@@ -1,0 +1,5 @@
+node_modules/
+.vite/
+out/
+resources/contract.md
+test-results/
