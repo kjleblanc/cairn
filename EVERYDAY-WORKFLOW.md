@@ -182,6 +182,18 @@ with a message naming the old and new versions. Do not push.
 That's it — the update touches one file, and your project's history stays exactly as
 it was.
 
+**The even easier way (Chrome/Edge):** with your project connected in the app, press
+**Apply it for me** on the update notice. Cairn rewrites `AGENTS.md` only, keeps your
+Project facts exactly, and hands you this message so Git records the change:
+
+```text
+I used the Cairn app to update this project's contract. Verify that AGENTS.md is
+a complete Cairn contract at the new version with my Project facts intact, and
+that no other file changed. Then commit only AGENTS.md with a message naming the
+old and new contract versions. Do not push. If anything looks wrong, stop and
+show me.
+```
+
 ## Troubleshooting
 
 **"The AI asks for approval in its own words."** After defining a task, the AI may

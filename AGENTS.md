@@ -67,9 +67,13 @@ can see the next step's text.
 8. **Change in lockstep.** A change to loop, lanes, commands, or names updates the
    contract template first, then every document and the app in the same session.
    `cairn.html` embeds verbatim copies (in its `text/plain` script blocks) of the
-   contract, the kickoff setup prompt, and the four conversion prompts — when any
-   source text changes, update the embedded copy in the same session and verify the
-   contract block still matches `CONTRACT-TEMPLATE.md` exactly.
+   contract, both kickoff setup prompts (manual and app-assisted), the four
+   conversion prompts, and the three update prompts (check, apply, app-applied
+   commit) — when any source text changes, update the embedded copy in the same
+   session and verify the contract block still matches `CONTRACT-TEMPLATE.md`
+   exactly. The app may write files directly (automatic setup, applied updates)
+   only in ways an owner explicitly clicks, never touching files outside Cairn's
+   own, and the manual path must always remain documented for non-Chromium users.
 
 Do not add session logs, project-specific scripts, publishing configuration, or
 heavyweight evidence machinery (hashes, receipts, hooks) to the beginner defaults;

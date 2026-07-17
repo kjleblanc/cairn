@@ -824,6 +824,33 @@ accepted beside it, and commit only that change. Do not touch anything else, sta
 any task, push, or deploy. Show the final status.
 </script>
 
+<script type="text/plain" id="src-setup-auto">
+The Cairn app has already created this project's workflow files: AGENTS.md (the
+project contract, with my Project facts filled in), docs/ai-work/PROJECT.md,
+docs/ai-work/LOG.md, docs/ai-work/PILOT.md, and the empty folder
+docs/ai-work/tasks/.
+
+Read AGENTS.md and confirm it is a complete Cairn contract with STATUS: ACTIVE and
+my facts filled in. Confirm the folder contains nothing else unexpected.
+
+Then initialize Git in this folder and make one setup commit of exactly those
+files, staged by name. If Git is missing or has no name and email configured, skip
+the commit and tell me plainly what to do.
+
+Do not install anything, connect to any service, add a remote, or write any
+product code. Finish with a one-paragraph summary of what the contract makes you
+do from now on, and tell me my next step: open a new chat and send "Define a
+task: [my first milestone]".
+</script>
+
+<script type="text/plain" id="src-upcommit">
+I used the Cairn app to update this project's contract. Verify that AGENTS.md is
+a complete Cairn contract at the new version with my Project facts intact, and
+that no other file changed. Then commit only AGENTS.md with a message naming the
+old and new contract versions. Do not push. If anything looks wrong, stop and
+show me.
+</script>
+
 <script type="text/plain" id="src-upcheck">
 Check this project's Cairn contract against the new version I placed at
 CONTRACT-TEMPLATE.md. Read both files and change nothing yet.
@@ -1001,6 +1028,64 @@ function verCmp(a, b) {
   return 0;
 }
 function fsSupported() { return typeof window.showDirectoryPicker === 'function'; }
+function downloadContract() {
+  var blob = new Blob([srcText('src-contract') + '\n'], { type: 'text/markdown' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'CONTRACT-TEMPLATE.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+}
+function fillFacts(template, f) {
+  function put(re, val) { template = template.replace(re, function (m) { return m.split(':')[0] + ': ' + val; }); }
+  put(/^PROJECT NAME:.*$/m, f.name); put(/^WHAT WE ARE BUILDING:.*$/m, f.what);
+  put(/^WHO WILL USE IT:.*$/m, f.who); put(/^CURRENT MILESTONE:.*$/m, f.milestone);
+  put(/^DIRECTION GATE TIMEBOX:.*$/m, f.timebox);
+  return template;
+}
+function idb() {
+  return new Promise(function (res, rej) {
+    var q = indexedDB.open('cairn', 1);
+    q.onupgradeneeded = function () { q.result.createObjectStore('projects', { keyPath: 'name' }); };
+    q.onsuccess = function () { res(q.result); };
+    q.onerror = function () { rej(q.error); };
+  });
+}
+function idbPut(rec) {
+  return idb().then(function (db) {
+    return new Promise(function (res) {
+      var tx = db.transaction('projects', 'readwrite');
+      tx.objectStore('projects').put(rec);
+      tx.oncomplete = res;
+    });
+  }).catch(function () {});
+}
+function idbAll() {
+  return idb().then(function (db) {
+    return new Promise(function (res) {
+      var q = db.transaction('projects').objectStore('projects').getAll();
+      q.onsuccess = function () { res(q.result || []); };
+      q.onerror = function () { res([]); };
+    });
+  }).catch(function () { return []; });
+}
+function idbDel(name) {
+  return idb().then(function (db) {
+    return new Promise(function (res) {
+      var tx = db.transaction('projects', 'readwrite');
+      tx.objectStore('projects').delete(name);
+      tx.oncomplete = res;
+    });
+  }).catch(function () {});
+}
+async function writeTextFile(root, pathArr, text) {
+  var d = root;
+  for (var i = 0; i < pathArr.length - 1; i++) d = await d.getDirectoryHandle(pathArr[i], { create: true });
+  var fh = await d.getFileHandle(pathArr[pathArr.length - 1], { create: true });
+  var w = await fh.createWritable();
+  await w.write(text);
+  await w.close();
+}
 async function readTextFile(root, pathArr) {
   var d = root;
   for (var i = 0; i < pathArr.length - 1; i++) d = await d.getDirectoryHandle(pathArr[i]);
@@ -1026,14 +1111,8 @@ function parseLog(text) {
   });
   return rows;
 }
-async function connectProject() {
-  var dir;
-  try { dir = await window.showDirectoryPicker(); }
-  catch (e) {
-    if (e && e.name !== 'AbortError') openModal('<h2>Couldn’t open the folder picker</h2><p class="muted small">Some browsers only allow folder access on the hosted version: <a href="https://kjleblanc.github.io/cairn/" rel="noreferrer">kjleblanc.github.io/cairn</a>.</p>');
-    return;
-  }
-  var p = { folder: dir.name, facts: null, log: [], logMissing: false, taskFiles: 0 };
+async function loadProject(dir) {
+  var p = { folder: dir.name, _handle: dir, facts: null, log: [], logMissing: false, taskFiles: 0 };
   try { p.facts = parseFacts(await readTextFile(dir, ['AGENTS.md'])); } catch (e) {}
   try { p.log = parseLog(await readTextFile(dir, ['docs', 'ai-work', 'LOG.md'])); } catch (e) { p.logMissing = true; }
   try {
@@ -1042,6 +1121,110 @@ async function connectProject() {
   } catch (e) {}
   proj = p;
   render();
+}
+async function connectProject() {
+  var dir;
+  try { dir = await window.showDirectoryPicker(); }
+  catch (e) {
+    if (e && e.name !== 'AbortError') openModal('<h2>Couldn’t open the folder picker</h2><p class="muted small">Some browsers only allow folder access on the hosted version: <a href="https://kjleblanc.github.io/cairn/" rel="noreferrer">kjleblanc.github.io/cairn</a>.</p>');
+    return;
+  }
+  idbPut({ name: dir.name, handle: dir, at: Date.now() });
+  await loadProject(dir);
+}
+async function autoSetup() {
+  var a = store.get('kickoff', {});
+  var dir;
+  try { dir = await window.showDirectoryPicker({ mode: 'readwrite' }); }
+  catch (e) {
+    if (e && e.name !== 'AbortError') openModal('<h2>Couldn’t open the folder</h2><p class="small muted">Use the manual download instead — it works everywhere.</p>');
+    return;
+  }
+  try {
+    var extra = [];
+    for await (var entry of dir.values()) { if (entry.name !== 'CONTRACT-TEMPLATE.md') extra.push(entry.name); }
+    if (extra.length) {
+      openModal('<h2>That folder isn’t empty</h2><p class="small">Found: ' + esc(extra.slice(0, 5).join(', ')) + (extra.length > 5 ? '…' : '') + '.</p><p class="small muted">Automatic setup only runs in an empty folder — nothing was changed. For a folder with existing work, use Project Conversion.</p>');
+      return;
+    }
+    var facts = {
+      name: (a.name || '').trim(), what: (a.what || '').trim(), who: (a.who || '').trim(),
+      milestone: (a.milestone || '').trim(),
+      timebox: (a.timebox || '').trim() || 'two Standard tasks without visible progress (default)'
+    };
+    await writeTextFile(dir, ['AGENTS.md'], fillFacts(srcText('src-contract'), facts) + '\n');
+    await writeTextFile(dir, ['docs', 'ai-work', 'PROJECT.md'],
+      '# ' + facts.name + '\n\nGoal: ' + facts.what + '\n\nUsers: ' + facts.who +
+      '\n\nFirst visible milestone: ' + facts.milestone +
+      '\n\nOut of scope for now: to be decided as tasks close.\n\nDirection Gate timebox: ' + facts.timebox + '\n');
+    await writeTextFile(dir, ['docs', 'ai-work', 'LOG.md'], '| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |\n|---|---|---|---|---|---|---|---|\n');
+    await writeTextFile(dir, ['docs', 'ai-work', 'PILOT.md'], '| Task | Lane | Time to visible result | Visible progress? | DONE/STOPPED | Rework needed later? | Notes |\n|---|---|---|---|---|---|---|\n');
+    await (await (await dir.getDirectoryHandle('docs')).getDirectoryHandle('ai-work')).getDirectoryHandle('tasks', { create: true });
+    try { await dir.removeEntry('CONTRACT-TEMPLATE.md'); } catch (e2) {}
+    store.set('kickauto', true);
+    idbPut({ name: dir.name, handle: dir, at: Date.now() });
+    await loadProject(dir);
+    markStep('kickoff', state.step);
+    if (state.scene === 'path' && state.path === 'kickoff') state.step = Math.min(state.step + 1, PATHS.kickoff.steps.length - 1);
+    render();
+    openModal('<h2>Folder set up ✓</h2><p class="small">Created AGENTS.md (Contract v' + APP_CONTRACT_V + ' with your answers), docs/ai-work/PROJECT.md, LOG.md, PILOT.md, and the tasks/ folder. Nothing else was touched.</p><p class="small muted">Next: the setup message has your AI verify the files and start your Git history.</p>');
+  } catch (e) {
+    openModal('<h2>Setup didn’t finish</h2><p class="small muted">' + esc((e && e.message) || 'Unknown error') + '. Only Cairn’s own files could have been written — retry, or use the manual download.</p>');
+  }
+}
+async function applyUpdate() {
+  if (!proj || !proj._handle) return;
+  var dir = proj._handle;
+  try {
+    if (dir.requestPermission && (await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+      openModal('<h2>Permission needed</h2><p class="small muted">Without write permission Cairn can’t apply the update — the manual steps work everywhere.</p>');
+      return;
+    }
+    var oldText = await readTextFile(dir, ['AGENTS.md']);
+    var fence = /```[^\n]*\r?\n([\s\S]*?)```/;
+    var oldFacts = (oldText.match(fence) || [])[1];
+    if (!oldFacts || oldText.indexOf('Cairn') === -1) {
+      openModal('<h2>Couldn’t update safely</h2><p class="small muted">AGENTS.md doesn’t look like a Cairn contract — use the manual steps.</p>');
+      return;
+    }
+    var next = srcText('src-contract').replace(fence, function (m, inner) {
+      return m.replace(inner, function () { return oldFacts; });
+    }) + '\n';
+    await writeTextFile(dir, ['AGENTS.md'], next);
+    await loadProject(dir);
+    openModal('<h2>Updated to v' + APP_CONTRACT_V + ' ✓</h2><p class="small">Your Project facts carried over exactly; only AGENTS.md changed. Paste this in your next AI chat so Git records the update:</p>' + cmdBlock(srcText('src-upcommit')));
+  } catch (e) {
+    openModal('<h2>Update didn’t finish</h2><p class="small muted">' + esc((e && e.message) || '') + ' — the manual steps in the update guide still work.</p>');
+  }
+}
+async function openSwitcher() {
+  var list = await idbAll();
+  list.sort(function (x, y) { return (y.at || 0) - (x.at || 0); });
+  openModal('<h2>Your projects</h2>' +
+    (list.length ? list.map(function (r) {
+      return '<div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">' +
+        '<b style="flex:1">' + esc(r.name) + '</b>' +
+        '<button class="btn ghost sm" data-action="open-proj" data-name="' + esc(r.name) + '">Open</button>' +
+        '<button class="copy" data-action="forget-proj" data-name="' + esc(r.name) + '">Forget</button></div>';
+    }).join('') : '<p class="small muted">No remembered projects yet — connect one and it appears here.</p>') +
+    '<p style="margin-top:12px"><button class="btn sm" data-action="connect-project">Connect a different folder</button></p>');
+}
+async function openRemembered(name) {
+  var list = await idbAll();
+  var rec = null;
+  list.forEach(function (r) { if (r.name === name) rec = r; });
+  if (!rec || !rec.handle) return;
+  try {
+    var perm = await rec.handle.queryPermission({ mode: 'read' });
+    if (perm !== 'granted') perm = await rec.handle.requestPermission({ mode: 'read' });
+    if (perm !== 'granted') return;
+    closeModal();
+    rec.at = Date.now();
+    idbPut(rec);
+    await loadProject(rec.handle);
+  } catch (e) {
+    openModal('<h2>Couldn’t reopen ' + esc(name) + '</h2><p class="small muted">The saved connection expired — connect the folder again.</p><p><button class="btn sm" data-action="connect-project">Connect a folder</button></p>');
+  }
 }
 function doneCountOf(p) { return p.log.filter(function (r) { return /DONE/i.test(r.outcome); }).length; }
 function shareSnippet() {
@@ -1071,7 +1254,7 @@ function stackSvg(count, label) {
 function projCard() {
   if (!proj) {
     if (!fsSupported()) return '<div class="card"><p class="small muted">Connecting a project folder needs Chrome or Edge. Everything else works in any browser.</p></div>';
-    return '<div class="card"><p class="small">See your real recent work here. Cairn reads your project folder on this device only — read-only, nothing is uploaded.</p><button class="btn sm" data-action="connect-project">Connect a project folder</button></div>';
+    return '<div class="card"><p class="small">See your real recent work here. Cairn reads your project folder on this device only — read-only, nothing is uploaded.</p><button class="btn sm" data-action="connect-project">Connect a project folder</button> <button class="btn ghost sm" data-action="switch-project">Recent projects</button></div>';
   }
   var f = proj.facts || {};
   var done = doneCountOf(proj);
@@ -1095,12 +1278,13 @@ function projCard() {
     (f.status && f.status !== 'ACTIVE' ? '<span class="badge amber">' + esc(f.status) + '</span>' : '') +
     '<span style="flex:1"></span>' +
     '<button class="btn ghost sm" data-action="share-cairn">Share your cairn</button>' +
+    '<button class="btn ghost sm" data-action="switch-project">Switch</button>' +
     '<button class="btn ghost sm" data-action="disconnect-project">Disconnect</button></div>' +
     (f.milestone ? '<p class="small muted" style="margin:0 0 10px">Milestone: ' + esc(f.milestone) + '</p>' : '') +
     '<div class="cairnviz">' + stackSvg(done, done + ' completed tasks') +
     '<div style="flex:1;min-width:220px">' + body + '</div></div></div>';
 }
-window.__cairn = { parseLog: parseLog, parseFacts: parseFacts,
+window.__cairn = { parseLog: parseLog, parseFacts: parseFacts, fillFacts: fillFacts,
   _setProj: function (p) { proj = p; render(); } };
 
 /* ---------- guided paths ---------- */
@@ -1151,12 +1335,6 @@ var PATHS = {
         ]) +
         '<div class="tip">Folder already has files in it? Use <b>Project Conversion</b> instead — it protects what exists. <button class="btn ghost sm" data-action="start-path" data-path="convert">Switch to Conversion</button></div>';
       }},
-      { t: 'Give your project its rulebook', h: function () {
-        return '<p>The rules come pre-written — the AI only fills in blanks, it never invents your rulebook. Get the contract into your project folder either way:</p>' +
-        '<div class="card" style="margin:10px 0"><h3>Option A — copy the file <span class="badge">easiest</span></h3><p class="small">Drag <code>CONTRACT-TEMPLATE.md</code> from the Cairn folder into your project folder.</p></div>' +
-        '<div class="card"><h3>Option B — copy the text</h3><p class="small">Copy the full contract below, then save it in your project folder as a file named exactly <code>CONTRACT-TEMPLATE.md</code>.</p>' +
-        '<p style="margin-top:10px">' + bigCopy('📋 Copy the full contract', 'src-contract') + '</p></div>';
-      }},
       { t: 'Five questions', h: function () {
         var a = store.get('kickoff', {});
         function f(k, label, hint, ph) {
@@ -1172,7 +1350,34 @@ var PATHS = {
         f('timebox', 'Timebox before rethinking the approach', 'Leave as-is if unsure.', '') +
         '<div class="tip small">Timebox left empty uses the default: two tasks without visible progress.</div>';
       }},
+      { t: 'Install the rulebook', h: function () {
+        var a = store.get('kickoff', {});
+        var ready = ['name', 'what', 'who', 'milestone'].every(function (k) { return (a[k] || '').trim(); });
+        return '<p>The rules come pre-written — nothing invents your rulebook. Two ways in:</p>' +
+        (fsSupported()
+          ? '<div class="card" style="margin:10px 0"><h3>Automatic <span class="badge">Chrome / Edge</span></h3><p class="small">Cairn connects to your empty project folder and creates every workflow file itself — the contract filled with your answers, the log, the pilot, and the task folder. You approve the browser’s permission ask; nothing else is touched.</p>' +
+            (ready
+              ? '<button class="btn sm" data-action="auto-setup">Connect &amp; set up my folder</button>'
+              : '<p class="small muted">Finish the five questions first — the contract needs your answers.</p>') +
+            '</div>'
+          : '') +
+        '<div class="card"><h3>' + (fsSupported() ? 'Manual — works everywhere' : 'Get the contract') + '</h3><p class="small">Download the contract into your Downloads folder, then drag it into your empty project folder. The setup message on the next step does the rest.</p>' +
+        '<p style="margin-top:10px"><button class="btn sm" data-action="download-contract">⬇ Download CONTRACT-TEMPLATE.md</button> <button class="copy" data-action="copy-src" data-src="src-contract">or copy the text</button></p></div>';
+      }},
       { t: 'Run the setup', h: function () {
+        if (store.get('kickauto', false)) {
+          return '<p>Cairn already created the files — paste this one message so your AI verifies them and starts your Git history:</p>' +
+          cmdBlock(srcText('src-setup-auto'), { tall: true }) +
+          '<p class="small muted">Used the manual download instead? <button class="copy" data-action="kick-manual">Show the manual setup message</button></p>' +
+          '<p>Then confirm these plain facts — no code-reading needed:</p>' +
+          checklist('kick3', [
+            'AGENTS.md exists and its Project facts match my answers.',
+            'docs/ai-work/ has PROJECT.md, LOG.md, PILOT.md, and an empty tasks/ folder.',
+            'The log and pilot tables are empty — no invented results.',
+            'Nothing else was created, installed, or connected.',
+            'The AI’s summary says it waits for my approval before building.'
+          ]);
+        }
         var a = store.get('kickoff', {});
         var missing = ['name', 'what', 'who', 'milestone'].filter(function (k) { return !(a[k] || '').trim(); });
         var prompt = srcText('src-setup')
@@ -1220,8 +1425,9 @@ var PATHS = {
         ]);
       }},
       { t: 'Bring the contract along', h: function () {
-        return '<p>Copy <code>CONTRACT-TEMPLATE.md</code> into the project folder — drag the file over, or copy the text below and save it under exactly that name. <b>Leave the name unchanged</b>; it does not become the rulebook until the final step.</p>' +
-        '<p>' + bigCopy('📋 Copy the full contract', 'src-contract') + '</p>';
+        return '<p>Put <code>CONTRACT-TEMPLATE.md</code> into the project folder. <b>Leave the name unchanged</b>; it does not become the rulebook until the final step.</p>' +
+        '<p><button class="btn sm" data-action="download-contract">⬇ Download CONTRACT-TEMPLATE.md</button> <button class="copy" data-action="copy-src" data-src="src-contract">or copy the text</button></p>' +
+        '<p class="small muted">The download lands in your Downloads folder — drag it into the project from there.</p>';
       }},
       { t: 'Audit first, change nothing', h: function () {
         return '<p>Open the project in your AI coding agent and paste this. It looks around <b>read-only</b>, then saves a single plan file for you to review:</p>' +
@@ -1490,17 +1696,35 @@ document.addEventListener('click', function (e) {
     if (pilot[pi] === 1) { var pr = t.getBoundingClientRect(); burst(pr.left + pr.width / 2, pr.top); }
     render();
   } else if (a === 'connect-project') {
-    connectProject();
+    closeModal(); connectProject();
   } else if (a === 'disconnect-project') {
     proj = null; render();
   } else if (a === 'share-cairn') {
     copyText(shareSnippet(), t);
+  } else if (a === 'download-contract') {
+    downloadContract();
+  } else if (a === 'auto-setup') {
+    autoSetup();
+  } else if (a === 'apply-update') {
+    closeModal(); applyUpdate();
+  } else if (a === 'switch-project') {
+    closeModal(); openSwitcher();
+  } else if (a === 'open-proj') {
+    openRemembered(t.dataset.name);
+  } else if (a === 'forget-proj') {
+    idbDel(t.dataset.name).then(openSwitcher);
+  } else if (a === 'kick-manual') {
+    store.set('kickauto', false); render();
   } else if (a === 'update-contract') {
     var oldV = proj && proj.facts ? proj.facts.version : '';
     openModal('<h2>Update this project: v' + esc(oldV) + ' → v' + APP_CONTRACT_V + '</h2>' +
-      '<p class="small muted">Updates are never automatic — you approve them like any task. See what changed: <a href="https://github.com/kjleblanc/cairn/blob/main/CHANGELOG.md" rel="noreferrer">changelog</a>.</p>' +
-      '<p><b>1.</b> Copy the new contract and save it in your project folder as <code>CONTRACT-TEMPLATE.md</code>:</p>' +
-      '<p>' + bigCopy('📋 Copy the new contract', 'src-contract') + '</p>' +
+      '<p class="small muted">You approve every update — nothing changes behind your back. See what changed: <a href="https://github.com/kjleblanc/cairn/blob/main/CHANGELOG.md" rel="noreferrer">changelog</a>.</p>' +
+      (proj && proj._handle
+        ? '<p><button class="btn" data-action="apply-update">Apply it for me</button></p>' +
+          '<p class="small muted">Cairn rewrites AGENTS.md only, keeps your Project facts exactly, and then gives you one message so Git records it. Prefer doing it by hand? Steps below.</p>'
+        : '') +
+      '<p><b>1.</b> Get the new contract into your project folder:</p>' +
+      '<p><button class="btn sm" data-action="download-contract">⬇ Download CONTRACT-TEMPLATE.md</button> <button class="copy" data-action="copy-src" data-src="src-contract">or copy</button></p>' +
       '<p><b>2.</b> Paste the check message — nothing changes yet:</p>' +
       cmdBlock(srcText('src-upcheck'), { tall: true }) +
       '<p><b>3.</b> Read the summary, then approve with:</p>' +

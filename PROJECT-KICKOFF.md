@@ -10,11 +10,17 @@ agent, Git, and an empty project folder.
 Setup takes three steps and about fifteen minutes. Because the rules come pre-written
 in this framework, the AI only fills in blanks — it does not invent your rulebook.
 
+> **The fast path:** in Chrome or Edge, [the Cairn app](https://kjleblanc.github.io/cairn/)
+> can do Steps 1 and most of Step 2 for you — answer the five questions in the app,
+> connect your empty folder, and it creates every workflow file itself. Then you only
+> paste the short verification message shown below. The steps here are the manual
+> path, which works everywhere.
+
 ## Step 1 — copy in the contract
 
 Copy the file `CONTRACT-TEMPLATE.md` from this framework folder into your empty
-project folder (drag it over, or copy and paste in your file explorer). This file
-becomes your project's rulebook.
+project folder (drag it over, download it from the app, or copy and paste in your
+file explorer). This file becomes your project's rulebook.
 
 Then answer these five questions in plain language — you will paste them in Step 2:
 
@@ -69,6 +75,30 @@ Finish by showing me: every file you created, the filled-in Project facts, the G
 status, and a one-paragraph summary of what the contract makes you do from now on.
 Then tell me my next step: open a new chat and send "Define a task: [my first
 milestone]".
+```
+
+### If the app set up your folder for you
+
+When Cairn's automatic setup created the files, use this shorter message instead of
+the one above:
+
+```text
+The Cairn app has already created this project's workflow files: AGENTS.md (the
+project contract, with my Project facts filled in), docs/ai-work/PROJECT.md,
+docs/ai-work/LOG.md, docs/ai-work/PILOT.md, and the empty folder
+docs/ai-work/tasks/.
+
+Read AGENTS.md and confirm it is a complete Cairn contract with STATUS: ACTIVE and
+my facts filled in. Confirm the folder contains nothing else unexpected.
+
+Then initialize Git in this folder and make one setup commit of exactly those
+files, staged by name. If Git is missing or has no name and email configured, skip
+the commit and tell me plainly what to do.
+
+Do not install anything, connect to any service, add a remote, or write any
+product code. Finish with a one-paragraph summary of what the contract makes you
+do from now on, and tell me my next step: open a new chat and send "Define a
+task: [my first milestone]".
 ```
 
 ## Step 3 — check the setup
