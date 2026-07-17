@@ -133,6 +133,55 @@ experienced human, full stop.
 
 When in doubt: `Stop. What just happened?`
 
+## When Cairn updates
+
+Your project's contract carries its version (`Cairn Contract v1.2` in the header of
+`AGENTS.md`), and nothing updates by itself — an update is a change to your project's
+rules, so you approve it like any other change. The
+[changelog](https://github.com/kjleblanc/cairn/blob/main/CHANGELOG.md) says what each
+version changed.
+
+The easy way to notice: connect your project folder in the Cairn app — when a newer
+contract exists, the dashboard shows an update button with these same steps.
+
+**Step 1.** Copy the new `CONTRACT-TEMPLATE.md` into your project folder (drag the
+file in, or use the app's copy button and save it under exactly that name).
+
+**Step 2.** Paste the check message — nothing changes yet:
+
+```text
+Check this project's Cairn contract against the new version I placed at
+CONTRACT-TEMPLATE.md. Read both files and change nothing yet.
+
+Confirm the template is a Cairn contract with a newer version number than
+AGENTS.md. Then explain in plain language what would change in the rules and
+what stays the same. My Project facts block (STATUS, PROJECT NAME, and the
+rest) must carry over exactly as it is.
+
+If the template is missing, older, or not a Cairn contract, say so and stop.
+
+Then stop and wait. The only message that applies the update begins:
+"I approve the contract update. Apply it."
+```
+
+**Step 3.** Read the summary. If you're happy, paste:
+
+```text
+I approve the contract update. Apply it.
+
+Replace the contents of AGENTS.md with the new template's text, then restore
+my existing Project facts block exactly as it was, including STATUS. Remove
+the CONTRACT-TEMPLATE.md copy afterward. Change no other files — my log,
+tasks, and reports stay untouched.
+
+Show me the restored Project facts and the new version line. If Git is
+available and the state is safe, commit the contract update staged by name,
+with a message naming the old and new versions. Do not push.
+```
+
+That's it — the update touches one file, and your project's history stays exactly as
+it was.
+
 ## Troubleshooting
 
 **"The AI asks for approval in its own words."** After defining a task, the AI may

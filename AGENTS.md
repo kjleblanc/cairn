@@ -18,11 +18,15 @@ inside this directory unless the user explicitly expands scope.
   tracker). It is the primary human-facing interface; the Markdown files remain the
   canonical source.
 - `index.html` — a redirect to `cairn.html` so the GitHub Pages root opens the app;
+- `CHANGELOG.md` — plain-language history of contract versions;
 - `LICENSE` — MIT.
 
 The contract carries a version number (`Cairn Contract v1.2` in its header). Bump it
 whenever the contract's rules change meaningfully, in the template and the app's
-embedded copy together.
+embedded copy together — and add a plain-language entry to `CHANGELOG.md` in the
+same session. Projects update through the two prompts in EVERYDAY-WORKFLOW.md
+("When Cairn updates"), which the app mirrors; those prompts preserve the Project
+facts block exactly and touch nothing else.
 
 Every prompt that ends by waiting for the owner must name the exact next message it
 will accept ("the only message that approves this begins: …"). Prompts travel

@@ -95,4 +95,6 @@ with any programming language and any AI coding agent that can read and edit fil
 
 Licensed under the [MIT License](LICENSE): use it, adapt it, and share what you build.
 The project contract carries a version number (`Cairn Contract v1.2`) so projects can
-say which rules they run.
+say which rules they run. [CHANGELOG.md](CHANGELOG.md) records what each version
+changed; updating a project takes two approved messages, described in the
+[Everyday Workflow](EVERYDAY-WORKFLOW.md).

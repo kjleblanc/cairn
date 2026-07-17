@@ -824,6 +824,34 @@ accepted beside it, and commit only that change. Do not touch anything else, sta
 any task, push, or deploy. Show the final status.
 </script>
 
+<script type="text/plain" id="src-upcheck">
+Check this project's Cairn contract against the new version I placed at
+CONTRACT-TEMPLATE.md. Read both files and change nothing yet.
+
+Confirm the template is a Cairn contract with a newer version number than
+AGENTS.md. Then explain in plain language what would change in the rules and
+what stays the same. My Project facts block (STATUS, PROJECT NAME, and the
+rest) must carry over exactly as it is.
+
+If the template is missing, older, or not a Cairn contract, say so and stop.
+
+Then stop and wait. The only message that applies the update begins:
+"I approve the contract update. Apply it."
+</script>
+
+<script type="text/plain" id="src-upapply">
+I approve the contract update. Apply it.
+
+Replace the contents of AGENTS.md with the new template's text, then restore
+my existing Project facts block exactly as it was, including STATUS. Remove
+the CONTRACT-TEMPLATE.md copy afterward. Change no other files — my log,
+tasks, and reports stay untouched.
+
+Show me the restored Project facts and the new version line. If Git is
+available and the state is safe, commit the contract update staged by name,
+with a message naming the old and new versions. Do not push.
+</script>
+
 <script>
 (function () {
 'use strict';
@@ -963,6 +991,15 @@ var COMMANDS = [
 
 /* ---------- project connection ---------- */
 var proj = null;
+var APP_CONTRACT_V = (srcText('src-contract').match(/Contract v([0-9][0-9.]*)/) || [])[1] || '';
+function verCmp(a, b) {
+  var pa = String(a).split('.'), pb = String(b).split('.');
+  for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+    var d = (parseInt(pa[i], 10) || 0) - (parseInt(pb[i], 10) || 0);
+    if (d) return d;
+  }
+  return 0;
+}
 function fsSupported() { return typeof window.showDirectoryPicker === 'function'; }
 async function readTextFile(root, pathArr) {
   var d = root;
@@ -1052,7 +1089,9 @@ function projCard() {
   return '<div class="card">' +
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">' +
     '<h3 style="margin:0">' + esc(f.name || proj.folder) + '</h3>' +
-    (f.version ? '<span class="badge">Contract v' + esc(f.version) + '</span>' : '') +
+    (f.version ? (APP_CONTRACT_V && verCmp(f.version, APP_CONTRACT_V) < 0
+      ? '<button class="badge amber" style="border:0;cursor:pointer;font:inherit;font-size:.76rem" data-action="update-contract">v' + esc(f.version) + ' → v' + APP_CONTRACT_V + ' update available</button>'
+      : '<span class="badge">Contract v' + esc(f.version) + '</span>') : '') +
     (f.status && f.status !== 'ACTIVE' ? '<span class="badge amber">' + esc(f.status) + '</span>' : '') +
     '<span style="flex:1"></span>' +
     '<button class="btn ghost sm" data-action="share-cairn">Share your cairn</button>' +
@@ -1374,13 +1413,13 @@ function viewDaily() {
     '<span class="ls">Build<small>only the brief</small></span><span class="arr">→</span>' +
     '<span class="ls">Verify<small>see it yourself</small></span><span class="arr">→</span>' +
     '<span class="ls">Decide<small>you close it</small></span></div>' +
-    deck +
-    '<h3 class="grp" style="margin:26px 0 8px">Your project</h3>' + projCard() +
+    '<h3 class="grp" style="margin:18px 0 8px">Your project</h3>' + projCard() +
     (proj ? '' :
     '<h3 class="grp" style="margin:26px 0 8px">Your cairn — the five-task pilot</h3>' +
     '<div class="card"><div class="cairnviz">' + stackSvg(doneCount, doneCount + ' stones stacked') +
     '<div style="flex:1;min-width:220px"><p class="small">Tap each task as you close it — <b>DONE</b> stacks a stone, <b>STOPPED</b> is an honest outcome too (tap again to cycle). After five, keep the habits that prevented real mistakes and drop the ones that only cost time.</p>' +
     '<div class="slots">' + slots + '</div></div></div></div>') +
+    deck +
     '<div class="grid two" style="margin-top:14px">' +
     '<div class="card"><span class="badge amber">When progress stalls</span><h3>The Direction Gate</h3>' +
     '<p class="small muted">Same blocker twice · two tasks with nothing visible · a “fixed” problem back again · timebox expired. No third patch — change direction instead.</p>' +
@@ -1456,6 +1495,16 @@ document.addEventListener('click', function (e) {
     proj = null; render();
   } else if (a === 'share-cairn') {
     copyText(shareSnippet(), t);
+  } else if (a === 'update-contract') {
+    var oldV = proj && proj.facts ? proj.facts.version : '';
+    openModal('<h2>Update this project: v' + esc(oldV) + ' → v' + APP_CONTRACT_V + '</h2>' +
+      '<p class="small muted">Updates are never automatic — you approve them like any task. See what changed: <a href="https://github.com/kjleblanc/cairn/blob/main/CHANGELOG.md" rel="noreferrer">changelog</a>.</p>' +
+      '<p><b>1.</b> Copy the new contract and save it in your project folder as <code>CONTRACT-TEMPLATE.md</code>:</p>' +
+      '<p>' + bigCopy('📋 Copy the new contract', 'src-contract') + '</p>' +
+      '<p><b>2.</b> Paste the check message — nothing changes yet:</p>' +
+      cmdBlock(srcText('src-upcheck'), { tall: true }) +
+      '<p><b>3.</b> Read the summary, then approve with:</p>' +
+      cmdBlock(srcText('src-upapply'), { tall: true }));
   } else if (a === 'lifeline') {
     openModal('<h2>Feeling lost is normal.</h2><p class="muted">Paste this in any chat, at any moment. The AI must freeze, change nothing, and explain where things stand and what your options are.</p>' +
       cmdBlock('Stop. What just happened?') +
