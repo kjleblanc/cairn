@@ -14,11 +14,13 @@
     "make": "electron-forge make",
     "prepackage": "node scripts/copy-assets.mjs",
     "package": "electron-forge package",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:vite": "node scripts/copy-assets.mjs && vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build -c vite.renderer.config.ts",
+    "test:smoke": "npm run build:vite && playwright test"
   },
   "dependencies": {
-    "@cairn/core": "file:../core",
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
+    "@cairn/core": "file:../core",
     "electron-squirrel-startup": "^1.0.1"
   },
   "devDependencies": {
@@ -28,6 +30,7 @@
     "@electron-forge/maker-zip": "^7.5.0",
     "@electron-forge/plugin-vite": "^7.5.0",
     "@fontsource/quicksand": "^5.1.0",
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
