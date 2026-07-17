@@ -29,6 +29,39 @@ test("scaffold creates a recognizable Cairn project with filled facts", () => {
   assert.match(facts.contractVersion, /^\d/);
 });
 
+test("isCairnProject rejects an AGENTS.md that only mentions Cairn", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cairn-fake-"));
+  writeFileSync(
+    join(dir, "AGENTS.md"),
+    "# Team notes\n\nWe follow Cairn-style ideas when we build things.\n",
+  );
+  assert.equal(isCairnProject(dir), false);
+});
+
+test("isCairnProject accepts a real contract even when the version wraps a line", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cairn-real-"));
+  // Mirrors the real AGENTS.md, where "Cairn" ends one line and "Contract v1.2"
+  // begins the next — so a naive `Cairn Contract v` substring check would wrongly
+  // reject a genuine contract. The structural markers must still recognise it.
+  const contract = [
+    "# Project Contract",
+    "",
+    "> This is the rulebook for AI work in this project — Cairn",
+    "> Contract v1.2, from the Cairn framework.",
+    "",
+    "```",
+    "STATUS: ACTIVE",
+    "PROJECT NAME: Demo",
+    "WHAT WE ARE BUILDING: a thing",
+    "WHO WILL USE IT: people",
+    "CURRENT MILESTONE: ship it",
+    "```",
+    "",
+  ].join("\n");
+  writeFileSync(join(dir, "AGENTS.md"), contract);
+  assert.equal(isCairnProject(dir), true);
+});
+
 test("log round-trip: append then parse, pipes sanitized", () => {
   const dir = freshProject();
   appendLogRow(dir, {

@@ -65,7 +65,21 @@ export function contractTemplate(): string {
 }
 
 export function isCairnProject(root: string): boolean {
-  return existsSync(paths.contract(root)) && /Cairn/.test(readFileSync(paths.contract(root), "utf8"));
+  const file = paths.contract(root);
+  if (!existsSync(file)) return false;
+  const text = readFileSync(file, "utf8");
+  // A real Cairn contract is recognised by structural markers shared by the real
+  // contract and every freshly-scaffolded project — not by a bare "Cairn" mention.
+  // In the real AGENTS.md the word "Cairn" and "Contract v1.2" fall on separate
+  // lines, so we look for a "Contract v<number>" version string, the contract
+  // heading, and the project-facts labels rather than a "Cairn Contract v" phrase.
+  const hasHeading = /^#[ \t]+Project Contract[ \t]*$/m.test(text);
+  const hasVersion = /Contract v[0-9]/.test(text);
+  const hasFacts =
+    /^STATUS:/m.test(text) &&
+    /^PROJECT NAME:/m.test(text) &&
+    /^CURRENT MILESTONE:/m.test(text);
+  return hasHeading && hasVersion && hasFacts;
 }
 
 export function parseFacts(root: string): ProjectFacts {
