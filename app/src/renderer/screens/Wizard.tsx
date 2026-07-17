@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { UnfinishedTask } from "@cairn/core";
+import type { CloseInput, UnfinishedTask } from "@cairn/core";
 import type { EngineEvent } from "../../shared/ipc";
 import { Badge, Card, ErrorCard, Pill } from "../components/Ui";
 import { Md } from "../components/Md";
@@ -13,9 +13,17 @@ const railStep: Record<Phase, number> = {
   outcome: 0, defining: 0, approve: 1, building: 2, report: 2, reviewing: 3, verdict: 3, decide: 4,
 };
 
+const DECISIONS: { value: CloseInput["decision"]; label: string }[] = [
+  { value: "accept", label: "Accept — it does what I wanted" },
+  { value: "revise", label: "Revise — not quite; a new task will follow" },
+  { value: "rollback", label: "Rollback — undo this in a new task" },
+  { value: "defer", label: "Defer — park it for now" },
+  { value: "escalate", label: "Escalate — this needs experienced help" },
+];
+
 function initialPhase(resume: UnfinishedTask | null): Phase {
   if (!resume) return "outcome";
-  if (resume.hasReport) return "report";
+  if (resume.hasReport) return "decide";
   return "approve";
 }
 
@@ -34,8 +42,13 @@ export function Wizard({ dir, resume, onDone }: {
   const [approved, setApproved] = useState(resume?.hasApproval ?? false);
   const [report, setReport] = useState(resume?.reportText ?? "");
   const [disposition, setDisposition] = useState<"DONE" | "STOPPED" | "UNKNOWN">(resume?.disposition ?? "UNKNOWN");
+  const [review, setReview] = useState<{ text: string; finalVerdict: string } | null>(null);
   const [events, setEvents] = useState<EngineEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [decision, setDecision] = useState<CloseInput["decision"]>("accept");
+  const [summary, setSummary] = useState("");
+  const [moved, setMoved] = useState<CloseInput["moved"]>("YES");
+  const [closing, setClosing] = useState(false);
 
   useEffect(() => cairn.onEngineEvent((ev) => setEvents((p) => [...p.slice(-199), ev])), []);
 
@@ -60,6 +73,22 @@ export function Wizard({ dir, resume, onDone }: {
     if (!a.ok) { setError(a.message); return; }
     setApproved(true);
     await build();
+  }
+
+  async function runReview() {
+    setError(null); setEvents([]); setPhase("reviewing");
+    const r = await cairn.taskReview(dir, taskNumber);
+    if (r.ok) { setReview(r.value); setPhase("verdict"); }
+    else { setError(r.message); setPhase("report"); }
+  }
+
+  async function close() {
+    if (summary.trim().length === 0) { setError("One line for the log: what did you personally see?"); return; }
+    setError(null); setClosing(true);
+    const r = await cairn.taskClose(dir, taskNumber, { decision, summary, moved });
+    setClosing(false);
+    if (r.ok) onDone(true);
+    else setError(r.message);
   }
 
   const body = (() => {
@@ -123,13 +152,58 @@ export function Wizard({ dir, resume, onDone }: {
               <Md text={report || "The builder wrote no report."} />
             </Card>
             <div className="row">
-              <Pill kind="quiet" onClick={() => onDone(false)}>Back to the project</Pill>
-              <span className="small muted">Deciding comes in the next part of the loop.</span>
+              <Pill kind={disposition === "DONE" ? "soft" : "primary"} onClick={() => void runReview()}>Run a fresh review</Pill>
+              <Pill kind={disposition === "DONE" ? "primary" : "soft"} onClick={() => setPhase("decide")}>Skip to the decision</Pill>
             </div>
+            <p className="small muted" style={{ marginTop: 8 }}>A fresh review is recommended after any stopped task and every third task.</p>
           </>
         );
-      default:
-        return <p className="muted">This part of the loop arrives in the next task.</p>;
+      case "reviewing":
+        return (
+          <Card title="fresh eyes at work">
+            <p className="muted">A reviewer that didn't build this is checking the work. The builder's report stays locked until the reviewer forms its own view.</p>
+            <ActivityFeed events={events} />
+          </Card>
+        );
+      case "verdict":
+        return (
+          <>
+            <Card title={`the reviewer's verdict — ${review?.finalVerdict ?? ""}`}>
+              <Md text={review?.text ?? ""} />
+            </Card>
+            <Pill kind="primary" onClick={() => setPhase("decide")}>On to your decision</Pill>
+          </>
+        );
+      case "decide":
+        return (
+          <>
+            <Card title="your decision closes the task">
+              <p className="muted">What happened when you tried it?</p>
+              <div className="row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                {DECISIONS.map((d) => (
+                  <Pill key={d.value} kind={decision === d.value ? "primary" : "soft"} onClick={() => setDecision(d.value)}>
+                    {d.label}
+                  </Pill>
+                ))}
+              </div>
+            </Card>
+            <Card title="one line for the log">
+              <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)}
+                placeholder="What did you personally see?" />
+              <p style={{ marginTop: 12 }}>Did this visibly move the milestone?</p>
+              <div className="row">
+                {(["YES", "NO", "UNCLEAR"] as const).map((m) => (
+                  <Pill key={m} kind={moved === m ? "primary" : "soft"} onClick={() => setMoved(m)}>
+                    {m === "YES" ? "Yes" : m === "NO" ? "No" : "Unclear"}
+                  </Pill>
+                ))}
+              </div>
+            </Card>
+            <Pill kind="primary" onClick={() => void close()} disabled={closing}>
+              {closing ? "Closing…" : "Close the task — a stone on your cairn"}
+            </Pill>
+          </>
+        );
     }
   })();
 
