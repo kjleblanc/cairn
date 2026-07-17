@@ -2,6 +2,7 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
+import { registerProjectIpc } from "./ipc.js";
 
 if (started) app.quit();
 
@@ -35,6 +36,7 @@ export function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   setContractPath(contractPath());
+  registerProjectIpc();
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
