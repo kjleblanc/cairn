@@ -51,7 +51,15 @@ export function sha256File(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+let contractOverride: string | null = null;
+
+/** The desktop app bundles core, so import.meta.url probing fails there; it names the asset explicitly instead. */
+export function setContractPath(p: string): void {
+  contractOverride = p;
+}
+
 export function contractTemplate(): string {
+  if (contractOverride && existsSync(contractOverride)) return readFileSync(contractOverride, "utf8");
   const here = dirname(fileURLToPath(import.meta.url));
   // dist/src -> package root -> assets
   const candidates = [

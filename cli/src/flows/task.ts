@@ -3,11 +3,12 @@ import pc from "picocolors";
 import { readFileSync, existsSync } from "node:fs";
 import {
   appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths,
-} from "../files.js";
-import { assertApprovalValid, checkDirectionGate, recordApproval } from "../gates.js";
-import { pickEngine, RunEvents } from "../agents.js";
-import { builderPrompt, definerPrompt, directionPrompt, reviewerPrompt } from "../prompts.js";
-import { banner, dispositionOf, finalVerdictOf, label, spinnerLine } from "../ui.js";
+  assertApprovalValid, checkDirectionGate, recordApproval,
+  pickEngine, RunEvents,
+  builderPrompt, definerPrompt, directionPrompt, reviewerPrompt,
+  dispositionOf, finalVerdictOf,
+} from "@cairn/core";
+import { banner, label, spinnerLine } from "../ui.js";
 
 function events(spin: { message: (m: string) => void }): RunEvents {
   // spinnerLine bounds the status to the terminal width so a long agent line can never

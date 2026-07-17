@@ -2,7 +2,7 @@
   "name": "cairn-monorepo",
   "private": true,
   "license": "MIT",
-  "workspaces": ["cli"],
+  "workspaces": ["core", "cli"],
   "engines": { "node": ">=20" },
   "scripts": {
     "test": "npm test --workspaces"

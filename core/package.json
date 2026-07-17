@@ -1,0 +1,23 @@
+{
+  "name": "@cairn/core",
+  "version": "0.1.0",
+  "description": "The Cairn engine — files, gates, prompts, agents — shared by every skin",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist/src", "assets"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "sync-contract": "node scripts/sync-contract.mjs",
+    "build": "npm run sync-contract && tsc",
+    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/parse.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

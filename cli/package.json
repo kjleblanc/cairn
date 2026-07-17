@@ -8,20 +8,18 @@
     "cairn": "dist/src/index.js"
   },
   "files": [
-    "dist/src",
-    "assets"
+    "dist/src"
   ],
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "sync-contract": "node scripts/sync-contract.mjs",
-    "build": "npm run sync-contract && tsc",
-    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/ui.test.js",
+    "build": "tsc",
+    "test": "npm run build && node --test dist/test/ui.test.js",
     "start": "npm run build && node dist/src/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
+    "@cairn/core": "*",
     "@clack/prompts": "^0.11.0",
     "picocolors": "^1.1.0"
   },

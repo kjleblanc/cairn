@@ -1,6 +1,5 @@
 import pc from "picocolors";
-import { isCairnProject, parseFacts, parseLog } from "../files.js";
-import { checkDirectionGate } from "../gates.js";
+import { checkDirectionGate, isCairnProject, parseFacts, parseLog } from "@cairn/core";
 import { banner, label, stack } from "../ui.js";
 
 export function statusFlow(root: string): void {

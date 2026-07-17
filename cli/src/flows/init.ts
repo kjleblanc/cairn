@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { isCairnProject, scaffoldProject } from "../files.js";
+import { isCairnProject, scaffoldProject } from "@cairn/core";
 import { banner } from "../ui.js";
 
 function git(root: string, args: string[]): string {
