@@ -1,0 +1,31 @@
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#fbf7ee, #1b1e26);
+  --sky: light-dark(#edf4fa, #141721);
+  --cloud: light-dark(#dcebf7, #232a3a);
+  --hill-back: light-dark(#eaf3de, #202a22);
+  --hill-front: light-dark(#d9e8c4, #263427);
+  --card: light-dark(rgb(255 255 255 / 74%), rgb(38 42 54 / 74%));
+  --card-solid: light-dark(#ffffff, #262a36);
+  --ink: light-dark(#44423c, #e6e2d8);
+  --muted: light-dark(#8a8375, #a09a8d);
+  --line: light-dark(#eae4d6, #333947);
+  --green: light-dark(#7fae62, #9ec98a);
+  --green-ink: light-dark(#ffffff, #16241b);
+  --green-deep: light-dark(#3f5c31, #cfe4c2);
+  --green-soft: light-dark(#e9f1e0, #26331f);
+  --amber: light-dark(#b08a45, #d8b57c);
+  --amber-deep: light-dark(#6b5222, #ecd9b4);
+  --amber-soft: light-dark(#f7eeda, #37301f);
+  --stop: light-dark(#a96e63, #d8a49a);
+  --stop-soft: light-dark(#f6e9e6, #3a2a27);
+  --stone-a: light-dark(#d6d1c5, #4a5162);
+  --stone-b: light-dark(#c4beb0, #3d4453);
+  --trail: light-dark(#a49c8c, #6a7284);
+  --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+  --r: 22px;
+  --r-sm: 14px;
+  --spring: cubic-bezier(.34, 1.4, .5, 1);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }

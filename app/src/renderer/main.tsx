@@ -1,20 +1,16 @@
-import React, { useEffect, useState } from "react";
+import "@fontsource/quicksand/400.css";
+import "@fontsource/quicksand/600.css";
+import "./tokens.css";
+import "./app.css";
+import React from "react";
 import { createRoot } from "react-dom/client";
-import { cairn } from "./api";
-import type { Preflight, ProjectList } from "../shared/ipc";
+import { App } from "./App";
 
-function Debug() {
-  const [pf, setPf] = useState<Preflight | null>(null);
-  const [pl, setPl] = useState<ProjectList | null>(null);
-  useEffect(() => {
-    cairn.preflight().then(setPf);
-    cairn.projectList().then(setPl);
-  }, []);
-  return <pre>{JSON.stringify({ pf, pl }, null, 2)}</pre>;
-}
+const savedTheme = localStorage.getItem("cairn-theme");
+if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <Debug />
+    <App />
   </React.StrictMode>,
 );
