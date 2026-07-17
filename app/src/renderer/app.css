@@ -86,3 +86,11 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
 .gate-banner { background: var(--amber-soft); color: var(--amber-deep); border-radius: var(--r); padding: 14px 18px; margin: 0 0 12px; }
 .log-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .log-row:last-child { border-bottom: none; }
+
+.rail { display: flex; justify-content: center; align-items: center; gap: 18px; margin: 6px 0 18px; }
+.rail-step { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .85rem; }
+.rail-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--stone-a); }
+.rail-done { color: var(--ink); }
+.rail-done .rail-dot { background: var(--green); }
+.rail-now { color: var(--green-deep); font-weight: 600; }
+.rail-now .rail-dot { width: 15px; height: 15px; background: var(--green-soft); border: 2px solid var(--green); }
