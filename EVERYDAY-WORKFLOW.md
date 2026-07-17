@@ -15,7 +15,7 @@ the project's files carry the memory.
 | **1. Define** | `Define a task: [what you want to see]` | A saved brief and a plain summary. Nothing is built yet. |
 | **2. Build** | `I approve the brief at [path]. Build it.` | The work, plus a saved report ending in DONE or STOPPED. |
 | **3. Verify** | `How do I try it?` | Exact safe steps to see the result yourself. |
-| **4. Decide** | `My decision for task [N]: … What I saw: …` | The task recorded and closed. Then a new chat for the next task. |
+| **4. Decide** | `My decision for task [N]: … What I saw: …` | The task logged and closed. Then a new chat for the next task. |
 
 ## A worked example
 
@@ -111,6 +111,10 @@ Your project's `docs/ai-work/PILOT.md` tracks the first five tasks: how long unt
 saw something, whether it moved the milestone, and whether it needed rework. After
 five, look at the table and decide what to simplify. The workflow must earn its
 paperwork; where it only cost time, cut it.
+
+Beyond the pilot, every closed task lands as one row in `docs/ai-work/LOG.md` — the
+project's one-glance history. The Cairn app can read it: connect your project folder
+on the Daily screen (Chrome or Edge) to see your real recent work and share it.
 
 ## High-Stakes work
 

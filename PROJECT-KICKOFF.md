@@ -55,8 +55,8 @@ If the folder is clean:
    with my answers, keeping STATUS: ACTIVE.
 2. Create docs/ai-work/PROJECT.md holding the goal, users, first milestone, what is
    out of scope for now, and the Direction Gate timebox.
-3. Create docs/ai-work/PILOT.md containing only the empty pilot table defined in the
-   contract.
+3. Create docs/ai-work/LOG.md and docs/ai-work/PILOT.md, each containing only its
+   empty table as defined in the contract.
 4. Create the empty folder docs/ai-work/tasks/.
 5. Initialize Git in this folder and make one setup commit of exactly these files,
    staged by name. If Git is missing or has no name and email configured, create the
@@ -76,8 +76,9 @@ milestone]".
 You do not need to judge any code — just confirm these plain facts:
 
 - `AGENTS.md` exists and its Project facts match your five answers;
-- `docs/ai-work/` contains `PROJECT.md`, `PILOT.md`, and an empty `tasks/` folder;
-- the pilot table is empty — no invented results;
+- `docs/ai-work/` contains `PROJECT.md`, `LOG.md`, `PILOT.md`, and an empty `tasks/`
+  folder;
+- the log and pilot tables are empty — no invented results;
 - nothing else was created, installed, or connected;
 - the AI's summary mentions waiting for your approval before building anything.
 
