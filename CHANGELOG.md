@@ -5,6 +5,15 @@ project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates
 [EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
 automatic.
 
+## Cairn Desktop v0.1 — 2026-07-17
+
+The gated loop as a desktop app. A project picker, a dashboard where your cairn
+stands on a hillside, and the five steps — define, approve, build, verify,
+decide — as one calm wizard. Approvals are hash-locked and now persisted to
+`docs/ai-work/tasks/NNN-approval.json` (the CLI does the same). Windows and Mac
+installers are built by CI on every version tag; v1 ships unsigned with honest
+install notes in `app/README.md`.
+
 ## Contract v1.2 — 2026-07-17
 
 - Added the work log: every closed task appends one row to `docs/ai-work/LOG.md`,
