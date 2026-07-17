@@ -13,10 +13,14 @@ You never need to write code. Your job is four things:
 
 ## Start here
 
-**The easiest way in: open [the Cairn app](cairn.html)** (double-click `cairn.html` —
-it works offline, saves your progress on your device, and sends nothing anywhere). It
-walks you through everything below, generates your setup message from five questions,
-and keeps every daily command one tap away.
+**The easiest way in: open [the Cairn app](https://kjleblanc.github.io/cairn/)** — or
+double-click `cairn.html` from this folder; it works offline either way, saves your
+progress on your device, and sends nothing anywhere. It walks you through everything
+below, generates your setup message from five questions, and keeps every daily command
+one tap away.
+
+Get the framework: visit the [repository](https://github.com/kjleblanc/cairn) and use
+**Code → Download ZIP**, or share the links above.
 
 Prefer reading? The same journey as written guides:
 
