@@ -11,7 +11,7 @@
   "scripts": {
     "sync-contract": "node scripts/sync-contract.mjs",
     "build": "npm run sync-contract && tsc",
-    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/parse.test.js"
+    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/parse.test.js dist/test/steps.test.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0"

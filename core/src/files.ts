@@ -41,6 +41,7 @@ export const paths = {
   tasks: (root: string) => join(root, "docs", "ai-work", "tasks"),
   brief: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-brief.md`),
   report: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-report.md`),
+  approval: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-approval.json`),
 };
 
 export function pad(n: number): string {
