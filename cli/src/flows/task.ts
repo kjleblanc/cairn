@@ -7,15 +7,16 @@ import {
 import { assertApprovalValid, checkDirectionGate, recordApproval } from "../gates.js";
 import { pickEngine, RunEvents } from "../agents.js";
 import { builderPrompt, definerPrompt, directionPrompt, reviewerPrompt } from "../prompts.js";
-import { banner, dispositionOf, finalVerdictOf, label } from "../ui.js";
+import { banner, dispositionOf, finalVerdictOf, label, spinnerLine } from "../ui.js";
 
 function events(spin: { message: (m: string) => void }): RunEvents {
+  // spinnerLine bounds the status to the terminal width so a long agent line can never
+  // wrap and flood the console (see ui.ts). It reads process.stdout.columns each call,
+  // so it follows the window even if it is resized mid-run.
+  const status = (raw: string) => spin.message(pc.dim(spinnerLine(raw, process.stdout.columns)));
   return {
-    onText: (t) => {
-      const first = t.split("\n").find((l) => l.trim());
-      if (first) spin.message(pc.dim(first.slice(0, 76)));
-    },
-    onTool: (name, detail) => spin.message(pc.dim(`${name}: ${detail.slice(0, 60)}`)),
+    onText: (t) => { if (t.trim()) status(t); },
+    onTool: (name, detail) => status(`${name}: ${detail}`),
     onDenied: (name, why) => p.log.warn(`${label.denied} ${name} — ${why}`),
   };
 }

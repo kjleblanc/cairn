@@ -17,7 +17,7 @@
   "scripts": {
     "sync-contract": "node scripts/sync-contract.mjs",
     "build": "npm run sync-contract && tsc",
-    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js",
+    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/ui.test.js",
     "start": "npm run build && node dist/src/index.js"
   },
   "dependencies": {

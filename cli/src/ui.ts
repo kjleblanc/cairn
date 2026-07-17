@@ -38,3 +38,22 @@ export function finalVerdictOf(text: string): string {
   const m = text.match(/FINAL VERDICT:\s*([A-Z ]+)/);
   return m ? m[1].trim() : "NO VERDICT";
 }
+
+/**
+ * Turn raw agent text into a safe one-line spinner status.
+ *
+ * The @clack/prompts spinner redraws in place by jumping to the start of the line and
+ * erasing it — which only works while the line occupies ONE physical row. It counts
+ * rows by newlines and never consults the terminal width, so a message wide enough to
+ * wrap defeats the redraw and every animation frame floods the console with a fresh
+ * copy. We prevent that here: collapse any whitespace (including newlines) to single
+ * spaces, then cut the text so the finished line — including the spinner's 3-column
+ * "<char>  " prefix, plus one column of margin so it never touches the last cell and
+ * triggers a deferred auto-wrap — stays strictly inside the terminal width.
+ */
+export function spinnerLine(raw: string, columns?: number): string {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  const width = Number.isFinite(columns) && (columns as number) > 0 ? (columns as number) : 80;
+  const budget = Math.max(0, width - 4);
+  return collapsed.length > budget ? collapsed.slice(0, budget) : collapsed;
+}
