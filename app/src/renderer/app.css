@@ -68,3 +68,21 @@ textarea, input[type="text"] {
   border-radius: var(--r-sm); padding: 10px 14px; outline: none;
 }
 textarea:focus, input[type="text"]:focus { border-color: var(--green); }
+
+.scene-wrap { position: relative; border-radius: var(--r); overflow: hidden; margin: 0 0 14px; background: var(--sky); }
+.scene-head { position: absolute; top: 14px; left: 20px; }
+.scene-head h1 { margin: 0; }
+.stone-top { transform-origin: center; }
+.stone-drop { animation: drop .7s var(--spring); }
+@keyframes drop {
+  0% { transform: translateY(-46px); opacity: 0; }
+  60% { transform: translateY(3px); opacity: 1; }
+  100% { transform: translateY(0); }
+}
+.status-pill {
+  display: inline-block; background: var(--card); border-radius: 999px;
+  padding: 8px 16px; font-family: var(--mono); font-size: .78rem; color: var(--muted);
+}
+.gate-banner { background: var(--amber-soft); color: var(--amber-deep); border-radius: var(--r); padding: 14px 18px; margin: 0 0 12px; }
+.log-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.log-row:last-child { border-bottom: none; }
