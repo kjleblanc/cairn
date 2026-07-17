@@ -3,8 +3,11 @@ import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
 import { registerProjectIpc } from "./ipc.js";
+import { registerTaskIpc } from "./tasks.js";
 
 if (started) app.quit();
+
+let mainWindow: BrowserWindow | null = null;
 
 function contractPath(): string {
   return app.isPackaged
@@ -31,12 +34,15 @@ export function createWindow(): BrowserWindow {
   } else {
     win.loadFile(path.join(__dirname, "..", "renderer", "main_window", "index.html"));
   }
+  mainWindow = win;
+  win.on("closed", () => { mainWindow = null; });
   return win;
 }
 
 app.whenReady().then(() => {
   setContractPath(contractPath());
   registerProjectIpc();
+  registerTaskIpc(() => mainWindow);
   createWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
