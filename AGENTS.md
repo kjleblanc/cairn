@@ -20,9 +20,14 @@ inside this directory unless the user explicitly expands scope.
 - `index.html` — a redirect to `cairn.html` so the GitHub Pages root opens the app;
 - `LICENSE` — MIT.
 
-The contract carries a version number (`Cairn Contract v1.0` in its header). Bump it
+The contract carries a version number (`Cairn Contract v1.1` in its header). Bump it
 whenever the contract's rules change meaningfully, in the template and the app's
 embedded copy together.
+
+Every prompt that ends by waiting for the owner must name the exact next message it
+will accept ("the only message that approves this begins: …"). Prompts travel
+without their guides, so each handoff must be self-contained — never assume the AI
+can see the next step's text.
 
 ## Design rules
 

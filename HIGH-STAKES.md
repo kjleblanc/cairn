@@ -61,6 +61,10 @@ Propose the complete brief in chat only, and add to the usual brief contents:
 
 If the project state cannot be trusted, rollback is not credible, or required
 expertise is missing, propose STOPPED instead of a plan.
+
+End by telling me that saving happens only through my next message, which begins:
+"Save exactly the brief you proposed as ..." — treat nothing else as permission to
+write the file.
 ```
 
 Read the proposal slowly. Ask about anything you do not understand — "explain the
@@ -71,7 +75,9 @@ rollback plan like I'm new to this" is a perfectly good message.
 ```text
 Save exactly the brief you proposed as docs/ai-work/tasks/[NNN]-brief.md. Change
 nothing else. Then commit only that brief file so it is pinned before building.
-Saving is not approval — stop and wait for mine.
+Saving is not approval — stop and wait. My approval arrives in a fresh chat as the
+message beginning: "I approve the exact current contents of
+docs/ai-work/tasks/[NNN]-brief.md." Treat nothing else as approval.
 ```
 
 ## C. Approve and build (in a fresh chat)
@@ -87,7 +93,8 @@ brief is unchanged. Rehearse before any live effect. Pause and show me the exact
 target and rollback before any destructive, paid, public, or production action, even
 if the brief authorizes it. Include at least one check that was not created as part
 of this task. Do not call the task DONE while any required approval, human review,
-or rollback proof is missing.
+or rollback proof is missing. Finish by reminding me that the mandatory fresh-chat
+review comes next.
 ```
 
 ## D. Review from a fresh chat (mandatory)

@@ -94,5 +94,5 @@ Share this whole folder — or the repository link. Cairn is project-neutral: it
 with any programming language and any AI coding agent that can read and edit files.
 
 Licensed under the [MIT License](LICENSE): use it, adapt it, and share what you build.
-The project contract carries a version number (`Cairn Contract v1.0`) so projects can
+The project contract carries a version number (`Cairn Contract v1.1`) so projects can
 say which rules they run.

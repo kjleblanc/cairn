@@ -131,6 +131,11 @@ When in doubt: `Stop. What just happened?`
 
 ## Troubleshooting
 
+**"The AI asks for approval in its own words."** After defining a task, the AI may
+ask "shall I proceed?" or "just say yes." Don't. Approval is always the scripted
+message — `I approve the brief at [path]. Build it.` — and the contract tells the AI
+to accept nothing else. Paste the real thing.
+
 **"The AI is ignoring the workflow."** Start your message with "Follow the project
 contract in AGENTS.md." If it persists, start a new chat — long chats drift.
 

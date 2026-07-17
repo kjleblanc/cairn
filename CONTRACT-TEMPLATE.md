@@ -1,9 +1,10 @@
 # Project Contract
 
 > **What this file is.** This is the rulebook for AI work in this project — Cairn
-> Contract v1.0. It is copied from the Cairn framework during setup and saved as
-> `AGENTS.md` in the project root. The AI must read it at the start of every chat and
-> follow it exactly. The owner is a beginner: explain everything in plain language.
+> Contract v1.1, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
+> copied into the project during setup and saved as `AGENTS.md` in the project root.
+> The AI must read it at the start of every chat and follow it exactly. The owner is a
+> beginner: explain everything in plain language.
 
 ## Project facts
 
@@ -73,8 +74,11 @@ below — the owner never needs to restate the rules.
    - any action that needs separate approval: installing anything, network access,
      credentials, money, deployment, sending messages, deleting or moving files,
      or writing to any external service.
-4. Show the brief in full with a plain-language summary. Stop. Implement nothing,
-   install nothing, commit nothing.
+4. Show the brief in full with a plain-language summary, then stop. Tell the owner
+   that approval is exactly the message `I approve the brief at [path]. Build it.`
+   with the real path filled in — and treat no other reply, including "yes" or
+   "looks good", as permission to build. Implement nothing, install nothing, commit
+   nothing.
 
 ### Tiny change: [change]
 
@@ -93,9 +97,10 @@ fresh-context review of the combined result.
 
 ### I approve the brief at [path]. Build it.
 
-1. Re-orient. Confirm the brief is unchanged, its starting facts still hold, and
-   unrelated modified or untracked work is identified and protected. If anything
-   fails, stop and explain the decision the owner must make.
+1. Re-orient. Confirm the approval message names this brief's exact path, the brief
+   is unchanged, its starting facts still hold, and unrelated modified or untracked
+   work is identified and protected. If anything fails, stop and explain the decision
+   the owner must make.
 2. Build only what the brief allows. Never widen, reinterpret, or rewrite it. Reach
    the smallest visible checkpoint early. In a Draft task, stop at a judgeable
    candidate — never make it the project default.
@@ -115,6 +120,9 @@ fresh-context review of the combined result.
    state exactly and report it.
 6. Never push, deploy, spend money, message anyone, use credentials, or write to an
    external service unless the approved brief names that exact action.
+7. End by telling the owner: how to try the result, that the task closes with
+   `My decision for task NNN: …`, and — when a fresh-context review is due — that
+   `Review task NNN.` belongs in a brand-new chat.
 
 DONE means the brief's boundary and checks completed. STOPPED means they did not.
 Nothing else may soften or blur those two words.
@@ -149,8 +157,9 @@ Record the decision. During the five-task pilot, update that task's row in
 `docs/ai-work/PILOT.md`; otherwise change no files. A revision or rollback becomes a
 new task with a new brief — never rewrite an accepted brief or an old report. If the
 task was a Draft the owner is keeping, record its exact identity (commit or file) so a
-later Final task can name it. Start no new task in this chat. If a Direction Gate
-trigger has occurred, say so plainly instead of proposing another patch.
+later Final task can name it. Start no new task in this chat, and remind the owner
+that the next task begins in a fresh chat. If a Direction Gate trigger has occurred,
+say so plainly instead of proposing another patch.
 
 ### Stop. What just happened?
 

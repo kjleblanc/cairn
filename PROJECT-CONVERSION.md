@@ -58,9 +58,16 @@ plain language:
 6. how activation will later work, and how the conversion can be abandoned without
    rewriting history.
 
-Show me the full brief and the complete Git status before and after. Then stop for
-my approval. Do not implement anything.
+Show me the full brief and the complete Git status before and after. Then stop and
+wait. Tell me to review the brief, and that the only message that approves it
+begins: "I approve the exact current contents of
+docs/ai-work/tasks/000-conversion-brief.md." Treat no other reply — including
+"yes" — as approval, and do not implement anything.
 ```
+
+The AI may still finish by asking "shall I proceed?" in its own words. Don't answer
+with "yes" — review the brief, then paste the Step 4 message. The prompts name each
+other on purpose, and the AI is told to accept nothing else.
 
 ## Step 3 — review the brief
 
@@ -91,7 +98,8 @@ untouched. Change no product code, no dependencies, no existing files outside th
 brief, and nothing in the preservation list.
 
 If Git can commit safely, make one conversion commit of exactly the created files,
-staged by name. Do not push. Then show the complete final status and stop.
+staged by name. Do not push. Then show the complete final status, tell me the next
+step is a review from a brand-new chat, and stop.
 ```
 
 ## Step 5 — review from a fresh chat
@@ -111,7 +119,9 @@ are recorded rather than hidden.
 
 Give one verdict — PASS, PASS WITH CONCERNS, or FAIL — and explain in plain language
 what you observed, what the evidence cannot prove, and whether I should activate,
-correct, or abandon the conversion.
+correct, or abandon the conversion. Do not activate anything yourself: activation
+happens only through my separate message that begins "I accept the review verdict
+and authorize activation."
 ```
 
 ## Step 6 — activate

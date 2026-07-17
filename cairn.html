@@ -442,9 +442,10 @@ footer { padding-bottom: 150px; }
 # Project Contract
 
 > **What this file is.** This is the rulebook for AI work in this project — Cairn
-> Contract v1.0. It is copied from the Cairn framework during setup and saved as
-> `AGENTS.md` in the project root. The AI must read it at the start of every chat and
-> follow it exactly. The owner is a beginner: explain everything in plain language.
+> Contract v1.1, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
+> copied into the project during setup and saved as `AGENTS.md` in the project root.
+> The AI must read it at the start of every chat and follow it exactly. The owner is a
+> beginner: explain everything in plain language.
 
 ## Project facts
 
@@ -514,8 +515,11 @@ below — the owner never needs to restate the rules.
    - any action that needs separate approval: installing anything, network access,
      credentials, money, deployment, sending messages, deleting or moving files,
      or writing to any external service.
-4. Show the brief in full with a plain-language summary. Stop. Implement nothing,
-   install nothing, commit nothing.
+4. Show the brief in full with a plain-language summary, then stop. Tell the owner
+   that approval is exactly the message `I approve the brief at [path]. Build it.`
+   with the real path filled in — and treat no other reply, including "yes" or
+   "looks good", as permission to build. Implement nothing, install nothing, commit
+   nothing.
 
 ### Tiny change: [change]
 
@@ -534,9 +538,10 @@ fresh-context review of the combined result.
 
 ### I approve the brief at [path]. Build it.
 
-1. Re-orient. Confirm the brief is unchanged, its starting facts still hold, and
-   unrelated modified or untracked work is identified and protected. If anything
-   fails, stop and explain the decision the owner must make.
+1. Re-orient. Confirm the approval message names this brief's exact path, the brief
+   is unchanged, its starting facts still hold, and unrelated modified or untracked
+   work is identified and protected. If anything fails, stop and explain the decision
+   the owner must make.
 2. Build only what the brief allows. Never widen, reinterpret, or rewrite it. Reach
    the smallest visible checkpoint early. In a Draft task, stop at a judgeable
    candidate — never make it the project default.
@@ -556,6 +561,9 @@ fresh-context review of the combined result.
    state exactly and report it.
 6. Never push, deploy, spend money, message anyone, use credentials, or write to an
    external service unless the approved brief names that exact action.
+7. End by telling the owner: how to try the result, that the task closes with
+   `My decision for task NNN: …`, and — when a fresh-context review is due — that
+   `Review task NNN.` belongs in a brand-new chat.
 
 DONE means the brief's boundary and checks completed. STOPPED means they did not.
 Nothing else may soften or blur those two words.
@@ -590,8 +598,9 @@ Record the decision. During the five-task pilot, update that task's row in
 `docs/ai-work/PILOT.md`; otherwise change no files. A revision or rollback becomes a
 new task with a new brief — never rewrite an accepted brief or an old report. If the
 task was a Draft the owner is keeping, record its exact identity (commit or file) so a
-later Final task can name it. Start no new task in this chat. If a Direction Gate
-trigger has occurred, say so plainly instead of proposing another patch.
+later Final task can name it. Start no new task in this chat, and remind the owner
+that the next task begins in a fresh chat. If a Direction Gate trigger has occurred,
+say so plainly instead of proposing another patch.
 
 ### Stop. What just happened?
 
@@ -714,6 +723,8 @@ change settings outside this folder, or write any product code.
 
 Finish by showing me: every file you created, the filled-in Project facts, the Git
 status, and a one-paragraph summary of what the contract makes you do from now on.
+Then tell me my next step: open a new chat and send "Define a task: [my first
+milestone]".
 </script>
 
 <script type="text/plain" id="src-audit">
@@ -746,8 +757,11 @@ plain language:
 6. how activation will later work, and how the conversion can be abandoned without
    rewriting history.
 
-Show me the full brief and the complete Git status before and after. Then stop for
-my approval. Do not implement anything.
+Show me the full brief and the complete Git status before and after. Then stop and
+wait. Tell me to review the brief, and that the only message that approves it
+begins: "I approve the exact current contents of
+docs/ai-work/tasks/000-conversion-brief.md." Treat no other reply — including
+"yes" — as approval, and do not implement anything.
 </script>
 
 <script type="text/plain" id="src-install">
@@ -763,7 +777,8 @@ untouched. Change no product code, no dependencies, no existing files outside th
 brief, and nothing in the preservation list.
 
 If Git can commit safely, make one conversion commit of exactly the created files,
-staged by name. Do not push. Then show the complete final status and stop.
+staged by name. Do not push. Then show the complete final status, tell me the next
+step is a review from a brand-new chat, and stop.
 </script>
 
 <script type="text/plain" id="src-convreview">
@@ -778,7 +793,9 @@ are recorded rather than hidden.
 
 Give one verdict — PASS, PASS WITH CONCERNS, or FAIL — and explain in plain language
 what you observed, what the evidence cannot prove, and whether I should activate,
-correct, or abandon the conversion.
+correct, or abandon the conversion. Do not activate anything yourself: activation
+happens only through my separate message that begins "I accept the review verdict
+and authorize activation."
 </script>
 
 <script type="text/plain" id="src-activate">
@@ -1056,6 +1073,7 @@ var PATHS = {
       }},
       { t: 'Review the plan', h: function () {
         return '<p>Before approving, make sure the saved brief answers all four. If anything is unclear, ask — approve only what you understand.</p>' +
+        '<div class="tip">If the AI asks “shall I proceed?” in its own words, don’t say yes. The next step’s message is the only approval it will accept.</div>' +
         checklist('conv3', [
           'Which files stay untouched — and is everything modified or unclear on that list?',
           'If the project already has a rules file, the existing one stays in charge until activation.',

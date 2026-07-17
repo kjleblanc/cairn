@@ -67,6 +67,8 @@ change settings outside this folder, or write any product code.
 
 Finish by showing me: every file you created, the filled-in Project facts, the Git
 status, and a one-paragraph summary of what the contract makes you do from now on.
+Then tell me my next step: open a new chat and send "Define a task: [my first
+milestone]".
 ```
 
 ## Step 3 — check the setup
