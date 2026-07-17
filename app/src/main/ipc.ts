@@ -1,9 +1,9 @@
-import { dialog, ipcMain, shell } from "electron";
+import { app, dialog, ipcMain, shell } from "electron";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { initProject, isCairnProject, projectStatus } from "@cairn/core";
-import type { InitInput, Preflight, ProjectList, RecentProject, Result } from "../shared/ipc.js";
+import type { InitInput, Preflight, ProjectList, RecentProject, Result, UpdateInfo } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
 import { recentDirs, touchProject } from "./registry.js";
 
@@ -76,6 +76,23 @@ export function registerProjectIpc(): void {
     }));
 
   ipcMain.handle("project:status", (_e, dir: string) => toResult("project:status", () => projectStatus(dir)));
+
+  ipcMain.handle("app:updateCheck", async (): Promise<UpdateInfo> => {
+    const current = app.getVersion();
+    try {
+      const res = await fetch("https://api.github.com/repos/kjleblanc/cairn/releases/latest", {
+        headers: { accept: "application/vnd.github+json" },
+      });
+      if (!res.ok) return { current, latest: null, newer: false };
+      const data = (await res.json()) as { tag_name?: string };
+      const latest = (data.tag_name ?? "").replace(/^v/, "") || null;
+      const newer = latest !== null && latest.localeCompare(current, undefined, { numeric: true }) > 0;
+      return { current, latest, newer };
+    } catch (err) {
+      logError("updateCheck", err);
+      return { current, latest: null, newer: false };
+    }
+  });
 
   ipcMain.handle("app:openExternal", async (_e, url: string) => {
     if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/|claude\.com\/)/.test(url)) return;
