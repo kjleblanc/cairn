@@ -1,12 +1,9 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { readFileSync, existsSync } from "node:fs";
 import {
-  appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths,
-  assertApprovalValid, checkDirectionGate, recordApproval,
-  pickEngine, RunEvents,
-  builderPrompt, definerPrompt, directionPrompt, reviewerPrompt,
-  dispositionOf, finalVerdictOf,
+  approveBrief, buildTask, checkDirectionGate, closeTask, defineTask, isCairnProject,
+  pad, parseFacts, parseLog, pickEngine, reviewTask, runDirectionCheck,
+  type RunEvents,
 } from "@cairn/core";
 import { banner, label, spinnerLine } from "../ui.js";
 
@@ -21,6 +18,8 @@ function events(spin: { message: (m: string) => void }): RunEvents {
     onDenied: (name, why) => p.log.warn(`${label.denied} ${name} — ${why}`),
   };
 }
+
+const cost = (usd?: number) => (usd ? pc.dim(`  ($${usd.toFixed(2)})`) : "");
 
 export async function taskFlow(root: string, opts: { mock: boolean }): Promise<void> {
   console.log(banner());
@@ -47,10 +46,7 @@ export async function taskFlow(root: string, opts: { mock: boolean }): Promise<v
     p.log.info("No third narrow patch. Running a direction check instead — nothing will be changed.");
     const spin = p.spinner();
     spin.start("Thinking about genuinely different options…");
-    const res = await engine.run(
-      { role: "direction", root, system: directionPrompt(root, gate.reason).system, user: directionPrompt(root, gate.reason).user },
-      events(spin),
-    );
+    const res = await runDirectionCheck(root, gate.reason, engine, events(spin));
     spin.stop("Direction check complete.");
     p.note(res.text.slice(0, 4000), "Your options");
     p.outro("Choose a different approach, a smaller milestone, help, or a pause — then run `cairn task` again.");
@@ -65,64 +61,57 @@ export async function taskFlow(root: string, opts: { mock: boolean }): Promise<v
   });
   if (p.isCancel(outcome)) { p.cancel("Nothing was changed."); return; }
 
-  const taskNumber = nextTaskNumber(root);
   const dSpin = p.spinner();
-  dSpin.start(`Task ${pad(taskNumber)} — writing the brief…`);
-  const dp = definerPrompt(root, taskNumber, String(outcome));
-  const defRes = await engine.run({ role: "definer", root, taskNumber, system: dp.system, user: dp.user }, events(dSpin));
-  dSpin.stop(`Brief drafted.${defRes.costUsd ? pc.dim(`  ($${defRes.costUsd.toFixed(2)})`) : ""}`);
-
-  const briefPath = paths.brief(root, taskNumber);
-  if (!existsSync(briefPath)) {
-    p.log.error("The definer produced no brief file. Nothing was approved and nothing will be built.");
+  dSpin.start("Writing the brief…");
+  let def;
+  try {
+    def = await defineTask(root, String(outcome), engine, events(dSpin));
+  } catch (err) {
+    dSpin.stop("The definer stopped.");
+    p.log.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;
     return;
   }
-  p.note(readFileSync(briefPath, "utf8").slice(0, 4000), `The brief — docs/ai-work/tasks/${pad(taskNumber)}-brief.md`);
+  dSpin.stop(`Brief drafted.${cost(def.costUsd)}`);
+  p.note(def.briefText.slice(0, 4000), `The brief — docs/ai-work/tasks/${pad(def.taskNumber)}-brief.md`);
 
-  // ---- 2. THE APPROVAL GATE (human action; hash-locked)
+  // ---- 2. THE APPROVAL GATE (human action; hash-locked and persisted)
   const approve = await p.confirm({
     message: "Approve this exact brief? Nothing is built until you say yes.",
     initialValue: false,
   });
   if (p.isCancel(approve) || !approve) {
-    p.cancel(`Not approved. The brief stays at docs/ai-work/tasks/${pad(taskNumber)}-brief.md — edit your outcome and run \`cairn task\` again.`);
+    p.cancel(`Not approved. The brief stays at docs/ai-work/tasks/${pad(def.taskNumber)}-brief.md — edit your outcome and run \`cairn task\` again.`);
     return;
   }
-  const approval = recordApproval(taskNumber, briefPath);
+  const approval = approveBrief(root, def.taskNumber);
   p.log.success(`Approval recorded (brief locked: ${approval.briefSha256.slice(0, 12)}…).`);
 
-  // ---- 3. BUILD (fresh session; the gate re-checks the brief hash first)
-  assertApprovalValid(approval);
+  // ---- 3. BUILD (fresh session; buildTask re-reads and re-checks the approval file)
   const bSpin = p.spinner();
   bSpin.start("Building — only what the brief allows…");
-  const bp = builderPrompt(root, taskNumber);
-  const buildRes = await engine.run({ role: "builder", root, taskNumber, system: bp.system, user: bp.user }, events(bSpin));
-  bSpin.stop(`Build finished.${buildRes.costUsd ? pc.dim(`  ($${buildRes.costUsd.toFixed(2)})`) : ""}`);
+  const build = await buildTask(root, def.taskNumber, engine, events(bSpin));
+  bSpin.stop(`Build finished.${cost(build.costUsd)}`);
 
-  const reportPath = paths.report(root, taskNumber);
-  const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-  const disposition = dispositionOf(report || buildRes.text);
-  p.log.info(`Outcome: ${disposition === "DONE" ? label.done : disposition === "STOPPED" ? label.stopped : pc.yellow("no clear disposition")}`);
-  if (report) p.note(report.slice(0, 4000), `The report — docs/ai-work/tasks/${pad(taskNumber)}-report.md`);
+  p.log.info(`Outcome: ${build.disposition === "DONE" ? label.done : build.disposition === "STOPPED" ? label.stopped : pc.yellow("no clear disposition")}`);
+  if (build.reportText) p.note(build.reportText.slice(0, 4000), `The report — docs/ai-work/tasks/${pad(def.taskNumber)}-report.md`);
 
-  const howM = (report.match(/how[^\n]*try[^\n]*:?\s*([\s\S]{0,300}?)(\n\n|\n[A-Z#])/i) || [])[1];
+  const howM = (build.reportText.match(/how[^\n]*try[^\n]*:?\s*([\s\S]{0,300}?)(\n\n|\n[A-Z#])/i) || [])[1];
   if (howM) p.note(howM.trim(), "Try it yourself before deciding");
 
   // ---- 4. VERIFY (optional fresh-context review; report locked until provisional verdict)
-  const wantReview = await p.confirm({ message: "Run a fresh-context review now? (recommended every third task and after any STOPPED)", initialValue: disposition !== "DONE" });
+  const wantReview = await p.confirm({ message: "Run a fresh-context review now? (recommended every third task and after any STOPPED)", initialValue: build.disposition !== "DONE" });
   let verdict = "";
   if (!p.isCancel(wantReview) && wantReview) {
     const rSpin = p.spinner();
     rSpin.start("Fresh reviewer at work — the builder's report is locked until it forms its own view…");
-    const rp = reviewerPrompt(root, taskNumber);
-    const revRes = await engine.run({ role: "reviewer", root, taskNumber, system: rp.system, user: rp.user }, events(rSpin));
-    verdict = finalVerdictOf(revRes.text);
-    rSpin.stop(`Review complete: ${pc.bold(verdict)}${revRes.costUsd ? pc.dim(`  ($${revRes.costUsd.toFixed(2)})`) : ""}`);
-    p.note(revRes.text.slice(0, 4000), "The reviewer's verdict");
+    const review = await reviewTask(root, def.taskNumber, engine, events(rSpin));
+    verdict = review.finalVerdict;
+    rSpin.stop(`Review complete: ${pc.bold(verdict)}${cost(review.costUsd)}`);
+    p.note(review.text.slice(0, 4000), "The reviewer's verdict");
   }
 
-  // ---- 5. DECIDE (human; the CLI writes the log row itself)
+  // ---- 5. DECIDE (human; core writes the log row)
   const decision = await p.select({
     message: "Your decision closes the task. What happened when you tried it?",
     options: [
@@ -145,16 +134,11 @@ export async function taskFlow(root: string, opts: { mock: boolean }): Promise<v
     ],
   });
 
-  appendLogRow(root, {
-    task: pad(taskNumber),
-    date: new Date().toISOString().slice(0, 10),
-    lane: "Standard",
-    mode: /Mode:\s*Final/i.test(readFileSync(briefPath, "utf8")) ? "Final" : "Draft",
-    outcome: disposition === "UNKNOWN" ? "STOPPED" : disposition,
-    decision: String(decision),
+  closeTask(root, def.taskNumber, {
+    decision: String(decision) as "accept" | "revise" | "rollback" | "defer" | "escalate",
     summary: summary || String(outcome),
-    moved: p.isCancel(moved) ? "UNCLEAR" : String(moved),
+    moved: p.isCancel(moved) ? "UNCLEAR" : (String(moved) as "YES" | "NO" | "UNCLEAR"),
   });
   p.log.success("Logged in docs/ai-work/LOG.md — a stone on your cairn.");
-  p.outro(`Task ${pad(taskNumber)} closed${verdict ? ` (review: ${verdict})` : ""}. Next task: \`cairn task\` — each task gets a fresh start.`);
+  p.outro(`Task ${pad(def.taskNumber)} closed${verdict ? ` (review: ${verdict})` : ""}. Next task: \`cairn task\` — each task gets a fresh start.`);
 }

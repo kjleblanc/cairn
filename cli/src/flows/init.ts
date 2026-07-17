@@ -1,13 +1,8 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import { isCairnProject, scaffoldProject } from "@cairn/core";
+import { initProject, isCairnProject } from "@cairn/core";
 import { banner } from "../ui.js";
-
-function git(root: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-}
 
 export async function initFlow(root: string): Promise<void> {
   console.log(banner());
@@ -44,22 +39,11 @@ export async function initFlow(root: string): Promise<void> {
     { onCancel: () => { p.cancel("Kickoff cancelled. Nothing was changed."); process.exit(1); } },
   );
 
-  const created = scaffoldProject(root, answers as never);
-  p.log.success(`Created:\n${created.map((c) => "  " + pc.dim(c)).join("\n")}`);
-
-  try {
-    git(root, ["--version"]);
-    try {
-      git(root, ["rev-parse", "--git-dir"]);
-    } catch {
-      git(root, ["init"]);
-    }
-    const name = git(root, ["config", "user.name"]);
-    if (!name) throw new Error("no identity");
-    git(root, ["add", "AGENTS.md", "docs/ai-work/PROJECT.md", "docs/ai-work/LOG.md", "docs/ai-work/PILOT.md"]);
-    git(root, ["commit", "-m", "Cairn setup: contract, project, log, pilot"]);
+  const res = initProject(root, answers as never);
+  p.log.success(`Created:\n${res.created.map((c) => "  " + pc.dim(c)).join("\n")}`);
+  if (res.gitReady) {
     p.log.success("Git initialized and the setup commit is saved.");
-  } catch {
+  } else {
     p.log.warn(
       "Files created, but Git isn't ready (missing, or no name/email configured). See GETTING-READY.md, then commit AGENTS.md and docs/ai-work/ yourself.",
     );
