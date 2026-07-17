@@ -1,0 +1,32 @@
+{
+  "name": "cairn-cli",
+  "version": "0.1.0",
+  "description": "Cairn — the gated AI coding workflow for people who don't code, as a CLI",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "cairn": "dist/src/index.js"
+  },
+  "files": [
+    "dist/src",
+    "assets"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "sync-contract": "node scripts/sync-contract.mjs",
+    "build": "npm run sync-contract && tsc",
+    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js",
+    "start": "npm run build && node dist/src/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
+    "@clack/prompts": "^0.11.0",
+    "picocolors": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

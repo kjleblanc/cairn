@@ -19,7 +19,13 @@ inside this directory unless the user explicitly expands scope.
   canonical source.
 - `index.html` — a redirect to `cairn.html` so the GitHub Pages root opens the app;
 - `CHANGELOG.md` — plain-language history of contract versions;
-- `LICENSE` — MIT.
+- `LICENSE` — MIT;
+- `cli/` — cairn-cli (early alpha): the workflow as a gated command line on the
+  Claude Agent SDK. The Markdown protocol stays canonical; the CLI is its reference
+  runtime, and it must enforce in code what the contract states in prose (hash-locked
+  approvals, tool deny-lists, the reviewer's report lockout, the mechanical Direction
+  Gate). Its `assets/contract.md` is synced from `CONTRACT-TEMPLATE.md` at every
+  build — never edited by hand.
 
 The contract carries a version number (`Cairn Contract v1.2` in its header). Bump it
 whenever the contract's rules change meaningfully, in the template and the app's

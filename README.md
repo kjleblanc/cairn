@@ -88,6 +88,14 @@ Everything else — protecting existing files, honest DONE/STOPPED reporting, th
 Direction Gate that stops endless patching — is written into your project's contract,
 and the AI is bound by it so you don't have to remember it.
 
+## The command line (early alpha)
+
+For those ready to go further, [cairn-cli](cli/README.md) runs the whole loop for
+you: you describe the outcome, approve the brief with a keypress, and separate AI
+agents define, build, and review — with the contract's rules enforced by code, not
+trust. The written guides above remain the canonical protocol and work with any AI
+tool.
+
 ## Sharing this framework
 
 Share this whole folder — or the repository link. Cairn is project-neutral: it works
