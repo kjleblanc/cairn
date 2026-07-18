@@ -27,7 +27,9 @@ test("the full mock loop drops a stone", async () => {
   });
   const win = await app.firstWindow();
 
-  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
+  // First paint includes Electron launch + bundle + scaffold read; slower
+  // machines have been measured near 6 s, so give it a generous ceiling.
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30000 });
   await win.getByRole("button", { name: "Start a task" }).click();
 
   await win.getByPlaceholder("The home page shows my list of books").fill("A demo file appears");
