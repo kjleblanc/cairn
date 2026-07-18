@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type { ProjectStatus } from "@cairn/core";
 import { Badge, Card, Pill } from "../components/Ui";
 import { Scene } from "../components/Scene";
+import { ModelEffort } from "../components/ModelEffort";
 import { pluck } from "../sound";
 
 export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDirection, onSwitch, onSettings }: {
@@ -27,6 +28,8 @@ export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDir
         <span className="status-pill">▸ idle · {stones} {stones === 1 ? "stone" : "stones"} · gate {gate.tripped ? "tripped" : "quiet"}</span>
         {!gate.tripped ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
       </div>
+
+      {!gate.tripped ? <ModelEffort /> : null}
 
       {gate.tripped ? (
         <div className="gate-banner">
