@@ -2,7 +2,7 @@ import type { CloseInput, Disposition, LogRow, ProjectStatus } from "@cairn/core
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
-export type Preflight = { claudeReady: boolean; reason: "no-sdk" | "no-login" | null };
+export type Preflight = { claudeReady: boolean; reason: "no-sdk" | "no-login" | null; mock: boolean };
 export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number; lastOpened: string };
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string; timebox: string };

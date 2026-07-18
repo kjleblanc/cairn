@@ -10,6 +10,12 @@ import { Dashboard } from "./screens/Dashboard";
 import { Wizard, type WizardStatus } from "./screens/Wizard";
 import { Direction } from "./screens/Direction";
 import { Settings } from "./screens/Settings";
+import {
+  DEFAULT_OPENAI_PREVIEW_MODEL,
+  PREVIEW_EFFORT_KEY,
+  PREVIEW_MODEL_KEY,
+  PREVIEW_PROVIDER_KEY,
+} from "./components/modelCatalog";
 
 type View =
   | { name: "loading" }
@@ -36,6 +42,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [wstat, setWstat] = useState<WizardStatus | null>(null);
+  const [mock, setMock] = useState(false);
 
   const openProject = useCallback(async (dir: string, justAdded = false) => {
     const r = await cairn.projectOpen(dir);
@@ -45,6 +52,22 @@ export function App() {
 
   const boot = useCallback(async () => {
     const pf = await cairn.preflight();
+    setMock(pf.mock);
+
+    // Restore one truthful engine setup before the dashboard can render. A
+    // mock OpenAI preview may return only inside this renderer window; every
+    // non-mock or new-window boot uses the durable Anthropic setup.
+    const restorePreview = pf.mock && sessionStorage.getItem(PREVIEW_PROVIDER_KEY) === "openai";
+    const durableModel = localStorage.getItem("cairn-model") ?? "";
+    const model = restorePreview
+      ? sessionStorage.getItem(PREVIEW_MODEL_KEY) || DEFAULT_OPENAI_PREVIEW_MODEL
+      : durableModel;
+    const effort = restorePreview
+      ? sessionStorage.getItem(PREVIEW_EFFORT_KEY) ?? ""
+      : localStorage.getItem("cairn-effort") ?? "";
+    await cairn.taskSetModel(model);
+    await cairn.taskSetEffort(effort);
+
     const list = await cairn.projectList();
     if (!pf.claudeReady) { setView({ name: "welcome", preflight: pf, hasRecent: list.recent.length > 0 }); return; }
     if (list.autoOpen) { await openProject(list.autoOpen); return; }
@@ -61,9 +84,6 @@ export function App() {
   }, [openProject]);
 
   useEffect(() => { void boot(); }, [boot]);
-
-  // Apply the owner's saved model choice (if any) so the first run uses it.
-  useEffect(() => { void cairn.taskSetModel(localStorage.getItem("cairn-model") ?? ""); }, []);
 
   const pickAndOpen = useCallback(async () => {
     const dir = await cairn.projectPickFolder();
@@ -128,7 +148,7 @@ export function App() {
           onCreated={(dir, status) => setView({ name: "dashboard", dir, status, justAdded: false })}
           onSettings={() => setView({ name: "settings", dir: null })} />;
       case "dashboard":
-        return <Dashboard dir={view.dir} status={view.status} justAdded={view.justAdded}
+        return <Dashboard dir={view.dir} status={view.status} justAdded={view.justAdded} mock={mock}
           onStartTask={() => enterTask(view.dir, null)}
           onResume={() => enterTask(view.dir, view.status.unfinished)}
           onDirection={(reason) => setView({ name: "direction", dir: view.dir, reason })}

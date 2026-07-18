@@ -6,8 +6,8 @@ import { ModelEffort } from "../components/ModelEffort";
 import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { pluck } from "../sound";
 
-export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
-  dir: string; status: ProjectStatus; justAdded: boolean;
+export function Dashboard({ dir, status, justAdded, mock, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
+  dir: string; status: ProjectStatus; justAdded: boolean; mock: boolean;
   onStartTask: () => void; onResume: () => void; onDirection: (reason: string) => void;
   onSwitch: () => void; onOpenProject: (dir: string) => void; onSettings: () => void;
 }) {
@@ -30,7 +30,7 @@ export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDir
         {!gate.tripped ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
       </div>
 
-      {!gate.tripped ? <ModelEffort /> : null}
+      {!gate.tripped ? <ModelEffort mock={mock} /> : null}
 
       {gate.tripped ? (
         <div className="gate-banner">
