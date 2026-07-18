@@ -116,6 +116,24 @@ Beyond the pilot, every closed task lands as one row in `docs/ai-work/LOG.md` �
 project's one-glance history. The Cairn app can read it: connect your project folder
 on the Daily screen (Chrome or Edge) to see your real recent work and share it.
 
+## Choosing the model and effort
+
+Cairn is built on Claude. Both of its tools let you pick which Claude model runs your
+tasks, and how hard it thinks:
+
+- **In the app:** Settings → **Model** offers the current Claude models and accepts
+  any model id you type; Settings → **Effort** offers five levels. Leave both alone
+  and Cairn uses its built-in default (`claude-opus-4-8`, with the model deciding its
+  own effort).
+- **In the terminal:** `cairn task --model <id> --effort <level>` does the same for
+  one run, and `cairn help` lists the current picks. Every run announces the model it
+  is using.
+
+Plain cost note: a real run bills the model you chose at its own price. A bigger
+model costs more per run, and a higher effort spends more on thinking, so it also
+costs more. The offline demo (`--mock`) never calls a real model and never bills
+anything.
+
 ## High-Stakes work
 
 When a task touches money, personal data, security, dependencies, deployment, or

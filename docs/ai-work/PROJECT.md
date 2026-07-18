@@ -11,6 +11,6 @@ itself, end to end.
 
 Out of scope for now: accounts, servers, analytics, or paid infrastructure of any
 kind; external dependencies in the public artifacts (the app stays one self-contained
-file); anything that ties the written protocol to a single AI product.
+file).
 
 Direction Gate timebox: two Standard tasks without visible progress (default)

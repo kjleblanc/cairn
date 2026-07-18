@@ -93,13 +93,15 @@ and the AI is bound by it so you don't have to remember it.
 For those ready to go further, [cairn-cli](cli/README.md) runs the whole loop for
 you: you describe the outcome, approve the brief with a keypress, and separate AI
 agents define, build, and review — with the contract's rules enforced by code, not
-trust. The written guides above remain the canonical protocol and work with any AI
-tool.
+trust. The written guides above remain the canonical protocol; Claude Code is the
+recommended agent for following them.
 
 ## Sharing this framework
 
-Share this whole folder — or the repository link. Cairn is project-neutral: it works
-with any programming language and any AI coding agent that can read and edit files.
+Share this whole folder — or the repository link. Cairn works with any programming
+language. It is built on Claude — the CLI and app run Claude models, and Claude Code
+is the recommended agent — though the written commands can be pasted into any AI
+coding agent that can read and edit files.
 
 Licensed under the [MIT License](LICENSE): use it, adapt it, and share what you build.
 The project contract carries a version number (`Cairn Contract v1.2`) so projects can

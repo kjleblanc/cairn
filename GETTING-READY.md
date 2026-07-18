@@ -6,8 +6,9 @@ use the framework.
 ## What you need
 
 **1. An AI coding agent.** This is an AI that can read and edit files in a folder on
-your computer — not just a chat window. Claude Code, Cursor, and similar tools all
-work. The framework does not depend on which one you pick.
+your computer — not just a chat window. Cairn is built for Claude Code — its app and
+CLI run Claude models — so install Claude Code if you can. The written commands also
+work in similar tools, such as Cursor.
 
 **2. Git.** Git is a save-history tool. It takes snapshots of your project so any
 mistake can be undone by going back to an earlier snapshot. It is free and safe to

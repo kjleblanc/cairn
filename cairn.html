@@ -1295,7 +1295,7 @@ var PATHS = {
     steps: [
       { t: 'What you’ll need', h: function () {
         return '<p>Two tools, ten minutes, once. After this, nothing else to install.</p>' +
-        '<div class="card" style="margin:10px 0"><h3>1 · An AI coding agent</h3><p class="small">An AI that can read and edit files in a folder on your computer — not just a chat window. Claude Code, Cursor, and similar tools all work. Cairn doesn’t care which you pick.</p></div>' +
+        '<div class="card" style="margin:10px 0"><h3>1 · An AI coding agent</h3><p class="small">An AI that can read and edit files in a folder on your computer — not just a chat window. Cairn is built for Claude Code — its app and CLI run Claude models — so install Claude Code if you can. The written commands also work in similar tools, such as Cursor.</p></div>' +
         '<div class="card"><h3>2 · Git</h3><p class="small">A free save-history tool. It snapshots your project so any mistake can be undone by going back to an earlier snapshot. We’ll check for it next.</p></div>';
       }},
       { t: 'Check for Git', h: function () {
@@ -1632,6 +1632,8 @@ function viewDaily() {
     cmdBlock('Direction check: [what happened]') + '</div>' +
     '<div class="card"><span class="badge stop">Hard to reverse?</span><h3>High-Stakes work</h3>' +
     '<p class="small muted">Money, personal data, security, dependencies, deployment. Stricter steps live in <b>HIGH-STAKES.md</b> — and some of it requires an experienced human. No checklist makes anyone qualified by paperwork.</p></div>' +
+    '<div class="card"><span class="badge">Your dials</span><h3>Model &amp; effort</h3>' +
+    '<p class="small muted">Cairn is built on Claude. The desktop app’s Settings — or the CLI’s <b>--model</b> and <b>--effort</b> flags — choose which Claude model runs a task and how hard it thinks. A bigger model, or a higher effort, costs more per real run; leave both alone for the default.</p></div>' +
     '</div>';
 }
 

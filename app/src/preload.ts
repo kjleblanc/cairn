@@ -14,7 +14,16 @@ const api: CairnApi = {
   taskReview: (dir, taskNumber) => ipcRenderer.invoke("task:review", dir, taskNumber),
   taskClose: (dir, taskNumber, input) => ipcRenderer.invoke("task:close", dir, taskNumber, input),
   taskDirection: (dir, reason) => ipcRenderer.invoke("task:direction", dir, reason),
-  taskSetModel: (model) => ipcRenderer.invoke("task:setModel", model),
+  // The saved effort rides along with the model call, so the app's existing
+  // boot-time taskSetModel(...) applies both saved choices with no extra boot
+  // code. Guarded: if storage is unreachable, behaviour degrades to model-only,
+  // exactly as before the effort setting existed.
+  taskSetModel: (model) => {
+    let savedEffort = "";
+    try { savedEffort = window.localStorage.getItem("cairn-effort") ?? ""; } catch { /* model-only */ }
+    return ipcRenderer.invoke("task:setModel", model, savedEffort);
+  },
+  taskSetEffort: (effort) => ipcRenderer.invoke("task:setEffort", effort),
   updateCheck: () => ipcRenderer.invoke("app:updateCheck"),
   openExternal: (url) => ipcRenderer.invoke("app:openExternal", url),
   onEngineEvent: (cb) => {

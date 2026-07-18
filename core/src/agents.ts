@@ -44,6 +44,22 @@ export function resolveModel(explicit?: string): string {
   return process.env.CAIRN_MODEL || DEFAULT_MODEL;
 }
 
+/** The named effort levels the Claude Agent SDK accepts. */
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/**
+ * Decide which effort level a run should use, mirroring resolveModel. An
+ * explicit choice (a CLI flag or an app setting) wins; otherwise the
+ * CAIRN_EFFORT environment variable; otherwise undefined — meaning no effort
+ * option is sent to the SDK at all, so Cairn behaves exactly as it does today.
+ * A blank or whitespace-only choice counts as "no choice".
+ */
+export function resolveEffort(explicit?: string): string | undefined {
+  const chosen = (explicit ?? "").trim();
+  if (chosen) return chosen;
+  return process.env.CAIRN_EFFORT?.trim() || undefined;
+}
+
 function norm(root: string, p: string): string {
   return relative(resolve(root), resolve(root, p)).replace(/\\/g, "/");
 }
@@ -122,10 +138,12 @@ function extractText(message: unknown): string {
 
 export class SdkEngine implements Engine {
   private readonly model: string;
+  private readonly effort?: string;
 
-  /** An explicit model wins over CAIRN_MODEL and the built-in default (see resolveModel). */
-  constructor(model?: string) {
+  /** An explicit model/effort wins over the environment and defaults (see resolveModel/resolveEffort). */
+  constructor(model?: string, effort?: string) {
     this.model = resolveModel(model);
+    this.effort = resolveEffort(effort);
   }
 
   async run(spec: RunSpec, events: RunEvents): Promise<RunResult> {
@@ -138,6 +156,8 @@ export class SdkEngine implements Engine {
       options: {
         cwd: spec.root,
         model: this.model,
+        // Only sent when chosen — with no choice the SDK behaves exactly as today.
+        ...(this.effort ? { effort: this.effort } : {}),
         systemPrompt: spec.system,
         allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
         disallowedTools: ["WebFetch", "WebSearch"],
@@ -170,9 +190,11 @@ export class SdkEngine implements Engine {
  */
 export class MockEngine implements Engine {
   private readonly model: string;
+  private readonly effort?: string;
 
-  constructor(model?: string) {
+  constructor(model?: string, effort?: string) {
     this.model = resolveModel(model);
+    this.effort = resolveEffort(effort);
   }
 
   async run(spec: RunSpec, events: RunEvents): Promise<RunResult> {
@@ -180,8 +202,8 @@ export class MockEngine implements Engine {
       events.onText?.(t);
       return t;
     };
-    // Echo the active model so a selection is visible with no paid call.
-    events.onText?.(`Using model: ${this.model} (mock)`);
+    // Echo the active model (and effort, when chosen) so a selection is visible with no paid call.
+    events.onText?.(`Using model: ${this.model}${this.effort ? ` · effort: ${this.effort}` : ""} (mock)`);
     if (spec.role === "definer" && spec.taskNumber) {
       const briefPath = paths.brief(spec.root, spec.taskNumber);
       mkdirSync(dirname(briefPath), { recursive: true });
@@ -213,6 +235,6 @@ export class MockEngine implements Engine {
   }
 }
 
-export function pickEngine(mock: boolean, model?: string): Engine {
-  return mock || process.env.CAIRN_MOCK === "1" ? new MockEngine(model) : new SdkEngine(model);
+export function pickEngine(mock: boolean, model?: string, effort?: string): Engine {
+  return mock || process.env.CAIRN_MOCK === "1" ? new MockEngine(model, effort) : new SdkEngine(model, effort);
 }

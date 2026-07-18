@@ -2,7 +2,7 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import {
   approveBrief, buildTask, checkDirectionGate, closeTask, defineTask, isCairnProject,
-  pad, parseFacts, parseLog, pickEngine, resolveModel, reviewTask, runDirectionCheck,
+  pad, parseFacts, parseLog, pickEngine, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
   type RunEvents,
 } from "@cairn/core";
 import { banner, label, spinnerLine } from "../ui.js";
@@ -26,6 +26,25 @@ export function parseModel(args: string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Read an optional effort choice from the CLI args, accepting both
+ * `--effort <level>` and `--effort=<level>`, mirroring parseModel. Returns
+ * whatever was typed (validation against the named levels happens in the
+ * entrypoint, so an invalid value can fail with a plain message before any
+ * run); undefined when the flag is absent or has no value.
+ */
+export function parseEffort(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--effort") {
+      const next = args[i + 1];
+      return next && !next.startsWith("-") ? next : undefined;
+    }
+    if (a.startsWith("--effort=")) return a.slice("--effort=".length) || undefined;
+  }
+  return undefined;
+}
+
 function events(spin: { message: (m: string) => void }): RunEvents {
   // spinnerLine bounds the status to the terminal width so a long agent line can never
   // wrap and flood the console (see ui.ts). It reads process.stdout.columns each call,
@@ -40,7 +59,7 @@ function events(spin: { message: (m: string) => void }): RunEvents {
 
 const cost = (usd?: number) => (usd ? pc.dim(`  ($${usd.toFixed(2)})`) : "");
 
-export async function taskFlow(root: string, opts: { mock: boolean; model?: string }): Promise<void> {
+export async function taskFlow(root: string, opts: { mock: boolean; model?: string; effort?: string }): Promise<void> {
   console.log(banner());
 
   if (!isCairnProject(root)) {
@@ -56,8 +75,10 @@ export async function taskFlow(root: string, opts: { mock: boolean; model?: stri
   }
 
   p.intro(`${facts.name || "Your project"} — milestone: ${facts.milestone || "not set"}`);
-  const engine = pickEngine(opts.mock, opts.model);
+  const engine = pickEngine(opts.mock, opts.model, opts.effort);
   p.log.info(`Using model: ${resolveModel(opts.model)}`);
+  const effort = resolveEffort(opts.effort);
+  if (effort) p.log.info(`Using effort: ${effort}`);
 
   // ---- Direction Gate: computed from the log, enforced before anything else.
   const gate = checkDirectionGate(parseLog(root));

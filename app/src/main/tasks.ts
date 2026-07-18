@@ -1,6 +1,6 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
-  approveBrief, buildTask, closeTask, defineTask, pickEngine, resolveModel, reviewTask, runDirectionCheck,
+  approveBrief, buildTask, closeTask, defineTask, pickEngine, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
   type CloseInput, type Engine, type RunEvents,
 } from "@cairn/core";
 import type { EngineEvent, Result } from "../shared/ipc.js";
@@ -42,9 +42,12 @@ function forward(win: () => BrowserWindow | null, role: string): RunEvents {
 
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const mock = process.env.CAIRN_MOCK === "1";
-  // The engine is rebuilt when the owner picks a model in Settings; every handler
-  // reads this binding at call time, so the next run uses the chosen model.
+  // The engine is rebuilt when the owner picks a model or effort in Settings; every
+  // handler reads this binding at call time, so the next run uses the chosen values.
+  let chosenModel = "";
+  let chosenEffort = "";
   let engine: Engine = pickEngine(mock);
+  const rebuild = () => { engine = pickEngine(mock, chosenModel, chosenEffort); };
 
   ipcMain.handle("task:define", (_e, dir: string, outcome: string) =>
     exclusive("task:define", async () => {
@@ -73,9 +76,20 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   ipcMain.handle("task:direction", (_e, dir: string, reason: string) =>
     exclusive("task:direction", () => runDirectionCheck(dir, reason, engine, forward(win, "direction"))));
 
-  // Choose the model for the next run. A blank choice keeps today's default.
-  ipcMain.handle("task:setModel", (_e, model: string) => {
-    engine = pickEngine(mock, model);
+  // Choose the model for the next run. A blank choice keeps today's default. The
+  // renderer's saved effort rides along (see preload), so the app's one boot-time
+  // call applies both choices.
+  ipcMain.handle("task:setModel", (_e, model: string, effort?: string) => {
+    chosenModel = model;
+    if (typeof effort === "string") chosenEffort = effort;
+    rebuild();
     return resolveModel(model);
+  });
+
+  // Choose the effort for the next run. Blank keeps today's behaviour: no effort sent.
+  ipcMain.handle("task:setEffort", (_e, effort: string) => {
+    chosenEffort = effort;
+    rebuild();
+    return resolveEffort(effort) ?? "default";
   });
 }

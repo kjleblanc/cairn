@@ -68,10 +68,11 @@ can see the next step's text.
    experts are required where the contract says so. Never soften these.
 6. **Preservation first.** Existing, modified, and untracked work is protected in
    every flow. Setup must never become cleanup.
-7. **Project-neutral.** No personal names, private history, product code, external
-   dependencies, or ties to a specific language or AI product. The app stays
-   self-contained (no CDNs, no network requests, no analytics; user data only in
-   localStorage).
+7. **Self-contained and personal-data-free.** No personal names, private history,
+   product code, or external dependencies in the public artifacts, and no tie to a
+   specific programming language. The app stays self-contained (no CDNs, no network
+   requests, no analytics; user data only in localStorage). Cairn builds on Claude:
+   the CLI and app run Claude models, and the docs may name current Claude model ids.
 8. **Change in lockstep.** A change to loop, lanes, commands, or names updates the
    contract template first, then every document and the app in the same session.
    `cairn.html` embeds verbatim copies (in its `text/plain` script blocks) of the
