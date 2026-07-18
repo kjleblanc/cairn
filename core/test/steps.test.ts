@@ -8,7 +8,7 @@ import { MockEngine } from "../src/agents.js";
 import { paths, parseLog, scaffoldProject } from "../src/files.js";
 import {
   approveBrief, buildTask, closeTask, defineTask, initProject, loadApproval,
-  projectStatus, reviewTask, runDirectionCheck,
+  projectStatus, refineBrief, reviewTask, runDirectionCheck,
 } from "../src/steps.js";
 
 const engine = new MockEngine();
@@ -79,6 +79,45 @@ test("projectStatus reports stones, gate, and an unfinished task", async () => {
   const s2 = projectStatus(dir);
   assert.equal(s2.stones, 1);
   assert.equal(s2.unfinished, null);
+});
+
+test("defineTask carries the owner's answer through to the brief when a channel is wired", async () => {
+  const dir = freshProject();
+  const def = await defineTask(dir, "A demo file appears", engine, {
+    onAsk: async () => "keep it tiny please",
+  });
+  assert.ok(def.briefText.includes("The owner answered: keep it tiny please"));
+});
+
+test("refineBrief revises the brief before approval and reports the change", async () => {
+  const dir = freshProject();
+  await defineTask(dir, "A demo file appears", engine);
+  const r = await refineBrief(dir, 1, "Please also mention the demo note", engine);
+  assert.equal(r.briefChanged, true);
+  assert.ok(r.briefText.includes("Revision (mock)"), "the revised text is returned");
+  assert.ok(readFileSync(paths.brief(dir, 1), "utf8").includes("Please also mention the demo note"));
+  assert.ok(r.reply.length > 0);
+});
+
+test("refineBrief answers a question in plain words without touching the brief", async () => {
+  const dir = freshProject();
+  const def = await defineTask(dir, "A demo file appears", engine);
+  const r = await refineBrief(dir, 1, "Does this touch anything else?", engine);
+  assert.equal(r.briefChanged, false);
+  assert.equal(r.briefText, def.briefText, "the brief file is byte-identical");
+  assert.match(r.reply, /Answer \(mock\)/);
+});
+
+test("refineBrief refuses once the brief is approved — the hash lock keeps its meaning", async () => {
+  const dir = freshProject();
+  await defineTask(dir, "A demo file appears", engine);
+  approveBrief(dir, 1);
+  await assert.rejects(() => refineBrief(dir, 1, "one more thing", engine), /already approved|locked/);
+});
+
+test("refineBrief refuses when there is no brief to refine", async () => {
+  const dir = freshProject();
+  await assert.rejects(() => refineBrief(dir, 1, "hello", engine), /No brief to refine/);
 });
 
 test("steps refuse a folder that is not a Cairn project", async () => {

@@ -109,3 +109,9 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
 .rail-done .rail-dot { background: var(--green); }
 .rail-now { color: var(--green-deep); font-weight: 600; }
 .rail-now .rail-dot { width: 15px; height: 15px; background: var(--green-soft); border: 2px solid var(--green); }
+
+/* Task 008: two-way talk — the AI's question card and the pre-approval reply line. */
+.question-card .card { background: var(--amber-soft); }
+.question-card .card-title { color: var(--amber-deep); }
+.question-text { font-size: 1.02rem; margin: 2px 0 12px; }
+.refine-reply { margin-top: 10px; color: var(--amber-deep); }

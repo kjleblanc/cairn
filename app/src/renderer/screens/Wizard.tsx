@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import type { CloseInput, UnfinishedTask } from "@cairn/core";
-import type { EngineEvent } from "../../shared/ipc";
+import type { EngineEvent, OwnerQuestionEvent } from "../../shared/ipc";
 import { Badge, Card, ErrorCard, Pill } from "../components/Ui";
 import { Md } from "../components/Md";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { StepRail } from "../components/StepRail";
+import { QuestionCard } from "../components/QuestionCard";
 import { cairn } from "../api";
 
 type Phase = "outcome" | "defining" | "approve" | "building" | "report" | "reviewing" | "verdict" | "decide";
@@ -49,15 +50,47 @@ export function Wizard({ dir, resume, onDone }: {
   const [summary, setSummary] = useState("");
   const [moved, setMoved] = useState<CloseInput["moved"]>("YES");
   const [closing, setClosing] = useState(false);
+  // Two-way talk (task 008): a pending question from the AI while it writes the
+  // brief, and the owner's pre-approval ask-or-change round on the drafted brief.
+  const [pendingQ, setPendingQ] = useState<OwnerQuestionEvent | null>(null);
+  const [refineMsg, setRefineMsg] = useState("");
+  const [refineReply, setRefineReply] = useState<string | null>(null);
+  const [refining, setRefining] = useState(false);
 
   useEffect(() => cairn.onEngineEvent((ev) => setEvents((p) => [...p.slice(-199), ev])), []);
+  useEffect(() => cairn.onOwnerQuestion((q) => setPendingQ(q)), []);
+
+  /** Deliver the answer (or a skip) and drop the card. The run resumes either way. */
+  function answerQuestion(answer: string | null) {
+    const q = pendingQ;
+    setPendingQ(null);
+    if (q) void cairn.taskAnswer(q.id, answer);
+  }
 
   async function define() {
     if (outcome.trim().length < 5) { setError("Say what you want to see, in a sentence."); return; }
     setError(null); setEvents([]); setPhase("defining");
     const r = await cairn.taskDefine(dir, outcome);
+    setPendingQ(null); // the run is over — no question can still be waiting
     if (r.ok) { setTaskNumber(r.value.taskNumber); setBrief(r.value.briefText); setPhase("approve"); }
     else { setError(r.message); setPhase("outcome"); }
+  }
+
+  /** One pre-approval round: a question gets a plain answer; a change request revises the brief file. */
+  async function refine() {
+    const message = refineMsg.trim();
+    if (message.length < 2) { setError("Say it in a sentence."); return; }
+    setError(null); setRefining(true); setRefineReply(null);
+    const r = await cairn.taskRefine(dir, taskNumber, message);
+    setRefining(false);
+    if (!r.ok) { setError(r.message); return; }
+    setRefineMsg("");
+    setBrief(r.value.briefText); // what is shown is always the current file — approval hashes exactly this
+    setRefineReply(
+      r.value.briefChanged
+        ? "The brief was revised — read it again before approving. Approving locks exactly the text shown above."
+        : r.value.reply.trim() || "Answered — the brief is unchanged.",
+    );
   }
 
   async function build() {
@@ -107,10 +140,17 @@ export function Wizard({ dir, resume, onDone }: {
         );
       case "defining":
         return (
-          <Card title="writing the brief">
-            <p className="muted">A fresh agent is turning your outcome into an exact, bounded task…</p>
-            <ActivityFeed events={events} />
-          </Card>
+          <>
+            {pendingQ ? <QuestionCard q={pendingQ} onAnswer={answerQuestion} /> : null}
+            <Card title="writing the brief">
+              <p className="muted">
+                {pendingQ
+                  ? "Paused — the AI is waiting for your answer above. Skipping is always fine."
+                  : "A fresh agent is turning your outcome into an exact, bounded task…"}
+              </p>
+              <ActivityFeed events={events} />
+            </Card>
+          </>
         );
       case "approve":
         return (
@@ -125,11 +165,32 @@ export function Wizard({ dir, resume, onDone }: {
                   <Pill kind="primary" onClick={() => void build()}>Build it</Pill>
                 </>
               ) : (
-                <Pill kind="primary" onClick={() => void approveAndBuild()}>Approve this exact brief</Pill>
+                <Pill kind="primary" onClick={() => void approveAndBuild()} disabled={refining}>Approve this exact brief</Pill>
               )}
               <Pill kind="quiet" onClick={() => onDone(false)}>Not yet</Pill>
               <span className="small muted">Nothing is built until you approve. Approving locks the brief.</span>
             </div>
+            {approved ? null : (
+              <Card title="ask a question or request a change">
+                <p className="muted small">
+                  Nothing is locked yet. A question gets a plain answer; a change request revises the
+                  brief — and you read the new version here before approving anything.
+                </p>
+                <input
+                  type="text"
+                  value={refineMsg}
+                  onChange={(e) => setRefineMsg(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !refining) void refine(); }}
+                  placeholder="e.g. Why is that file excluded? / Please keep it to one screen"
+                />
+                <div className="row" style={{ marginTop: 12 }}>
+                  <Pill kind="soft" onClick={() => void refine()} disabled={refining}>
+                    {refining ? "Thinking it over…" : "Send to the AI"}
+                  </Pill>
+                </div>
+                {refineReply ? <p className="small refine-reply">{refineReply}</p> : null}
+              </Card>
+            )}
           </>
         );
       case "building":

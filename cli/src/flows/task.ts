@@ -2,8 +2,8 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import {
   approveBrief, buildTask, checkDirectionGate, closeTask, defineTask, isCairnProject,
-  pad, parseFacts, parseLog, pickEngine, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
-  type RunEvents,
+  pad, parseFacts, parseLog, pickEngine, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
+  type OwnerQuestion, type RunEvents,
 } from "@cairn/core";
 import { banner, label, spinnerLine } from "../ui.js";
 
@@ -102,28 +102,76 @@ export async function taskFlow(root: string, opts: { mock: boolean; model?: stri
   });
   if (p.isCancel(outcome)) { p.cancel("Nothing was changed."); return; }
 
+  // The definer may ask up to 3 questions. Each one pauses the spinner, asks at
+  // the terminal, and resumes — pressing Enter with no text (or Esc) skips, which
+  // tells the AI to use its best judgment. It can never hang or kill the run.
   const dSpin = p.spinner();
   dSpin.start("Writing the brief…");
+  const spinRef = { current: dSpin };
+  const onAsk = async (q: OwnerQuestion): Promise<string | null> => {
+    spinRef.current.stop("The AI has a question for you.");
+    p.log.info(pc.dim(`Question ${q.asked} of ${q.limit} — answering is optional. Cairn never needs a password or key typed here.`));
+    const a = await p.text({ message: q.question, placeholder: "Your answer — press Enter with nothing to skip" });
+    const next = p.spinner();
+    next.start("Writing the brief…");
+    spinRef.current = next;
+    if (p.isCancel(a)) return null;
+    const clean = String(a ?? "").trim();
+    return clean ? clean : null;
+  };
   let def;
   try {
-    def = await defineTask(root, String(outcome), engine, events(dSpin));
+    def = await defineTask(root, String(outcome), engine, {
+      ...events({ message: (m) => spinRef.current.message(m) }),
+      onAsk,
+    });
   } catch (err) {
-    dSpin.stop("The definer stopped.");
+    spinRef.current.stop("The definer stopped.");
     p.log.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;
     return;
   }
-  dSpin.stop(`Brief drafted.${cost(def.costUsd)}`);
+  spinRef.current.stop(`Brief drafted.${cost(def.costUsd)}`);
   p.note(def.briefText.slice(0, 4000), `The brief — docs/ai-work/tasks/${pad(def.taskNumber)}-brief.md`);
 
   // ---- 2. THE APPROVAL GATE (human action; hash-locked and persisted)
-  const approve = await p.confirm({
-    message: "Approve this exact brief? Nothing is built until you say yes.",
-    initialValue: false,
-  });
-  if (p.isCancel(approve) || !approve) {
-    p.cancel(`Not approved. The brief stays at docs/ai-work/tasks/${pad(def.taskNumber)}-brief.md — edit your outcome and run \`cairn task\` again.`);
-    return;
+  // Before approving, the owner can ask about the brief or request a change —
+  // nothing is locked until approval, and approval always locks exactly the
+  // brief text last shown, byte for byte, via the existing hash record.
+  for (;;) {
+    const action = await p.select({
+      message: "The brief is ready. Approving locks this exact text — nothing is built until you approve.",
+      options: [
+        { value: "approve", label: "Approve this exact brief — build it" },
+        { value: "ask", label: "Ask a question or request a change first" },
+        { value: "later", label: "Not now — keep the brief for later" },
+      ],
+    });
+    if (p.isCancel(action) || action === "later") {
+      p.cancel(`Not approved. The brief stays at docs/ai-work/tasks/${pad(def.taskNumber)}-brief.md — run \`cairn task\` again when ready.`);
+      return;
+    }
+    if (action === "approve") break;
+    const msg = await p.text({
+      message: "Your question or change request (nothing is locked yet)",
+      placeholder: "e.g. Why is that file excluded? / Please keep it to one screen",
+      validate: (v) => (v && v.trim().length > 1 ? undefined : "Say it in a sentence."),
+    });
+    if (p.isCancel(msg)) continue;
+    const rSpin = p.spinner();
+    rSpin.start("Thinking it over…");
+    try {
+      const refined = await refineBrief(root, def.taskNumber, String(msg), engine, events(rSpin));
+      rSpin.stop(`${refined.briefChanged ? "Brief revised." : "Answered — the brief is unchanged."}${cost(refined.costUsd)}`);
+      if (refined.briefChanged) {
+        p.note(refined.briefText.slice(0, 4000), `The revised brief — docs/ai-work/tasks/${pad(def.taskNumber)}-brief.md`);
+      } else if (refined.reply.trim()) {
+        p.note(refined.reply.slice(0, 4000), "The answer");
+      }
+    } catch (err) {
+      rSpin.stop("That round didn't finish.");
+      p.log.error(err instanceof Error ? err.message : String(err));
+    }
   }
   const approval = approveBrief(root, def.taskNumber);
   p.log.success(`Approval recorded (brief locked: ${approval.briefSha256.slice(0, 12)}…).`);

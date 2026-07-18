@@ -1,6 +1,7 @@
 import { contractTemplate, pad } from "./files.js";
 import { readFileSync, existsSync } from "node:fs";
 import { paths } from "./files.js";
+import { ASK_OWNER_TOOL, NO_ANSWER_FALLBACK, OWNER_QUESTION_LIMIT } from "./agents.js";
 
 /**
  * Role charters. The project contract is the law; each charter tells one
@@ -19,9 +20,14 @@ is binding. The Cairn CLI enforces the hard rules in code — forbidden commands
 blocked, and human approval is collected outside your session, so never ask the owner
 to approve anything in your own words and never claim their approval.`;
 
-export function definerPrompt(root: string, taskNumber: number, outcome: string): { system: string; user: string } {
+export function definerPrompt(root: string, taskNumber: number, outcome: string, opts?: { canAsk?: boolean }): { system: string; user: string } {
+  // Mentioned only when the skin wired an answer channel — otherwise the tool
+  // does not exist and the prompt stays byte-for-byte as before.
+  const ask = opts?.canAsk
+    ? `\n\nYou may ask the owner up to ${OWNER_QUESTION_LIMIT} short plain-language questions with the ${ASK_OWNER_TOOL} tool, when one answer would make the brief meaningfully better — about scope, what to protect, or what the owner wants to see. Ask one at a time and keep them optional in tone. If the tool returns "${NO_ANSWER_FALLBACK}", do exactly that. Never ask for a password, key, or any secret — Cairn never needs one typed into a question box.`
+    : "";
   return {
-    system: `${COMMON}\n\nYour role: DEFINER. You create exactly one task brief file and nothing else. You have read access to the project; the only file you may write is the brief.`,
+    system: `${COMMON}\n\nYour role: DEFINER. You create exactly one task brief file and nothing else. You have read access to the project; the only file you may write is the brief.${ask}`,
     user:
       `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
       `Follow the contract's "Define a task" procedure for this outcome:\n\n${outcome}\n\n` +
@@ -43,6 +49,19 @@ export function builderPrompt(root: string, taskNumber: number): { system: strin
       `"Disposition: DONE" or "Disposition: STOPPED — [blocker]". Commit per the contract when safe (named paths only). ` +
       `Installing anything, pushing, and network access are blocked at the tool level — if the work truly needs one of those, ` +
       `stop honestly and record it in the report as a STOPPED blocker for the owner to authorize.`,
+  };
+}
+
+export function refinePrompt(root: string, taskNumber: number, message: string): { system: string; user: string } {
+  return {
+    system: `${COMMON}\n\nYour role: DEFINER, refining a drafted brief before approval. Nothing is approved or locked yet. The only file you may write is the brief itself.`,
+    user:
+      `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
+      `The owner read the drafted brief at docs/ai-work/tasks/${pad(taskNumber)}-brief.md and replied:\n\n${message}\n\n` +
+      `Read the current brief first. If the owner asked a question, answer it in plain language and change nothing. ` +
+      `If the owner requested a change, revise the brief file so it honors the request — keep every section the contract requires, ` +
+      `keep the lane honest, and never widen the task beyond what the owner asked for. Do not implement anything and do not touch any other file. ` +
+      `End with a short plain-language summary: what you changed, or your answer. The CLI will show the owner the current brief again before any approval.`,
   };
 }
 

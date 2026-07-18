@@ -9,7 +9,7 @@ import {
   type ApprovalRecord, type DirectionGateResult,
 } from "./gates.js";
 import type { Engine, RunEvents } from "./agents.js";
-import { builderPrompt, definerPrompt, directionPrompt, reviewerPrompt } from "./prompts.js";
+import { builderPrompt, definerPrompt, directionPrompt, refinePrompt, reviewerPrompt } from "./prompts.js";
 import { dispositionOf, finalVerdictOf } from "./parse.js";
 
 /**
@@ -21,6 +21,7 @@ import { dispositionOf, finalVerdictOf } from "./parse.js";
 export type Disposition = "DONE" | "STOPPED" | "UNKNOWN";
 
 export interface DefineResult { taskNumber: number; briefPath: string; briefText: string; costUsd?: number }
+export interface RefineResult { briefPath: string; briefText: string; briefChanged: boolean; reply: string; costUsd?: number }
 export interface BuildResult { reportPath: string; reportText: string; disposition: Disposition; costUsd?: number }
 export interface ReviewResult { text: string; finalVerdict: string; costUsd?: number }
 export interface CloseInput {
@@ -61,7 +62,8 @@ export async function defineTask(root: string, outcome: string, engine: Engine, 
   const gate = checkDirectionGate(parseLog(root));
   if (gate.tripped) throw new Error(`DIRECTION GATE: ${gate.reason} No third narrow patch — run the direction check instead.`);
   const taskNumber = nextTaskNumber(root);
-  const p = definerPrompt(root, taskNumber, outcome);
+  // The prompt mentions the ask tool only when the skin wired an answer channel.
+  const p = definerPrompt(root, taskNumber, outcome, { canAsk: Boolean(events.onAsk) });
   const res = await engine.run({ role: "definer", root, taskNumber, system: p.system, user: p.user }, events);
   const briefPath = paths.brief(root, taskNumber);
   if (!existsSync(briefPath)) {
@@ -82,6 +84,31 @@ export function loadApproval(root: string, taskNumber: number): ApprovalRecord |
   const p = paths.approval(root, taskNumber);
   if (!existsSync(p)) return null;
   return JSON.parse(readFileSync(p, "utf8")) as ApprovalRecord;
+}
+
+/**
+ * A follow-up definer-role turn on the not-yet-approved brief: the owner's
+ * question gets a plain answer, a change request revises the brief file.
+ * Allowed because nothing is locked until approval — and refused the moment an
+ * approval is on file, so the hash gate keeps its exact meaning.
+ */
+export async function refineBrief(root: string, taskNumber: number, message: string, engine: Engine, events: RunEvents = {}): Promise<RefineResult> {
+  assertGoverned(root);
+  const briefPath = paths.brief(root, taskNumber);
+  if (!existsSync(briefPath)) {
+    throw new Error(`No brief to refine for task ${pad(taskNumber)}. Define the task first.`);
+  }
+  if (loadApproval(root, taskNumber)) {
+    throw new Error(`Task ${pad(taskNumber)} is already approved — the brief is locked. A change now is a new task with a new brief.`);
+  }
+  const before = readFileSync(briefPath, "utf8");
+  const p = refinePrompt(root, taskNumber, message);
+  const res = await engine.run(
+    { role: "definer", root, taskNumber, system: p.system, user: p.user, intent: "refine", ownerMessage: message },
+    events,
+  );
+  const after = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "";
+  return { briefPath, briefText: after, briefChanged: after !== before, reply: res.text, costUsd: res.costUsd };
 }
 
 export async function buildTask(root: string, taskNumber: number, engine: Engine, events: RunEvents = {}): Promise<BuildResult> {

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CairnApi, EngineEvent } from "./shared/ipc.js";
+import type { CairnApi, EngineEvent, OwnerQuestionEvent } from "./shared/ipc.js";
 
 const api: CairnApi = {
   preflight: () => ipcRenderer.invoke("preflight:check"),
@@ -10,6 +10,8 @@ const api: CairnApi = {
   projectStatus: (dir) => ipcRenderer.invoke("project:status", dir),
   projectForget: (dir) => ipcRenderer.invoke("project:forget", dir),
   taskDefine: (dir, outcome) => ipcRenderer.invoke("task:define", dir, outcome),
+  taskAnswer: (id, answer) => ipcRenderer.invoke("task:answer", id, answer),
+  taskRefine: (dir, taskNumber, message) => ipcRenderer.invoke("task:refine", dir, taskNumber, message),
   taskApprove: (dir, taskNumber) => ipcRenderer.invoke("task:approve", dir, taskNumber),
   taskBuild: (dir, taskNumber) => ipcRenderer.invoke("task:build", dir, taskNumber),
   taskReview: (dir, taskNumber) => ipcRenderer.invoke("task:review", dir, taskNumber),
@@ -31,6 +33,11 @@ const api: CairnApi = {
     const listener = (_e: unknown, ev: EngineEvent) => cb(ev);
     ipcRenderer.on("engine:event", listener as never);
     return () => ipcRenderer.removeListener("engine:event", listener as never);
+  },
+  onOwnerQuestion: (cb) => {
+    const listener = (_e: unknown, q: OwnerQuestionEvent) => cb(q);
+    ipcRenderer.on("engine:ask", listener as never);
+    return () => ipcRenderer.removeListener("engine:ask", listener as never);
   },
 };
 

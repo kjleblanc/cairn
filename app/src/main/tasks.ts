@@ -1,10 +1,27 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
-  approveBrief, buildTask, closeTask, defineTask, pickEngine, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
-  type CloseInput, type Engine, type RunEvents,
+  approveBrief, buildTask, closeTask, defineTask, pickEngine, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
+  type CloseInput, type Engine, type OwnerQuestion, type RunEvents,
 } from "@cairn/core";
 import type { EngineEvent, Result } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
+
+/**
+ * In mock (demo) mode only: an UNTOUCHED question card skips itself after this
+ * long, so an unattended demo run always finishes on its own. The card cancels
+ * this the moment the owner touches it — a typing owner is never cut off.
+ * Real runs have no self-skip — the question waits for the owner, and the Skip
+ * button (or closing the window) is always there to release it.
+ */
+const MOCK_ASK_AUTOSKIP_MS = 10_000;
+
+/**
+ * In mock (demo) mode only: the main process's last-resort backstop, generous
+ * on purpose — it exists so a demo run still finishes even if the question
+ * card never renders at all. The card's own self-skip above is what ends the
+ * normal unattended case long before this fires.
+ */
+const MOCK_ASK_PATIENCE_MS = 180_000;
 
 /** One agent at a time — the loop is sequential by design. */
 let busy = false;
@@ -49,10 +66,47 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   let engine: Engine = pickEngine(mock);
   const rebuild = () => { engine = pickEngine(mock, chosenModel, chosenEffort); };
 
+  // ---- The ask-the-owner bridge: a definer question crosses to the renderer as
+  // an "engine:ask" event; the renderer's answer (or skip) comes back through
+  // "task:answer" and releases the waiting run. If the window dies — or, in mock
+  // mode, nobody answers in time — the question resolves as a skip, never a hang.
+  const pendingAnswers = new Map<number, (answer: string | null) => void>();
+  let nextQuestionId = 0;
+
+  const askOwnerViaWindow = (q: OwnerQuestion): Promise<string | null> =>
+    new Promise((resolve) => {
+      const w = win();
+      if (!w || w.webContents.isDestroyed()) { resolve(null); return; }
+      const id = ++nextQuestionId;
+      const finish = (answer: string | null) => { if (pendingAnswers.delete(id)) resolve(answer); };
+      pendingAnswers.set(id, finish);
+      w.webContents.send("engine:ask", {
+        id, question: q.question, asked: q.asked, limit: q.limit,
+        ...(mock ? { autoSkipMs: MOCK_ASK_AUTOSKIP_MS } : {}),
+      });
+      w.webContents.once("destroyed", () => finish(null));
+      if (mock) setTimeout(() => finish(null), MOCK_ASK_PATIENCE_MS);
+    });
+
+  ipcMain.handle("task:answer", (_e, id: number, answer: string | null) => {
+    const finish = pendingAnswers.get(id);
+    finish?.(typeof answer === "string" && answer.trim() ? answer.trim() : null);
+    return null;
+  });
+
   ipcMain.handle("task:define", (_e, dir: string, outcome: string) =>
     exclusive("task:define", async () => {
-      const r = await defineTask(dir, outcome, engine, forward(win, "definer"));
+      const r = await defineTask(dir, outcome, engine, { ...forward(win, "definer"), onAsk: askOwnerViaWindow });
       return { taskNumber: r.taskNumber, briefText: r.briefText, costUsd: r.costUsd };
+    }));
+
+  // A pre-approval round on the brief: answer the owner's question or revise the
+  // file. Core refuses this the moment an approval is on file, so the hash gate
+  // keeps its exact meaning. No ask channel here — one question box at a time.
+  ipcMain.handle("task:refine", (_e, dir: string, taskNumber: number, message: string) =>
+    exclusive("task:refine", async () => {
+      const r = await refineBrief(dir, taskNumber, message, engine, forward(win, "definer"));
+      return { briefText: r.briefText, briefChanged: r.briefChanged, reply: r.reply, costUsd: r.costUsd };
     }));
 
   ipcMain.handle("task:approve", (_e, dir: string, taskNumber: number) =>
