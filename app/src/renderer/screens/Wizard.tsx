@@ -10,6 +10,12 @@ import { cairn } from "../api";
 
 type Phase = "outcome" | "defining" | "approve" | "building" | "report" | "reviewing" | "verdict" | "decide";
 
+/**
+ * Task 009: what the rest of the window needs to know about the open task, so
+ * stepping away shows a truthful live reminder. Purely display information.
+ */
+export type WizardStatus = { taskNumber: number; phase: Phase; waiting: boolean };
+
 const railStep: Record<Phase, number> = {
   outcome: 0, defining: 0, approve: 1, building: 2, report: 2, reviewing: 3, verdict: 3, decide: 4,
 };
@@ -33,8 +39,11 @@ function tryItOf(report: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-export function Wizard({ dir, resume, onDone }: {
+export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
   dir: string; resume: UnfinishedTask | null; onDone: (stoneAdded: boolean) => void;
+  /** Show the project's home screen while this task stays alive behind it (task 009). */
+  onHome: () => void;
+  onStatus: (s: WizardStatus) => void;
 }) {
   const [phase, setPhase] = useState<Phase>(initialPhase(resume));
   const [taskNumber, setTaskNumber] = useState<number>(resume?.taskNumber ?? 0);
@@ -59,6 +68,9 @@ export function Wizard({ dir, resume, onDone }: {
 
   useEffect(() => cairn.onEngineEvent((ev) => setEvents((p) => [...p.slice(-199), ev])), []);
   useEffect(() => cairn.onOwnerQuestion((q) => setPendingQ(q)), []);
+  // Task 009: keep the rest of the window informed, so the home and project
+  // screens can show a truthful reminder while this task is open behind them.
+  useEffect(() => { onStatus({ taskNumber, phase, waiting: pendingQ !== null }); }, [onStatus, taskNumber, phase, pendingQ]);
 
   /** Deliver the answer (or a skip) and drop the card. The run resumes either way. */
   function answerQuestion(answer: string | null) {
@@ -270,6 +282,12 @@ export function Wizard({ dir, resume, onDone }: {
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <div className="row spread wizard-top">
+        <Pill kind="quiet" onClick={onHome}>← Project home</Pill>
+        {phase === "defining" || phase === "building" || phase === "reviewing"
+          ? <span className="small muted">the AI keeps working if you step away</span>
+          : null}
+      </div>
       <StepRail current={railStep[phase]} />
       {error ? <ErrorCard message={error} /> : null}
       {body}
