@@ -40,6 +40,9 @@ export function App() {
 
   useEffect(() => { void boot(); }, [boot]);
 
+  // Apply the owner's saved model choice (if any) so the first run uses it.
+  useEffect(() => { void cairn.taskSetModel(localStorage.getItem("cairn-model") ?? ""); }, []);
+
   const pickAndOpen = useCallback(async () => {
     const dir = await cairn.projectPickFolder();
     if (dir) await openProject(dir);

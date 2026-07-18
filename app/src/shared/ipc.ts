@@ -25,6 +25,8 @@ export interface CairnApi {
   taskReview(dir: string, taskNumber: number): Promise<Result<ReviewPayload>>;
   taskClose(dir: string, taskNumber: number, input: CloseInput): Promise<Result<LogRow>>;
   taskDirection(dir: string, reason: string): Promise<Result<{ text: string }>>;
+  /** Choose the model for the next run; returns the resolved active model id. Blank = today's default. */
+  taskSetModel(model: string): Promise<string>;
   updateCheck(): Promise<UpdateInfo>;
   openExternal(url: string): Promise<void>;
   onEngineEvent(cb: (ev: EngineEvent) => void): () => void;

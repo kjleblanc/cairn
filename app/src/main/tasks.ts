@@ -1,6 +1,6 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
-  approveBrief, buildTask, closeTask, defineTask, pickEngine, reviewTask, runDirectionCheck,
+  approveBrief, buildTask, closeTask, defineTask, pickEngine, resolveModel, reviewTask, runDirectionCheck,
   type CloseInput, type Engine, type RunEvents,
 } from "@cairn/core";
 import type { EngineEvent, Result } from "../shared/ipc.js";
@@ -41,7 +41,10 @@ function forward(win: () => BrowserWindow | null, role: string): RunEvents {
 }
 
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
-  const engine: Engine = pickEngine(process.env.CAIRN_MOCK === "1");
+  const mock = process.env.CAIRN_MOCK === "1";
+  // The engine is rebuilt when the owner picks a model in Settings; every handler
+  // reads this binding at call time, so the next run uses the chosen model.
+  let engine: Engine = pickEngine(mock);
 
   ipcMain.handle("task:define", (_e, dir: string, outcome: string) =>
     exclusive("task:define", async () => {
@@ -69,4 +72,10 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
 
   ipcMain.handle("task:direction", (_e, dir: string, reason: string) =>
     exclusive("task:direction", () => runDirectionCheck(dir, reason, engine, forward(win, "direction"))));
+
+  // Choose the model for the next run. A blank choice keeps today's default.
+  ipcMain.handle("task:setModel", (_e, model: string) => {
+    engine = pickEngine(mock, model);
+    return resolveModel(model);
+  });
 }

@@ -29,7 +29,20 @@ export interface Engine {
   run(spec: RunSpec, events: RunEvents): Promise<RunResult>;
 }
 
-const MODEL = process.env.CAIRN_MODEL || "claude-opus-4-8";
+/** The built-in default model, used only when nothing else is chosen. Kept verbatim. */
+export const DEFAULT_MODEL = "claude-opus-4-8";
+
+/**
+ * Decide which model a run should use. An explicit choice (a CLI flag or an app
+ * setting) wins; otherwise the CAIRN_MODEL environment variable; otherwise the
+ * built-in default. A blank or whitespace-only choice counts as "no choice", so
+ * clearing a selection returns to exactly today's behaviour.
+ */
+export function resolveModel(explicit?: string): string {
+  const chosen = (explicit ?? "").trim();
+  if (chosen) return chosen;
+  return process.env.CAIRN_MODEL || DEFAULT_MODEL;
+}
 
 function norm(root: string, p: string): string {
   return relative(resolve(root), resolve(root, p)).replace(/\\/g, "/");
@@ -108,6 +121,13 @@ function extractText(message: unknown): string {
 }
 
 export class SdkEngine implements Engine {
+  private readonly model: string;
+
+  /** An explicit model wins over CAIRN_MODEL and the built-in default (see resolveModel). */
+  constructor(model?: string) {
+    this.model = resolveModel(model);
+  }
+
   async run(spec: RunSpec, events: RunEvents): Promise<RunResult> {
     const { query } = await import("@anthropic-ai/claude-agent-sdk");
     const state = { reportUnlocked: false };
@@ -117,7 +137,7 @@ export class SdkEngine implements Engine {
       prompt: spec.user,
       options: {
         cwd: spec.root,
-        model: MODEL,
+        model: this.model,
         systemPrompt: spec.system,
         allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
         disallowedTools: ["WebFetch", "WebSearch"],
@@ -149,11 +169,19 @@ export class SdkEngine implements Engine {
  * exact same gates and flows without any model call.
  */
 export class MockEngine implements Engine {
+  private readonly model: string;
+
+  constructor(model?: string) {
+    this.model = resolveModel(model);
+  }
+
   async run(spec: RunSpec, events: RunEvents): Promise<RunResult> {
     const say = (t: string) => {
       events.onText?.(t);
       return t;
     };
+    // Echo the active model so a selection is visible with no paid call.
+    events.onText?.(`Using model: ${this.model} (mock)`);
     if (spec.role === "definer" && spec.taskNumber) {
       const briefPath = paths.brief(spec.root, spec.taskNumber);
       mkdirSync(dirname(briefPath), { recursive: true });
@@ -185,6 +213,6 @@ export class MockEngine implements Engine {
   }
 }
 
-export function pickEngine(mock: boolean): Engine {
-  return mock || process.env.CAIRN_MOCK === "1" ? new MockEngine() : new SdkEngine();
+export function pickEngine(mock: boolean, model?: string): Engine {
+  return mock || process.env.CAIRN_MOCK === "1" ? new MockEngine(model) : new SdkEngine(model);
 }

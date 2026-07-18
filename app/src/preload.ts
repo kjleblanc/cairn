@@ -14,6 +14,7 @@ const api: CairnApi = {
   taskReview: (dir, taskNumber) => ipcRenderer.invoke("task:review", dir, taskNumber),
   taskClose: (dir, taskNumber, input) => ipcRenderer.invoke("task:close", dir, taskNumber, input),
   taskDirection: (dir, reason) => ipcRenderer.invoke("task:direction", dir, reason),
+  taskSetModel: (model) => ipcRenderer.invoke("task:setModel", model),
   updateCheck: () => ipcRenderer.invoke("app:updateCheck"),
   openExternal: (url) => ipcRenderer.invoke("app:openExternal", url),
   onEngineEvent: (cb) => {

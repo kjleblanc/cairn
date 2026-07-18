@@ -2,10 +2,29 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import {
   approveBrief, buildTask, checkDirectionGate, closeTask, defineTask, isCairnProject,
-  pad, parseFacts, parseLog, pickEngine, reviewTask, runDirectionCheck,
+  pad, parseFacts, parseLog, pickEngine, resolveModel, reviewTask, runDirectionCheck,
   type RunEvents,
 } from "@cairn/core";
 import { banner, label, spinnerLine } from "../ui.js";
+
+/**
+ * Read an optional model choice from the CLI args, accepting both
+ * `--model <id>` and `--model=<id>`. Returns undefined when the flag is absent
+ * or has no value, so the engine falls back to today's default (see
+ * resolveModel in @cairn/core). A pure function, kept here so it can be tested
+ * without launching the interactive flow.
+ */
+export function parseModel(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--model") {
+      const next = args[i + 1];
+      return next && !next.startsWith("-") ? next : undefined;
+    }
+    if (a.startsWith("--model=")) return a.slice("--model=".length) || undefined;
+  }
+  return undefined;
+}
 
 function events(spin: { message: (m: string) => void }): RunEvents {
   // spinnerLine bounds the status to the terminal width so a long agent line can never
@@ -21,7 +40,7 @@ function events(spin: { message: (m: string) => void }): RunEvents {
 
 const cost = (usd?: number) => (usd ? pc.dim(`  ($${usd.toFixed(2)})`) : "");
 
-export async function taskFlow(root: string, opts: { mock: boolean }): Promise<void> {
+export async function taskFlow(root: string, opts: { mock: boolean; model?: string }): Promise<void> {
   console.log(banner());
 
   if (!isCairnProject(root)) {
@@ -37,7 +56,8 @@ export async function taskFlow(root: string, opts: { mock: boolean }): Promise<v
   }
 
   p.intro(`${facts.name || "Your project"} — milestone: ${facts.milestone || "not set"}`);
-  const engine = pickEngine(opts.mock);
+  const engine = pickEngine(opts.mock, opts.model);
+  p.log.info(`Using model: ${resolveModel(opts.model)}`);
 
   // ---- Direction Gate: computed from the log, enforced before anything else.
   const gate = checkDirectionGate(parseLog(root));
