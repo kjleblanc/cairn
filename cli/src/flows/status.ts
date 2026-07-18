@@ -2,6 +2,18 @@ import pc from "picocolors";
 import { projectStatus } from "@cairn/core";
 import { banner, label, stack } from "../ui.js";
 
+export function parallelStatusLines(status: ReturnType<typeof projectStatus>): string[] {
+  if (!status.parallel) return [];
+  const lines = [`${status.parallel.label} — coordinator-owned tasks:`];
+  for (const task of status.parallel.tasks.filter((item) => item.phase !== "integrated")) {
+    lines.push(
+      `  Task ${String(task.taskNumber).padStart(3, "0")} · ${task.phase}` +
+      `${task.blocker ? ` · STOPPED: ${task.blocker}` : task.waitingReason ? ` · ${task.waitingReason}` : ""} · ${task.branch} · ${task.worktree}`,
+    );
+  }
+  return lines;
+}
+
 export function statusFlow(root: string): void {
   console.log(banner());
   let s;
@@ -19,6 +31,9 @@ export function statusFlow(root: string): void {
   console.log("");
   if (s.stones > 0) console.log(stack(s.stones) + "\n");
   console.log(`Tasks closed: ${s.log.length}   ${pc.green(`DONE: ${s.stones}`)}   ${pc.yellow(`STOPPED: ${stopped}`)}`);
+
+  const parallelLines = parallelStatusLines(s);
+  if (parallelLines.length) console.log(`\n${parallelLines.join("\n")}`);
 
   const recent = s.log.slice(-5).reverse();
   if (recent.length) {

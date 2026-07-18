@@ -17,20 +17,21 @@ function toResult<T>(context: string, fn: () => T): Result<T> {
 }
 
 async function preflight(): Promise<Preflight> {
-  if (process.env.CAIRN_MOCK === "1") return { claudeReady: true, reason: null, mock: true };
+  const parallelDraft = process.env.CAIRN_PARALLEL_DRAFT === "1";
+  if (process.env.CAIRN_MOCK === "1") return { claudeReady: true, reason: null, mock: true, parallelDraft };
   try {
     await import("@anthropic-ai/claude-agent-sdk");
   } catch (err) {
     logError("preflight", err);
-    return { claudeReady: false, reason: "no-sdk", mock: false };
+    return { claudeReady: false, reason: "no-sdk", mock: false, parallelDraft };
   }
   const home = homedir();
   const signedIn =
     existsSync(path.join(home, ".claude", ".credentials.json")) ||
     existsSync(path.join(home, ".claude.json"));
   return signedIn
-    ? { claudeReady: true, reason: null, mock: false }
-    : { claudeReady: false, reason: "no-login", mock: false };
+    ? { claudeReady: true, reason: null, mock: false, parallelDraft }
+    : { claudeReady: false, reason: "no-login", mock: false, parallelDraft };
 }
 
 export function registerProjectIpc(): void {

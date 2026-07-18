@@ -1,6 +1,6 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
-  approveBrief, buildTask, closeTask, defineTask, pickEngine, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
+  approveBrief, buildTask, closeTask, defineTask, integrateNext, parallelDraftEnabled, pickEngine, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
   type CloseInput, type Engine, type OwnerQuestion, type RunEvents,
 } from "@cairn/core";
 import type { EngineEvent, Result } from "../shared/ipc.js";
@@ -24,18 +24,20 @@ const MOCK_ASK_AUTOSKIP_MS = 10_000;
 const MOCK_ASK_PATIENCE_MS = 180_000;
 
 /** One agent at a time — the loop is sequential by design. */
-let busy = false;
+const running = new Set<string>();
 
-async function exclusive<T>(context: string, fn: () => Promise<T>): Promise<Result<T>> {
-  if (busy) return { ok: false, message: "One step at a time — an agent is already running." };
-  busy = true;
+async function exclusive<T>(context: string, key: string, parallel: boolean, fn: () => Promise<T>): Promise<Result<T>> {
+  if ((!parallel && running.size > 0) || running.has(key)) {
+    return { ok: false, message: "One step at a time — an agent is already running." };
+  }
+  running.add(key);
   try {
     return { ok: true, value: await fn() };
   } catch (err) {
     logError(context, err);
     return { ok: false, message: plainMessage(err) };
   } finally {
-    busy = false;
+    running.delete(key);
   }
 }
 
@@ -48,17 +50,18 @@ function sync<T>(context: string, fn: () => T): Result<T> {
   }
 }
 
-function forward(win: () => BrowserWindow | null, role: string): RunEvents {
+function forward(win: () => BrowserWindow | null, role: string, sessionId: number, taskNumber?: number): RunEvents {
   const send = (ev: EngineEvent) => win()?.webContents.send("engine:event", ev);
   return {
-    onText: (t) => { if (t.trim()) send({ role, kind: "text", text: t }); },
-    onTool: (name, detail) => send({ role, kind: "tool", text: `${name}: ${detail}` }),
-    onDenied: (name, why) => send({ role, kind: "denied", text: `${name} — ${why}` }),
+    onText: (t) => { if (t.trim()) send({ role, kind: "text", text: t, sessionId, taskNumber }); },
+    onTool: (name, detail) => send({ role, kind: "tool", text: `${name}: ${detail}`, sessionId, taskNumber }),
+    onDenied: (name, why) => send({ role, kind: "denied", text: `${name} — ${why}`, sessionId, taskNumber }),
   };
 }
 
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const mock = process.env.CAIRN_MOCK === "1";
+  const parallel = parallelDraftEnabled();
   // The engine is rebuilt when the owner picks a model or effort in Settings; every
   // handler reads this binding at call time, so the next run uses the chosen values.
   let chosenModel = "";
@@ -73,7 +76,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const pendingAnswers = new Map<number, (answer: string | null) => void>();
   let nextQuestionId = 0;
 
-  const askOwnerViaWindow = (q: OwnerQuestion): Promise<string | null> =>
+  const askOwnerViaWindow = (sessionId: number) => (q: OwnerQuestion): Promise<string | null> =>
     new Promise((resolve) => {
       const w = win();
       if (!w || w.webContents.isDestroyed()) { resolve(null); return; }
@@ -81,7 +84,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const finish = (answer: string | null) => { if (pendingAnswers.delete(id)) resolve(answer); };
       pendingAnswers.set(id, finish);
       w.webContents.send("engine:ask", {
-        id, question: q.question, asked: q.asked, limit: q.limit,
+        id, question: q.question, asked: q.asked, limit: q.limit, sessionId,
         ...(mock ? { autoSkipMs: MOCK_ASK_AUTOSKIP_MS } : {}),
       });
       w.webContents.once("destroyed", () => finish(null));
@@ -94,41 +97,45 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     return null;
   });
 
-  ipcMain.handle("task:define", (_e, dir: string, outcome: string) =>
-    exclusive("task:define", async () => {
-      const r = await defineTask(dir, outcome, engine, { ...forward(win, "definer"), onAsk: askOwnerViaWindow });
-      return { taskNumber: r.taskNumber, briefText: r.briefText, costUsd: r.costUsd };
+  ipcMain.handle("task:define", (_e, dir: string, outcome: string, sessionId: number) =>
+    exclusive("task:define", `define:${dir}`, parallel, async () => {
+      const r = await defineTask(dir, outcome, engine, { ...forward(win, "definer", sessionId), onAsk: askOwnerViaWindow(sessionId) });
+      return { taskNumber: r.taskNumber, briefText: r.briefText, costUsd: r.costUsd, coordinatorTask: r.coordinatorTask };
     }));
 
   // A pre-approval round on the brief: answer the owner's question or revise the
   // file. Core refuses this the moment an approval is on file, so the hash gate
   // keeps its exact meaning. No ask channel here — one question box at a time.
-  ipcMain.handle("task:refine", (_e, dir: string, taskNumber: number, message: string) =>
-    exclusive("task:refine", async () => {
-      const r = await refineBrief(dir, taskNumber, message, engine, forward(win, "definer"));
+  ipcMain.handle("task:refine", (_e, dir: string, taskNumber: number, message: string, sessionId: number) =>
+    exclusive("task:refine", `task:${dir}:${taskNumber}`, parallel, async () => {
+      const r = await refineBrief(dir, taskNumber, message, engine, forward(win, "definer", sessionId, taskNumber));
       return { briefText: r.briefText, briefChanged: r.briefChanged, reply: r.reply, costUsd: r.costUsd };
     }));
 
   ipcMain.handle("task:approve", (_e, dir: string, taskNumber: number) =>
     sync("task:approve", () => ({ briefSha256: approveBrief(dir, taskNumber).briefSha256 })));
 
-  ipcMain.handle("task:build", (_e, dir: string, taskNumber: number) =>
-    exclusive("task:build", async () => {
-      const r = await buildTask(dir, taskNumber, engine, forward(win, "builder"));
+  ipcMain.handle("task:build", (_e, dir: string, taskNumber: number, sessionId: number) =>
+    exclusive("task:build", `task:${dir}:${taskNumber}`, parallel, async () => {
+      const r = await buildTask(dir, taskNumber, engine, forward(win, "builder", sessionId, taskNumber));
       return { reportText: r.reportText, disposition: r.disposition, costUsd: r.costUsd };
     }));
 
-  ipcMain.handle("task:review", (_e, dir: string, taskNumber: number) =>
-    exclusive("task:review", async () => {
-      const r = await reviewTask(dir, taskNumber, engine, forward(win, "reviewer"));
+  ipcMain.handle("task:review", (_e, dir: string, taskNumber: number, sessionId: number) =>
+    exclusive("task:review", `task:${dir}:${taskNumber}`, parallel, async () => {
+      const r = await reviewTask(dir, taskNumber, engine, forward(win, "reviewer", sessionId, taskNumber));
       return { text: r.text, finalVerdict: r.finalVerdict, costUsd: r.costUsd };
     }));
 
-  ipcMain.handle("task:close", (_e, dir: string, taskNumber: number, input: CloseInput) =>
-    sync("task:close", () => closeTask(dir, taskNumber, input)));
+  ipcMain.handle("task:close", (_e, dir: string, taskNumber: number, input: CloseInput, _sessionId: number) =>
+    exclusive("task:close", `integration:${dir}`, parallel, async () => {
+      const row = closeTask(dir, taskNumber, input);
+      if (parallel) integrateNext(dir);
+      return row;
+    }));
 
   ipcMain.handle("task:direction", (_e, dir: string, reason: string) =>
-    exclusive("task:direction", () => runDirectionCheck(dir, reason, engine, forward(win, "direction"))));
+    exclusive("task:direction", `direction:${dir}`, parallel, () => runDirectionCheck(dir, reason, engine, forward(win, "direction", 0))));
 
   // Choose the model for the next run. A blank choice keeps today's default. The
   // renderer's saved effort rides along (see preload), so the app's one boot-time

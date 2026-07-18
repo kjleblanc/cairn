@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CloseInput, UnfinishedTask } from "@cairn/core";
+import type { CloseInput, CoordinatorTaskView, UnfinishedTask } from "@cairn/core";
 import type { EngineEvent, OwnerQuestionEvent } from "../../shared/ipc";
 import { Badge, Card, ErrorCard, Pill } from "../components/Ui";
 import { Md } from "../components/Md";
@@ -8,16 +8,23 @@ import { StepRail } from "../components/StepRail";
 import { QuestionCard } from "../components/QuestionCard";
 import { cairn } from "../api";
 
-type Phase = "outcome" | "defining" | "approve" | "building" | "report" | "reviewing" | "verdict" | "decide";
+type Phase = "outcome" | "defining" | "approve" | "building" | "report" | "reviewing" | "verdict" | "decide" | "integrating";
 
 /**
  * Task 009: what the rest of the window needs to know about the open task, so
  * stepping away shows a truthful live reminder. Purely display information.
  */
-export type WizardStatus = { taskNumber: number; phase: Phase; waiting: boolean };
+export type WizardStatus = {
+  taskNumber: number;
+  phase: Phase;
+  waiting: boolean;
+  branch?: string;
+  worktree?: string;
+  waitingReason?: string;
+};
 
 const railStep: Record<Phase, number> = {
-  outcome: 0, defining: 0, approve: 1, building: 2, report: 2, reviewing: 3, verdict: 3, decide: 4,
+  outcome: 0, defining: 0, approve: 1, building: 2, report: 2, reviewing: 3, verdict: 3, decide: 4, integrating: 4,
 };
 
 const DECISIONS: { value: CloseInput["decision"]; label: string }[] = [
@@ -39,8 +46,9 @@ function tryItOf(report: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
+export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, onStatus }: {
   dir: string; resume: UnfinishedTask | null; onDone: (stoneAdded: boolean) => void;
+  sessionId: number; parallelDraft: boolean;
   /** Show the project's home screen while this task stays alive behind it (task 009). */
   onHome: () => void;
   onStatus: (s: WizardStatus) => void;
@@ -65,12 +73,30 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
   const [refineMsg, setRefineMsg] = useState("");
   const [refineReply, setRefineReply] = useState<string | null>(null);
   const [refining, setRefining] = useState(false);
+  const [coordinatorTask, setCoordinatorTask] = useState<Pick<CoordinatorTaskView, "branch" | "worktree" | "waitingReason"> | null>(
+    resume?.branch && resume.worktree
+      ? { branch: resume.branch, worktree: resume.worktree, waitingReason: resume.waitingReason ?? "" }
+      : null,
+  );
 
-  useEffect(() => cairn.onEngineEvent((ev) => setEvents((p) => [...p.slice(-199), ev])), []);
-  useEffect(() => cairn.onOwnerQuestion((q) => setPendingQ(q)), []);
+  useEffect(() => cairn.onEngineEvent((ev) => {
+    if (ev.sessionId === sessionId) setEvents((p) => [...p.slice(-199), ev]);
+  }), [sessionId]);
+  useEffect(() => cairn.onOwnerQuestion((q) => {
+    if (q.sessionId === sessionId) setPendingQ(q);
+  }), [sessionId]);
   // Task 009: keep the rest of the window informed, so the home and project
   // screens can show a truthful reminder while this task is open behind them.
-  useEffect(() => { onStatus({ taskNumber, phase, waiting: pendingQ !== null }); }, [onStatus, taskNumber, phase, pendingQ]);
+  useEffect(() => {
+    onStatus({
+      taskNumber,
+      phase,
+      waiting: pendingQ !== null || Boolean(coordinatorTask?.waitingReason),
+      branch: coordinatorTask?.branch,
+      worktree: coordinatorTask?.worktree,
+      waitingReason: coordinatorTask?.waitingReason,
+    });
+  }, [onStatus, taskNumber, phase, pendingQ, coordinatorTask]);
 
   /** Deliver the answer (or a skip) and drop the card. The run resumes either way. */
   function answerQuestion(answer: string | null) {
@@ -82,9 +108,14 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
   async function define() {
     if (outcome.trim().length < 5) { setError("Say what you want to see, in a sentence."); return; }
     setError(null); setEvents([]); setPhase("defining");
-    const r = await cairn.taskDefine(dir, outcome);
+    const r = await cairn.taskDefine(dir, outcome, sessionId);
     setPendingQ(null); // the run is over — no question can still be waiting
-    if (r.ok) { setTaskNumber(r.value.taskNumber); setBrief(r.value.briefText); setPhase("approve"); }
+    if (r.ok) {
+      setTaskNumber(r.value.taskNumber);
+      setBrief(r.value.briefText);
+      setCoordinatorTask(r.value.coordinatorTask ?? null);
+      setPhase("approve");
+    }
     else { setError(r.message); setPhase("outcome"); }
   }
 
@@ -93,7 +124,7 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
     const message = refineMsg.trim();
     if (message.length < 2) { setError("Say it in a sentence."); return; }
     setError(null); setRefining(true); setRefineReply(null);
-    const r = await cairn.taskRefine(dir, taskNumber, message);
+    const r = await cairn.taskRefine(dir, taskNumber, message, sessionId);
     setRefining(false);
     if (!r.ok) { setError(r.message); return; }
     setRefineMsg("");
@@ -107,8 +138,13 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
 
   async function build() {
     setError(null); setEvents([]); setPhase("building");
-    const b = await cairn.taskBuild(dir, taskNumber);
-    if (b.ok) { setReport(b.value.reportText); setDisposition(b.value.disposition); setPhase("report"); }
+    const b = await cairn.taskBuild(dir, taskNumber, sessionId);
+    if (b.ok) {
+      setReport(b.value.reportText);
+      setDisposition(b.value.disposition);
+      setCoordinatorTask((current) => current ? { ...current, waitingReason: "" } : current);
+      setPhase("report");
+    }
     else { setError(b.message); setPhase("approve"); }
   }
 
@@ -122,7 +158,7 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
 
   async function runReview() {
     setError(null); setEvents([]); setPhase("reviewing");
-    const r = await cairn.taskReview(dir, taskNumber);
+    const r = await cairn.taskReview(dir, taskNumber, sessionId);
     if (r.ok) { setReview(r.value); setPhase("verdict"); }
     else { setError(r.message); setPhase("report"); }
   }
@@ -130,10 +166,11 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
   async function close() {
     if (summary.trim().length === 0) { setError("One line for the log: what did you personally see?"); return; }
     setError(null); setClosing(true);
-    const r = await cairn.taskClose(dir, taskNumber, { decision, summary, moved });
+    if (parallelDraft) setPhase("integrating");
+    const r = await cairn.taskClose(dir, taskNumber, { decision, summary, moved }, sessionId);
     setClosing(false);
     if (r.ok) onDone(true);
-    else setError(r.message);
+    else { setError(r.message); setPhase("decide"); }
   }
 
   const body = (() => {
@@ -276,6 +313,13 @@ export function Wizard({ dir, resume, onDone, onHome, onStatus }: {
               {closing ? "Closing…" : "Close the task — a stone on your cairn"}
             </Pill>
           </>
+        );
+      case "integrating":
+        return (
+          <Card title="serialized integration">
+            <p className="muted">This accepted task is updating against latest main, rerunning its approved checks, and waiting for the one-at-a-time integration gate.</p>
+            <p className="small mono">The other task remains open and independently navigable.</p>
+          </Card>
         );
     }
   })();

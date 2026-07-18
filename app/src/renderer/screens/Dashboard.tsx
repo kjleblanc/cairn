@@ -1,19 +1,20 @@
 import { useEffect } from "react";
-import type { ProjectStatus } from "@cairn/core";
+import type { ProjectStatus, UnfinishedTask } from "@cairn/core";
 import { Badge, Card, Pill } from "../components/Ui";
 import { Scene } from "../components/Scene";
 import { ModelEffort } from "../components/ModelEffort";
 import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { pluck } from "../sound";
 
-export function Dashboard({ dir, status, justAdded, mock, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
-  dir: string; status: ProjectStatus; justAdded: boolean; mock: boolean;
-  onStartTask: () => void; onResume: () => void; onDirection: (reason: string) => void;
+export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
+  dir: string; status: ProjectStatus; justAdded: boolean; mock: boolean; parallelDraft: boolean;
+  onStartTask: () => void; onResume: (task: UnfinishedTask) => void; onDirection: (reason: string) => void;
   onSwitch: () => void; onOpenProject: (dir: string) => void; onSettings: () => void;
 }) {
   useEffect(() => { if (justAdded) pluck(); }, [justAdded]);
   const { facts, log, stones, gate, unfinished } = status;
   const recent = log.slice(-6).reverse();
+  const unfinishedTasks = status.unfinishedTasks?.length ? status.unfinishedTasks : unfinished ? [unfinished] : [];
 
   return (
     <div>
@@ -30,6 +31,13 @@ export function Dashboard({ dir, status, justAdded, mock, onStartTask, onResume,
         {!gate.tripped ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
       </div>
 
+      {parallelDraft ? (
+        <div className="gate-banner">
+          <p><strong>Parallel Draft — not active by default.</strong> Task branches, worktrees, waiting rules, and integration stay isolated behind the opt-in flag.</p>
+          {justAdded ? <p><strong>Serialized integration completed.</strong> One task entered the queue and integrated; every other task stayed independently open.</p> : null}
+        </div>
+      ) : null}
+
       {!gate.tripped ? <ModelEffort mock={mock} /> : null}
 
       {gate.tripped ? (
@@ -39,14 +47,24 @@ export function Dashboard({ dir, status, justAdded, mock, onStartTask, onResume,
         </div>
       ) : null}
 
-      {unfinished ? (
-        <Card title="unfinished task">
+      {unfinishedTasks.map((task) => (
+        <Card title="unfinished task" key={task.taskNumber}>
+          {(() => {
+            const coordinatorTask = status.parallel?.tasks.find((item) => item.taskNumber === task.taskNumber);
+            if (coordinatorTask?.blocker) return <p className="small"><strong>Stopped safely:</strong> {coordinatorTask.blocker}. Its branch and worktree were retained.</p>;
+            return coordinatorTask?.waitingReason ? <p className="small"><strong>Waiting:</strong> {coordinatorTask.waitingReason}</p> : null;
+          })()}
           <div className="row spread">
-            <p>Task {String(unfinished.taskNumber).padStart(3, "0")} was started but never closed. Pick up where you left off.</p>
-            <Pill onClick={onResume}>Continue it</Pill>
+            <p>Task {String(task.taskNumber).padStart(3, "0")} is still independent and open. Pick up exactly this task.</p>
+            <Pill onClick={() => onResume(task)}>{parallelDraft ? `Continue Task ${String(task.taskNumber).padStart(3, "0")}` : "Continue it"}</Pill>
           </div>
+          {status.parallel?.tasks.find((item) => item.taskNumber === task.taskNumber) ? (
+            <p className="small mono muted">
+              {status.parallel.tasks.find((item) => item.taskNumber === task.taskNumber)?.branch} · {status.parallel.tasks.find((item) => item.taskNumber === task.taskNumber)?.worktree}
+            </p>
+          ) : null}
         </Card>
-      ) : null}
+      ))}
 
       <Card title="recent stones">
         {recent.length === 0 ? <p className="muted">No tasks closed yet — start the first one.</p> : null}

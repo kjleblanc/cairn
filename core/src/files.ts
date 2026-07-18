@@ -42,6 +42,7 @@ export const paths = {
   brief: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-brief.md`),
   report: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-report.md`),
   approval: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-approval.json`),
+  decision: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-decision.json`),
 };
 
 export function pad(n: number): string {

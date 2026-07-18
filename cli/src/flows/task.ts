@@ -4,6 +4,7 @@ import {
   approveBrief, buildTask, checkDirectionGate, closeTask, defineTask, isCairnProject,
   pad, parseFacts, parseLog, pickEngine, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
   type OwnerQuestion, type RunEvents,
+  parallelDraftEnabled, hasCoordinator, coordinatorSummary,
 } from "@cairn/core";
 import { banner, label, spinnerLine } from "../ui.js";
 
@@ -59,11 +60,26 @@ function events(spin: { message: (m: string) => void }): RunEvents {
 
 const cost = (usd?: number) => (usd ? pc.dim(`  ($${usd.toFixed(2)})`) : "");
 
+export function parallelTaskRefusal(root: string): string | null {
+  if (!parallelDraftEnabled()) return null;
+  const active = hasCoordinator(root)
+    ? coordinatorSummary(root).tasks.filter((task) => task.phase !== "integrated").length
+    : 0;
+  return `Parallel Draft is coordinator-owned (${active} active task${active === 1 ? "" : "s"}). ` +
+    "The CLI may report these tasks but will not bypass their worktrees, scope gates, or integration queue; use Cairn Desktop for this Draft.";
+}
+
 export async function taskFlow(root: string, opts: { mock: boolean; model?: string; effort?: string }): Promise<void> {
   console.log(banner());
 
   if (!isCairnProject(root)) {
     p.log.error("No Cairn contract here. Run `cairn init` in an empty folder, or use Project Conversion for existing work.");
+    process.exitCode = 1;
+    return;
+  }
+  const parallelRefusal = parallelTaskRefusal(root);
+  if (parallelRefusal) {
+    p.log.error(parallelRefusal);
     process.exitCode = 1;
     return;
   }

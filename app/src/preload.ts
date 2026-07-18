@@ -9,13 +9,13 @@ const api: CairnApi = {
   projectInit: (input) => ipcRenderer.invoke("project:init", input),
   projectStatus: (dir) => ipcRenderer.invoke("project:status", dir),
   projectForget: (dir) => ipcRenderer.invoke("project:forget", dir),
-  taskDefine: (dir, outcome) => ipcRenderer.invoke("task:define", dir, outcome),
+  taskDefine: (dir, outcome, sessionId) => ipcRenderer.invoke("task:define", dir, outcome, sessionId),
   taskAnswer: (id, answer) => ipcRenderer.invoke("task:answer", id, answer),
-  taskRefine: (dir, taskNumber, message) => ipcRenderer.invoke("task:refine", dir, taskNumber, message),
+  taskRefine: (dir, taskNumber, message, sessionId) => ipcRenderer.invoke("task:refine", dir, taskNumber, message, sessionId),
   taskApprove: (dir, taskNumber) => ipcRenderer.invoke("task:approve", dir, taskNumber),
-  taskBuild: (dir, taskNumber) => ipcRenderer.invoke("task:build", dir, taskNumber),
-  taskReview: (dir, taskNumber) => ipcRenderer.invoke("task:review", dir, taskNumber),
-  taskClose: (dir, taskNumber, input) => ipcRenderer.invoke("task:close", dir, taskNumber, input),
+  taskBuild: (dir, taskNumber, sessionId) => ipcRenderer.invoke("task:build", dir, taskNumber, sessionId),
+  taskReview: (dir, taskNumber, sessionId) => ipcRenderer.invoke("task:review", dir, taskNumber, sessionId),
+  taskClose: (dir, taskNumber, input, sessionId) => ipcRenderer.invoke("task:close", dir, taskNumber, input, sessionId),
   taskDirection: (dir, reason) => ipcRenderer.invoke("task:direction", dir, reason),
   // The saved effort rides along with the model call, so the app's existing
   // boot-time taskSetModel(...) applies both saved choices with no extra boot

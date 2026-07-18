@@ -4,6 +4,7 @@ import type { Preflight } from "../shared/ipc";
 import { cairn } from "./api";
 import { ErrorCard } from "./components/Ui";
 import { RunReminder } from "./components/RunReminder";
+import { TaskDeck } from "./components/TaskDeck";
 import { Welcome } from "./screens/Welcome";
 import { Picker } from "./screens/Picker";
 import { Dashboard } from "./screens/Dashboard";
@@ -22,7 +23,7 @@ type View =
   | { name: "welcome"; preflight: Preflight; hasRecent: boolean }
   | { name: "picker"; startNew: boolean; note?: string }
   | { name: "dashboard"; dir: string; status: ProjectStatus; justAdded: boolean }
-  | { name: "wizard" }
+  | { name: "wizard"; sessionId: number }
   | { name: "direction"; dir: string; reason: string }
   | { name: "settings"; dir: string | null };
 
@@ -40,9 +41,10 @@ const folderName = (dir: string): string => dir.split(/[\\/]/).filter(Boolean).p
 export function App() {
   const [view, setView] = useState<View>({ name: "loading" });
   const [error, setError] = useState<string | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [wstat, setWstat] = useState<WizardStatus | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [wstats, setWstats] = useState<Record<number, WizardStatus>>({});
   const [mock, setMock] = useState(false);
+  const [parallelDraft, setParallelDraft] = useState(false);
 
   const openProject = useCallback(async (dir: string, justAdded = false) => {
     const r = await cairn.projectOpen(dir);
@@ -53,6 +55,7 @@ export function App() {
   const boot = useCallback(async () => {
     const pf = await cairn.preflight();
     setMock(pf.mock);
+    setParallelDraft(pf.parallelDraft);
 
     // Restore one truthful engine setup before the dashboard can render. A
     // mock OpenAI preview may return only inside this renderer window; every
@@ -90,46 +93,59 @@ export function App() {
     if (dir) await openProject(dir);
   }, [openProject]);
 
-  const runLive = wstat !== null && (IN_FLIGHT.includes(wstat.phase) || wstat.waiting);
-
   /**
    * Enter the task walk. One walk at a time: while an agent is live, a second
    * start is refused with the engine room's own words; a walk parked at a
    * quiet step is returned to (same project) or pointed at (another project).
    */
   const enterTask = useCallback((dir: string, resume: UnfinishedTask | null) => {
-    if (session) {
+    const existing = resume ? sessions.find((item) => wstats[item.id]?.taskNumber === resume.taskNumber) : undefined;
+    if (existing) { setError(null); setView({ name: "wizard", sessionId: existing.id }); return; }
+    if (!parallelDraft && sessions.length > 0) {
+      const session = sessions[0];
+      const wstat = wstats[session.id];
+      const runLive = Boolean(wstat && (IN_FLIGHT.includes(wstat.phase) || wstat.waiting));
       if (runLive) { setError("One step at a time — an agent is already running."); return; }
-      if (session.dir === dir) { setError(null); setView({ name: "wizard" }); return; }
+      if (session.dir === dir) { setError(null); setView({ name: "wizard", sessionId: session.id }); return; }
       const open = wstat && wstat.taskNumber > 0 ? `Task ${String(wstat.taskNumber).padStart(3, "0")}` : "A task";
       setError(`${open} in "${folderName(session.dir)}" is still open — use the reminder to return and finish it first.`);
       return;
     }
+    if (parallelDraft && sessions.length >= 2) {
+      setError("Parallel Draft allows at most two non-integrated tasks. Finish or integrate one before reserving another.");
+      return;
+    }
+    const id = Date.now() + sessions.length;
     setError(null);
-    setSession({ id: Date.now(), dir, resume });
-    setView({ name: "wizard" });
-  }, [session, runLive, wstat]);
+    setSessions((current) => [...current, { id, dir, resume }]);
+    setView({ name: "wizard", sessionId: id });
+  }, [sessions, wstats, parallelDraft]);
 
   /**
    * Leave the task walk without disturbing it. The untouched first screen has
    * nothing worth keeping, so it simply closes; every later step stays alive
    * behind the home screen, run and all.
    */
-  const goHome = useCallback(() => {
+  const goHome = useCallback((sessionId: number) => {
+    const session = sessions.find((item) => item.id === sessionId);
     if (!session) return;
-    if (wstat && wstat.phase === "outcome" && !wstat.waiting) { setSession(null); setWstat(null); }
+    const wstat = wstats[sessionId];
+    if (wstat && wstat.phase === "outcome" && !wstat.waiting) {
+      setSessions((current) => current.filter((item) => item.id !== sessionId));
+      setWstats((current) => { const next = { ...current }; delete next[sessionId]; return next; });
+    }
     void openProject(session.dir);
-  }, [session, wstat, openProject]);
+  }, [sessions, wstats, openProject]);
 
   /** The walk ended the ordinary way (closed, or left from a quiet step). */
-  const endSession = useCallback((stoneAdded: boolean) => {
-    const dir = session?.dir;
-    setSession(null);
-    setWstat(null);
+  const endSession = useCallback((sessionId: number, stoneAdded: boolean) => {
+    const dir = sessions.find((item) => item.id === sessionId)?.dir;
+    setSessions((current) => current.filter((item) => item.id !== sessionId));
+    setWstats((current) => { const next = { ...current }; delete next[sessionId]; return next; });
     if (dir) void openProject(dir, stoneAdded);
-  }, [session, openProject]);
+  }, [sessions, openProject]);
 
-  const returnToTask = useCallback(() => { setError(null); setView({ name: "wizard" }); }, []);
+  const returnToTask = useCallback((sessionId: number) => { setError(null); setView({ name: "wizard", sessionId }); }, []);
 
   const body = (() => {
     switch (view.name) {
@@ -148,9 +164,9 @@ export function App() {
           onCreated={(dir, status) => setView({ name: "dashboard", dir, status, justAdded: false })}
           onSettings={() => setView({ name: "settings", dir: null })} />;
       case "dashboard":
-        return <Dashboard dir={view.dir} status={view.status} justAdded={view.justAdded} mock={mock}
+        return <Dashboard dir={view.dir} status={view.status} justAdded={view.justAdded} mock={mock} parallelDraft={parallelDraft}
           onStartTask={() => enterTask(view.dir, null)}
-          onResume={() => enterTask(view.dir, view.status.unfinished)}
+          onResume={(task) => enterTask(view.dir, task)}
           onDirection={(reason) => setView({ name: "direction", dir: view.dir, reason })}
           onSwitch={() => setView({ name: "picker", startNew: false })}
           onOpenProject={(dir) => void openProject(dir)}
@@ -164,23 +180,33 @@ export function App() {
     }
   })();
 
-  const showWizard = view.name === "wizard";
+  const activeSessionId = view.name === "wizard" ? view.sessionId : null;
+  const deckItems = sessions.flatMap((session) => {
+    const status = wstats[session.id];
+    return status ? [{ sessionId: session.id, status, project: folderName(session.dir) }] : [];
+  });
+  const legacySession = sessions[0];
+  const legacyStatus = legacySession ? wstats[legacySession.id] : undefined;
 
   return (
     <main className="shell">
       {error ? <ErrorCard message={error} /> : null}
-      {session && wstat && (view.name === "dashboard" || view.name === "picker") ? (
-        <RunReminder status={wstat}
-          projectNote={view.name === "picker" || view.dir !== session.dir ? folderName(session.dir) : null}
-          onReturn={returnToTask} />
+      {parallelDraft ? (
+        <TaskDeck items={deckItems} activeSessionId={activeSessionId} onReturn={returnToTask} />
+      ) : legacySession && legacyStatus && (view.name === "dashboard" || view.name === "picker") ? (
+        <RunReminder status={legacyStatus}
+          projectNote={view.name === "picker" || view.dir !== legacySession.dir ? folderName(legacySession.dir) : null}
+          onReturn={() => returnToTask(legacySession.id)} />
       ) : null}
       {body}
-      {session ? (
-        <div style={showWizard ? undefined : { display: "none" }}>
-          <Wizard key={session.id} dir={session.dir} resume={session.resume}
-            onDone={endSession} onHome={goHome} onStatus={setWstat} />
+      {sessions.map((session) => (
+        <div key={session.id} style={activeSessionId === session.id ? undefined : { display: "none" }}>
+          <Wizard dir={session.dir} resume={session.resume} sessionId={session.id} parallelDraft={parallelDraft}
+            onDone={(stoneAdded) => endSession(session.id, stoneAdded)}
+            onHome={() => goHome(session.id)}
+            onStatus={(status) => setWstats((current) => ({ ...current, [session.id]: status }))} />
         </div>
-      ) : null}
+      ))}
     </main>
   );
 }

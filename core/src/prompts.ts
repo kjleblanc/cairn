@@ -26,13 +26,16 @@ export function definerPrompt(root: string, taskNumber: number, outcome: string,
   const ask = opts?.canAsk
     ? `\n\nYou may ask the owner up to ${OWNER_QUESTION_LIMIT} short plain-language questions with the ${ASK_OWNER_TOOL} tool, when one answer would make the brief meaningfully better — about scope, what to protect, or what the owner wants to see. Ask one at a time and keep them optional in tone. If the tool returns "${NO_ANSWER_FALLBACK}", do exactly that. Never ask for a password, key, or any secret — Cairn never needs one typed into a question box.`
     : "";
+  const coordinatorMetadata = process.env.CAIRN_PARALLEL_DRAFT === "1"
+    ? ` Include exactly one fenced \`\`\`cairn-task-metadata JSON block with only these fields: schemaVersion (1), lane, mode, allowedPaths (exact repository-relative paths), dependencies (earlier task numbers), checks (safe local commands), and externalActions. No wildcards, parent paths, .git paths, or undeclared fields.`
+    : "";
   return {
     system: `${COMMON}\n\nYour role: DEFINER. You create exactly one task brief file and nothing else. You have read access to the project; the only file you may write is the brief.${ask}`,
     user:
       `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
       `Follow the contract's "Define a task" procedure for this outcome:\n\n${outcome}\n\n` +
       `Orient first (contract, docs/ai-work/PROJECT.md, the last rows of docs/ai-work/LOG.md, the latest report, git status). ` +
-      `The task number is ${taskNumber}. Create only docs/ai-work/tasks/${pad(taskNumber)}-brief.md with every section the contract requires. ` +
+      `The task number is ${taskNumber}. Create only docs/ai-work/tasks/${pad(taskNumber)}-brief.md with every section the contract requires.${coordinatorMetadata} ` +
       `If the outcome is truly Tiny or High-Stakes, still write the brief but say so plainly in it and in your summary. ` +
       `Finish with a short plain-language summary of the brief. Do not implement anything. The CLI will show the brief to the owner for approval.`,
   };

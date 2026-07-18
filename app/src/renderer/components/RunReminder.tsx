@@ -28,6 +28,8 @@ function describe(s: WizardStatus): { tone: "waiting" | "working" | "ready"; tex
       return { tone: "ready", text: `${task} has a reviewer's verdict ready.` };
     case "decide":
       return { tone: "ready", text: `${task} is waiting for your decision.` };
+    case "integrating":
+      return { tone: "working", text: `${task} is in the serialized integration queue; its checks are running against latest main.` };
     case "outcome":
       return { tone: "ready", text: `${task} is still open.` };
   }

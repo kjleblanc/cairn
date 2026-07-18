@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { checkBashCommand } from "./gates.js";
 import { pad, paths } from "./files.js";
+import { metadataBlock, parallelDraftEnabled, taskArtifactPaths } from "./coordinator.js";
 
 export type Role = "definer" | "builder" | "reviewer" | "direction";
 
@@ -50,6 +51,8 @@ export interface RunSpec {
   intent?: "refine";
   /** The owner's question or change request, carried alongside a refine turn. */
   ownerMessage?: string;
+  /** Frozen exact paths for a coordinated builder. Absent keeps the legacy path unchanged. */
+  allowedPaths?: string[];
 }
 
 export interface Engine {
@@ -133,6 +136,9 @@ function norm(root: string, p: string): string {
 function makeToolGate(spec: RunSpec, state: { reportUnlocked: boolean }, events: RunEvents) {
   const briefRel = spec.taskNumber ? norm(spec.root, paths.brief(spec.root, spec.taskNumber)) : "";
   const reportRel = spec.taskNumber ? norm(spec.root, paths.report(spec.root, spec.taskNumber)) : "";
+  const coordinatedBuilderPaths = spec.role === "builder" && spec.allowedPaths
+    ? new Set(spec.allowedPaths.map((path) => path.replace(/\\/g, "/")))
+    : null;
 
   return async (request: unknown): Promise<{ approved: true } | { approved: false; reason: string }> => {
     const req = request as { tool_name?: string; name?: string; input?: Record<string, unknown> };
@@ -171,6 +177,9 @@ function makeToolGate(spec: RunSpec, state: { reportUnlocked: boolean }, events:
       }
       if (spec.role === "builder" && target === briefRel) {
         return deny("The approved brief is frozen. A change of scope needs a new brief.");
+      }
+      if (spec.role === "builder" && coordinatedBuilderPaths && !coordinatedBuilderPaths.has(target)) {
+        return deny(`The coordinated builder may write only its frozen exact paths; ${target || "that path"} is outside them.`);
       }
       return { approved: true };
     }
@@ -320,23 +329,37 @@ export class MockEngine implements Engine {
       const ownerLine = askOwner
         ? `Owner Q&A: ${await askOwner("Before I write the brief: is there anything this task must be careful not to touch? (mock)")}\n`
         : "";
+      const parallel = parallelDraftEnabled();
+      const taskFile = `demo-${pad(spec.taskNumber)}.txt`;
+      const metadata = parallel
+        ? `\n\n## Coordinator metadata\n\n${metadataBlock({
+            schemaVersion: 1,
+            lane: "Standard",
+            mode: "Draft",
+            allowedPaths: [taskFile],
+            dependencies: [],
+            checks: ['node -e "process.exit(0)"'],
+            externalActions: [],
+          })}\n`
+        : "";
       mkdirSync(dirname(briefPath), { recursive: true });
       writeFileSync(
         briefPath,
         `# Task ${pad(spec.taskNumber)} — brief (mock)\n\nMode: Draft\nLane: Standard\n\n` +
           `Outcome: ${spec.user.slice(spec.user.indexOf("outcome:") + 8, spec.user.indexOf("outcome:") + 120).trim() || "mock outcome"}\n\n` +
-          `Allowed: demo.txt\nForbidden: everything else\nOwner will see: demo.txt contains a greeting\n` +
+          `Allowed: ${parallel ? taskFile : "demo.txt"}\nForbidden: everything else\nOwner will see: ${parallel ? taskFile : "demo.txt"} contains a greeting\n` +
           ownerLine +
-          `Checks: file exists\nDONE when: file written\nSTOPPED if: cannot write\n`,
+          `Checks: file exists\nDONE when: file written\nSTOPPED if: cannot write\n` + metadata,
       );
       return { text: say(`Brief saved (mock). Lane: Standard, Mode: Draft.`) };
     }
     if (spec.role === "builder" && spec.taskNumber) {
-      writeFileSync(resolve(spec.root, "demo.txt"), "hello from the mock builder\n");
+      const taskFile = spec.allowedPaths?.find((path) => !taskArtifactPaths(spec.taskNumber!).includes(path)) ?? "demo.txt";
+      writeFileSync(resolve(spec.root, taskFile), "hello from the mock builder\n");
       writeFileSync(
         paths.report(spec.root, spec.taskNumber),
-        `# Task ${pad(spec.taskNumber)} — report (mock)\n\nResult: demo.txt written.\nFiles changed: demo.txt\n` +
-          `Commands: none\nHow to try it: open demo.txt\nHuman checks: read the file\nLimitations: mock\n` +
+        `# Task ${pad(spec.taskNumber)} — report (mock)\n\nResult: ${taskFile} written.\nFiles changed: ${taskFile}\n` +
+          `Commands: none\nHow to try it: open ${taskFile}\nHuman checks: read the file\nLimitations: mock\n` +
           `Milestone movement: YES\n\nDisposition: DONE\n`,
       );
       return { text: say("Built (mock). Report written. Disposition: DONE.") };

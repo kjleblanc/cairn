@@ -1,13 +1,13 @@
-import type { CloseInput, Disposition, LogRow, ProjectStatus } from "@cairn/core";
+import type { CloseInput, CoordinatorTaskView, Disposition, LogRow, ProjectStatus } from "@cairn/core";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
-export type Preflight = { claudeReady: boolean; reason: "no-sdk" | "no-login" | null; mock: boolean };
+export type Preflight = { claudeReady: boolean; reason: "no-sdk" | "no-login" | null; mock: boolean; parallelDraft: boolean };
 export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number; lastOpened: string };
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string; timebox: string };
-export type EngineEvent = { role: string; kind: "text" | "tool" | "denied"; text: string };
-export type DefinePayload = { taskNumber: number; briefText: string; costUsd?: number };
+export type EngineEvent = { role: string; kind: "text" | "tool" | "denied"; text: string; sessionId: number; taskNumber?: number };
+export type DefinePayload = { taskNumber: number; briefText: string; costUsd?: number; coordinatorTask?: CoordinatorTaskView };
 export type BuildPayload = { reportText: string; disposition: Disposition; costUsd?: number };
 export type ReviewPayload = { text: string; finalVerdict: string; costUsd?: number };
 /**
@@ -16,7 +16,7 @@ export type ReviewPayload = { text: string; finalVerdict: string; costUsd?: numb
  * waits before skipping itself, so an unattended demo always finishes; touching
  * the card cancels that. Real runs carry no autoSkipMs — they wait for the owner.
  */
-export type OwnerQuestionEvent = { id: number; question: string; asked: number; limit: number; autoSkipMs?: number };
+export type OwnerQuestionEvent = { id: number; question: string; asked: number; limit: number; sessionId: number; autoSkipMs?: number };
 export type RefinePayload = { briefText: string; briefChanged: boolean; reply: string; costUsd?: number };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 
@@ -29,15 +29,15 @@ export interface CairnApi {
   projectStatus(dir: string): Promise<Result<ProjectStatus>>;
   /** Drop one entry from the app's own remembered list. Never deletes, moves, or changes the project folder itself. */
   projectForget(dir: string): Promise<Result<null>>;
-  taskDefine(dir: string, outcome: string): Promise<Result<DefinePayload>>;
+  taskDefine(dir: string, outcome: string, sessionId: number): Promise<Result<DefinePayload>>;
   /** Deliver the owner's answer to a pending question — or null for "skip, use your judgment". */
   taskAnswer(id: number, answer: string | null): Promise<null>;
   /** Ask about, or request a change to, the not-yet-approved brief. Refused once approved. */
-  taskRefine(dir: string, taskNumber: number, message: string): Promise<Result<RefinePayload>>;
+  taskRefine(dir: string, taskNumber: number, message: string, sessionId: number): Promise<Result<RefinePayload>>;
   taskApprove(dir: string, taskNumber: number): Promise<Result<{ briefSha256: string }>>;
-  taskBuild(dir: string, taskNumber: number): Promise<Result<BuildPayload>>;
-  taskReview(dir: string, taskNumber: number): Promise<Result<ReviewPayload>>;
-  taskClose(dir: string, taskNumber: number, input: CloseInput): Promise<Result<LogRow>>;
+  taskBuild(dir: string, taskNumber: number, sessionId: number): Promise<Result<BuildPayload>>;
+  taskReview(dir: string, taskNumber: number, sessionId: number): Promise<Result<ReviewPayload>>;
+  taskClose(dir: string, taskNumber: number, input: CloseInput, sessionId: number): Promise<Result<LogRow>>;
   taskDirection(dir: string, reason: string): Promise<Result<{ text: string }>>;
   /** Choose the model for the next run; returns the resolved active model id. Blank = today's default. */
   taskSetModel(model: string): Promise<string>;

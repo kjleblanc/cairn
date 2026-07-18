@@ -207,3 +207,25 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
   .model-option { align-items: flex-start; flex-direction: column; gap: 5px; }
   .model-option > .mono { text-align: left; }
 }
+/* Task 013: unmistakable, opt-in two-task deck. */
+.task-deck {
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid rgba(205, 150, 55, 0.45);
+  border-radius: 16px;
+  background: rgba(255, 247, 224, 0.76);
+}
+
+.task-deck-title,
+.task-deck-card-head { display: flex; justify-content: space-between; gap: 12px; }
+.task-deck-title span,
+.task-deck-card-head span { color: var(--muted); font-size: 0.8rem; }
+.task-deck-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.task-deck-card {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 11px;
+  text-align: left; color: inherit; border: 1px solid rgba(93, 72, 42, 0.2);
+  border-radius: 12px; background: rgba(255, 255, 255, 0.8); cursor: pointer;
+}
+.task-deck-card-active { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(205, 150, 55, 0.15); }
+.task-deck-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 620px) { .task-deck-grid { grid-template-columns: 1fr; } }

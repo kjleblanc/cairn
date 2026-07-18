@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
-  appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths,
+  appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, sha256File,
   scaffoldProject, type LogRow, type ProjectFacts,
 } from "./files.js";
 import {
@@ -11,6 +11,22 @@ import {
 import type { Engine, RunEvents } from "./agents.js";
 import { builderPrompt, definerPrompt, directionPrompt, refinePrompt, reviewerPrompt } from "./prompts.js";
 import { dispositionOf, finalVerdictOf } from "./parse.js";
+import {
+  beginCoordinatedBuild,
+  builderWritablePaths,
+  coordinatorSummary,
+  finishCoordinatedBuild,
+  hasCoordinator,
+  parallelDraftEnabled,
+  parseTaskMetadata,
+  queueTaskDecision,
+  readCoordinatorState,
+  recordCoordinatorApproval,
+  registerTaskMetadata,
+  reserveTaskWorktree,
+  type CoordinatorSummary,
+  type CoordinatorTaskView,
+} from "./coordinator.js";
 
 /**
  * The gated loop as resumable steps. Every skin (CLI, desktop) sequences these;
@@ -20,7 +36,7 @@ import { dispositionOf, finalVerdictOf } from "./parse.js";
 
 export type Disposition = "DONE" | "STOPPED" | "UNKNOWN";
 
-export interface DefineResult { taskNumber: number; briefPath: string; briefText: string; costUsd?: number }
+export interface DefineResult { taskNumber: number; briefPath: string; briefText: string; costUsd?: number; coordinatorTask?: CoordinatorTaskView }
 export interface RefineResult { briefPath: string; briefText: string; briefChanged: boolean; reply: string; costUsd?: number }
 export interface BuildResult { reportPath: string; reportText: string; disposition: Disposition; costUsd?: number }
 export interface ReviewResult { text: string; finalVerdict: string; costUsd?: number }
@@ -37,6 +53,10 @@ export interface UnfinishedTask {
   disposition: Disposition;
   briefText: string;
   reportText: string;
+  branch?: string;
+  worktree?: string;
+  waitingReason?: string;
+  blocker?: string;
 }
 export interface ProjectStatus {
   facts: ProjectFacts;
@@ -44,6 +64,15 @@ export interface ProjectStatus {
   stones: number;
   gate: DirectionGateResult;
   unfinished: UnfinishedTask | null;
+  unfinishedTasks?: UnfinishedTask[];
+  parallel?: CoordinatorSummary;
+}
+
+function coordinatedTaskRoot(root: string, taskNumber: number): string {
+  if (!parallelDraftEnabled() || !hasCoordinator(root)) return root;
+  const task = readCoordinatorState(root).tasks.find((item) => item.taskNumber === taskNumber);
+  if (!task) throw new Error(`Task ${pad(taskNumber)} is not owned by this coordinator.`);
+  return task.worktree;
 }
 
 function assertGoverned(root: string): ProjectFacts {
@@ -61,27 +90,37 @@ export async function defineTask(root: string, outcome: string, engine: Engine, 
   assertGoverned(root);
   const gate = checkDirectionGate(parseLog(root));
   if (gate.tripped) throw new Error(`DIRECTION GATE: ${gate.reason} No third narrow patch — run the direction check instead.`);
-  const taskNumber = nextTaskNumber(root);
+  const coordinated = parallelDraftEnabled();
+  const reserved = coordinated ? reserveTaskWorktree(root) : null;
+  const taskNumber = reserved?.taskNumber ?? nextTaskNumber(root);
+  const runRoot = reserved?.worktree ?? root;
   // The prompt mentions the ask tool only when the skin wired an answer channel.
-  const p = definerPrompt(root, taskNumber, outcome, { canAsk: Boolean(events.onAsk) });
-  const res = await engine.run({ role: "definer", root, taskNumber, system: p.system, user: p.user }, events);
-  const briefPath = paths.brief(root, taskNumber);
+  const p = definerPrompt(runRoot, taskNumber, outcome, { canAsk: Boolean(events.onAsk) });
+  const res = await engine.run({ role: "definer", root: runRoot, taskNumber, system: p.system, user: p.user }, events);
+  const briefPath = paths.brief(runRoot, taskNumber);
   if (!existsSync(briefPath)) {
     throw new Error("The definer produced no brief file. Nothing was approved and nothing will be built.");
   }
-  return { taskNumber, briefPath, briefText: readFileSync(briefPath, "utf8"), costUsd: res.costUsd };
+  const briefText = readFileSync(briefPath, "utf8");
+  if (coordinated) registerTaskMetadata(root, taskNumber, parseTaskMetadata(briefText));
+  const taskView = coordinated
+    ? coordinatorSummary(root).tasks.find((task) => task.taskNumber === taskNumber)
+    : undefined;
+  return { taskNumber, briefPath, briefText, costUsd: res.costUsd, coordinatorTask: taskView };
 }
 
 /** The one human gate. Persisted so approve and build survive a restart — and so build can re-check the hash. */
 export function approveBrief(root: string, taskNumber: number): ApprovalRecord {
   assertGoverned(root);
-  const record = recordApproval(taskNumber, paths.brief(root, taskNumber));
-  writeFileSync(paths.approval(root, taskNumber), JSON.stringify(record, null, 2) + "\n");
+  const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  const record = recordApproval(taskNumber, paths.brief(taskRoot, taskNumber));
+  writeFileSync(paths.approval(taskRoot, taskNumber), JSON.stringify(record, null, 2) + "\n");
+  if (taskRoot !== root) recordCoordinatorApproval(root, taskNumber, sha256File(paths.approval(taskRoot, taskNumber)));
   return record;
 }
 
 export function loadApproval(root: string, taskNumber: number): ApprovalRecord | null {
-  const p = paths.approval(root, taskNumber);
+  const p = paths.approval(coordinatedTaskRoot(root, taskNumber), taskNumber);
   if (!existsSync(p)) return null;
   return JSON.parse(readFileSync(p, "utf8")) as ApprovalRecord;
 }
@@ -94,7 +133,8 @@ export function loadApproval(root: string, taskNumber: number): ApprovalRecord |
  */
 export async function refineBrief(root: string, taskNumber: number, message: string, engine: Engine, events: RunEvents = {}): Promise<RefineResult> {
   assertGoverned(root);
-  const briefPath = paths.brief(root, taskNumber);
+  const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  const briefPath = paths.brief(taskRoot, taskNumber);
   if (!existsSync(briefPath)) {
     throw new Error(`No brief to refine for task ${pad(taskNumber)}. Define the task first.`);
   }
@@ -102,12 +142,13 @@ export async function refineBrief(root: string, taskNumber: number, message: str
     throw new Error(`Task ${pad(taskNumber)} is already approved — the brief is locked. A change now is a new task with a new brief.`);
   }
   const before = readFileSync(briefPath, "utf8");
-  const p = refinePrompt(root, taskNumber, message);
+  const p = refinePrompt(taskRoot, taskNumber, message);
   const res = await engine.run(
-    { role: "definer", root, taskNumber, system: p.system, user: p.user, intent: "refine", ownerMessage: message },
+    { role: "definer", root: taskRoot, taskNumber, system: p.system, user: p.user, intent: "refine", ownerMessage: message },
     events,
   );
   const after = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "";
+  if (taskRoot !== root && after !== before) registerTaskMetadata(root, taskNumber, parseTaskMetadata(after));
   return { briefPath, briefText: after, briefChanged: after !== before, reply: res.text, costUsd: res.costUsd };
 }
 
@@ -118,38 +159,56 @@ export async function buildTask(root: string, taskNumber: number, engine: Engine
     throw new Error(`No approval on file for task ${pad(taskNumber)}. Approve the brief first — nothing is built without you.`);
   }
   assertApprovalValid(approval);
-  const p = builderPrompt(root, taskNumber);
-  const res = await engine.run({ role: "builder", root, taskNumber, system: p.system, user: p.user }, events);
-  const reportPath = paths.report(root, taskNumber);
+  const coordinated = parallelDraftEnabled() && hasCoordinator(root);
+  const task = coordinated ? beginCoordinatedBuild(root, taskNumber) : null;
+  const taskRoot = task?.worktree ?? root;
+  const p = builderPrompt(taskRoot, taskNumber);
+  const res = await engine.run({
+    role: "builder",
+    root: taskRoot,
+    taskNumber,
+    system: p.system,
+    user: p.user,
+    ...(task ? { allowedPaths: builderWritablePaths(task) } : {}),
+  }, events);
+  const reportPath = paths.report(taskRoot, taskNumber);
   const reportText = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-  return { reportPath, reportText, disposition: dispositionOf(reportText || res.text), costUsd: res.costUsd };
+  const disposition = dispositionOf(reportText || res.text);
+  if (coordinated) finishCoordinatedBuild(root, taskNumber, disposition);
+  return { reportPath, reportText, disposition, costUsd: res.costUsd };
 }
 
 export async function reviewTask(root: string, taskNumber: number, engine: Engine, events: RunEvents = {}): Promise<ReviewResult> {
   assertGoverned(root);
-  const p = reviewerPrompt(root, taskNumber);
-  const res = await engine.run({ role: "reviewer", root, taskNumber, system: p.system, user: p.user }, events);
+  const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  const p = reviewerPrompt(taskRoot, taskNumber);
+  const res = await engine.run({ role: "reviewer", root: taskRoot, taskNumber, system: p.system, user: p.user }, events);
   return { text: res.text, finalVerdict: finalVerdictOf(res.text), costUsd: res.costUsd };
 }
 
 export function closeTask(root: string, taskNumber: number, input: CloseInput): LogRow {
   assertGoverned(root);
-  const briefPath = paths.brief(root, taskNumber);
+  const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  const briefPath = paths.brief(taskRoot, taskNumber);
   const brief = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "";
-  const reportPath = paths.report(root, taskNumber);
+  const reportPath = paths.report(taskRoot, taskNumber);
   const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
   const disposition = dispositionOf(report);
   const row: LogRow = {
     task: pad(taskNumber),
     date: new Date().toISOString().slice(0, 10),
-    lane: "Standard",
+    lane: /Lane:\s*High-Stakes/i.test(brief) ? "High-Stakes" : /Lane:\s*Tiny/i.test(brief) ? "Tiny" : "Standard",
     mode: /Mode:\s*Final/i.test(brief) ? "Final" : "Draft",
     outcome: disposition === "UNKNOWN" ? "STOPPED" : disposition,
     decision: input.decision,
     summary: input.summary,
     moved: input.moved,
   };
-  appendLogRow(root, row);
+  if (taskRoot === root) {
+    appendLogRow(root, row);
+  } else {
+    queueTaskDecision(root, taskNumber, { ...input, row, decidedAt: new Date().toISOString() });
+  }
   return row;
 }
 
@@ -166,6 +225,30 @@ export function projectStatus(root: string): ProjectStatus {
   const log = parseLog(root);
   const stones = log.filter((r) => /DONE/i.test(r.outcome)).length;
   const gate = checkDirectionGate(log);
+  const parallel = parallelDraftEnabled() && hasCoordinator(root) ? coordinatorSummary(root) : undefined;
+  if (parallel) {
+    const unfinishedTasks = parallel.tasks
+      .filter((task) => task.phase !== "integrated")
+      .map((task): UnfinishedTask => {
+        const hasBrief = existsSync(paths.brief(task.worktree, task.taskNumber));
+        const hasReport = existsSync(paths.report(task.worktree, task.taskNumber));
+        const reportText = hasReport ? readFileSync(paths.report(task.worktree, task.taskNumber), "utf8") : "";
+        return {
+          taskNumber: task.taskNumber,
+          hasBrief,
+          hasApproval: existsSync(paths.approval(task.worktree, task.taskNumber)),
+          hasReport,
+          disposition: hasReport ? dispositionOf(reportText) : "UNKNOWN",
+          briefText: hasBrief ? readFileSync(paths.brief(task.worktree, task.taskNumber), "utf8") : "",
+          reportText,
+          branch: task.branch,
+          worktree: task.worktree,
+          waitingReason: task.waitingReason,
+          blocker: task.blocker,
+        };
+      });
+    return { facts, log, stones, gate, unfinished: unfinishedTasks[0] ?? null, unfinishedTasks, parallel };
+  }
   const last = nextTaskNumber(root) - 1;
   let unfinished: UnfinishedTask | null = null;
   if (last >= 1 && !log.some((r) => r.task === pad(last))) {
@@ -182,7 +265,7 @@ export function projectStatus(root: string): ProjectStatus {
       reportText,
     };
   }
-  return { facts, log, stones, gate, unfinished };
+  return { facts, log, stones, gate, unfinished, unfinishedTasks: unfinished ? [unfinished] : [] };
 }
 
 export function initProject(root: string, facts: { name: string; what: string; who: string; milestone: string; timebox: string }): { created: string[]; gitReady: boolean } {
