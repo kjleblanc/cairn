@@ -7,8 +7,19 @@ import { cairn } from "../api";
 type Draft = { dir: string; name: string; what: string; who: string; milestone: string; timebox: string };
 const emptyDraft: Draft = { dir: "", name: "", what: "", who: "", milestone: "", timebox: "two Standard tasks without visible progress (default)" };
 
-export function Picker({ startNew, onOpen, onOpenFolder, onCreated, onSettings }: {
-  startNew: boolean; onOpen: (dir: string) => void; onOpenFolder: () => void;
+/** A plain phrase for when a project was last opened; empty when the time is unknown. */
+function lastOpenedText(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const days = Math.floor((Date.now() - t) / 86_400_000);
+  if (days <= 0) return "last opened today";
+  if (days === 1) return "last opened yesterday";
+  if (days < 30) return `last opened ${days} days ago`;
+  return `last opened ${new Date(t).toLocaleDateString()}`;
+}
+
+export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSettings }: {
+  startNew: boolean; note: string | null; onOpen: (dir: string) => void; onOpenFolder: () => void;
   onCreated: (dir: string, status: ProjectStatus) => void; onSettings: () => void;
 }) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
@@ -20,6 +31,14 @@ export function Picker({ startNew, onOpen, onOpenFolder, onCreated, onSettings }
   useEffect(() => { void cairn.projectList().then((l) => setRecent(l.recent)); }, []);
 
   const set = (k: keyof Draft) => (e: React.ChangeEvent<HTMLInputElement>) => setDraft({ ...draft, [k]: e.target.value });
+
+  // Remove one entry from the app's own remembered list — never the folder itself.
+  async function forget(dir: string) {
+    const r = await cairn.projectForget(dir);
+    if (!r.ok) { setError(r.message); return; }
+    const l = await cairn.projectList();
+    setRecent(l.recent);
+  }
 
   async function create() {
     if (!draft.dir || !draft.name.trim() || !draft.milestone.trim()) {
@@ -74,19 +93,33 @@ export function Picker({ startNew, onOpen, onOpenFolder, onCreated, onSettings }
         <h1>Your projects</h1>
         <button className="pill pill-quiet" onClick={onSettings}>Settings</button>
       </div>
-      {recent.filter((r) => r.ok).map((r) => (
+      {note ? <p className="note-banner">{note}</p> : null}
+      {recent.map((r) => r.ok ? (
         <button key={r.dir} className="card" style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer", font: "inherit" }}
           onClick={() => onOpen(r.dir)}>
           <div className="row spread">
             <div>
               <strong>{r.name || "Unnamed project"}</strong>
               <p className="small muted">{r.milestone || "milestone not set"}</p>
+              {lastOpenedText(r.lastOpened) ? <p className="small muted">{lastOpenedText(r.lastOpened)}</p> : null}
             </div>
             <span className="badge badge-done">{r.stones} {r.stones === 1 ? "stone" : "stones"}</span>
           </div>
         </button>
+      ) : (
+        <div key={r.dir} className="card">
+          <div className="row spread">
+            <div>
+              <strong>{r.name || "Unnamed project"}</strong>
+              <p className="small muted mono">{r.dir}</p>
+              <p className="small">Cairn can't find this project — the folder may have moved or lost its rulebook.</p>
+              {lastOpenedText(r.lastOpened) ? <p className="small muted">{lastOpenedText(r.lastOpened)}</p> : null}
+            </div>
+            <Pill kind="quiet" onClick={() => void forget(r.dir)}>Remove from this list</Pill>
+          </div>
+        </div>
       ))}
-      {recent.filter((r) => r.ok).length === 0 ? <p className="muted">Nothing here yet.</p> : null}
+      {recent.length === 0 ? <p className="muted">Nothing here yet.</p> : null}
       <div className="row" style={{ marginTop: 16 }}>
         <Pill kind="primary" onClick={() => setCreating(true)}>Start a new project</Pill>
         <Pill onClick={onOpenFolder}>Open a project folder</Pill>

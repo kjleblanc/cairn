@@ -87,6 +87,21 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
 .log-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .log-row:last-child { border-bottom: none; }
 
+.note-banner { background: var(--amber-soft); color: var(--amber-deep); border-radius: var(--r-sm); padding: 10px 16px; margin: 0 0 12px; }
+
+.switcher { position: relative; display: inline-block; }
+.switcher-list {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 5;
+  min-width: 250px; padding: 6px; background: var(--card-solid);
+  border-radius: var(--r-sm); box-shadow: 0 6px 24px rgba(0, 0, 0, .14);
+}
+.switcher-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 14px;
+  width: 100%; border: none; background: transparent; font: inherit; color: var(--ink);
+  text-align: left; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+}
+.switcher-item:hover { background: var(--card); }
+
 .rail { display: flex; justify-content: center; align-items: center; gap: 18px; margin: 6px 0 18px; }
 .rail-step { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .85rem; }
 .rail-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--stone-a); }

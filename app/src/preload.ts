@@ -8,6 +8,7 @@ const api: CairnApi = {
   projectOpen: (dir) => ipcRenderer.invoke("project:open", dir),
   projectInit: (input) => ipcRenderer.invoke("project:init", input),
   projectStatus: (dir) => ipcRenderer.invoke("project:status", dir),
+  projectForget: (dir) => ipcRenderer.invoke("project:forget", dir),
   taskDefine: (dir, outcome) => ipcRenderer.invoke("task:define", dir, outcome),
   taskApprove: (dir, taskNumber) => ipcRenderer.invoke("task:approve", dir, taskNumber),
   taskBuild: (dir, taskNumber) => ipcRenderer.invoke("task:build", dir, taskNumber),

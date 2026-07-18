@@ -13,7 +13,7 @@ import { Settings } from "./screens/Settings";
 type View =
   | { name: "loading" }
   | { name: "welcome"; preflight: Preflight; hasRecent: boolean }
-  | { name: "picker"; startNew: boolean }
+  | { name: "picker"; startNew: boolean; note?: string }
   | { name: "dashboard"; dir: string; status: ProjectStatus; justAdded: boolean }
   | { name: "wizard"; dir: string; resume: UnfinishedTask | null }
   | { name: "direction"; dir: string; reason: string }
@@ -34,8 +34,16 @@ export function App() {
     const list = await cairn.projectList();
     if (!pf.claudeReady) { setView({ name: "welcome", preflight: pf, hasRecent: list.recent.length > 0 }); return; }
     if (list.autoOpen) { await openProject(list.autoOpen); return; }
-    if (list.recent.length > 0) setView({ name: "picker", startNew: false });
-    else setView({ name: "welcome", preflight: pf, hasRecent: false });
+    const last = list.recent[0];
+    if (last) {
+      // Reopen where the owner left off; if that project can't load, fall back
+      // to the projects screen with a plain note — never an error dead-end.
+      const r = await cairn.projectOpen(last.dir);
+      if (r.ok) { setError(null); setView({ name: "dashboard", dir: last.dir, status: r.value, justAdded: false }); }
+      else setView({ name: "picker", startNew: false, note: `Cairn couldn't reopen ${last.name || "your last project"} — the folder may have moved or lost its rulebook.` });
+      return;
+    }
+    setView({ name: "welcome", preflight: pf, hasRecent: false });
   }, [openProject]);
 
   useEffect(() => { void boot(); }, [boot]);
@@ -59,7 +67,7 @@ export function App() {
           onNew={() => setView({ name: "picker", startNew: true })}
           onBrowseRecent={() => setView({ name: "picker", startNew: false })} />;
       case "picker":
-        return <Picker startNew={view.startNew}
+        return <Picker startNew={view.startNew} note={view.note ?? null}
           onOpen={(dir) => void openProject(dir)}
           onOpenFolder={() => void pickAndOpen()}
           onCreated={(dir, status) => setView({ name: "dashboard", dir, status, justAdded: false })}
@@ -70,6 +78,7 @@ export function App() {
           onResume={() => setView({ name: "wizard", dir: view.dir, resume: view.status.unfinished })}
           onDirection={(reason) => setView({ name: "direction", dir: view.dir, reason })}
           onSwitch={() => setView({ name: "picker", startNew: false })}
+          onOpenProject={(dir) => void openProject(dir)}
           onSettings={() => setView({ name: "settings", dir: view.dir })} />;
       case "wizard":
         return <Wizard dir={view.dir} resume={view.resume}

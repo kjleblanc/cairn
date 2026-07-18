@@ -3,7 +3,7 @@ import type { CloseInput, Disposition, LogRow, ProjectStatus } from "@cairn/core
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
 export type Preflight = { claudeReady: boolean; reason: "no-sdk" | "no-login" | null };
-export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number };
+export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number; lastOpened: string };
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string; timebox: string };
 export type EngineEvent = { role: string; kind: "text" | "tool" | "denied"; text: string };
@@ -19,6 +19,8 @@ export interface CairnApi {
   projectOpen(dir: string): Promise<Result<ProjectStatus>>;
   projectInit(input: InitInput): Promise<Result<ProjectStatus>>;
   projectStatus(dir: string): Promise<Result<ProjectStatus>>;
+  /** Drop one entry from the app's own remembered list. Never deletes, moves, or changes the project folder itself. */
+  projectForget(dir: string): Promise<Result<null>>;
   taskDefine(dir: string, outcome: string): Promise<Result<DefinePayload>>;
   taskApprove(dir: string, taskNumber: number): Promise<Result<{ briefSha256: string }>>;
   taskBuild(dir: string, taskNumber: number): Promise<Result<BuildPayload>>;

@@ -3,12 +3,13 @@ import type { ProjectStatus } from "@cairn/core";
 import { Badge, Card, Pill } from "../components/Ui";
 import { Scene } from "../components/Scene";
 import { ModelEffort } from "../components/ModelEffort";
+import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { pluck } from "../sound";
 
-export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDirection, onSwitch, onSettings }: {
+export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
   dir: string; status: ProjectStatus; justAdded: boolean;
   onStartTask: () => void; onResume: () => void; onDirection: (reason: string) => void;
-  onSwitch: () => void; onSettings: () => void;
+  onSwitch: () => void; onOpenProject: (dir: string) => void; onSettings: () => void;
 }) {
   useEffect(() => { if (justAdded) pluck(); }, [justAdded]);
   const { facts, log, stones, gate, unfinished } = status;
@@ -61,7 +62,7 @@ export function Dashboard({ dir, status, justAdded, onStartTask, onResume, onDir
       </Card>
 
       <div className="row">
-        <Pill kind="quiet" onClick={onSwitch}>Switch project</Pill>
+        <ProjectSwitcher currentDir={dir} onOpenProject={onOpenProject} onAllProjects={onSwitch} />
         <Pill kind="quiet" onClick={onSettings}>Settings</Pill>
       </div>
       <p className="small muted mono" style={{ marginTop: 8 }}>{dir}</p>

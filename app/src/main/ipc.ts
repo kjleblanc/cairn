@@ -5,7 +5,7 @@ import path from "node:path";
 import { initProject, isCairnProject, projectStatus } from "@cairn/core";
 import type { InitInput, Preflight, ProjectList, RecentProject, Result, UpdateInfo } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
-import { recentDirs, touchProject } from "./registry.js";
+import { forgetProject, recentEntries, touchProject } from "./registry.js";
 
 function toResult<T>(context: string, fn: () => T): Result<T> {
   try {
@@ -37,16 +37,22 @@ export function registerProjectIpc(): void {
   ipcMain.handle("preflight:check", () => preflight());
 
   ipcMain.handle("project:list", (): ProjectList => {
-    const recent: RecentProject[] = recentDirs().map((dir) => {
+    const recent: RecentProject[] = recentEntries().map(({ dir, lastOpened }) => {
       try {
         const s = projectStatus(dir);
-        return { dir, ok: true, name: s.facts.name, milestone: s.facts.milestone, stones: s.stones };
+        return { dir, ok: true, name: s.facts.name, milestone: s.facts.milestone, stones: s.stones, lastOpened };
       } catch {
-        return { dir, ok: false, name: path.basename(dir), milestone: "", stones: 0 };
+        return { dir, ok: false, name: path.basename(dir), milestone: "", stones: 0, lastOpened };
       }
     });
     return { recent, autoOpen: process.env.CAIRN_OPEN ?? null };
   });
+
+  ipcMain.handle("project:forget", (_e, dir: string) =>
+    toResult("project:forget", () => {
+      forgetProject(dir);
+      return null;
+    }));
 
   ipcMain.handle("project:pickFolder", async (): Promise<string | null> => {
     const res = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
