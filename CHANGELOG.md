@@ -5,6 +5,78 @@ project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates
 [EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
 automatic.
 
+## Contract v2.0 — 2026-07-19
+
+- Replaced the mandatory multi-chat Define → Build → Verify → Decide sequence with
+  **risk-based autonomy**. Tiny and Standard local reversible work now proceeds
+  continuously through brief, implementation, repair, verification, report, log, and
+  safe local commit without separate approval, build-chat, review, or decision gates.
+- Kept explicit planning and approval for genuine High-Stakes work. High-Stakes
+  builds still require safe rehearsal, just-in-time approval for live actions,
+  mandatory fresh-context review, an owner decision, and qualified humans where the
+  risk demands them.
+- Changed task records from permission machinery into project memory. Routine work
+  still leaves briefs, reports, and append-only log rows, so another chat can continue
+  without guessing.
+- Added `Bootstrap Cairn:` so maintainers can improve Cairn directly and serially
+  while its own runtime is not reliable enough to self-host. Bootstrap bypasses the
+  unproven app/CLI workflow, not the safety boundary.
+- Removed parallel execution and coordinator repair from Cairn's current milestone.
+  Existing parallel candidates remain disabled historical evidence.
+- Strengthened the Direction Gate: a second gate on the same implementation ends
+  that approach instead of permitting another renamed repair.
+- Marked the current Cairn CLI and Desktop workflow as legacy v1.x behavior until a
+  separate bootstrap implementation aligns them with Contract v2.0.
+
+## Contract v1.5 — 2026-07-19
+
+- Added **Experimental Drafts** for disabled, synthetic-only learning candidates.
+  Their briefs name one supported user path and finite containment and rollback
+  checks; they are not production guarantees.
+- Review may return `PASS WITH CONCERNS` when the supported path works and
+  containment holds. Defects or uncertainty outside that path remain documented
+  concerns unless they can break the path or escape containment.
+- A contained experiment no longer has to prove every internal call sequence,
+  platform, crash interleaving, or future production condition before the owner can
+  keep it for learning.
+- A later Final task must name the exact candidate and its retained concerns, run the
+  exhaustive checks appropriate to valuable work, and obtain every qualified-human
+  approval required before activation.
+- This distinction does not weaken scope, approval, protected-work, external-action,
+  rollback, or genuine product-safety stops.
+
+## Contract v1.4 — 2026-07-19
+
+- A failed check is no longer automatically final. Correctable, in-scope
+  implementation mistakes and checking-harness defects may be repaired and rerun in
+  the same approved task, with the failed output and every correction retained in the
+  report.
+- A brief cannot force a repairable failure into `STOPPED` merely by naming the check.
+  Tests may be corrected, but never weakened just to pass; affected checks must be
+  rerun and independent evidence remains required where the lane or brief calls for it.
+- Immediate stops remain for scope expansion, protected-state changes, missing
+  authority or expertise, secrets, unsafe external effects, unclear rollback, and
+  unexpected genuine product-safety failures.
+- Added `Owner override:` for explicit process-only direction and `Amend the project
+  contract:` for an owner-controlled pause, reviewed rule change, and separate exact
+  reactivation. Neither escape hatch can waive the hard safety boundaries or silently
+  authorize an external action.
+
+## Contract v1.3 — 2026-07-18
+
+- Added a narrow exception for an owner-managed local AI-provider credential. It can
+  avoid mandatory expert review solely for holding the credential only when a real
+  technical boundary keeps the value out of chat, files, logs, renderer memory, and
+  every model-accessible tool.
+- “Stored locally,” hidden UI, prompt rules, and command deny-lists are explicitly not
+  enough. A synthetic rehearsal and boundary inspection must support all nine
+  conditions; missing evidence fails closed.
+- Real application login and permissions, other secrets, payments, personal data,
+  destructive work, production security, public or legal commitments, and
+  safety-critical behavior still require an experienced human. Credential use,
+  provider network access, and cost still require separate owner approval.
+- Cairn's current runtime is not grandfathered into the exception.
+
 ## Cairn Desktop v0.1 — 2026-07-17
 
 The gated loop as a desktop app. A project picker, a dashboard where your cairn

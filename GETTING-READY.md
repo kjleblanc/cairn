@@ -63,14 +63,23 @@ word confuses you.
 | **Check / test** | A small program that verifies a piece of your project still works. |
 | **Milestone** | The next result you could actually see or try — "the page shows my list," not "the code is better." |
 | **Project contract** | The `AGENTS.md` rules file in your project that the AI must read and obey in every chat. |
-| **Task brief** | A short saved file describing one task's boundary — what will change and what will not — which you approve before anything is built. |
+| **Task brief** | A short saved record of one task's outcome, boundary, protected work, and checks. For Tiny and Standard work it is project memory, not a separate approval gate. |
 | **Report** | The saved file the AI writes after building, saying what actually happened. |
-| **Draft / Final** | A Draft is a candidate for you to judge. A Final makes an already-chosen result the project's real behavior. Drafts never become real silently. |
-| **DONE / STOPPED** | DONE means the approved work and its checks completed. STOPPED means they did not. Both are honest outcomes. |
-| **Lane** | How much care a task gets: Tiny, Standard, or High-Stakes. |
-| **Direction Gate** | The rule that stops endless patching: after two failed attempts at the same thing, the approach changes instead. |
-| **Fresh-context review** | Asking a brand-new chat to check finished work, so the reviewer is not attached to the builder's assumptions. |
-| **Secret** | Any password, key, token, or private detail. Secrets never go into a chat. |
+| **Applied** | A completed Tiny or Standard change that became local project behavior without a separate owner-decision gate because it was reversible and stayed inside the repository. |
+| **Draft / Final** | High-Stakes terms. A Draft is a candidate to judge; a Final is intended for activation after approval and review. Drafts never become real silently. |
+| **Experimental Draft** | A disabled, synthetic-only High-Stakes Draft used to learn from one supported user path before anyone claims it is safe for valuable work. |
+| **Supported user path** | The exact visible buttons or commands the owner will use to judge an Experimental Draft. Internal helpers and unsupported call sequences stay outside that promise unless they can break containment. |
+| **DONE / STOPPED** | DONE means the bounded outcome and its checks completed. STOPPED means they did not. Both are honest outcomes. |
+| **Lane** | The task's risk level: Tiny, Standard, or High-Stakes. Tiny and Standard proceed; High-Stakes pauses for approval and review. |
+| **Risk-based autonomy** | Cairn's default: local reversible work proceeds continuously, while costly, external, destructive, or hard-to-reverse work pauses for the owner. |
+| **Direction Gate** | The rule that stops endless patching. A second gate on the same implementation ends that approach. |
+| **Fresh-context review** | Asking a brand-new chat to check finished work. It is optional for routine work and mandatory for High-Stakes work. |
+| **Repair and rerun** | Fixing a correctable implementation or test-harness mistake inside the same bounded task, preserving important failed evidence, and rerunning affected checks. |
+| **Bootstrap Cairn** | The temporary serial workflow Cairn's maintainers use to improve Cairn directly until reliable self-hosting works. It bypasses the unproven runtime, not the safety rules. |
+| **Owner override** | Your explicit instruction to change a process-only next step. It cannot expand the task's bounded scope or waive protection, authority, secret, external-effect, rollback, or product-safety boundaries. |
+| **Contract amendment** | Your always-available way to pause product work, change the rules, inspect the complete rule diff, and reactivate only with a separate exact approval. |
+| **Secret** | Any password, key, token, or private detail. Ordinary secrets never go into a chat or an AI-accessible surface. |
+| **Owner-managed local AI credential** | A provider login the owner manages through the provider's official local login or the operating system's credential store. Its value never enters Cairn, chat, project files, logs, the renderer, or any model tool. It is different from an ordinary secret only after every isolation check in the High-Stakes guide passes. |
 
 ## Ready?
 

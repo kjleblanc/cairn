@@ -1,147 +1,208 @@
-# High-Stakes — when a mistake would really hurt
+# High-Stakes — when autonomy must pause
 
-Use this lane when a mistake would be hard to notice, hard to reverse, or genuinely
-harmful. It slows the loop down on purpose: more checking before, during, and after.
+Cairn Contract v2.0 lets Tiny and Standard work move continuously. This guide covers
+the smaller set of changes where a mistake could be costly, hard to reverse, or
+externally visible.
 
-Be honest about what it cannot do. **A longer checklist cannot make you qualified to
-approve security, payments, legal, or infrastructure work.** For those, the missing
-ingredient is a person, not more process.
+More process cannot replace missing expertise. Security, payments, production data,
+and other specialist boundaries need a qualified person, not a longer AI checklist.
 
-## When this lane applies
+## What belongs here
 
-The AI must propose High-Stakes (and you can demand it) for:
+Use High-Stakes for:
 
-- dependencies, build configuration, or release systems;
-- stored-data formats, schemas, migrations, or public interfaces;
-- broad refactors that cross several parts of the project;
-- tools that write, move, delete, or transform files;
-- production systems or real effects outside your computer;
-- anything you would seriously regret shipping wrong.
+- dependencies, build/release systems, or public interfaces;
+- stored-data formats, migrations, destructive operations, or valuable data;
+- authentication, authorization, permissions, secrets, or security controls;
+- production systems, deployment, payments, billing, or money movement;
+- network calls, external-service writes, public messages, or legal commitments;
+- broad refactors whose recovery path is uncertain; or
+- anything that can affect people, systems, or data outside the named local repository.
 
-**Work that also requires an experienced human before anything runs live:**
-
-- real login, permissions, or anything guarding who can do what;
-- secrets, personal data, health data, or financial data;
-- payments, billing, refunds — any movement of money;
-- destructive migrations, deletions, or anything irreversible;
-- production infrastructure and security controls;
-- public messages, legal commitments, or safety-critical behavior.
-
-If no qualified person is available, the honest outcome is `STOPPED — EXPERT_NEEDED`.
-The AI may investigate, explain, and prepare a plan that executes nothing — but it
-must not perform the live risky action. This rule holds even when everything seems to
-work.
+Removing or moving clearly scoped tracked code can remain Standard when Git makes it
+plainly recoverable. Untracked files, user data, production data, and unclear
+ownership always move the work up.
 
 ## What changes from Standard
 
-The loop is still Define → Build → Verify → Decide, with four additions:
+High-Stakes adds four gates:
 
-1. **Define splits in two.** The AI first proposes the plan in chat without saving
-   anything; the brief file is written only after you have read the proposal.
-2. **The brief gets its own commit** before building starts, so what you approved is
-   pinned and cannot quietly drift.
-3. **Fresh-context review is mandatory,** on every High-Stakes task, plus a qualified
-   human where the list above requires one.
-4. **You sign the decision.** The closing decision records what was checked, by whom,
-   and what uncertainty you knowingly accepted.
+1. A detailed brief is written and pinned before implementation.
+2. The owner explicitly approves the exact brief.
+3. Each destructive, paid, public, credentialed, production, or external action gets
+   its own just-in-time approval after the exact target and rollback are shown.
+4. A fresh-context review and owner decision are mandatory before acceptance or
+   activation.
 
-## A. Ask for the plan (nothing is saved)
+A new build chat is optional. The exact approval and fresh review are not.
+
+## Step 1 — plan
+
+Paste:
 
 ```text
-Plan a High-Stakes task, read-only: [OUTCOME].
-Why it is High-Stakes: [RISK].
-
-Follow the project contract, plus: change nothing and save nothing this turn.
-Propose the complete brief in chat only, and add to the usual brief contents:
-- what could be damaged and whether the damage is reversible;
-- the rollback plan — the exact way we get back to safety;
-- a rehearsal: how to try this safely before it counts;
-- which experienced human this needs, or "none" with a concrete reason;
-- every live action needing separate approval, listed one by one.
-
-If the project state cannot be trusted, rollback is not credible, or required
-expertise is missing, propose STOPPED instead of a plan.
-
-End by telling me that saving happens only through my next message, which begins:
-"Save exactly the brief you proposed as ..." — treat nothing else as permission to
-write the file.
+Plan a High-Stakes task: [the result I want].
 ```
 
-Read the proposal slowly. Ask about anything you do not understand — "explain the
-rollback plan like I'm new to this" is a perfectly good message.
+The AI works read-only first, then saves the next numbered task brief. The brief must
+name:
 
-## B. Save the brief, then pin it
+- the visible outcome and milestone movement;
+- every allowed and protected path;
+- the first safe visible checkpoint;
+- what could be damaged;
+- the rollback plan;
+- the rehearsal before any live effect;
+- the exact checks;
+- every separately approved action;
+- the qualified human required, or `none` with a concrete reason;
+- whether the result is an Experimental Draft or activation-ready; and
+- the DONE and STOPPED conditions.
+
+When Git is safe, the AI commits only the brief so the approved bytes are pinned. It
+shows the complete brief and stops.
+
+Planning does not authorize an install, network call, credential, cost, deployment,
+message, external write, destructive action, or production effect.
+
+## Step 2 — approve and build
+
+After reading the exact saved brief, paste the message the AI provided:
 
 ```text
-Save exactly the brief you proposed as docs/ai-work/tasks/[NNN]-brief.md. Change
-nothing else. Then commit only that brief file so it is pinned before building.
-Saving is not approval — stop and wait. My approval arrives in a fresh chat as the
-message beginning: "I approve the exact current contents of
-docs/ai-work/tasks/[NNN]-brief.md." Treat nothing else as approval.
+Approve High-Stakes task NNN at docs/ai-work/tasks/NNN-brief.md. Build it.
 ```
 
-## C. Approve and build (in a fresh chat)
+The AI rechecks the pinned brief and protected starting state, rehearses safely, and
+builds only that boundary. A correctable implementation or checking mistake is fixed
+and rerun in the same task. Scope growth, missing authority, secret exposure,
+protected-state changes, uncertain rollback, or a genuine safety failure stops the
+task.
 
-Start a **new chat** for the build, so the builder reads the pinned brief with fresh
-eyes:
+Immediately before any authorized live action, the AI pauses and states:
+
+- the exact target;
+- the exact effect;
+- what data, people, service, or money is involved;
+- the rollback; and
+- the exact approval message it will accept.
+
+The original brief is not blanket authority for that moment.
+
+The build ends with a report and, when safe, an exact-name local commit. It does not
+silently activate a Draft.
+
+## Step 3 — fresh-context review
+
+Open a brand-new chat and paste:
 
 ```text
-I approve the exact current contents of docs/ai-work/tasks/[NNN]-brief.md. Build it.
-
-Follow the project contract, plus: confirm the brief's pinned commit exists and the
-brief is unchanged. Rehearse before any live effect. Pause and show me the exact
-target and rollback before any destructive, paid, public, or production action, even
-if the brief authorizes it. Include at least one check that was not created as part
-of this task. Do not call the task DONE while any required approval, human review,
-or rollback proof is missing. Finish by reminding me that the mandatory fresh-chat
-review comes next.
+Review High-Stakes task NNN.
 ```
 
-## D. Review from a fresh chat (mandatory)
+The reviewer reads the pinned brief, actual diff, protected starting work, and test
+changes before reading the builder's report. It forms a provisional verdict, runs
+safe decisive checks, then audits the report last.
+
+The verdict is one of:
+
+- `PASS`
+- `PASS WITH CONCERNS`
+- `FAIL`
+- `VALID STOPPED`
+
+The review says what actually worked, whether the boundary held, what remains
+unproved, and which qualified human is still required. A fresh AI chat reduces tunnel
+vision; it is not independent expert assurance.
+
+## Step 4 — owner decision
+
+After reading the review and trying the result where safe, paste:
 
 ```text
-Review task [NNN].
-
-This was High-Stakes, so additionally verify: the built work matches the pinned
-brief exactly; the rehearsal and rollback actually happened and are believable;
-every required approval and human review is present, not promised; and any changes
-to tests or checking tools are themselves examined. State clearly which risks remain
-open and whether a qualified human still needs to look.
-```
-
-Where the work touches the expert-required list, the verdict you act on is the
-human's. The AI review supplements it; it cannot substitute for it.
-
-## E. Close with a signed decision
-
-```text
-My decision for High-Stakes task [NNN]: [ACCEPT / CORRECT / ROLLBACK / DEFER / ABANDON].
+My decision for High-Stakes task NNN: [accept / revise / rollback / defer / escalate].
 Review verdict I accept: [VERDICT].
-Experienced human involved: [NAME OR ROLE, or "not required" and why].
-What I personally checked: [WHAT YOU SAW].
-Uncertainty I knowingly accept: [WHAT REMAINS UNKNOWN].
-
-Record this in the task report. Do not release, push, deploy, or activate anything —
-if a live action is next, I will authorize it separately and explicitly.
+Qualified human involved: [NAME OR ROLE, or "none" with the reason].
+What I personally checked: [WHAT I SAW].
+Uncertainty I accept: [WHAT REMAINS UNKNOWN].
 ```
 
-## About proof and paperwork
+The AI records the decision in the work log and changes no product file. Revision or
+rollback is a new task. Acceptance still does not authorize deployment, publishing,
+credentials, cost, or another external effect.
 
-Before adding heavier machinery — generated receipts, hashes, evidence chains — ask
-who needs the proof and which real dispute it would settle. A hash proves bytes match
-bytes, not that the bytes are right. A passing script proves only what the script
-tests. A second AI can share the first one's blind spots. One qualified human reading
-the actual change usually beats all of it. Add machinery only when a real reviewer,
-contract, or regulation demands it and someone will maintain it.
+## Experimental Drafts
 
-## Stop immediately when
+Use an Experimental Draft when risky technology can be learned from safely before it
+is ready for valuable work. The candidate must be:
 
-- a required expert or approval is missing;
-- a secret would need to enter the chat;
-- the rollback plan is unclear or untested;
-- the accepted brief changed after approval;
-- a decisive check fails;
-- the live state no longer matches what was reviewed.
+- disabled by default;
+- restricted to newly created synthetic or disposable inputs;
+- free of credentials, network calls, money, deployment, public action, and other
+  live effects;
+- judged through one named supported user path; and
+- immediately reversible by leaving it disabled.
 
-High-Stakes succeeds when risk and authority stay visible — not when it produces the
-most paperwork.
+The review judges that path and containment, not imaginary production perfection.
+Defects outside the supported path may remain documented concerns when they cannot
+break the path or escape containment. `PASS WITH CONCERNS` preserves learning
+evidence only. A later High-Stakes task must name the exact candidate and all retained
+concerns before activation.
+
+## Repair and rerun
+
+A failed check is evidence, not an automatic stop or new task. The AI may make the
+smallest correction when:
+
+- the cause is an in-scope implementation or checking-harness mistake;
+- the approved outcome and safety boundary do not change;
+- no acceptance criterion is weakened;
+- protected work and rollback remain sound; and
+- no genuine safety failure occurred.
+
+Important failed output and corrections go in the report. If a checking tool changes,
+the test must not be made easier merely to pass. Every affected check is rerun.
+
+## When a qualified human is mandatory
+
+A qualified human must review before live work involving:
+
+- application login, authorization, or permissions;
+- payments, billing, refunds, or money movement;
+- personal, regulated, or production data;
+- destructive migrations;
+- production infrastructure or security controls;
+- public legal commitments; or
+- safety-critical behavior.
+
+Without that person, preparation may continue safely, but the live outcome is
+`STOPPED — EXPERT_NEEDED`.
+
+## Owner-managed local AI credentials
+
+A provider credential can avoid expert review solely for provider authentication
+only when a real process or operating-system boundary keeps its value out of:
+
+- chat, prompts, model context, and model output;
+- tool requests, results, subprocess environments, and command arguments;
+- project files, Git, logs, errors, crash output, analytics, and telemetry; and
+- renderer memory, IPC, browser APIs, and browser storage.
+
+The owner must manage the credential through the provider's official local login or
+an operating-system credential store. The provider-facing component may return only
+non-secret status, opaque handles, and redacted errors. A synthetic canary rehearsal
+and boundary inspection must support the claim before real use.
+
+The owner separately approves credential use, provider network access, and any cost.
+This exception does not cover application-user authentication, permissions, billing,
+money movement, or another secret class. Cairn's current broad model-tool runtime is
+not automatically qualified.
+
+## Evidence without theater
+
+A hash proves bytes match bytes. A passing test proves only what it exercises. A
+second AI can share the first AI's blind spots. Add receipts, hashes, branches,
+worktrees, and generated evidence only when a concrete risk or reviewer needs them.
+
+For many High-Stakes tasks, one experienced human reading the actual change is more
+valuable than a large pile of AI-generated paperwork.

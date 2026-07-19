@@ -34,7 +34,7 @@ DIRECTION GATE TIMEBOX:
 
 The **first visible milestone** is the first thing you could actually see or try —
 "a page that shows my recipe list," not "set up the database." If you have no timebox
-in mind, write "default" (two tasks without visible progress).
+in mind, write "default" (two attempts without visible progress).
 
 ## Step 2 — run the setup
 
@@ -73,8 +73,9 @@ change settings outside this folder, or write any product code.
 
 Finish by showing me: every file you created, the filled-in Project facts, the Git
 status, and a one-paragraph summary of what the contract makes you do from now on.
-Then tell me my next step: open a new chat and send "Define a task: [my first
-milestone]".
+Then tell me my next step is "Work on: [my first milestone]". Explain that Tiny and
+Standard work will proceed continuously, while High-Stakes work will stop for a
+separate plan and approval.
 ```
 
 ### If the app set up your folder for you
@@ -97,8 +98,9 @@ the commit and tell me plainly what to do.
 
 Do not install anything, connect to any service, add a remote, or write any
 product code. Finish with a one-paragraph summary of what the contract makes you
-do from now on, and tell me my next step: open a new chat and send "Define a
-task: [my first milestone]".
+do from now on, and tell me my next step is "Work on: [my first milestone]".
+Explain that Tiny and Standard work proceeds without a separate approval gate,
+while High-Stakes work stops for a plan and approval.
 ```
 
 ## Step 3 — check the setup
@@ -110,7 +112,8 @@ You do not need to judge any code — just confirm these plain facts:
   folder;
 - the log and pilot tables are empty — no invented results;
 - nothing else was created, installed, or connected;
-- the AI's summary mentions waiting for your approval before building anything.
+- the AI's summary says routine local work proceeds and genuine High-Stakes work
+  waits for your approval.
 
 If something is off, say so in plain language ("The milestone is wrong — it should
 be…") and let the AI correct it before you continue.
@@ -120,9 +123,8 @@ be…") and let the AI correct it before you continue.
 Open [Everyday Workflow](EVERYDAY-WORKFLOW.md) and type your first command:
 
 ```text
-Define a task: [the smallest version of your first milestone].
+Work on: [the smallest version of your first milestone].
 ```
 
-Make the first task a **Draft** that puts something on the screen you can actually
-look at. Avoid invisible groundwork — if two tasks pass with nothing to see, the
-Direction Gate exists for exactly that.
+Start with something visible that you can actually try. Avoid invisible groundwork.
+If two attempts produce nothing useful, the Direction Gate exists for exactly that.

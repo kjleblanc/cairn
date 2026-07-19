@@ -143,12 +143,18 @@ any task, push, or deploy. Show the final status.
 From this commit forward, the contract governs all new work. Past work is not
 retroactively judged by it.
 
-## Step 7 — first tasks
+## Step 7 — first task
 
-Open [Everyday Workflow](EVERYDAY-WORKFLOW.md). Make the first task a small **Draft**
-that produces something visible, and use the five-task pilot in
-`docs/ai-work/PILOT.md` to judge whether the workflow is earning its keep in this
-project.
+Open [Everyday Workflow](EVERYDAY-WORKFLOW.md) and start with:
+
+```text
+Work on: [a small visible result].
+```
+
+Tiny and Standard work proceeds continuously. If the outcome crosses a genuine
+High-Stakes boundary, the AI stops and points you to the separate planning and
+approval path. An existing `docs/ai-work/PILOT.md` may remain as historical
+measurement, but it does not gate work.
 
 ## Abandoning or rolling back
 

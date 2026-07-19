@@ -1,110 +1,151 @@
-# Cairn — build software with AI, without knowing how to code
+# Cairn
 
-Cairn is a workflow (and a companion app) for building real software with an AI coding
-agent, one small visible step at a time, while you stay in charge. Like the stacked
-stones that mark a mountain trail, it exists so you always know where the safe path is.
+Build real software with an AI through **risk-based autonomy**: routine local work
+moves forward; real risk pauses for you.
 
-You never need to write code. Your job is four things:
-
-- say what you want in plain language;
-- look at what the AI built and try it yourself;
-- keep passwords and other secrets out of the chat;
-- let the AI stop when something is unsafe or unclear.
+Cairn is written for complete beginners. You describe the result you want. The
+project contract protects existing work, keeps external authority explicit, records
+what happened, and stops repeated patching when the approach is wrong.
 
 ## Start here
 
-**The easiest way in: open [the Cairn app](https://kjleblanc.github.io/cairn/)** — or
-double-click `cairn.html` from this folder; it works offline either way, saves your
-progress on your device, and sends nothing anywhere. It walks you through everything
-below, generates your setup message from five questions, and keeps every daily command
-one tap away.
+- New empty folder: [Project Kickoff](PROJECT-KICKOFF.md)
+- Existing project with files or history: [Project Conversion](PROJECT-CONVERSION.md)
+- Already using Cairn: [Everyday Workflow](EVERYDAY-WORKFLOW.md)
+- Risky or hard-to-reverse work: [High-Stakes](HIGH-STAKES.md)
+- Need the glossary and setup tools: [Getting Ready](GETTING-READY.md)
 
-Get the framework: visit the [repository](https://github.com/kjleblanc/cairn) and use
-**Code → Download ZIP**, or share the links above.
+The browser companion at [kjleblanc.github.io/cairn](https://kjleblanc.github.io/cairn/)
+walks through the same written framework. The Markdown files remain canonical.
 
-Prefer reading? The same journey as written guides:
-
-1. **First time?** Read [Getting Ready](GETTING-READY.md) — ten minutes of setup and a
-   plain-language glossary.
-2. **Empty project folder?** Follow [Project Kickoff](PROJECT-KICKOFF.md).
-3. **Folder that already has files?** Follow [Project Conversion](PROJECT-CONVERSION.md).
-   When unsure, treat the folder as existing — setup must never turn into cleanup.
-4. **Already set up?** Keep [Everyday Workflow](EVERYDAY-WORKFLOW.md) open; it is your
-   daily reference.
-
-## How it works
-
-At setup, your project gets a **contract** — a rules file (`AGENTS.md`) the AI reads
-at the start of every chat. The contract carries all the safety rules and defines a
-handful of short commands, so your daily messages stay as simple as:
+## The normal command
 
 ```text
-Define a task: show my book list on the home page.
+Work on: [the visible result you want]
 ```
 
-The AI answers with a saved **task brief** — a short file saying exactly what will
-change and what will not. Nothing is built until you approve it. After building, the
-AI writes a **report** of what actually happened, you try the result yourself, and you
-decide what happens next.
+For Tiny or Standard work, the AI:
 
-That is the whole loop: **Define → Build → Verify → Decide.**
+1. reads the project and protects unfinished files;
+2. writes a short task brief as project memory;
+3. builds the result immediately;
+4. repairs ordinary mistakes and reruns checks in the same task;
+5. writes the report and work-log row; and
+6. tells you exactly how to try it.
 
-## One task, one chat
+There is no separate brief approval, build chat, review chat, or decision gate for
+local reversible work.
 
-AI chats forget, and long chats drift. So each task lives in its own chat, and the
-project's files — the contract, the briefs, the reports — carry the memory between
-chats. This is why the framework saves small files as it goes: they are the project's
-memory, not paperwork.
+When the task is genuinely High-Stakes, the AI changes nothing and points you to:
 
-## Three lanes
+```text
+Plan a High-Stakes task: [the result you want]
+```
 
-Every task gets a level of care matched to its risk. The AI proposes the lane and
-explains why; uncertainty always moves a task **up**, never down.
+High-Stakes work keeps exact approval, safe rehearsal, mandatory fresh-context
+review, qualified-human boundaries, and separate authority for every live action.
 
-- **Tiny** — one small, obvious, reversible change. One message, no files.
-- **Standard** — the everyday default. The full loop with a brief and a report.
-- **High-Stakes** — hard-to-reverse work: money, personal data, security, deployment,
-  dependencies. Stricter steps, described in [High-Stakes](HIGH-STAKES.md). Some of it
-  also requires an experienced human — an AI verdict alone is never enough there.
+## Why Cairn changed in v2.0
 
-## If you ever feel lost
+Earlier Cairn versions used the same multi-chat gated loop for nearly every feature.
+That protected boundaries, but it also let planning and review become the work. In
+Cairn's own development, repeated repair tasks and two Direction Gates failed to
+produce an activatable result.
 
-Paste this, any time, in any chat:
+Contract v2.0 keeps the protections that stop real harm and removes gates from
+routine implementation. The guiding question is now: **is this action local and
+reversible, or does it cross a real risk boundary?**
+
+## Cairn's own bootstrap
+
+Cairn cannot require an unreliable Cairn runtime to repair itself. Maintainers use:
+
+```text
+Bootstrap Cairn: [the visible improvement]
+```
+
+Bootstrap work runs directly through the current coding agent, serially and one
+outcome at a time. Standard work proceeds continuously; High-Stakes work retains all
+of its gates. Parallel execution and coordinator repair are outside the current
+milestone, and existing parallel candidates remain disabled historical evidence.
+
+Bootstrap ends only after a later contract amendment records that Cairn completed a
+reliable serial self-improvement task end to end.
+
+## The safety boundary
+
+Tiny and Standard autonomy includes scoped repository edits, already-installed local
+tools, proportionate tests, local previews, and safe exact-name Git commits.
+
+The AI still needs your exact approval for:
+
+- installing or updating software;
+- network access or external-service writes;
+- credentials or model cost;
+- deployment, publishing, or public messages;
+- destructive or irreversible actions;
+- production changes or valuable data; and
+- work requiring a qualified security, payments, infrastructure, legal, or safety
+  expert.
+
+Never paste a password, API key, token, bank detail, recovery code, or `.env` contents
+into chat.
+
+## The files that keep memory
+
+Each project keeps:
+
+- `AGENTS.md` — the project contract;
+- `docs/ai-work/PROJECT.md` — the goal, users, milestone, and current boundaries;
+- `docs/ai-work/tasks/NNN-brief.md` — the task's recorded outcome and boundary;
+- `docs/ai-work/tasks/NNN-report.md` — what actually happened; and
+- `docs/ai-work/LOG.md` — one row per completed or stopped task.
+
+Routine briefs are not permission slips. They let another chat continue without
+guessing. Existing `PILOT.md` files may remain, but the pilot no longer gates work.
+
+## When the AI should stop
+
+The AI stops when the project root or ownership is unclear, protected work changes,
+the task crosses into High-Stakes work, required authority or expertise is missing,
+a secret could leak, rollback is not credible, an external effect is unapproved, or
+the Direction Gate requires a different approach.
+
+An ordinary compile error, behavior mismatch, or broken fixture is normally repaired
+and rerun inside the same task.
+
+If you feel lost, type:
 
 ```text
 Stop. What just happened?
 ```
 
-The AI must freeze, change nothing, and explain in plain language where things stand
-and what your options are. Feeling lost is normal; this command is the way out.
+If the same approach keeps failing, type:
 
-## Two safety habits worth memorizing
+```text
+Direction check: [what keeps going wrong]
+```
 
-1. **Nothing is built before you approve a saved brief.** If code appears without one,
-   stop and say so.
-2. **No secrets in chat, ever.** No password, key, or bank detail — no matter who asks.
+A second Direction Gate on the same implementation ends that approach. The next
+choice must be a smaller milestone, different architecture, experienced help, or
+deferral—not another renamed repair.
 
-Everything else — protecting existing files, honest DONE/STOPPED reporting, the
-Direction Gate that stops endless patching — is written into your project's contract,
-and the AI is bound by it so you don't have to remember it.
+## Current software status
 
-## The command line (early alpha)
+The written protocol and browser companion describe Contract v2.0. The current Cairn
+CLI and Desktop runtime still implement the older gated sequence and are **legacy
+until a separate bootstrap implementation updates them**. Do not treat their extra
+approval screens or parallel coordinator as the v2.0 workflow.
 
-For those ready to go further, [cairn-cli](cli/README.md) runs the whole loop for
-you: you describe the outcome, approve the brief with a keypress, and separate AI
-agents define, build, and review — with the contract's rules enforced by code, not
-trust. The written guides above remain the canonical protocol; Claude Code is the
-recommended agent for following them.
+The written commands can be used with any coding agent that can read and edit project
+files. Cairn's existing CLI and Desktop use Claude models; no provider credential
+should ever be pasted into Cairn or chat.
 
-## Sharing this framework
+## Sharing and versioning
 
-Share this whole folder — or the repository link. Cairn works with any programming
-language. It is built on Claude — the CLI and app run Claude models, and Claude Code
-is the recommended agent — though the written commands can be pasted into any AI
-coding agent that can read and edit files.
+Share this folder or the repository link. Cairn is language-independent and licensed
+under the [MIT License](LICENSE).
 
-Licensed under the [MIT License](LICENSE): use it, adapt it, and share what you build.
-The project contract carries a version number (`Cairn Contract v1.2`) so projects can
-say which rules they run. [CHANGELOG.md](CHANGELOG.md) records what each version
-changed; updating a project takes two approved messages, described in the
-[Everyday Workflow](EVERYDAY-WORKFLOW.md).
+The project contract carries a version number (`Cairn Contract v2.0`).
+[CHANGELOG.md](CHANGELOG.md) records each version, and
+[Everyday Workflow](EVERYDAY-WORKFLOW.md) explains reviewed updates.

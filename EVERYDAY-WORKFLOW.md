@@ -1,231 +1,245 @@
-# Everyday Workflow — your daily reference
+# Everyday Workflow — the commands you actually use
 
-Use this page once setup is done. Your project's contract (`AGENTS.md`) defines every
-command below, so your messages stay short — the AI already knows the full procedure
-behind each one. If the AI ever seems to have forgotten the rules, say:
-**"Follow the project contract in AGENTS.md."**
+Cairn Contract v2.0 uses **risk-based autonomy**: routine local work moves forward;
+real risk pauses for you.
 
-Remember the session rule: **one task, one chat.** Start a fresh chat for each task;
-the project's files carry the memory.
+## The normal path
 
-## The loop at a glance
-
-| Step | You type | You get back |
-|---|---|---|
-| **1. Define** | `Define a task: [what you want to see]` | A saved brief and a plain summary. Nothing is built yet. |
-| **2. Build** | `I approve the brief at [path]. Build it.` | The work, plus a saved report ending in DONE or STOPPED. |
-| **3. Verify** | `How do I try it?` | Exact safe steps to see the result yourself. |
-| **4. Decide** | `My decision for task [N]: … What I saw: …` | The task logged and closed. Then a new chat for the next task. |
-
-## A worked example
+Open the project in your coding agent and type:
 
 ```text
-You:  Define a task: the home page shows my list of books.
-AI:   (proposes the Standard lane, saves docs/ai-work/tasks/001-brief.md,
-       summarizes it, and waits)
-
-You:  I approve the brief at docs/ai-work/tasks/001-brief.md. Build it.
-AI:   (builds only that, runs its checks, writes 001-report.md — DONE)
-
-You:  How do I try it?
-AI:   (gives you the exact steps; you look at the page yourself)
-
-You:  My decision for task 1: accept. What I saw: the list shows all
-      three books I typed in.
-AI:   (records it; you open a new chat for task 2)
+Work on: [the visible result you want]
 ```
 
-That's a normal day. Everything below handles the exceptions.
-
-## Small stuff: the Tiny lane
-
-For a change so small it needs no paperwork — a typo, a label, a color:
+For example:
 
 ```text
-Tiny change: [describe it]
+Work on: the home page shows the three books I entered.
 ```
 
-The AI checks it truly qualifies (small, obvious, reversible, no side effects). If it
-does not qualify, the AI must decline and ask you to define a task instead — that
-refusal is the system working. After three Tiny changes in a row, the next change goes
-through a Standard task.
+The AI reads the project, protects existing work, and classifies the task:
 
-## Draft tasks: judging before adopting
+- **Tiny or Standard:** it saves a short task brief and continues immediately through
+  implementation, checks, report, log, and a safe local commit. You do not approve
+  each transition.
+- **High-Stakes:** it changes nothing and tells you to use the High-Stakes planning
+  command instead.
 
-Most first attempts should be **Drafts** — candidates for you to look at, not
-commitments. When a Draft task finishes, your decision includes judging it:
+The brief is still useful: it records the outcome, boundary, protected files, first
+visible checkpoint, and checks. It is project memory, not a permission slip for
+routine work.
 
-- **Keep it:** `My decision for task [N]: accept — keep this draft.` A later task
-  makes it the project's real behavior, and the contract requires that step to name
-  exactly what you chose.
-- **Reject it:** `My decision for task [N]: revise — not this one. What I observed: [what felt wrong]`.
-  The project's current behavior stays unchanged, and a different attempt gets a new
-  brief.
+## Stay with the task
 
-## When to get a second look
+One outcome may continue in the same chat through implementation, failed checks,
+repairs, verification, and your feedback. A task does not need a new chat merely
+because one phase ended.
 
-A **fresh-context review** means opening a brand-new chat and typing:
+If you deliberately continue in a new chat, type:
 
 ```text
-Review task [N].
+Continue task NNN.
 ```
 
-The new chat re-examines the work skeptically without repairing it and gives one
-verdict: PASS, PASS WITH CONCERNS, FAIL, or VALID STOPPED. Do this:
+The AI re-reads the saved task state and continues from the last real checkpoint.
+It must not restart the task or discard unfinished work.
 
-- when a milestone is reached;
-- after any STOPPED, reopened, or confusing task;
-- whenever you feel unsure;
-- routinely, at least every third Standard task.
+## What completion looks like
 
-A fresh chat avoids the builder's tunnel vision, but it is still the same kind of AI
-on the same code — for high-stakes work it never replaces a qualified human.
+The AI finishes a Tiny or Standard task with one honest result:
 
-## When you feel lost
+- `DONE` — the bounded outcome and its checks completed; or
+- `STOPPED — [reason]` — they did not.
+
+It writes `docs/ai-work/tasks/NNN-report.md`, appends the work log, and tells you
+exactly how to try the result. No separate owner-decision message is required.
+
+To get the try-it steps again without changing anything:
+
+```text
+How do I try it?
+```
+
+If your feedback requires another code change after a task is DONE, use a new
+`Work on:` outcome. The new task references the old one rather than rewriting its
+history.
+
+## High-Stakes work
+
+Use High-Stakes when a mistake could be costly, hard to reverse, externally visible,
+or security-sensitive. Start with:
+
+```text
+Plan a High-Stakes task: [the result you want]
+```
+
+The AI works read-only, saves and pins a detailed brief, shows it to you, and stops.
+If you understand and accept that exact boundary, use the approval message it gives
+you:
+
+```text
+Approve High-Stakes task NNN at docs/ai-work/tasks/NNN-brief.md. Build it.
+```
+
+A fresh build chat is optional; exact approval is not. Before any destructive, paid,
+public, credentialed, production, or external action, the AI pauses again and shows
+you the exact target, effect, and rollback.
+
+After the build, open a brand-new chat and type:
+
+```text
+Review High-Stakes task NNN.
+```
+
+That fresh-context review is mandatory. After reading its verdict, record your
+decision with:
+
+```text
+My decision for High-Stakes task NNN: [accept / revise / rollback / defer / escalate].
+What I personally checked: [what you saw].
+Uncertainty I accept: [what remains unknown].
+```
+
+Acceptance does not silently deploy, publish, spend money, use a credential, or
+activate a Draft. Those actions still need exact separate approval.
+
+See [HIGH-STAKES.md](HIGH-STAKES.md) for the full boundary and examples.
+
+## Cairn's bootstrap workflow
+
+While Cairn cannot reliably improve itself through its own app or CLI, maintainers
+use the coding agent directly and work serially:
+
+```text
+Bootstrap Cairn: [the visible improvement]
+```
+
+This is not a safety bypass. Standard bootstrap work proceeds continuously; genuine
+High-Stakes work still uses planning, approval, review, and expert requirements.
+Parallel execution, coordinator repair, and parallel worktrees are outside Cairn's
+current milestone. Existing parallel candidates stay disabled as historical evidence.
+
+Bootstrap ends only through a later contract amendment after Cairn demonstrates one
+reliable serial self-improvement task end to end.
+
+## Optional review for routine work
+
+Routine work does not require a review gate. When another look would genuinely help,
+open a new chat and type:
+
+```text
+Review task NNN.
+```
+
+The reviewer checks the brief, actual diff, tests, protected work, and report. Its
+findings become evidence for follow-up work; they do not erase the completed task.
+
+## When something goes wrong
+
+### A check fails
+
+The AI normally repairs the smallest in-scope mistake and reruns the affected checks
+inside the same task. It should not create a new task for an ordinary compile error,
+behavior mismatch, or broken fixture.
+
+It stops when the repair would change the requested outcome, cross into High-Stakes
+work, require missing authority, threaten protected work, or make rollback unclear.
+
+### You feel lost
+
+Type:
 
 ```text
 Stop. What just happened?
 ```
 
-Works in any chat, at any moment. The AI freezes, changes nothing, and explains where
-things stand and what your options are. Use it freely — it costs nothing.
+The AI freezes and explains the current state, what happened, and the safest options.
 
-## When progress stalls: the Direction Gate
+### The same approach keeps failing
 
-Patching the same problem forever is the most common way AI projects die. The contract
-forces a halt when the same blocker hits twice, two tasks pass with nothing visible to
-show, a "fixed" problem comes back twice, or your timebox runs out. When any of those
-happens, type:
+Type:
 
 ```text
-Direction check: [what happened].
+Direction check: [what keeps going wrong]
 ```
 
-You will get two or three *genuinely different* options — a smaller milestone, a
-different approach, experienced help, or a pause — each with its cost and its fastest
-visible test. Pick one. No third patch is allowed until you do.
+The AI makes no patch. It compares genuinely different options: reduce the
+milestone, change architecture, get experienced help, or defer the work. A second
+Direction Gate on the same implementation ends that approach; it cannot lead to
+another renamed repair of the same design.
 
-## The first five tasks
+### You need to change a process step
 
-Your project's `docs/ai-work/PILOT.md` tracks the first five tasks: how long until you
-saw something, whether it moved the milestone, and whether it needed rework. After
-five, look at the table and decide what to simplify. The workflow must earn its
-paperwork; where it only cost time, cut it.
+Type:
 
-Beyond the pilot, every closed task lands as one row in `docs/ai-work/LOG.md` — the
-project's one-glance history. The Cairn app can read it: connect your project folder
-on the Daily screen (Chrome or Edge) to see your real recent work and share it.
+```text
+Owner override: [the exact process instruction]
+```
 
-## Choosing the model and effort
+An override can remove needless ceremony. It cannot expose secrets, alter protected
+work without permission, invent expertise, or silently authorize an external effect.
 
-Cairn is built on Claude. Both of its tools let you pick which Claude model runs your
-tasks, and how hard it thinks:
+## Changing the rules themselves
 
-- **In the app:** Settings → **Model** offers the current Claude models and accepts
-  any model id you type; Settings → **Effort** offers five levels. Leave both alone
-  and Cairn uses its built-in default (`claude-opus-4-8`, with the model deciding its
-  own effort).
-- **In the terminal:** `cairn task --model <id> --effort <level>` does the same for
-  one run, and `cairn help` lists the current picks. Every run announces the model it
-  is using.
+Type:
 
-Plain cost note: a real run bills the model you chose at its own price. A bigger
-model costs more per run, and a higher effort spends more on thinking, so it also
-costs more. The offline demo (`--mock`) never calls a real model and never bills
-anything.
+```text
+Amend the project contract: [the rule change]
+```
 
-## High-Stakes work
+The AI freezes product work, inventories the tree, changes `STATUS` to `PAUSED`, and
+updates only the contract and its required mirrors. It shows the complete checked
+amendment while the project remains paused.
 
-When a task touches money, personal data, security, dependencies, deployment, or
-anything hard to reverse, the AI must propose the High-Stakes lane. Switch to the
-[High-Stakes guide](HIGH-STAKES.md) — and note that some of that work requires an
-experienced human, full stop.
+Only this exact later message restores the contract:
 
-## Stop the moment
-
-- an AI asks you to paste a secret — refuse; the contract forbids it from asking;
-- code appears without an approved brief;
-- the AI wants more scope than the brief allows — that needs a new brief, not a yes
-  in chat;
-- anything could delete or overwrite files nobody has examined.
-
-When in doubt: `Stop. What just happened?`
+```text
+I approve the contract amendment. Restore STATUS: ACTIVE.
+```
 
 ## When Cairn updates
 
-Your project's contract carries its version (`Cairn Contract v1.2` in the header of
-`AGENTS.md`), and nothing updates by itself — an update is a change to your project's
-rules, so you approve it like any other change. The
-[changelog](https://github.com/kjleblanc/cairn/blob/main/CHANGELOG.md) says what each
-version changed.
+The app may show that a newer contract exists. Updating is a governance change, so
+every Project fact except the temporary `STATUS: PAUSED` change must survive
+byte-for-byte, and product work stays frozen during review.
 
-The easy way to notice: connect your project folder in the Cairn app — when a newer
-contract exists, the dashboard shows an update button with these same steps.
-
-**Step 1.** Copy the new `CONTRACT-TEMPLATE.md` into your project folder (drag the
-file in, or use the app's copy button and save it under exactly that name).
-
-**Step 2.** Paste the check message — nothing changes yet:
+### Check the proposed update
 
 ```text
-Check this project's Cairn contract against the new version I placed at
-CONTRACT-TEMPLATE.md. Read both files and change nothing yet.
-
-Confirm the template is a Cairn contract with a newer version number than
-AGENTS.md. Then explain in plain language what would change in the rules and
-what stays the same. My Project facts block (STATUS, PROJECT NAME, and the
-rest) must carry over exactly as it is.
-
-If the template is missing, older, or not a Cairn contract, say so and stop.
-
-Then stop and wait. The only message that applies the update begins:
-"I approve the contract update. Apply it."
+Check the current Cairn contract version in AGENTS.md against the newest
+CONTRACT-TEMPLATE.md. Work read-only. Explain the rule changes in plain language,
+identify any project-specific rules that must be preserved, and show the exact files
+that an update would change. Do not apply the update, install anything, use the
+network, or change product files. End by telling me that applying the update requires
+my next message beginning: "Amend the project contract: update this project to Cairn
+Contract v[VERSION]."
 ```
 
-**Step 3.** Read the summary. If you're happy, paste:
+### Apply the reviewed update
 
 ```text
-I approve the contract update. Apply it.
-
-Replace the contents of AGENTS.md with the new template's text, then restore
-my existing Project facts block exactly as it was, including STATUS. Remove
-the CONTRACT-TEMPLATE.md copy afterward. Change no other files — my log,
-tasks, and reports stay untouched.
-
-Show me the restored Project facts and the new version line. If Git is
-available and the state is safe, commit the contract update staged by name,
-with a message naming the old and new versions. Do not push.
+Amend the project contract: update this project to Cairn Contract v[VERSION], using
+the reviewed CONTRACT-TEMPLATE.md. Preserve every Project fact except the required
+temporary change of STATUS to PAUSED, and keep all stronger project-specific safety
+rules. Update only AGENTS.md and required local mirrors. Show the complete diff while
+STATUS remains PAUSED. Do not start product work, install, push, deploy, or contact
+an external service.
 ```
 
-That's it — the update touches one file, and your project's history stays exactly as
-it was.
-
-**The even easier way (Chrome/Edge):** with your project connected in the app, press
-**Apply it for me** on the update notice. Cairn rewrites `AGENTS.md` only, keeps your
-Project facts exactly, and hands you this message so Git records the change:
+### Record an app-applied update
 
 ```text
-I used the Cairn app to update this project's contract. Verify that AGENTS.md is
-a complete Cairn contract at the new version with my Project facts intact, and
-that no other file changed. Then commit only AGENTS.md with a message naming the
-old and new contract versions. Do not push. If anything looks wrong, stop and
-show me.
+I used the Cairn app to update this project's contract. Verify that AGENTS.md is the
+new contract version, STATUS is PAUSED, every other Project fact is unchanged, and no
+other file changed. If safe, commit only AGENTS.md by exact path. Do not push or start
+product work. The contract remains PAUSED until I send: "I approve the contract
+amendment. Restore STATUS: ACTIVE."
 ```
 
-## Troubleshooting
+## The safety boundary in one paragraph
 
-**"The AI asks for approval in its own words."** After defining a task, the AI may
-ask "shall I proceed?" or "just say yes." Don't. Approval is always the scripted
-message — `I approve the brief at [path]. Build it.` — and the contract tells the AI
-to accept nothing else. Paste the real thing.
-
-**"The AI is ignoring the workflow."** Start your message with "Follow the project
-contract in AGENTS.md." If it persists, start a new chat — long chats drift.
-
-**"The AI's answer contradicts its own report."** Ask for a fresh-context review of
-that task in a new chat. The saved files, not the chat, are the record.
-
-**Windows: an npm command fails before it even starts.** If PowerShell blocks a
-script with an error mentioning `npm.ps1`, the AI may retry the identical command
-through `npm.cmd` and must tell you it did so. If the command starts and *then* fails,
-that is a real failure and requires an honest STOPPED — not a retry trick.
+Tiny and Standard autonomy covers scoped local edits, already-installed tools,
+proportionate checks, local previews, and safe exact-name commits. The AI still needs explicit
+approval for installs, network access, credentials, money, deployment, messages,
+external writes, destructive or irreversible actions, production changes, or
+valuable data. Never paste a secret into chat.

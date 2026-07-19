@@ -22,19 +22,18 @@ inside this directory unless the user explicitly expands scope.
 - `index.html` — a redirect to `cairn.html` so the GitHub Pages root opens the app;
 - `CHANGELOG.md` — plain-language history of contract versions;
 - `LICENSE` — MIT;
-- `cli/` — cairn-cli (early alpha): the workflow as a gated command line on the
-  Claude Agent SDK. The Markdown protocol stays canonical; the CLI is its reference
-  runtime, and it must enforce in code what the contract states in prose (hash-locked
-  approvals, tool deny-lists, the reviewer's report lockout, the mechanical Direction
-  Gate). Its `assets/contract.md` is synced from `CONTRACT-TEMPLATE.md` at every
-  build — never edited by hand.
+- `cli/` — cairn-cli (early alpha). The Markdown protocol stays canonical. The
+  current CLI and Desktop runtime still implement the legacy v1.x gated sequence and
+  must be described honestly as legacy until a separate bootstrap implementation
+  brings them into line with v2.0. Their generated contract asset is synced from
+  `CONTRACT-TEMPLATE.md` at every build and is never edited by hand.
 
-The contract carries a version number (`Cairn Contract v1.2` in its header). Bump it
+The contract carries a version number (`Cairn Contract v2.0` in its header). Bump it
 whenever the contract's rules change meaningfully, in the template and the app's
 embedded copy together — and add a plain-language entry to `CHANGELOG.md` in the
-same session. Projects update through the two prompts in EVERYDAY-WORKFLOW.md
-("When Cairn updates"), which the app mirrors; those prompts preserve the Project
-facts block exactly and touch nothing else.
+same session. Projects update through the prompts in EVERYDAY-WORKFLOW.md ("When
+Cairn updates"), which the app mirrors; those prompts preserve every Project fact
+except the required temporary `STATUS: PAUSED` change and touch nothing else.
 
 Every prompt that ends by waiting for the owner must name the exact next message it
 will accept ("the only message that approves this begins: …"). Prompts travel
@@ -57,15 +56,24 @@ can see the next step's text.
    | The rules file in a project | project contract (`AGENTS.md`) |
    | The saved per-task boundary file | task brief |
    | The saved per-task outcome file | report |
-   | A candidate to judge / an adopted result | Draft / Final |
+   | A completed routine implementation | Applied |
+   | A High-Stakes candidate / activation-ready result | Draft / Final |
+   | A contained learning candidate | Experimental Draft |
+   | The exact interface promised by an experiment | supported user path |
    | The care levels | Tiny, Standard, High-Stakes |
    | The honest outcomes | DONE, STOPPED |
    | The stop-patching rule | Direction Gate |
+   | Routine work proceeding without ceremony | risk-based autonomy |
+   | An in-task correction cycle | repair and rerun |
+   | Cairn's temporary self-improvement path | Bootstrap Cairn |
+   | The owner's process escape hatch | owner override |
+   | A change to the governing rules | contract amendment |
    | The human in charge | owner |
 
-5. **Keep the honesty clauses.** Fresh-context review reduces tunnel vision but is
-   not independent assurance; evidence proves observations, not overall correctness;
-   experts are required where the contract says so. Never soften these.
+5. **Keep the honesty clauses.** Routine review is optional; High-Stakes
+   fresh-context review is mandatory but still not independent assurance. Evidence
+   proves observations, not overall correctness; experts are required where the
+   contract says so. Never soften these.
 6. **Preservation first.** Existing, modified, and untracked work is protected in
    every flow. Setup must never become cleanup.
 7. **Self-contained and personal-data-free.** No personal names, private history,
