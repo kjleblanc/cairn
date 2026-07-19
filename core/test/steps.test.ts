@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockEngine } from "../src/agents.js";
@@ -10,6 +10,7 @@ import {
   approveBrief, buildTask, closeTask, defineTask, initProject, loadApproval,
   projectStatus, refineBrief, reviewTask, runDirectionCheck,
 } from "../src/steps.js";
+import { runSerialV2MockStandardTask } from "../src/serial-v2.js";
 
 const engine = new MockEngine();
 
@@ -39,6 +40,84 @@ test("full loop: define, approve, build, review, close — files carry the state
   const row = closeTask(dir, 1, { decision: "accept", summary: "saw the file", moved: "YES" });
   assert.equal(row.task, "001");
   assert.equal(parseLog(dir).length, 1);
+});
+
+test("serial v2 mock path is off by default and refuses non-mock or parallel execution before writing", () => {
+  const dir = freshProject();
+  const originalSerial = process.env.CAIRN_SERIAL_V2_DRAFT;
+  const originalMock = process.env.CAIRN_MOCK;
+  const originalParallel = process.env.CAIRN_PARALLEL_DRAFT;
+  const originalLog = readFileSync(paths.log(dir), "utf8");
+  try {
+    delete process.env.CAIRN_SERIAL_V2_DRAFT;
+    delete process.env.CAIRN_MOCK;
+    delete process.env.CAIRN_PARALLEL_DRAFT;
+    assert.throws(() => runSerialV2MockStandardTask(dir), /SERIAL_V2_DISABLED/);
+
+    process.env.CAIRN_SERIAL_V2_DRAFT = "1";
+    assert.throws(() => runSerialV2MockStandardTask(dir), /SERIAL_V2_MOCK_ONLY/);
+
+    process.env.CAIRN_MOCK = "1";
+    process.env.CAIRN_PARALLEL_DRAFT = "1";
+    assert.throws(() => runSerialV2MockStandardTask(dir), /SERIAL_V2_SERIAL_ONLY/);
+
+    delete process.env.CAIRN_PARALLEL_DRAFT;
+    assert.throws(() => runSerialV2MockStandardTask(process.cwd()), /SERIAL_V2_SYNTHETIC_ONLY/);
+
+    assert.deepEqual(readdirSync(paths.tasks(dir)), []);
+    assert.equal(readFileSync(paths.log(dir), "utf8"), originalLog);
+    assert.equal(existsSync(join(dir, ".git")), false);
+  } finally {
+    if (originalSerial === undefined) delete process.env.CAIRN_SERIAL_V2_DRAFT;
+    else process.env.CAIRN_SERIAL_V2_DRAFT = originalSerial;
+    if (originalMock === undefined) delete process.env.CAIRN_MOCK;
+    else process.env.CAIRN_MOCK = originalMock;
+    if (originalParallel === undefined) delete process.env.CAIRN_PARALLEL_DRAFT;
+    else process.env.CAIRN_PARALLEL_DRAFT = originalParallel;
+  }
+});
+
+test("serial v2 mock path completes one synthetic Standard task without gates or coordinator state", () => {
+  const dir = freshProject();
+  const originalSerial = process.env.CAIRN_SERIAL_V2_DRAFT;
+  const originalMock = process.env.CAIRN_MOCK;
+  const originalParallel = process.env.CAIRN_PARALLEL_DRAFT;
+  try {
+    process.env.CAIRN_SERIAL_V2_DRAFT = "1";
+    process.env.CAIRN_MOCK = "1";
+    delete process.env.CAIRN_PARALLEL_DRAFT;
+
+    const result = runSerialV2MockStandardTask(dir);
+    assert.equal(result.taskNumber, 1);
+    assert.equal(result.disposition, "DONE");
+    assert.deepEqual(result.checks, [
+      "PASS: visible result file exists",
+      "PASS: visible result bytes match the fixed mock expectation",
+      "PASS: Applied/completed/DONE log row round-trips",
+    ]);
+    assert.equal(readFileSync(result.builtPath, "utf8"), "hello from the serial v2 mock path\n");
+    assert.match(readFileSync(result.briefPath, "utf8"), /Lane: \*\*Standard\*\*/);
+    assert.match(readFileSync(result.reportPath, "utf8"), /Disposition: DONE/);
+
+    const rows = parseLog(dir);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(
+      { lane: rows[0].lane, mode: rows[0].mode, outcome: rows[0].outcome, decision: rows[0].decision },
+      { lane: "Standard", mode: "Applied", outcome: "DONE", decision: "completed" },
+    );
+    assert.deepEqual(readdirSync(paths.tasks(dir)).sort(), ["001-brief.md", "001-report.md"]);
+    assert.equal(existsSync(paths.approval(dir, 1)), false);
+    assert.equal(existsSync(paths.decision(dir, 1)), false);
+    assert.equal(existsSync(join(dir, ".git")), false);
+    assert.equal(projectStatus(dir).unfinished, null);
+  } finally {
+    if (originalSerial === undefined) delete process.env.CAIRN_SERIAL_V2_DRAFT;
+    else process.env.CAIRN_SERIAL_V2_DRAFT = originalSerial;
+    if (originalMock === undefined) delete process.env.CAIRN_MOCK;
+    else process.env.CAIRN_MOCK = originalMock;
+    if (originalParallel === undefined) delete process.env.CAIRN_PARALLEL_DRAFT;
+    else process.env.CAIRN_PARALLEL_DRAFT = originalParallel;
+  }
 });
 
 test("build refuses without a persisted approval, and after tampering", async () => {
