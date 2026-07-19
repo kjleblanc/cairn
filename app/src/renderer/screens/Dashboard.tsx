@@ -51,12 +51,24 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
         <Card title="unfinished task" key={task.taskNumber}>
           {(() => {
             const coordinatorTask = status.parallel?.tasks.find((item) => item.taskNumber === task.taskNumber);
+            if (coordinatorTask?.blocker === "DEFINER_ENGINE_FAILED") {
+              return <p className="small"><strong>Definition stopped safely.</strong> Cairn kept this task number, branch, worktree, and partial brief for a definition retry.</p>;
+            }
+            if (coordinatorTask?.blocker === "BUILDER_ENGINE_FAILED") {
+              return <p className="small"><strong>Build stopped safely.</strong> Cairn kept this task's approval, branch, worktree, and partial allowed work for a build retry.</p>;
+            }
             if (coordinatorTask?.blocker) return <p className="small"><strong>Stopped safely:</strong> {coordinatorTask.blocker}. Its branch and worktree were retained.</p>;
             return coordinatorTask?.waitingReason ? <p className="small"><strong>Waiting:</strong> {coordinatorTask.waitingReason}</p> : null;
           })()}
           <div className="row spread">
             <p>Task {String(task.taskNumber).padStart(3, "0")} is still independent and open. Pick up exactly this task.</p>
-            <Pill onClick={() => onResume(task)}>{parallelDraft ? `Continue Task ${String(task.taskNumber).padStart(3, "0")}` : "Continue it"}</Pill>
+            <Pill onClick={() => onResume(task)}>
+              {task.blocker === "DEFINER_ENGINE_FAILED"
+                ? `Open definition recovery for Task ${String(task.taskNumber).padStart(3, "0")}`
+                : task.blocker === "BUILDER_ENGINE_FAILED"
+                  ? `Open build recovery for Task ${String(task.taskNumber).padStart(3, "0")}`
+                  : parallelDraft ? `Continue Task ${String(task.taskNumber).padStart(3, "0")}` : "Continue it"}
+            </Pill>
           </div>
           {status.parallel?.tasks.find((item) => item.taskNumber === task.taskNumber) ? (
             <p className="small mono muted">

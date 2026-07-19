@@ -13,6 +13,7 @@ import { builderPrompt, definerPrompt, directionPrompt, refinePrompt, reviewerPr
 import { dispositionOf, finalVerdictOf } from "./parse.js";
 import {
   beginCoordinatedBuild,
+  blockEngineFailure,
   builderWritablePaths,
   coordinatorSummary,
   finishCoordinatedBuild,
@@ -96,7 +97,16 @@ export async function defineTask(root: string, outcome: string, engine: Engine, 
   const runRoot = reserved?.worktree ?? root;
   // The prompt mentions the ask tool only when the skin wired an answer channel.
   const p = definerPrompt(runRoot, taskNumber, outcome, { canAsk: Boolean(events.onAsk) });
-  const res = await engine.run({ role: "definer", root: runRoot, taskNumber, system: p.system, user: p.user }, events);
+  let res: Awaited<ReturnType<Engine["run"]>>;
+  try {
+    res = await engine.run({ role: "definer", root: runRoot, taskNumber, system: p.system, user: p.user }, events);
+  } catch {
+    if (coordinated) {
+      blockEngineFailure(root, taskNumber, "defining", "DEFINER_ENGINE_FAILED");
+      throw new Error("DEFINER_ENGINE_FAILED: Definition stopped safely. The same task, worktree, and partial brief were retained for retry.");
+    }
+    throw new Error("DEFINER_ENGINE_FAILED: Definition stopped before a brief was completed.");
+  }
   const briefPath = paths.brief(runRoot, taskNumber);
   if (!existsSync(briefPath)) {
     throw new Error("The definer produced no brief file. Nothing was approved and nothing will be built.");
@@ -163,14 +173,23 @@ export async function buildTask(root: string, taskNumber: number, engine: Engine
   const task = coordinated ? beginCoordinatedBuild(root, taskNumber) : null;
   const taskRoot = task?.worktree ?? root;
   const p = builderPrompt(taskRoot, taskNumber);
-  const res = await engine.run({
-    role: "builder",
-    root: taskRoot,
-    taskNumber,
-    system: p.system,
-    user: p.user,
-    ...(task ? { allowedPaths: builderWritablePaths(task) } : {}),
-  }, events);
+  let res: Awaited<ReturnType<Engine["run"]>>;
+  try {
+    res = await engine.run({
+      role: "builder",
+      root: taskRoot,
+      taskNumber,
+      system: p.system,
+      user: p.user,
+      ...(task ? { allowedPaths: builderWritablePaths(task) } : {}),
+    }, events);
+  } catch {
+    if (coordinated) {
+      blockEngineFailure(root, taskNumber, "building", "BUILDER_ENGINE_FAILED");
+      throw new Error("BUILDER_ENGINE_FAILED: Build stopped safely. The approval, worktree, and partial allowed work were retained for retry.");
+    }
+    throw new Error("BUILDER_ENGINE_FAILED: Build stopped before a report was completed.");
+  }
   const reportPath = paths.report(taskRoot, taskNumber);
   const reportText = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
   const disposition = dispositionOf(reportText || res.text);

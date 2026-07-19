@@ -75,6 +75,7 @@ export interface CoordinatorTask {
   approvalSha256?: string;
   disposition?: "DONE" | "STOPPED" | "UNKNOWN";
   decision?: CoordinatorDecision;
+  decisionCommit?: string;
   changedPaths: string[];
   blocker?: string;
   integrationCommit?: string;
@@ -212,6 +213,7 @@ function taskIsValid(value: unknown): value is CoordinatorTask {
     Array.isArray(t.externalActions) && t.externalActions.every((item) => typeof item === "string") &&
     Array.isArray(t.changedPaths) && t.changedPaths.every((item) => typeof item === "string") &&
     (t.decision === undefined || (typeof t.decision === "object" && t.decision !== null)) &&
+    (t.decisionCommit === undefined || (typeof t.decisionCommit === "string" && /^[0-9a-f]{40}$/.test(t.decisionCommit))) &&
     typeof t.reservedAt === "string" &&
     typeof t.updatedAt === "string";
 }
@@ -395,6 +397,27 @@ function activeTasks(state: CoordinatorState): CoordinatorTask[] {
 
 export function reserveTask(root: string, claimDefinition = false): CoordinatorTask {
   const state = hasCoordinator(root) ? readCoordinatorState(root) : initializeCoordinator(root);
+  const retainedDefinition = claimDefinition
+    ? activeTasks(state).filter((task) => task.phase === "blocked" && task.blocker === "DEFINER_ENGINE_FAILED")
+    : [];
+  if (retainedDefinition.length > 1) {
+    throw new CoordinatorError("CORRUPT_STATE", "More than one failed definition is awaiting the serialized retry slot.");
+  }
+  if (retainedDefinition.length === 1) {
+    const taskNumber = retainedDefinition[0].taskNumber;
+    return findTask(updateState(root, (draft) => {
+      const current = findTask(draft, taskNumber);
+      if (current.phase !== "blocked" || current.blocker !== "DEFINER_ENGINE_FAILED") {
+        throw new CoordinatorError("RETRY_CHANGED", "The retained definition changed before retry could begin.");
+      }
+      if (activeTasks(draft).some((task) => task.taskNumber !== taskNumber && task.phase === "defining")) {
+        throw new CoordinatorError("DEFINE_BUSY", "Task definitions are serialized until lane and mode are frozen.");
+      }
+      current.phase = "defining";
+      current.blocker = undefined;
+      current.updatedAt = now();
+    }), taskNumber);
+  }
   if (activeTasks(state).length >= 2) {
     throw new CoordinatorError("CONCURRENCY_LIMIT", "At most two non-integrated Draft tasks may exist at once.");
   }
@@ -442,6 +465,14 @@ export function createTaskWorktree(root: string, taskNumber: number): Coordinato
   }
   if (!inside(tmpdir(), task.worktree) || !inside(state.worktreeRoot, task.worktree)) {
     throw new CoordinatorError("UNSAFE_WORKTREE_PATH", "The planned task worktree escaped its retained temporary area.");
+  }
+  if (existsSync(task.worktree)) {
+    const retainedRoot = resolve(git(task.worktree, ["rev-parse", "--show-toplevel"]));
+    const retainedBranch = git(task.worktree, ["branch", "--show-current"]);
+    if (task.phase === "defining" && retainedRoot === resolve(task.worktree) && retainedBranch === task.branch) {
+      return task;
+    }
+    throw new CoordinatorError("WORKTREE_ALREADY_EXISTS", "The retained worktree does not match the task awaiting retry.");
   }
   if (task.phase === "reserved") {
     state = updateState(root, (draft) => {
@@ -608,7 +639,7 @@ function waitingReason(state: CoordinatorState, task: CoordinatorTask): string {
     return "CLASSIFICATION_WAIT — both tasks must be frozen as Standard/Draft before parallel work starts.";
   }
   const parallelEligible = task.lane === "Standard" && task.mode === "Draft" && task.externalActions.length === 0;
-  if (!parallelEligible && peers.length > 0) {
+  if (!parallelEligible && peers.some((peer) => peer.taskNumber < task.taskNumber)) {
     return "EXCLUSIVE_TASK — High-Stakes, Final, Tiny, unknown, or live-action work runs alone.";
   }
   for (const peer of peers) {
@@ -683,8 +714,22 @@ function rebaseOnto(root: string, task: CoordinatorTask, mainCommit: string): vo
 export function beginCoordinatedBuild(root: string, taskNumber: number): CoordinatorTask {
   let state = readCoordinatorState(root);
   let task = findTask(state, taskNumber);
-  if (!task.approvalSha256 || !["approved", "waiting"].includes(task.phase)) {
+  const retryingEngineFailure = task.phase === "blocked" && task.blocker === "BUILDER_ENGINE_FAILED";
+  if (!task.approvalSha256 || (!retryingEngineFailure && !["approved", "waiting"].includes(task.phase))) {
     throw new CoordinatorError("TASK_PHASE", "The task is not approved and ready to build.");
+  }
+  if (retryingEngineFailure) {
+    inspectTaskScope(root, taskNumber);
+    state = updateState(root, (draft) => {
+      const current = findTask(draft, taskNumber);
+      if (current.phase !== "blocked" || current.blocker !== "BUILDER_ENGINE_FAILED") {
+        throw new CoordinatorError("RETRY_CHANGED", "The retained build changed before retry could begin.");
+      }
+      current.phase = "waiting";
+      current.blocker = undefined;
+      current.updatedAt = now();
+    });
+    task = findTask(state, taskNumber);
   }
   const reason = waitingReason(state, task);
   if (reason) {
@@ -725,13 +770,10 @@ function workingTreePaths(worktree: string): { paths: string[]; destructive: str
   return { paths: [...new Set(changed)], destructive };
 }
 
-export function inspectTaskScope(root: string, taskNumber: number, baseCommit?: string): string[] {
-  const state = readCoordinatorState(root);
-  const task = findTask(state, taskNumber);
-  const base = baseCommit ?? task.baseCommit;
-  const committed = git(task.worktree, ["diff", "--name-only", `${base}..HEAD`])
+function inspectScopeInWorktree(task: CoordinatorTask, worktree: string, baseCommit: string): string[] {
+  const committed = git(worktree, ["diff", "--name-only", `${baseCommit}..HEAD`])
     .split(/\r?\n/).filter(Boolean).map((path) => path.replace(/\\/g, "/"));
-  const working = workingTreePaths(task.worktree);
+  const working = workingTreePaths(worktree);
   if (working.destructive.length) {
     throw new CoordinatorError("SCOPE_GATE_FAILED", `Deletion, rename, or copy is not permitted: ${working.destructive.join(", ")}`);
   }
@@ -742,6 +784,29 @@ export function inspectTaskScope(root: string, taskNumber: number, baseCommit?: 
     throw new CoordinatorError("SCOPE_GATE_FAILED", `Undeclared changed path(s): ${outside.join(", ")}`);
   }
   return changed;
+}
+
+export function inspectTaskScope(root: string, taskNumber: number, baseCommit?: string): string[] {
+  const state = readCoordinatorState(root);
+  const task = findTask(state, taskNumber);
+  return inspectScopeInWorktree(task, task.worktree, baseCommit ?? task.baseCommit);
+}
+
+export function blockEngineFailure(
+  root: string,
+  taskNumber: number,
+  expectedPhase: "defining" | "building",
+  blocker: "DEFINER_ENGINE_FAILED" | "BUILDER_ENGINE_FAILED",
+): CoordinatorTask {
+  return findTask(updateState(root, (draft) => {
+    const task = findTask(draft, taskNumber);
+    if (task.phase !== expectedPhase) {
+      throw new CoordinatorError("TASK_PHASE", `Task ${pad(taskNumber)} left ${expectedPhase} before its engine failure was recorded.`);
+    }
+    task.phase = "blocked";
+    task.blocker = blocker;
+    task.updatedAt = now();
+  }), taskNumber);
 }
 
 export function finishCoordinatedBuild(
@@ -784,11 +849,12 @@ export function queueTaskDecision(root: string, taskNumber: number, decision: Co
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify(decision, null, 2) + "\n", { flag: "wx" });
   const withDecision = inspectTaskScope(root, taskNumber);
-  commitNamed(task.worktree, withDecision, `Task ${pad(taskNumber)}: parallel Draft candidate`);
+  const decisionCommit = commitNamed(task.worktree, withDecision, `Task ${pad(taskNumber)}: parallel Draft candidate`);
   return findTask(updateState(root, (draft) => {
     const current = findTask(draft, taskNumber);
     current.changedPaths = [...new Set([...changed, `docs/ai-work/tasks/${pad(taskNumber)}-decision.json`])].sort();
     current.decision = decision;
+    current.decisionCommit = decisionCommit;
     current.phase = "queued";
     current.updatedAt = now();
     if (!draft.integrationQueue.includes(taskNumber)) draft.integrationQueue.push(taskNumber);
@@ -856,6 +922,16 @@ function appendDecisionLog(worktree: string, decision: CoordinatorDecision): voi
   );
 }
 
+function decisionPositionChanged(root: string, task: CoordinatorTask): boolean {
+  if (!task.decisionCommit) return true;
+  try {
+    return git(root, ["rev-parse", task.branch]) !== task.decisionCommit ||
+      git(task.worktree, ["rev-parse", "HEAD"]) !== task.decisionCommit;
+  } catch {
+    return true;
+  }
+}
+
 export function integrateNext(root: string): CoordinatorTask | null {
   assertDraftRoot(root);
   assertCleanMain(root);
@@ -863,6 +939,16 @@ export function integrateNext(root: string): CoordinatorTask | null {
   if (state.integrationLease) throw new CoordinatorError("INTEGRATION_BUSY", "Another integration lease is active.");
   const taskNumber = state.integrationQueue[0];
   if (!taskNumber) return null;
+  const queuedTask = findTask(state, taskNumber);
+  if (!queuedTask.decisionCommit) {
+    failIntegration(root, taskNumber, "DECISION_COMMIT_MISSING");
+    throw new CoordinatorError("DECISION_COMMIT_MISSING", "The queued decision has no frozen task commit.");
+  }
+  if (decisionPositionChanged(root, queuedTask)) {
+    failIntegration(root, taskNumber, "DECISION_BRANCH_MOVED");
+    throw new CoordinatorError("DECISION_BRANCH_MOVED", "The task branch or worktree moved after the owner's decision.");
+  }
+  const decisionCommit = queuedTask.decisionCommit;
   const token = randomUUID();
   state = updateState(root, (draft) => {
     if (draft.integrationLease) throw new CoordinatorError("INTEGRATION_BUSY", "Another integration lease is active.");
@@ -872,8 +958,8 @@ export function integrateNext(root: string): CoordinatorTask | null {
     task.updatedAt = now();
     draft.integrationLease = { taskNumber, token, acquiredAt: now() };
   });
-  let expectedCoordinatorRevision = state.revision;
-  let task = findTask(state, taskNumber);
+  const expectedCoordinatorRevision = state.revision;
+  const task = findTask(state, taskNumber);
   const expectedMain = state.integratedMain;
   let retainedIntegrationWorktree: string | undefined;
   try {
@@ -883,17 +969,7 @@ export function integrateNext(root: string): CoordinatorTask | null {
     if (git(task.worktree, ["status", "--porcelain=v1", "--untracked-files=all"])) {
       throw new CoordinatorError("TASK_WORKTREE_DIRTY", "The queued task worktree is not clean.");
     }
-    if (task.decision?.decision === "accept") {
-      rebaseOnto(root, task, expectedMain);
-      task = findTask(readCoordinatorState(root), taskNumber);
-      // rebaseOnto updates coordinator state, so the lease revision intentionally advances.
-      state = readCoordinatorState(root);
-      if (state.integrationLease?.token !== token) throw new CoordinatorError("LEASE_CHANGED", "The integration lease changed.");
-      expectedCoordinatorRevision = state.revision;
-      inspectTaskScope(root, taskNumber, expectedMain);
-      runChecks(task);
-    }
-    const integrationBase = task.decision?.decision === "accept" ? task.branch : expectedMain;
+    const integrationBase = task.decision?.decision === "accept" ? decisionCommit : expectedMain;
     retainedIntegrationWorktree = resolve(state.worktreeRoot, `integration-${pad(taskNumber)}-${Date.now()}`);
     if (!inside(tmpdir(), retainedIntegrationWorktree) || !inside(state.worktreeRoot, retainedIntegrationWorktree)) {
       throw new CoordinatorError("UNSAFE_INTEGRATION_PATH", "The integration rehearsal path escaped the temporary worktree area.");
@@ -901,6 +977,18 @@ export function integrateNext(root: string): CoordinatorTask | null {
     mkdirSync(dirname(retainedIntegrationWorktree), { recursive: true });
     git(root, ["worktree", "add", "--detach", retainedIntegrationWorktree, integrationBase]);
     if (!task.decision) throw new CoordinatorError("DECISION_MISSING", "The queued task has no frozen decision.");
+    if (task.decision.decision === "accept") {
+      if (task.baseCommit !== expectedMain) {
+        try {
+          git(retainedIntegrationWorktree, ["rebase", expectedMain]);
+        } catch (error) {
+          try { git(retainedIntegrationWorktree, ["rebase", "--abort"]); } catch { /* retained evidence remains */ }
+          throw new CoordinatorError("INTEGRATION_CONFLICT", error instanceof Error ? error.message : String(error));
+        }
+      }
+      inspectScopeInWorktree(task, retainedIntegrationWorktree, expectedMain);
+      runChecks({ ...task, worktree: retainedIntegrationWorktree });
+    }
     appendDecisionLog(retainedIntegrationWorktree, task.decision);
     commitNamed(
       retainedIntegrationWorktree,
@@ -918,6 +1006,9 @@ export function integrateNext(root: string): CoordinatorTask | null {
     }
     if (git(root, ["rev-parse", "refs/heads/main"]) !== expectedMain) {
       throw new CoordinatorError("MAIN_CHANGED", "main or coordinator state changed before the final advance.");
+    }
+    if (decisionPositionChanged(root, task)) {
+      throw new CoordinatorError("DECISION_BRANCH_MOVED", "The task branch or worktree moved after the owner's decision.");
     }
     assertCleanMain(root);
     git(root, ["merge", "--ff-only", integrationCommit]);

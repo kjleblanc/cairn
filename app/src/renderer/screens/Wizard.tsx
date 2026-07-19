@@ -67,6 +67,7 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
   const [summary, setSummary] = useState("");
   const [moved, setMoved] = useState<CloseInput["moved"]>("YES");
   const [closing, setClosing] = useState(false);
+  const [blocker, setBlocker] = useState(resume?.blocker);
   // Two-way talk (task 008): a pending question from the AI while it writes the
   // brief, and the owner's pre-approval ask-or-change round on the drafted brief.
   const [pendingQ, setPendingQ] = useState<OwnerQuestionEvent | null>(null);
@@ -114,9 +115,27 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
       setTaskNumber(r.value.taskNumber);
       setBrief(r.value.briefText);
       setCoordinatorTask(r.value.coordinatorTask ?? null);
+      setBlocker(undefined);
       setPhase("approve");
     }
     else { setError(r.message); setPhase("outcome"); }
+  }
+
+  async function retryDefinition() {
+    setError(null); setEvents([]); setPhase("defining");
+    const r = await cairn.taskDefine(dir, `Retry the retained definition for Task ${String(taskNumber).padStart(3, "0")}`, sessionId);
+    setPendingQ(null);
+    if (r.ok) {
+      setTaskNumber(r.value.taskNumber);
+      setBrief(r.value.briefText);
+      setCoordinatorTask(r.value.coordinatorTask ?? null);
+      setBlocker(undefined);
+      setPhase("approve");
+    } else {
+      setError(r.message);
+      setBlocker("DEFINER_ENGINE_FAILED");
+      setPhase("approve");
+    }
   }
 
   /** One pre-approval round: a question gets a plain answer; a change request revises the brief file. */
@@ -143,9 +162,14 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
       setReport(b.value.reportText);
       setDisposition(b.value.disposition);
       setCoordinatorTask((current) => current ? { ...current, waitingReason: "" } : current);
+      setBlocker(undefined);
       setPhase("report");
     }
-    else { setError(b.message); setPhase("approve"); }
+    else {
+      setError(b.message);
+      if (/BUILDER_ENGINE_FAILED/.test(b.message)) setBlocker("BUILDER_ENGINE_FAILED");
+      setPhase("approve");
+    }
   }
 
   async function approveAndBuild() {
@@ -202,8 +226,24 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
           </>
         );
       case "approve":
+        if (blocker === "DEFINER_ENGINE_FAILED") {
+          return (
+            <>
+              <Card title="definition stopped safely">
+                <p>Cairn kept Task {String(taskNumber).padStart(3, "0")}, its branch, worktree, and partial brief. Retry continues this same task instead of reserving another number.</p>
+                <Pill kind="primary" onClick={() => void retryDefinition()}>Retry definition for Task {String(taskNumber).padStart(3, "0")}</Pill>
+              </Card>
+              <Card title="retained partial brief"><Md text={brief || "No partial brief text was written before the engine stopped."} /></Card>
+            </>
+          );
+        }
         return (
           <>
+            {blocker === "BUILDER_ENGINE_FAILED" ? (
+              <Card title="build stopped safely">
+                <p>Cairn kept this exact approval, task branch, worktree, and partial allowed work. Retry inspects those retained files before the builder runs again.</p>
+              </Card>
+            ) : null}
             <Card title={`task ${String(taskNumber).padStart(3, "0")} — the brief`}>
               <Md text={brief} />
             </Card>
@@ -211,7 +251,9 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
               {approved ? (
                 <>
                   <span className="badge badge-done">🔒 brief locked</span>
-                  <Pill kind="primary" onClick={() => void build()}>Build it</Pill>
+                  <Pill kind="primary" onClick={() => void build()}>
+                    {blocker === "BUILDER_ENGINE_FAILED" ? `Retry build for Task ${String(taskNumber).padStart(3, "0")}` : "Build it"}
+                  </Pill>
                 </>
               ) : (
                 <Pill kind="primary" onClick={() => void approveAndBuild()} disabled={refining}>Approve this exact brief</Pill>
