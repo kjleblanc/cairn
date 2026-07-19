@@ -21,6 +21,7 @@ export type WizardStatus = {
   branch?: string;
   worktree?: string;
   waitingReason?: string;
+  blocker?: string;
 };
 
 const railStep: Record<Phase, number> = {
@@ -44,6 +45,13 @@ function initialPhase(resume: UnfinishedTask | null): Phase {
 function tryItOf(report: string): string | null {
   const m = report.match(/how[^\n]*try[^\n]*:?\s*([\s\S]{0,300}?)(\n\n|\n[A-Z#])/i);
   return m ? m[1].trim() : null;
+}
+
+function refusalReason(blocker?: string): string {
+  if (blocker === "PARALLEL_SCOPE_OVERLAP") return "Its declared path overlaps an earlier admitted task.";
+  if (blocker === "PARALLEL_EXTERNAL_ACTION_REFUSED") return "It declares an external action, so it cannot use parallel mode.";
+  if (blocker === "PARALLEL_EXCLUSIVE_REFUSED") return "Its lane, mode, or dependency requires the ordinary serial path.";
+  return "Its classification is incomplete or malformed.";
 }
 
 export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, onStatus }: {
@@ -74,9 +82,15 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
   const [refineMsg, setRefineMsg] = useState("");
   const [refineReply, setRefineReply] = useState<string | null>(null);
   const [refining, setRefining] = useState(false);
-  const [coordinatorTask, setCoordinatorTask] = useState<Pick<CoordinatorTaskView, "branch" | "worktree" | "waitingReason"> | null>(
+  const [coordinatorTask, setCoordinatorTask] = useState<Pick<CoordinatorTaskView, "branch" | "worktree" | "waitingReason" | "phase" | "blocker"> | null>(
     resume?.branch && resume.worktree
-      ? { branch: resume.branch, worktree: resume.worktree, waitingReason: resume.waitingReason ?? "" }
+      ? {
+          branch: resume.branch,
+          worktree: resume.worktree,
+          waitingReason: resume.waitingReason ?? "",
+          phase: /^PARALLEL_/.test(resume.blocker ?? "") ? "refused" : "defined",
+          blocker: resume.blocker,
+        }
       : null,
   );
 
@@ -96,8 +110,9 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
       branch: coordinatorTask?.branch,
       worktree: coordinatorTask?.worktree,
       waitingReason: coordinatorTask?.waitingReason,
+      blocker: coordinatorTask?.blocker ?? blocker,
     });
-  }, [onStatus, taskNumber, phase, pendingQ, coordinatorTask]);
+  }, [onStatus, taskNumber, phase, pendingQ, coordinatorTask, blocker]);
 
   /** Deliver the answer (or a skip) and drop the card. The run resumes either way. */
   function answerQuestion(answer: string | null) {
@@ -115,7 +130,7 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
       setTaskNumber(r.value.taskNumber);
       setBrief(r.value.briefText);
       setCoordinatorTask(r.value.coordinatorTask ?? null);
-      setBlocker(undefined);
+      setBlocker(r.value.coordinatorTask?.blocker);
       setPhase("approve");
     }
     else { setError(r.message); setPhase("outcome"); }
@@ -129,7 +144,7 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
       setTaskNumber(r.value.taskNumber);
       setBrief(r.value.briefText);
       setCoordinatorTask(r.value.coordinatorTask ?? null);
-      setBlocker(undefined);
+      setBlocker(r.value.coordinatorTask?.blocker);
       setPhase("approve");
     } else {
       setError(r.message);
@@ -226,6 +241,20 @@ export function Wizard({ dir, resume, sessionId, parallelDraft, onDone, onHome, 
           </>
         );
       case "approve":
+        if (/^PARALLEL_/.test(blocker ?? coordinatorTask?.blocker ?? "")) {
+          return (
+            <>
+              <Card title="refused — not queued">
+                <p><strong>{blocker ?? coordinatorTask?.blocker}</strong></p>
+                <p>{refusalReason(blocker ?? coordinatorTask?.blocker)}</p>
+                <p className="small muted">Cairn retained this task number, brief, branch, worktree, and refusal evidence. It cannot be approved or built and does not consume one of the two safe-task slots.</p>
+              </Card>
+              <Card title={`task ${String(taskNumber).padStart(3, "0")} — retained brief`}>
+                <Md text={brief} />
+              </Card>
+            </>
+          );
+        }
         if (blocker === "DEFINER_ENGINE_FAILED") {
           return (
             <>

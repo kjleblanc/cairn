@@ -15,11 +15,11 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { checkBashCommand } from "./gates.js";
+import { checkBashCommand, type ApprovalRecord } from "./gates.js";
 import { nextTaskNumber, pad, paths, sha256File, type LogRow } from "./files.js";
 
 export const PARALLEL_DRAFT_ENV = "CAIRN_PARALLEL_DRAFT";
-export const COORDINATOR_SCHEMA = 1 as const;
+export const COORDINATOR_SCHEMA = 2 as const;
 export const COORDINATOR_LABEL = "Parallel Draft — not active by default";
 
 const LOCK_STALE_MS = 30_000;
@@ -38,6 +38,7 @@ export type CoordinatorPhase =
   | "queued"
   | "integrating"
   | "integrated"
+  | "refused"
   | "blocked";
 
 export interface TaskMetadata {
@@ -71,6 +72,7 @@ export interface CoordinatorTask {
   dependencies: number[];
   checks: string[];
   externalActions: string[];
+  admitted: boolean;
   briefSha256?: string;
   approvalSha256?: string;
   disposition?: "DONE" | "STOPPED" | "UNKNOWN";
@@ -85,7 +87,7 @@ export interface CoordinatorTask {
 }
 
 export interface CoordinatorState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
   projectRoot: string;
   gitDir: string;
@@ -159,10 +161,14 @@ export function coordinatorPaths(root: string): { dir: string; state: string; ba
   const dir = coordinatorDir(root);
   return {
     dir,
-    state: join(dir, "coordinator-v1.json"),
-    backup: join(dir, "coordinator-v1.backup.json"),
-    lock: join(dir, "coordinator-v1.lock"),
+    state: join(dir, "coordinator-v2.json"),
+    backup: join(dir, "coordinator-v2.backup.json"),
+    lock: join(dir, "coordinator-v2.lock"),
   };
+}
+
+function legacyCoordinatorState(root: string): string {
+  return join(coordinatorDir(root), "coordinator-v1.json");
 }
 
 function assertDraftRoot(root: string): string {
@@ -201,7 +207,7 @@ function taskIsValid(value: unknown): value is CoordinatorTask {
   const modes = ["Draft", "Final", "Unknown"];
   const phases: CoordinatorPhase[] = [
     "reserved", "defining", "defined", "approved", "waiting", "building",
-    "report", "queued", "integrating", "integrated", "blocked",
+    "report", "queued", "integrating", "integrated", "refused", "blocked",
   ];
   return Number.isInteger(t.taskNumber) && typeof t.projectRoot === "string" &&
     typeof t.baseCommit === "string" && typeof t.branch === "string" &&
@@ -211,6 +217,7 @@ function taskIsValid(value: unknown): value is CoordinatorTask {
     Array.isArray(t.dependencies) && t.dependencies.every((item) => Number.isInteger(item)) &&
     Array.isArray(t.checks) && t.checks.every((item) => typeof item === "string") &&
     Array.isArray(t.externalActions) && t.externalActions.every((item) => typeof item === "string") &&
+    typeof t.admitted === "boolean" &&
     Array.isArray(t.changedPaths) && t.changedPaths.every((item) => typeof item === "string") &&
     (t.decision === undefined || (typeof t.decision === "object" && t.decision !== null)) &&
     (t.decisionCommit === undefined || (typeof t.decisionCommit === "string" && /^[0-9a-f]{40}$/.test(t.decisionCommit))) &&
@@ -286,7 +293,7 @@ function acquireLock(lockPath: string): void {
 }
 
 function writeStateFile(pathsForState: ReturnType<typeof coordinatorPaths>, state: CoordinatorState): void {
-  const temp = join(pathsForState.dir, `coordinator-v1.${process.pid}.${randomUUID()}.tmp`);
+  const temp = join(pathsForState.dir, `coordinator-v2.${process.pid}.${randomUUID()}.tmp`);
   writeFileSync(temp, JSON.stringify(state, null, 2) + "\n", { flag: "wx" });
   if (existsSync(pathsForState.state)) copyFileSync(pathsForState.state, pathsForState.backup);
   renameSync(temp, pathsForState.state);
@@ -309,14 +316,18 @@ function updateState(root: string, mutate: (state: CoordinatorState) => void): C
 
 export function hasCoordinator(root: string): boolean {
   try {
-    return existsSync(coordinatorPaths(root).state);
+    return existsSync(coordinatorPaths(root).state) || existsSync(legacyCoordinatorState(root));
   } catch {
     return false;
   }
 }
 
 export function readCoordinatorState(root: string): CoordinatorState {
-  const state = readStateFile(coordinatorPaths(root).state);
+  const current = coordinatorPaths(root).state;
+  if (!existsSync(current) && existsSync(legacyCoordinatorState(root))) {
+    throw new CoordinatorError("UNSUPPORTED_STATE", "Coordinator schema version 1 is retained but cannot be migrated automatically.");
+  }
+  const state = readStateFile(current);
   if (resolve(state.projectRoot) !== resolve(root) || resolve(state.gitDir) !== projectGitDir(root)) {
     throw new CoordinatorError("STATE_PROJECT_MISMATCH", "Coordinator state belongs to a different Git project.");
   }
@@ -354,6 +365,9 @@ export function initializeCoordinator(root: string): CoordinatorState {
   git(projectRoot, ["config", "core.autocrlf", "false"]);
   const p = coordinatorPaths(projectRoot);
   mkdirSync(p.dir, { recursive: true });
+  if (!existsSync(p.state) && existsSync(legacyCoordinatorState(projectRoot))) {
+    throw new CoordinatorError("UNSUPPORTED_STATE", "Coordinator schema version 1 is retained but cannot be migrated automatically.");
+  }
   acquireLock(p.lock);
   try {
     if (existsSync(p.state)) return readStateFile(p.state);
@@ -392,7 +406,11 @@ function findTask(state: CoordinatorState, taskNumber: number): CoordinatorTask 
 }
 
 function activeTasks(state: CoordinatorState): CoordinatorTask[] {
-  return state.tasks.filter((task) => task.phase !== "integrated");
+  return state.tasks.filter((task) => !["integrated", "refused"].includes(task.phase));
+}
+
+function admittedTasks(state: CoordinatorState): CoordinatorTask[] {
+  return state.tasks.filter((task) => task.admitted && !["integrated", "refused"].includes(task.phase));
 }
 
 export function reserveTask(root: string, claimDefinition = false): CoordinatorTask {
@@ -418,7 +436,7 @@ export function reserveTask(root: string, claimDefinition = false): CoordinatorT
       current.updatedAt = now();
     }), taskNumber);
   }
-  if (activeTasks(state).length >= 2) {
+  if (admittedTasks(state).length >= 2) {
     throw new CoordinatorError("CONCURRENCY_LIMIT", "At most two non-integrated Draft tasks may exist at once.");
   }
   const updated = updateState(root, (draft) => {
@@ -428,11 +446,11 @@ export function reserveTask(root: string, claimDefinition = false): CoordinatorT
     if (claimDefinition && activeTasks(draft).some((task) => task.phase === "defining")) {
       throw new CoordinatorError("DEFINE_BUSY", "Task definitions are serialized until lane and mode are frozen.");
     }
-    if (activeTasks(draft).length >= 2) {
+    if (admittedTasks(draft).length >= 2) {
       throw new CoordinatorError("CONCURRENCY_LIMIT", "At most two non-integrated Draft tasks may exist at once.");
     }
-    if (activeTasks(draft).some((task) => ["building", "integrating"].includes(task.phase))) {
-      throw new CoordinatorError("ACTIVE_WORK", "A new task cannot be reserved while another task is building or integrating.");
+    if (admittedTasks(draft).some((task) => task.phase === "integrating")) {
+      throw new CoordinatorError("ACTIVE_WORK", "A new task cannot be reserved while integration is advancing main.");
     }
     const taskNumber = draft.nextTaskNumber++;
     const stamp = now();
@@ -449,6 +467,7 @@ export function reserveTask(root: string, claimDefinition = false): CoordinatorT
       dependencies: [],
       checks: [],
       externalActions: [],
+      admitted: false,
       changedPaths: [],
       reservedAt: stamp,
       updatedAt: stamp,
@@ -577,15 +596,26 @@ export function parseTaskMetadata(briefText: string): TaskMetadata {
   return validateTaskMetadata(parsed);
 }
 
+function pathsConflict(left: string, right: string): boolean {
+  return left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
+export function refuseTaskClassification(root: string, taskNumber: number): CoordinatorTask {
+  return findTask(updateState(root, (draft) => {
+    const current = findTask(draft, taskNumber);
+    if (!["reserved", "defining"].includes(current.phase) || current.admitted) {
+      throw new CoordinatorError("TASK_PHASE", "Only a provisional definition can be refused for invalid classification.");
+    }
+    current.phase = "refused";
+    current.blocker = "PARALLEL_CLASSIFICATION_REFUSED";
+    current.updatedAt = now();
+  }), taskNumber);
+}
+
 export function registerTaskMetadata(root: string, taskNumber: number, metadata: TaskMetadata): CoordinatorTask {
   const valid = validateTaskMetadata(metadata);
   const state = readCoordinatorState(root);
   const existingNumbers = new Set(state.tasks.map((task) => task.taskNumber));
-  for (const dependency of valid.dependencies) {
-    if (dependency >= taskNumber || !existingNumbers.has(dependency)) {
-      throw new CoordinatorError("MALFORMED_DEPENDENCY", "Dependencies must name an earlier reserved task.");
-    }
-  }
   const task = findTask(state, taskNumber);
   const briefPath = paths.brief(task.worktree, taskNumber);
   if (!existsSync(briefPath)) throw new CoordinatorError("BRIEF_MISSING", "The task worktree contains no brief.");
@@ -601,7 +631,21 @@ export function registerTaskMetadata(root: string, taskNumber: number, metadata:
     current.checks = valid.checks;
     current.externalActions = valid.externalActions;
     current.briefSha256 = sha256File(briefPath);
-    current.phase = "defined";
+    const malformedDependency = valid.dependencies.some((dependency) => dependency >= taskNumber || !existingNumbers.has(dependency));
+    const peers = admittedTasks(draft).filter((peer) => peer.taskNumber !== taskNumber);
+    let refusal: string | undefined;
+    if (malformedDependency) {
+      refusal = "PARALLEL_CLASSIFICATION_REFUSED";
+    } else if (valid.externalActions.length > 0) {
+      refusal = "PARALLEL_EXTERNAL_ACTION_REFUSED";
+    } else if (valid.lane !== "Standard" || valid.mode !== "Draft" || valid.dependencies.length > 0) {
+      refusal = "PARALLEL_EXCLUSIVE_REFUSED";
+    } else if (valid.allowedPaths.some((path) => peers.some((peer) => peer.allowedPaths.some((owned) => pathsConflict(path, owned))))) {
+      refusal = "PARALLEL_SCOPE_OVERLAP";
+    }
+    current.admitted = !refusal;
+    current.phase = refusal ? "refused" : "defined";
+    current.blocker = refusal;
     current.updatedAt = now();
   }), taskNumber);
 }
@@ -625,32 +669,9 @@ export function builderWritablePaths(task: CoordinatorTask): string[] {
 }
 
 function waitingReason(state: CoordinatorState, task: CoordinatorTask): string {
-  if (["integrated", "blocked", "queued", "integrating"].includes(task.phase)) return "";
+  if (["integrated", "refused", "queued", "integrating"].includes(task.phase) || !task.admitted) return "";
   if (state.integrationLease || state.integrationQueue.length > 0) {
     return "INTEGRATION_PENDING — shared decisions are serialized before another build starts.";
-  }
-  for (const dependency of task.dependencies) {
-    if (findTask(state, dependency).phase !== "integrated") {
-      return `DEPENDENCY_WAIT — Task ${pad(dependency)} must integrate first.`;
-    }
-  }
-  const peers = activeTasks(state).filter((peer) => peer.taskNumber !== task.taskNumber);
-  if (peers.some((peer) => peer.lane === "Unknown" || peer.mode === "Unknown")) {
-    return "CLASSIFICATION_WAIT — both tasks must be frozen as Standard/Draft before parallel work starts.";
-  }
-  const parallelEligible = task.lane === "Standard" && task.mode === "Draft" && task.externalActions.length === 0;
-  if (!parallelEligible && peers.some((peer) => peer.taskNumber < task.taskNumber)) {
-    return "EXCLUSIVE_TASK — High-Stakes, Final, Tiny, unknown, or live-action work runs alone.";
-  }
-  for (const peer of peers) {
-    const peerEligible = peer.lane === "Standard" && peer.mode === "Draft" && peer.externalActions.length === 0;
-    if (!peerEligible && peer.taskNumber < task.taskNumber) {
-      return `EXCLUSIVE_TASK — Task ${pad(peer.taskNumber)} must finish alone.`;
-    }
-    const overlap = task.allowedPaths.find((path) => peer.allowedPaths.includes(path));
-    if (overlap && peer.taskNumber < task.taskNumber && peer.phase !== "integrated") {
-      return `SCOPE_WAIT — ${overlap} is already owned by Task ${pad(peer.taskNumber)}.`;
-    }
   }
   return "";
 }
@@ -675,18 +696,50 @@ function commitNamed(worktree: string, pathsToCommit: string[], message: string)
   return git(worktree, ["rev-parse", "HEAD"]);
 }
 
-export function recordCoordinatorApproval(root: string, taskNumber: number, approvalSha256: string): CoordinatorTask {
-  const state = readCoordinatorState(root);
-  const task = findTask(state, taskNumber);
-  if (task.phase !== "defined") throw new CoordinatorError("TASK_PHASE", "Only a defined task can be approved.");
-  const briefPath = paths.brief(task.worktree, taskNumber);
-  if (sha256File(briefPath) !== task.briefSha256) {
-    throw new CoordinatorError("BRIEF_CHANGED", "The brief changed after its metadata was frozen.");
+function assertFrozenArtifacts(task: CoordinatorTask, expectedApprovalSha256 = task.approvalSha256): void {
+  const briefPath = paths.brief(task.worktree, task.taskNumber);
+  if (!task.briefSha256 || !existsSync(briefPath) || sha256File(briefPath) !== task.briefSha256) {
+    throw new CoordinatorError("BRIEF_CHANGED", "The frozen brief is missing or its bytes changed.");
   }
+  const approvalPath = paths.approval(task.worktree, task.taskNumber);
+  if (!expectedApprovalSha256 || !existsSync(approvalPath) || sha256File(approvalPath) !== expectedApprovalSha256) {
+    throw new CoordinatorError("APPROVAL_CHANGED", "The frozen approval is missing or its bytes changed.");
+  }
+  let approval: ApprovalRecord;
+  try {
+    approval = JSON.parse(readFileSync(approvalPath, "utf8")) as ApprovalRecord;
+  } catch {
+    throw new CoordinatorError("APPROVAL_CHANGED", "The frozen approval is not valid JSON.");
+  }
+  if (approval.taskNumber !== task.taskNumber || resolve(approval.briefPath) !== resolve(briefPath) ||
+      approval.briefSha256 !== task.briefSha256) {
+    throw new CoordinatorError("APPROVAL_CHANGED", "The approval no longer names the frozen task and brief.");
+  }
+}
+
+export function assertCoordinatorApprovable(root: string, taskNumber: number): CoordinatorTask {
+  const task = findTask(readCoordinatorState(root), taskNumber);
+  if (task.phase === "refused") {
+    throw new CoordinatorError(task.blocker ?? "PARALLEL_CLASSIFICATION_REFUSED", "Refused parallel work cannot be approved.");
+  }
+  if (!task.admitted || task.phase !== "defined") {
+    throw new CoordinatorError("TASK_PHASE", "Only an admitted, fully classified parallel task can be approved.");
+  }
+  return task;
+}
+
+export function recordCoordinatorApproval(root: string, taskNumber: number, approvalSha256: string): CoordinatorTask {
+  const task = assertCoordinatorApprovable(root, taskNumber);
+  const briefPath = paths.brief(task.worktree, taskNumber);
+  assertFrozenArtifacts(task, approvalSha256);
   const approvalRel = `docs/ai-work/tasks/${pad(taskNumber)}-approval.json`;
   commitNamed(task.worktree, [`docs/ai-work/tasks/${pad(taskNumber)}-brief.md`, approvalRel], `Task ${pad(taskNumber)}: pin approved parallel Draft`);
   return findTask(updateState(root, (draft) => {
     const current = findTask(draft, taskNumber);
+    if (!current.admitted || current.phase !== "defined") {
+      throw new CoordinatorError("TASK_PHASE", "The admitted task changed before approval was frozen.");
+    }
+    assertFrozenArtifacts(current, approvalSha256);
     current.approvalSha256 = approvalSha256;
     current.phase = waitingReason(draft, current) ? "waiting" : "approved";
     current.updatedAt = now();
@@ -714,26 +767,24 @@ function rebaseOnto(root: string, task: CoordinatorTask, mainCommit: string): vo
 export function beginCoordinatedBuild(root: string, taskNumber: number): CoordinatorTask {
   let state = readCoordinatorState(root);
   let task = findTask(state, taskNumber);
+  if (task.phase === "refused" || !task.admitted) {
+    throw new CoordinatorError(task.blocker ?? "PARALLEL_CLASSIFICATION_REFUSED", "Refused parallel work cannot be built.");
+  }
   const retryingEngineFailure = task.phase === "blocked" && task.blocker === "BUILDER_ENGINE_FAILED";
   if (!task.approvalSha256 || (!retryingEngineFailure && !["approved", "waiting"].includes(task.phase))) {
     throw new CoordinatorError("TASK_PHASE", "The task is not approved and ready to build.");
   }
+  // Reject obvious tampering before a rebase can touch retained task history,
+  // then repeat the same check under the final state lock below.
+  assertFrozenArtifacts(task);
   if (retryingEngineFailure) {
     inspectTaskScope(root, taskNumber);
-    state = updateState(root, (draft) => {
-      const current = findTask(draft, taskNumber);
-      if (current.phase !== "blocked" || current.blocker !== "BUILDER_ENGINE_FAILED") {
-        throw new CoordinatorError("RETRY_CHANGED", "The retained build changed before retry could begin.");
-      }
-      current.phase = "waiting";
-      current.blocker = undefined;
-      current.updatedAt = now();
-    });
-    task = findTask(state, taskNumber);
   }
   const reason = waitingReason(state, task);
   if (reason) {
-    updateState(root, (draft) => { findTask(draft, taskNumber).phase = "waiting"; });
+    if (!retryingEngineFailure) {
+      updateState(root, (draft) => { findTask(draft, taskNumber).phase = "waiting"; });
+    }
     throw new CoordinatorError("TASK_WAITING", reason);
   }
   const currentMain = git(root, ["rev-parse", "refs/heads/main"]);
@@ -745,9 +796,25 @@ export function beginCoordinatedBuild(root: string, taskNumber: number): Coordin
   task = findTask(state, taskNumber);
   return findTask(updateState(root, (draft) => {
     const current = findTask(draft, taskNumber);
+    if (!current.admitted || current.approvalSha256 !== task.approvalSha256) {
+      throw new CoordinatorError("APPROVAL_CHANGED", "Coordinator ownership or approval changed before the build.");
+    }
+    if (retryingEngineFailure) {
+      if (current.phase !== "blocked" || current.blocker !== "BUILDER_ENGINE_FAILED") {
+        throw new CoordinatorError("RETRY_CHANGED", "The retained build changed before retry could begin.");
+      }
+      inspectScopeInWorktree(current, current.worktree, current.baseCommit);
+    } else if (!["approved", "waiting"].includes(current.phase)) {
+      throw new CoordinatorError("TASK_PHASE", "The approved task changed before the build could begin.");
+    }
     const again = waitingReason(draft, current);
     if (again) throw new CoordinatorError("TASK_WAITING", again);
+    if (git(root, ["rev-parse", "refs/heads/main"]) !== draft.integratedMain) {
+      throw new CoordinatorError("MAIN_CHANGED", "main moved before the final build transition.");
+    }
+    assertFrozenArtifacts(current);
     current.phase = "building";
+    current.blocker = undefined;
     current.updatedAt = now();
   }), taskNumber);
 }

@@ -70,7 +70,7 @@ function metadata(path: string, options: Partial<TaskMetadata> = {}): TaskMetada
   });
 }
 
-function defineAndApprove(root: string, spec: TaskMetadata): CoordinatorTask {
+function defineOnly(root: string, spec: TaskMetadata): CoordinatorTask {
   const task = reserveTaskWorktree(root);
   const briefPath = paths.brief(task.worktree, task.taskNumber);
   mkdirSync(dirname(briefPath), { recursive: true });
@@ -79,7 +79,12 @@ function defineAndApprove(root: string, spec: TaskMetadata): CoordinatorTask {
     `# Task ${String(task.taskNumber).padStart(3, "0")} — regression brief\n\n` +
       `Lane: ${spec.lane}\n\nMode: ${spec.mode}\n\n${metadataBlock(spec)}\n`,
   );
-  registerTaskMetadata(root, task.taskNumber, spec);
+  return registerTaskMetadata(root, task.taskNumber, spec);
+}
+
+function defineAndApprove(root: string, spec: TaskMetadata): CoordinatorTask {
+  const task = defineOnly(root, spec);
+  const briefPath = paths.brief(task.worktree, task.taskNumber);
   const approval = recordApproval(task.taskNumber, briefPath);
   const approvalPath = paths.approval(task.worktree, task.taskNumber);
   writeFileSync(approvalPath, JSON.stringify(approval, null, 2) + "\n");
@@ -197,27 +202,29 @@ test("a malformed retained decision commit is rejected as unsupported state", ()
   assert.throws(() => readCoordinatorState(root), /UNSUPPORTED_STATE/);
 });
 
-function assertOlderExclusiveRunsFirst(label: string, options: Partial<TaskMetadata>): void {
+function assertOlderUnsafeTaskIsRefused(label: string, options: Partial<TaskMetadata>, blocker: string): void {
   const root = freshRepo(`older-${label}`);
-  const first = defineAndApprove(root, metadata(`${label}.txt`, options));
+  const first = defineOnly(root, metadata(`${label}.txt`, options));
   const second = defineAndApprove(root, metadata("later-standard.txt"));
-  assert.equal(beginCoordinatedBuild(root, first.taskNumber).phase, "building");
-  assert.throws(
-    () => beginCoordinatedBuild(root, second.taskNumber),
-    /TASK_WAITING.*EXCLUSIVE_TASK.*Task 001 must finish alone/,
-  );
+  assert.equal(first.phase, "refused");
+  assert.equal(first.blocker, blocker);
+  assert.equal(beginCoordinatedBuild(root, second.taskNumber).phase, "building");
 }
 
-test("an earlier High-Stakes task runs alone while the later Standard Draft waits", () => {
-  assertOlderExclusiveRunsFirst("high-stakes", { lane: "High-Stakes" });
+test("an earlier High-Stakes task is refused without delaying a later Standard Draft", () => {
+  assertOlderUnsafeTaskIsRefused("high-stakes", { lane: "High-Stakes" }, "PARALLEL_EXCLUSIVE_REFUSED");
 });
 
-test("an earlier Final task runs alone while the later Standard Draft waits", () => {
-  assertOlderExclusiveRunsFirst("final", { mode: "Final" });
+test("an earlier Final task is refused without delaying a later Standard Draft", () => {
+  assertOlderUnsafeTaskIsRefused("final", { mode: "Final" }, "PARALLEL_EXCLUSIVE_REFUSED");
 });
 
-test("an earlier live-action task runs alone while the later Standard Draft waits", () => {
-  assertOlderExclusiveRunsFirst("live-action", { externalActions: ["synthetic live action — never executed"] });
+test("an earlier live-action task is refused without delaying a later Standard Draft", () => {
+  assertOlderUnsafeTaskIsRefused(
+    "live-action",
+    { externalActions: ["synthetic live action — never executed"] },
+    "PARALLEL_EXTERNAL_ACTION_REFUSED",
+  );
 });
 
 test("two disjoint Standard Draft tasks remain parallel-eligible", () => {

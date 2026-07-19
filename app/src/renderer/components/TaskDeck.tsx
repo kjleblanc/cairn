@@ -9,6 +9,7 @@ export interface TaskDeckItem {
 const pad = (n: number) => String(n).padStart(3, "0");
 
 function phaseText(status: WizardStatus): string {
+  if (/^PARALLEL_/.test(status.blocker ?? "")) return `refused — not queued · ${status.blocker}`;
   if (status.waitingReason) return status.waitingReason;
   if (status.waiting) return "Waiting for the owner";
   if (status.phase === "integrating") return "Serialized integration in progress";

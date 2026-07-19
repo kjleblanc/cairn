@@ -33,7 +33,7 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
 
       {parallelDraft ? (
         <div className="gate-banner">
-          <p><strong>Parallel Draft — not active by default.</strong> Task branches, worktrees, waiting rules, and integration stay isolated behind the opt-in flag.</p>
+          <p><strong>Parallel Draft — not active by default.</strong> Strict safe-task admission, terminal refusal, isolated worktrees, and serialized integration stay behind the opt-in flag.</p>
           {justAdded ? <p><strong>Serialized integration completed.</strong> One task entered the queue and integrated; every other task stayed independently open.</p> : null}
         </div>
       ) : null}
@@ -48,9 +48,16 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
       ) : null}
 
       {unfinishedTasks.map((task) => (
-        <Card title="unfinished task" key={task.taskNumber}>
+        <Card title={/^PARALLEL_/.test(task.blocker ?? "") ? "retained refusal evidence" : "unfinished task"} key={task.taskNumber}>
           {(() => {
             const coordinatorTask = status.parallel?.tasks.find((item) => item.taskNumber === task.taskNumber);
+            if (coordinatorTask?.phase === "refused") {
+              return (
+                <p className="small">
+                  <strong>Refused — not queued:</strong> {coordinatorTask.blocker}. Its task number, brief, branch, and worktree remain as evidence; it cannot be approved or built and uses no safe-task slot.
+                </p>
+              );
+            }
             if (coordinatorTask?.blocker === "DEFINER_ENGINE_FAILED") {
               return <p className="small"><strong>Definition stopped safely.</strong> Cairn kept this task number, branch, worktree, and partial brief for a definition retry.</p>;
             }
@@ -61,9 +68,15 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
             return coordinatorTask?.waitingReason ? <p className="small"><strong>Waiting:</strong> {coordinatorTask.waitingReason}</p> : null;
           })()}
           <div className="row spread">
-            <p>Task {String(task.taskNumber).padStart(3, "0")} is still independent and open. Pick up exactly this task.</p>
+            <p>
+              {/^PARALLEL_/.test(task.blocker ?? "")
+                ? `Task ${String(task.taskNumber).padStart(3, "0")} is retained as terminal refusal evidence.`
+                : `Task ${String(task.taskNumber).padStart(3, "0")} is still independent and open. Pick up exactly this task.`}
+            </p>
             <Pill onClick={() => onResume(task)}>
-              {task.blocker === "DEFINER_ENGINE_FAILED"
+              {/^PARALLEL_/.test(task.blocker ?? "")
+                ? `View refusal for Task ${String(task.taskNumber).padStart(3, "0")}`
+                : task.blocker === "DEFINER_ENGINE_FAILED"
                 ? `Open definition recovery for Task ${String(task.taskNumber).padStart(3, "0")}`
                 : task.blocker === "BUILDER_ENGINE_FAILED"
                   ? `Open build recovery for Task ${String(task.taskNumber).padStart(3, "0")}`

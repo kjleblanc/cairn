@@ -111,7 +111,9 @@ export function App() {
       setError(`${open} in "${folderName(session.dir)}" is still open — use the reminder to return and finish it first.`);
       return;
     }
-    if (parallelDraft && sessions.length >= 2) {
+    const refusedResume = /^PARALLEL_/.test(resume?.blocker ?? "");
+    const slotConsumers = sessions.filter((session) => !/^PARALLEL_/.test(wstats[session.id]?.blocker ?? ""));
+    if (parallelDraft && !refusedResume && slotConsumers.length >= 2) {
       setError("Parallel Draft allows at most two non-integrated tasks. Finish or integrate one before reserving another.");
       return;
     }

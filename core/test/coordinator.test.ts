@@ -62,7 +62,7 @@ function metadata(path: string, options: Partial<TaskMetadata> = {}): TaskMetada
   });
 }
 
-function defineAndApprove(root: string, spec: TaskMetadata): CoordinatorTask {
+function defineOnly(root: string, spec: TaskMetadata): CoordinatorTask {
   const task = reserveTaskWorktree(root);
   const brief = paths.brief(task.worktree, task.taskNumber);
   mkdirSync(dirname(brief), { recursive: true });
@@ -70,7 +70,12 @@ function defineAndApprove(root: string, spec: TaskMetadata): CoordinatorTask {
     brief,
     `# Task ${String(task.taskNumber).padStart(3, "0")} — brief\n\nLane: ${spec.lane}\n\nMode: ${spec.mode}\n\n${metadataBlock(spec)}\n`,
   );
-  registerTaskMetadata(root, task.taskNumber, spec);
+  return registerTaskMetadata(root, task.taskNumber, spec);
+}
+
+function defineAndApprove(root: string, spec: TaskMetadata): CoordinatorTask {
+  const task = defineOnly(root, spec);
+  const brief = paths.brief(task.worktree, task.taskNumber);
   const approval = recordApproval(task.taskNumber, brief);
   const approvalPath = paths.approval(task.worktree, task.taskNumber);
   writeFileSync(approvalPath, JSON.stringify(approval, null, 2) + "\n");
@@ -192,39 +197,47 @@ test("two disjoint task worktrees build concurrently and remain isolated", async
   console.log(`CAIRN_CONCURRENT_REHEARSAL_ROOT=${root}`);
 });
 
-test("overlap, dependency, exclusive work, and a third task all wait or refuse", () => {
-  const classificationRoot = freshRepo("wait-classification");
+test("provisional work does not wait-block safe work, while overlap, dependencies, exclusive work, and a third admitted task are refused", () => {
+  const classificationRoot = freshRepo("classification-does-not-wait");
   const classified = defineAndApprove(classificationRoot, metadata("ready.txt"));
   reserveTaskWorktree(classificationRoot);
-  assert.throws(() => beginCoordinatedBuild(classificationRoot, classified.taskNumber), /TASK_WAITING.*CLASSIFICATION_WAIT/);
+  assert.equal(beginCoordinatedBuild(classificationRoot, classified.taskNumber).phase, "building");
 
-  const overlapRoot = freshRepo("wait-overlap");
+  const overlapRoot = freshRepo("refuse-overlap");
   const a = defineAndApprove(overlapRoot, metadata("shared.txt"));
-  const b = defineAndApprove(overlapRoot, metadata("shared.txt"));
-  beginCoordinatedBuild(overlapRoot, a.taskNumber);
-  assert.throws(() => beginCoordinatedBuild(overlapRoot, b.taskNumber), /TASK_WAITING.*SCOPE_WAIT/);
+  const b = defineOnly(overlapRoot, metadata("shared.txt"));
+  assert.equal(b.phase, "refused");
+  assert.equal(b.blocker, "PARALLEL_SCOPE_OVERLAP");
+  assert.equal(beginCoordinatedBuild(overlapRoot, a.taskNumber).phase, "building");
 
-  const dependencyRoot = freshRepo("wait-dependency");
-  defineAndApprove(dependencyRoot, metadata("first.txt"));
-  const dependent = defineAndApprove(dependencyRoot, metadata("second.txt", { dependencies: [1] }));
-  assert.throws(() => beginCoordinatedBuild(dependencyRoot, dependent.taskNumber), /TASK_WAITING.*DEPENDENCY_WAIT/);
+  const dependencyRoot = freshRepo("refuse-dependency");
+  defineOnly(dependencyRoot, metadata("first.txt"));
+  const dependent = defineOnly(dependencyRoot, metadata("second.txt", { dependencies: [1] }));
+  assert.equal(dependent.phase, "refused");
+  assert.equal(dependent.blocker, "PARALLEL_EXCLUSIVE_REFUSED");
 
-  const exclusiveRoot = freshRepo("wait-exclusive");
-  defineAndApprove(exclusiveRoot, metadata("ordinary.txt"));
-  const high = defineAndApprove(exclusiveRoot, metadata("careful.txt", { lane: "High-Stakes" }));
-  assert.throws(() => beginCoordinatedBuild(exclusiveRoot, high.taskNumber), /TASK_WAITING.*EXCLUSIVE_TASK/);
+  const exclusiveRoot = freshRepo("refuse-exclusive");
+  defineOnly(exclusiveRoot, metadata("ordinary.txt"));
+  const high = defineOnly(exclusiveRoot, metadata("careful.txt", { lane: "High-Stakes" }));
+  assert.equal(high.phase, "refused");
+  assert.equal(high.blocker, "PARALLEL_EXCLUSIVE_REFUSED");
 
-  const liveRoot = freshRepo("wait-live");
-  defineAndApprove(liveRoot, metadata("ordinary.txt"));
-  const live = defineAndApprove(liveRoot, metadata("live.txt", { externalActions: ["send a message"] }));
-  assert.throws(() => beginCoordinatedBuild(liveRoot, live.taskNumber), /TASK_WAITING.*EXCLUSIVE_TASK/);
+  const liveRoot = freshRepo("refuse-live");
+  defineOnly(liveRoot, metadata("ordinary.txt"));
+  const live = defineOnly(liveRoot, metadata("live.txt", { externalActions: ["send a message"] }));
+  assert.equal(live.phase, "refused");
+  assert.equal(live.blocker, "PARALLEL_EXTERNAL_ACTION_REFUSED");
 
-  const finalRoot = freshRepo("wait-final");
-  defineAndApprove(finalRoot, metadata("ordinary.txt"));
-  const finalTask = defineAndApprove(finalRoot, metadata("final.txt", { mode: "Final" }));
-  assert.throws(() => beginCoordinatedBuild(finalRoot, finalTask.taskNumber), /TASK_WAITING.*EXCLUSIVE_TASK/);
+  const finalRoot = freshRepo("refuse-final");
+  defineOnly(finalRoot, metadata("ordinary.txt"));
+  const finalTask = defineOnly(finalRoot, metadata("final.txt", { mode: "Final" }));
+  assert.equal(finalTask.phase, "refused");
+  assert.equal(finalTask.blocker, "PARALLEL_EXCLUSIVE_REFUSED");
 
-  assert.throws(() => reserveTask(overlapRoot), /CONCURRENCY_LIMIT/);
+  const limitRoot = freshRepo("two-admitted-limit");
+  defineOnly(limitRoot, metadata("first.txt"));
+  defineOnly(limitRoot, metadata("second.txt"));
+  assert.throws(() => reserveTask(limitRoot), /CONCURRENCY_LIMIT/);
 });
 
 test("an undeclared path blocks the build even when the builder claims success", () => {
@@ -255,7 +268,7 @@ test("post-build inspection catches shell-level tampering with the frozen approv
 test("independent decisions integrate one at a time against latest main and append the log only then", () => {
   const root = freshRepo("serialized");
   const first = defineAndApprove(root, metadata("alpha.txt"));
-  const second = defineAndApprove(root, metadata("beta.txt", { dependencies: [1] }));
+  const second = defineAndApprove(root, metadata("beta.txt"));
   buildCandidate(root, first.taskNumber, "alpha.txt", "alpha\n");
   queueTaskDecision(root, first.taskNumber, decision(first.taskNumber, "alpha integrated"));
   assert.equal(parseLog(root).length, 0, "queueing must not touch the shared log");
@@ -267,7 +280,7 @@ test("independent decisions integrate one at a time against latest main and appe
 
   buildCandidate(root, second.taskNumber, "beta.txt", "beta\n");
   const rebased = readCoordinatorState(root).tasks.find((task) => task.taskNumber === second.taskNumber)!;
-  assert.equal(rebased.baseCommit, baseAfterFirst, "the dependent task updated against latest main before building");
+  assert.equal(rebased.baseCommit, baseAfterFirst, "the second admitted task updated against latest main before building");
   queueTaskDecision(root, second.taskNumber, decision(second.taskNumber, "beta integrated"));
   assert.equal(parseLog(root).length, 1, "the second row is still queued, not written early");
   integrateNext(root);
@@ -295,26 +308,31 @@ test("a failed approved check leaves synthetic main and its log unchanged", () =
   console.log(`CAIRN_FAILED_CHECK_REHEARSAL_ROOT=${root}`);
 });
 
-test("a real Git directory/file conflict returns the task branch and leaves main unchanged", () => {
+test("a real Git directory/file conflict is refused at admission before it can reach main", () => {
   const root = freshRepo("conflict");
   const fileTask = defineAndApprove(root, metadata("area"));
-  const directoryTask = defineAndApprove(root, metadata("area/item.txt"));
+  const directoryTask = defineOnly(root, metadata("area/item.txt"));
+  assert.equal(directoryTask.phase, "refused");
+  assert.equal(directoryTask.blocker, "PARALLEL_SCOPE_OVERLAP");
   buildCandidate(root, fileTask.taskNumber, "area", "a file blocks the directory\n");
-  buildCandidate(root, directoryTask.taskNumber, "area/item.txt", "nested file\n");
   queueTaskDecision(root, fileTask.taskNumber, decision(fileTask.taskNumber));
-  queueTaskDecision(root, directoryTask.taskNumber, decision(directoryTask.taskNumber));
   integrateNext(root);
-  const mainBefore = runGit(root, ["rev-parse", "HEAD"]);
-  const logBefore = readFileSync(paths.log(root));
-  const branchBefore = runGit(directoryTask.worktree, ["rev-parse", "HEAD"]);
-  assert.throws(() => integrateNext(root), /INTEGRATION_CONFLICT/);
-  assert.equal(runGit(root, ["rev-parse", "HEAD"]), mainBefore);
-  assert.deepEqual(readFileSync(paths.log(root)), logBefore);
-  assert.equal(runGit(directoryTask.worktree, ["rev-parse", "HEAD"]), branchBefore, "rebase abort returned the branch");
+  assert.equal(readFileSync(join(root, "area"), "utf8").replace(/\r\n/g, "\n"), "a file blocks the directory\n");
+  assert.equal(readCoordinatorState(root).tasks.find((task) => task.taskNumber === directoryTask.taskNumber)?.phase, "refused");
+  assert.equal(parseLog(root).length, 1);
   console.log(`CAIRN_CONFLICT_REHEARSAL_ROOT=${root}`);
 });
 
 test("corrupt state and a stale lock both fail closed and preserve evidence", () => {
+  const legacyRoot = freshRepo("legacy-state");
+  const legacyPaths = coordinatorPaths(legacyRoot);
+  const legacyState = join(legacyPaths.dir, "coordinator-v1.json");
+  mkdirSync(legacyPaths.dir, { recursive: true });
+  writeFileSync(legacyState, JSON.stringify({ schemaVersion: 1, retained: true }) + "\n");
+  assert.throws(() => readCoordinatorState(legacyRoot), /UNSUPPORTED_STATE/);
+  assert.equal(existsSync(legacyPaths.state), false, "legacy state is never migrated automatically");
+  assert.equal(readFileSync(legacyState, "utf8"), JSON.stringify({ schemaVersion: 1, retained: true }) + "\n");
+
   const corruptRoot = freshRepo("corrupt-state");
   initializeCoordinator(corruptRoot);
   const corrupt = coordinatorPaths(corruptRoot);

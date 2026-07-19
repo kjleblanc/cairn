@@ -12,6 +12,7 @@ import type { Engine, RunEvents } from "./agents.js";
 import { builderPrompt, definerPrompt, directionPrompt, refinePrompt, reviewerPrompt } from "./prompts.js";
 import { dispositionOf, finalVerdictOf } from "./parse.js";
 import {
+  assertCoordinatorApprovable,
   beginCoordinatedBuild,
   blockEngineFailure,
   builderWritablePaths,
@@ -23,6 +24,7 @@ import {
   queueTaskDecision,
   readCoordinatorState,
   recordCoordinatorApproval,
+  refuseTaskClassification,
   registerTaskMetadata,
   reserveTaskWorktree,
   type CoordinatorSummary,
@@ -76,6 +78,15 @@ function coordinatedTaskRoot(root: string, taskNumber: number): string {
   return task.worktree;
 }
 
+function assertCoordinatorActionAllowed(root: string, taskNumber: number, action: string): void {
+  if (!parallelDraftEnabled() || !hasCoordinator(root)) return;
+  const task = readCoordinatorState(root).tasks.find((item) => item.taskNumber === taskNumber);
+  if (!task) throw new Error(`Task ${pad(taskNumber)} is not owned by this coordinator.`);
+  if (task.phase === "refused") {
+    throw new Error(`${task.blocker ?? "PARALLEL_CLASSIFICATION_REFUSED"}: Refused parallel work cannot be ${action}.`);
+  }
+}
+
 function assertGoverned(root: string): ProjectFacts {
   if (!isCairnProject(root)) {
     throw new Error("No Cairn contract here. Run init in an empty folder, or use Project Conversion for existing work.");
@@ -112,7 +123,16 @@ export async function defineTask(root: string, outcome: string, engine: Engine, 
     throw new Error("The definer produced no brief file. Nothing was approved and nothing will be built.");
   }
   const briefText = readFileSync(briefPath, "utf8");
-  if (coordinated) registerTaskMetadata(root, taskNumber, parseTaskMetadata(briefText));
+  if (coordinated) {
+    let metadata: ReturnType<typeof parseTaskMetadata>;
+    try {
+      metadata = parseTaskMetadata(briefText);
+    } catch {
+      refuseTaskClassification(root, taskNumber);
+      throw new Error("PARALLEL_CLASSIFICATION_REFUSED: The task metadata is malformed or incomplete. The retained task was refused, not queued.");
+    }
+    registerTaskMetadata(root, taskNumber, metadata);
+  }
   const taskView = coordinated
     ? coordinatorSummary(root).tasks.find((task) => task.taskNumber === taskNumber)
     : undefined;
@@ -123,6 +143,7 @@ export async function defineTask(root: string, outcome: string, engine: Engine, 
 export function approveBrief(root: string, taskNumber: number): ApprovalRecord {
   assertGoverned(root);
   const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  if (taskRoot !== root) assertCoordinatorApprovable(root, taskNumber);
   const record = recordApproval(taskNumber, paths.brief(taskRoot, taskNumber));
   writeFileSync(paths.approval(taskRoot, taskNumber), JSON.stringify(record, null, 2) + "\n");
   if (taskRoot !== root) recordCoordinatorApproval(root, taskNumber, sha256File(paths.approval(taskRoot, taskNumber)));
@@ -144,6 +165,7 @@ export function loadApproval(root: string, taskNumber: number): ApprovalRecord |
 export async function refineBrief(root: string, taskNumber: number, message: string, engine: Engine, events: RunEvents = {}): Promise<RefineResult> {
   assertGoverned(root);
   const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  assertCoordinatorActionAllowed(root, taskNumber, "refined");
   const briefPath = paths.brief(taskRoot, taskNumber);
   if (!existsSync(briefPath)) {
     throw new Error(`No brief to refine for task ${pad(taskNumber)}. Define the task first.`);
@@ -164,13 +186,15 @@ export async function refineBrief(root: string, taskNumber: number, message: str
 
 export async function buildTask(root: string, taskNumber: number, engine: Engine, events: RunEvents = {}): Promise<BuildResult> {
   assertGoverned(root);
-  const approval = loadApproval(root, taskNumber);
-  if (!approval) {
-    throw new Error(`No approval on file for task ${pad(taskNumber)}. Approve the brief first — nothing is built without you.`);
-  }
-  assertApprovalValid(approval);
   const coordinated = parallelDraftEnabled() && hasCoordinator(root);
   const task = coordinated ? beginCoordinatedBuild(root, taskNumber) : null;
+  if (!coordinated) {
+    const approval = loadApproval(root, taskNumber);
+    if (!approval) {
+      throw new Error(`No approval on file for task ${pad(taskNumber)}. Approve the brief first — nothing is built without you.`);
+    }
+    assertApprovalValid(approval);
+  }
   const taskRoot = task?.worktree ?? root;
   const p = builderPrompt(taskRoot, taskNumber);
   let res: Awaited<ReturnType<Engine["run"]>>;
@@ -200,6 +224,7 @@ export async function buildTask(root: string, taskNumber: number, engine: Engine
 export async function reviewTask(root: string, taskNumber: number, engine: Engine, events: RunEvents = {}): Promise<ReviewResult> {
   assertGoverned(root);
   const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  assertCoordinatorActionAllowed(root, taskNumber, "reviewed");
   const p = reviewerPrompt(taskRoot, taskNumber);
   const res = await engine.run({ role: "reviewer", root: taskRoot, taskNumber, system: p.system, user: p.user }, events);
   return { text: res.text, finalVerdict: finalVerdictOf(res.text), costUsd: res.costUsd };
@@ -208,6 +233,7 @@ export async function reviewTask(root: string, taskNumber: number, engine: Engin
 export function closeTask(root: string, taskNumber: number, input: CloseInput): LogRow {
   assertGoverned(root);
   const taskRoot = coordinatedTaskRoot(root, taskNumber);
+  assertCoordinatorActionAllowed(root, taskNumber, "decided or integrated");
   const briefPath = paths.brief(taskRoot, taskNumber);
   const brief = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "";
   const reportPath = paths.report(taskRoot, taskNumber);
