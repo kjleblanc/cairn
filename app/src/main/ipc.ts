@@ -1,6 +1,5 @@
 import { app, dialog, ipcMain, shell } from "electron";
 import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { initProject, isCairnProject, projectStatus } from "@cairn/core";
 import type { InitInput, Preflight, ProjectList, RecentProject, Result, UpdateInfo } from "../shared/ipc.js";
@@ -25,13 +24,10 @@ async function preflight(): Promise<Preflight> {
     logError("preflight", err);
     return { claudeReady: false, reason: "no-sdk", mock: false, parallelDraft };
   }
-  const home = homedir();
-  const signedIn =
-    existsSync(path.join(home, ".claude", ".credentials.json")) ||
-    existsSync(path.join(home, ".claude.json"));
-  return signedIn
-    ? { claudeReady: true, reason: null, mock: false, parallelDraft }
-    : { claudeReady: false, reason: "no-login", mock: false, parallelDraft };
+  // Import success proves only that the already-installed legacy provider
+  // software is present. Cairn does not inspect provider-owned account files and
+  // does not treat their existence as connection evidence.
+  return { claudeReady: true, reason: null, mock: false, parallelDraft };
 }
 
 export function registerProjectIpc(): void {

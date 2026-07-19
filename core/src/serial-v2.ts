@@ -12,6 +12,11 @@ import {
   type LogRow,
 } from "./files.js";
 import { checkDirectionGate } from "./gates.js";
+import {
+  connectProviderDraft,
+  type ProviderConnectionAdapters,
+  type ProviderConnectionState,
+} from "./provider-connection.js";
 
 export const SERIAL_V2_DRAFT_ENV = "CAIRN_SERIAL_V2_DRAFT";
 
@@ -23,6 +28,10 @@ export interface SerialV2MockResult {
   logPath: string;
   checks: string[];
   disposition: "DONE";
+}
+
+export interface SerialV2ProviderMockResult extends SerialV2MockResult {
+  connection: ProviderConnectionState;
 }
 
 export function serialV2DraftEnabled(): boolean {
@@ -56,12 +65,7 @@ function assertMockV2Project(root: string): void {
   }
 }
 
-/**
- * A deliberately tiny Contract v2 lifecycle proof. It is internal, disabled by
- * default, mock-only, temporary-directory-only, and never touches Git or the
- * legacy approval/review/coordinator steps.
- */
-export function runSerialV2MockStandardTask(root: string): SerialV2MockResult {
+function assertSerialV2DraftReady(root: string): string {
   if (!serialV2DraftEnabled()) {
     throw new Error(`SERIAL_V2_DISABLED: ${SERIAL_V2_DRAFT_ENV}=1 is required.`);
   }
@@ -74,6 +78,16 @@ export function runSerialV2MockStandardTask(root: string): SerialV2MockResult {
 
   const projectRoot = assertSyntheticRoot(root);
   assertMockV2Project(projectRoot);
+  return projectRoot;
+}
+
+/**
+ * A deliberately tiny Contract v2 lifecycle proof. It is internal, disabled by
+ * default, mock-only, temporary-directory-only, and never touches Git or the
+ * legacy approval/review/coordinator steps.
+ */
+export function runSerialV2MockStandardTask(root: string): SerialV2MockResult {
+  const projectRoot = assertSerialV2DraftReady(root);
 
   const taskNumber = nextTaskNumber(projectRoot);
   const taskId = pad(taskNumber);
@@ -149,5 +163,25 @@ export function runSerialV2MockStandardTask(root: string): SerialV2MockResult {
     logPath: paths.log(projectRoot),
     checks,
     disposition: "DONE",
+  };
+}
+
+/**
+ * Task 019's one supported path: obtain a strict non-secret status from an
+ * injected fake adapter, then run the accepted Task 018 serial mock lifecycle.
+ */
+export function runSerialV2ProviderMockStandardTask(
+  root: string,
+  provider: unknown,
+  adapters: ProviderConnectionAdapters,
+): SerialV2ProviderMockResult {
+  const projectRoot = assertSerialV2DraftReady(root);
+  const connection = connectProviderDraft(projectRoot, provider, adapters);
+  if (connection.status !== "connected") {
+    throw new Error("PROVIDER_NOT_CONNECTED: The selected provider is not connected.");
+  }
+  return {
+    ...runSerialV2MockStandardTask(projectRoot),
+    connection,
   };
 }

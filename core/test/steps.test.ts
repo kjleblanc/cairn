@@ -6,11 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockEngine } from "../src/agents.js";
 import { paths, parseLog, scaffoldProject } from "../src/files.js";
+import type { ProviderConnectionAdapter, ProviderConnectionAdapters, ProviderConnectionStatus, ProviderId } from "../src/provider-connection.js";
 import {
   approveBrief, buildTask, closeTask, defineTask, initProject, loadApproval,
   projectStatus, refineBrief, reviewTask, runDirectionCheck,
 } from "../src/steps.js";
-import { runSerialV2MockStandardTask } from "../src/serial-v2.js";
+import { runSerialV2MockStandardTask, runSerialV2ProviderMockStandardTask } from "../src/serial-v2.js";
 
 const engine = new MockEngine();
 
@@ -18,6 +19,68 @@ function freshProject(): string {
   const dir = mkdtempSync(join(tmpdir(), "cairn-steps-"));
   scaffoldProject(dir, { name: "Steps", what: "w", who: "me", milestone: "see it", timebox: "default" });
   return dir;
+}
+
+const TASK_019_CANARY = "CAIRN_TASK_019_SYNTHETIC_CANARY_NOT_A_CREDENTIAL";
+
+function fakeAdapter(response: unknown): ProviderConnectionAdapter {
+  return { checkConnection: () => response };
+}
+
+function fakeAdapters(provider: ProviderId, response: unknown): ProviderConnectionAdapters {
+  return { [provider]: fakeAdapter(response) };
+}
+
+function providerStatePath(root: string): string {
+  return join(root, ".cairn", "provider-connection.json");
+}
+
+function allFileText(root: string): string {
+  const texts: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const item = join(dir, entry.name);
+      if (entry.isDirectory()) walk(item);
+      else texts.push(readFileSync(item, "utf8"));
+    }
+  };
+  walk(root);
+  return texts.join("\n");
+}
+
+function assertNoTaskWrites(root: string, originalLog: string): void {
+  assert.deepEqual(readdirSync(paths.tasks(root)), []);
+  assert.equal(readFileSync(paths.log(root), "utf8"), originalLog);
+  assert.equal(existsSync(providerStatePath(root)), false);
+}
+
+function withProviderDraftEnvironment(body: () => void): void {
+  const names = ["CAIRN_SERIAL_V2_DRAFT", "CAIRN_PROVIDER_CONNECTION_DRAFT", "CAIRN_MOCK", "CAIRN_PARALLEL_DRAFT", "CAIRN_TASK_019_CANARY"] as const;
+  const original = Object.fromEntries(names.map((name) => [name, process.env[name]])) as Record<(typeof names)[number], string | undefined>;
+  try {
+    process.env.CAIRN_SERIAL_V2_DRAFT = "1";
+    process.env.CAIRN_PROVIDER_CONNECTION_DRAFT = "1";
+    process.env.CAIRN_MOCK = "1";
+    delete process.env.CAIRN_PARALLEL_DRAFT;
+    process.env.CAIRN_TASK_019_CANARY = TASK_019_CANARY;
+    body();
+  } finally {
+    for (const name of names) {
+      if (original[name] === undefined) delete process.env[name];
+      else process.env[name] = original[name];
+    }
+  }
+}
+
+function captureError(body: () => void): Error {
+  let caught: unknown;
+  try {
+    body();
+  } catch (error) {
+    caught = error;
+  }
+  if (!(caught instanceof Error)) assert.fail("Expected the operation to throw an Error.");
+  return caught;
 }
 
 test("full loop: define, approve, build, review, close — files carry the state", async () => {
@@ -118,6 +181,138 @@ test("serial v2 mock path completes one synthetic Standard task without gates or
     if (originalParallel === undefined) delete process.env.CAIRN_PARALLEL_DRAFT;
     else process.env.CAIRN_PARALLEL_DRAFT = originalParallel;
   }
+});
+
+test("serial v2 provider connection Draft refuses before writes when any guard is closed", () => {
+  const run = (configure: (dir: string) => void, pattern: RegExp) => {
+    const dir = freshProject();
+    configure(dir);
+    const originalLog = readFileSync(paths.log(dir), "utf8");
+    assert.throws(
+      () => runSerialV2ProviderMockStandardTask(dir, "claude", fakeAdapters("claude", { status: "connected" })),
+      pattern,
+    );
+    assertNoTaskWrites(dir, originalLog);
+  };
+
+  withProviderDraftEnvironment(() => {
+    run(() => { delete process.env.CAIRN_SERIAL_V2_DRAFT; }, /SERIAL_V2_DISABLED/);
+    process.env.CAIRN_SERIAL_V2_DRAFT = "1";
+    run(() => { delete process.env.CAIRN_PROVIDER_CONNECTION_DRAFT; }, /PROVIDER_CONNECTION_DISABLED/);
+    process.env.CAIRN_PROVIDER_CONNECTION_DRAFT = "1";
+    run(() => { delete process.env.CAIRN_MOCK; }, /SERIAL_V2_MOCK_ONLY/);
+    process.env.CAIRN_MOCK = "1";
+    run(() => { process.env.CAIRN_PARALLEL_DRAFT = "1"; }, /SERIAL_V2_SERIAL_ONLY/);
+    delete process.env.CAIRN_PARALLEL_DRAFT;
+
+    const outside = process.cwd();
+    assert.throws(
+      () => runSerialV2ProviderMockStandardTask(outside, "claude", fakeAdapters("claude", { status: "connected" })),
+      /SERIAL_V2_SYNTHETIC_ONLY/,
+    );
+
+    run((dir) => {
+      const contract = readFileSync(paths.contract(dir), "utf8");
+      writeFileSync(paths.contract(dir), contract.replace("STATUS: ACTIVE", "STATUS: PAUSED"));
+    }, /SERIAL_V2_INACTIVE/);
+
+    run((dir) => {
+      const contract = readFileSync(paths.contract(dir), "utf8");
+      writeFileSync(paths.contract(dir), contract.replace(/Contract v2\.0/, "Contract v1.9"));
+    }, /SERIAL_V2_CONTRACT_REQUIRED/);
+
+    run((dir) => {
+      const rows =
+        "| 001 | 2026-07-19 | Standard | Applied | STOPPED | stopped | synthetic | NO |\n" +
+        "| 002 | 2026-07-19 | Standard | Applied | STOPPED | stopped | synthetic | NO |\n";
+      writeFileSync(paths.log(dir), readFileSync(paths.log(dir), "utf8") + rows);
+    }, /SERIAL_V2_DIRECTION_GATE/);
+  });
+});
+
+test("serial v2 provider connection Draft redacts tainted fake adapters and writes nothing", () => {
+  withProviderDraftEnvironment(() => {
+    const cases: Array<{ provider: unknown; adapters: ProviderConnectionAdapters; pattern: RegExp }> = [
+      { provider: "other", adapters: {}, pattern: /PROVIDER_CHOICE_INVALID/ },
+      { provider: "claude", adapters: {}, pattern: /PROVIDER_ADAPTER_UNAVAILABLE/ },
+      { provider: "claude", adapters: fakeAdapters("claude", null), pattern: /PROVIDER_STATUS_INVALID/ },
+      { provider: "claude", adapters: fakeAdapters("claude", {}), pattern: /PROVIDER_STATUS_INVALID/ },
+      { provider: "claude", adapters: fakeAdapters("claude", { status: "unexpected" }), pattern: /PROVIDER_STATUS_INVALID/ },
+      {
+        provider: "claude",
+        adapters: fakeAdapters("claude", { status: "connected", rawOutput: TASK_019_CANARY }),
+        pattern: /PROVIDER_STATUS_INVALID/,
+      },
+    ];
+
+    for (const item of cases) {
+      const dir = freshProject();
+      const originalLog = readFileSync(paths.log(dir), "utf8");
+      const error = captureError(() => runSerialV2ProviderMockStandardTask(dir, item.provider, item.adapters));
+      assert.match(error.message, item.pattern);
+      assert.doesNotMatch(`${error.message}\n${error.stack ?? ""}`, new RegExp(TASK_019_CANARY));
+      assertNoTaskWrites(dir, originalLog);
+      assert.doesNotMatch(allFileText(dir), new RegExp(TASK_019_CANARY));
+    }
+
+    const thrownDir = freshProject();
+    const originalLog = readFileSync(paths.log(thrownDir), "utf8");
+    const thrownAdapter: ProviderConnectionAdapter = {
+      checkConnection: () => { throw new Error(TASK_019_CANARY); },
+    };
+    const error = captureError(
+      () => runSerialV2ProviderMockStandardTask(thrownDir, "openai", { openai: thrownAdapter }),
+    );
+    assert.match(error.message, /PROVIDER_STATUS_FAILED/);
+    assert.doesNotMatch(`${error.message}\n${error.stack ?? ""}`, new RegExp(TASK_019_CANARY));
+    assertNoTaskWrites(thrownDir, originalLog);
+    assert.doesNotMatch(allFileText(thrownDir), new RegExp(TASK_019_CANARY));
+  });
+});
+
+test("serial v2 provider connection Draft handles every allowed non-secret status", () => {
+  withProviderDraftEnvironment(() => {
+    for (const status of ["unknown", "disconnected"] as const satisfies readonly ProviderConnectionStatus[]) {
+      const dir = freshProject();
+      const originalLog = readFileSync(paths.log(dir), "utf8");
+      assert.throws(
+        () => runSerialV2ProviderMockStandardTask(dir, "claude", fakeAdapters("claude", { status })),
+        /PROVIDER_NOT_CONNECTED/,
+      );
+      assert.equal(readFileSync(providerStatePath(dir), "utf8"), `{"provider":"claude","status":"${status}"}\n`);
+      assert.deepEqual(Object.keys(JSON.parse(readFileSync(providerStatePath(dir), "utf8"))).sort(), ["provider", "status"]);
+      assert.deepEqual(readdirSync(paths.tasks(dir)), []);
+      assert.equal(readFileSync(paths.log(dir), "utf8"), originalLog);
+      assert.doesNotMatch(allFileText(dir), new RegExp(TASK_019_CANARY));
+    }
+  });
+});
+
+test("serial v2 provider connection Draft completes the supported path for both fake providers", () => {
+  withProviderDraftEnvironment(() => {
+    for (const provider of ["claude", "openai"] as const) {
+      const dir = freshProject();
+      const result = runSerialV2ProviderMockStandardTask(
+        dir,
+        provider,
+        fakeAdapters(provider, { status: "connected" }),
+      );
+
+      assert.equal(result.disposition, "DONE");
+      assert.deepEqual(result.connection, { provider, status: "connected" });
+      assert.equal(readFileSync(providerStatePath(dir), "utf8"), `{"provider":"${provider}","status":"connected"}\n`);
+      assert.deepEqual(Object.keys(JSON.parse(readFileSync(providerStatePath(dir), "utf8"))).sort(), ["provider", "status"]);
+      assert.deepEqual(readdirSync(paths.tasks(dir)).sort(), ["001-brief.md", "001-report.md"]);
+      assert.equal(readFileSync(result.builtPath, "utf8"), "hello from the serial v2 mock path\n");
+      assert.match(readFileSync(result.reportPath, "utf8"), /Disposition: DONE/);
+      assert.equal(existsSync(paths.approval(dir, 1)), false);
+      assert.equal(existsSync(paths.decision(dir, 1)), false);
+      assert.equal(existsSync(join(dir, ".git")), false);
+      assert.equal(existsSync(join(dir, ".git", "cairn")), false);
+      assert.doesNotMatch(JSON.stringify(result), new RegExp(TASK_019_CANARY));
+      assert.doesNotMatch(allFileText(dir), new RegExp(TASK_019_CANARY));
+    }
+  });
 });
 
 test("build refuses without a persisted approval, and after tampering", async () => {
