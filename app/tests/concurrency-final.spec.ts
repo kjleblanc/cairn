@@ -35,7 +35,7 @@ test("Desktop observes two bounded tasks read-only and points recovery to the CL
     const text = brief(task);
     const digest = createHash("sha256").update(text).digest("hex");
     writeFileSync(join(project, briefPath), text);
-    writeFileSync(join(project, `docs/ai-work/tasks/${n}-approval.json`), JSON.stringify({ taskNumber: task, briefPath, briefSha256: digest }, null, 2) + "\n");
+    writeFileSync(join(project, `docs/ai-work/tasks/${n}-approval.json`), JSON.stringify({ schemaVersion: 1, taskNumber: task, briefPath, briefSha256: digest, approvedAt: "offline-rehearsal" }, null, 2) + "\n");
   }
   git(project, ["init", "-b", "main"]);
   git(project, ["config", "user.name", "Cairn Task 024 Desktop"]);
@@ -58,8 +58,11 @@ test("Desktop observes two bounded tasks read-only and points recovery to the CL
       { ...common(2), outcome: "Add-book copy", usefulness: "Useful alone", implementationPaths: ["content/add-book.txt"], testPaths: ["test/add-book.test.mjs"], writablePaths: ["content/add-book.txt"], checks: [{ command: "node" as const, args: ["--test", "test/add-book.test.mjs"] }], provider: { provider: "anthropic" as const, model: "claude-haiku-4-5" as const, inputSha256: "2196cff705d1b7e4dff0507afc0ba808871e377aadf14da1e9a7631f2fb6bdd8", maxCalls: 1 as const, maxCostUsd: 0.25 as const } },
     ],
   };
+  writeFileSync(join(project, "run-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  git(project, ["add", "--", "run-manifest.json"]);
+  git(project, ["commit", "-m", "Pin closed-batch manifest"]);
   process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
-  const state = core.admitConcurrentRun(project, manifest);
+  const state = core.admitConcurrentFromManifestPath(project, "run-manifest.json");
 
   const app = await electron.launch({ args: ["."], env: { ...process.env, APPDATA: appData, CAIRN_MOCK: "1", CAIRN_OPEN: project } });
   const win = await app.firstWindow();

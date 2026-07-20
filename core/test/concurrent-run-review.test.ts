@@ -1,0 +1,34 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { CONCURRENT_DISABLE_ENV } from "../src/concurrent-run.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const sourceRoot = join(here, "..", "..", "src");
+
+test("the Contract v2.2 emergency switch has the exact required name", () => {
+  assert.equal(CONCURRENT_DISABLE_ENV, "CAIRN_BOUNDED_CONCURRENCY_DISABLE");
+});
+
+test("the coordinator-facing provider module cannot import the credential SDK", () => {
+  const source = readFileSync(join(sourceRoot, "bounded-provider.ts"), "utf8");
+  assert.doesNotMatch(source, /import\(["']@anthropic-ai\/claude-agent-sdk["']\)/);
+  assert.doesNotMatch(source, /\bquery\s*\(/);
+});
+
+test("the bounded mutating API is raw-file-only and has no raw-object official proof export", async () => {
+  const moduleName = "../src/concurrent-run.js";
+  const candidate = await import(moduleName) as Record<string, unknown>;
+  assert.equal(typeof candidate.runConcurrentFromManifestPath, "function");
+  assert.equal(candidate.runConcurrentOfficialProof, undefined);
+  assert.equal(candidate.admitConcurrentRun, undefined);
+  assert.equal(candidate.runConcurrentFake, undefined);
+});
+
+test("Desktop status uses a sanitized bounded view rather than persisted state", async () => {
+  const moduleName = "../src/concurrent-run.js";
+  const candidate = await import(moduleName) as Record<string, unknown>;
+  assert.equal(typeof candidate.concurrentRunView, "function");
+});

@@ -1,16 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createFakeBoundedProvider } from "../src/bounded-provider.js";
 import {
-  admitConcurrentRun,
+  admitConcurrentFromManifestPath,
+  concurrentRunView,
   inspectConcurrentCleanup,
   recoverConcurrentRun,
-  runConcurrentFake,
+  runConcurrentFromManifestPath,
   validateConcurrentManifest,
   type ConcurrentManifest,
 } from "../src/concurrent-run.js";
@@ -23,7 +25,7 @@ function sha(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function fixture(label: string): { root: string; manifest: ConcurrentManifest } {
+function fixture(label: string): { root: string; manifest: ConcurrentManifest; manifestPath: string } {
   const root = mkdtempSync(join(tmpdir(), `cairn-task-024-${label}-`));
   for (const dir of ["content", "test", "docs/ai-work/tasks"]) mkdirSync(join(root, dir), { recursive: true });
   writeFileSync(join(root, "AGENTS.md"), "# Disposable Cairn proof\n");
@@ -31,8 +33,8 @@ function fixture(label: string): { root: string; manifest: ConcurrentManifest } 
   writeFileSync(join(root, "docs/ai-work/LOG.md"), "| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |\n|---|---|---|---|---|---|---|---|---|\n");
   writeFileSync(join(root, "content/welcome.txt"), "PLACEHOLDER_WELCOME\n");
   writeFileSync(join(root, "content/add-book.txt"), "PLACEHOLDER_ADD_BOOK\n");
-  writeFileSync(join(root, "test/welcome.test.mjs"), `import test from "node:test"; import assert from "node:assert/strict"; import { readFileSync } from "node:fs";\ntest("welcome copy",()=>{const v=readFileSync("content/welcome.txt","utf8").trim(); assert.ok(v==="PLACEHOLDER_WELCOME" || /\\bwelcome\\b/i.test(v));});\n`);
-  writeFileSync(join(root, "test/add-book.test.mjs"), `import test from "node:test"; import assert from "node:assert/strict"; import { readFileSync } from "node:fs";\ntest("add book copy",()=>{const v=readFileSync("content/add-book.txt","utf8").trim(); assert.ok(v==="PLACEHOLDER_ADD_BOOK" || (/\\badd\\b/i.test(v) && /\\bbook\\b/i.test(v)));});\n`);
+  writeFileSync(join(root, "test/welcome.test.mjs"), `import test from "node:test"; import assert from "node:assert/strict"; import { readFileSync } from "node:fs";\ntest("welcome copy",()=>{const v=readFileSync("content/welcome.txt","utf8").trim(); assert.notEqual(v,"PLACEHOLDER_WELCOME"); assert.match(v,/\\bwelcome\\b/i);});\n`);
+  writeFileSync(join(root, "test/add-book.test.mjs"), `import test from "node:test"; import assert from "node:assert/strict"; import { readFileSync } from "node:fs";\ntest("add book copy",()=>{const v=readFileSync("content/add-book.txt","utf8").trim(); assert.notEqual(v,"PLACEHOLDER_ADD_BOOK"); assert.match(v,/\\badd\\b/i); assert.match(v,/\\bbook\\b/i);});\n`);
   const briefs = {
     1: "# Task 001 brief\n\nLane: Standard\n\nReplace only the disposable welcome sentence.\n",
     2: "# Task 002 brief\n\nLane: Standard\n\nReplace only the disposable add-book sentence.\n",
@@ -77,7 +79,7 @@ function fixture(label: string): { root: string; manifest: ConcurrentManifest } 
       {
         ...common(1), outcome: "Replace the welcome placeholder", usefulness: "Welcome copy is useful without add-book copy.",
         implementationPaths: ["content/welcome.txt"], testPaths: ["test/welcome.test.mjs"], writablePaths: ["content/welcome.txt"],
-        checks: [{ command: "node", args: ["--test", "test/welcome.test.mjs"] }, { command: "node", args: ["--test", "test/welcome.test.mjs", "test/add-book.test.mjs"] }],
+        checks: [{ command: "node", args: ["--test", "test/welcome.test.mjs"] }],
         provider: { provider: "anthropic", model: "claude-haiku-4-5", inputSha256: "3f50f7d24b6e52247aa05eae652d6a0bed39ce8bd7ce6da42642b74ee117bfe8", maxCalls: 1, maxCostUsd: 0.25 },
       },
       {
@@ -91,15 +93,15 @@ function fixture(label: string): { root: string; manifest: ConcurrentManifest } 
   writeFileSync(join(root, "run-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
   git(root, ["add", "--", "run-manifest.json"]);
   git(root, ["commit", "-m", "Pin closed-batch manifest"]);
-  return { root, manifest };
+  return { root, manifest, manifestPath: "run-manifest.json" };
 }
 
 test("the Final exposes closed-batch admission and an offline fake run", async () => {
   const moduleName = "../src/concurrent-run.js";
   const candidate = await import(moduleName) as Record<string, unknown>;
   assert.equal(typeof candidate.validateConcurrentManifest, "function");
-  assert.equal(typeof candidate.admitConcurrentRun, "function");
-  assert.equal(typeof candidate.runConcurrentFake, "function");
+  assert.equal(typeof candidate.admitConcurrentFromManifestPath, "function");
+  assert.equal(typeof candidate.runConcurrentFromManifestPath, "function");
 });
 
 test("whole-batch validation refuses overlap and a third task before admission", () => {
@@ -118,11 +120,11 @@ test("whole-batch validation refuses overlap and a third task before admission",
 });
 
 test("offline builders overlap and both integrate one at a time against latest main", async () => {
-  const { root, manifest } = fixture("done-done");
+  const { root, manifestPath } = fixture("done-done");
   process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
   let maximum = 0;
   const provider = createFakeBoundedProvider({ delayMs: 30, onActiveChange: (active) => { maximum = Math.max(maximum, active); } });
-  const result = await runConcurrentFake(root, manifest, { provider });
+  const result = await runConcurrentFromManifestPath(root, manifestPath, { fakeProvider: provider });
   assert.equal(maximum, 2);
   assert.deepEqual(result.tasks.map((task) => task.disposition), ["DONE", "DONE"]);
   assert.deepEqual(result.integrationOrder, [1, 2]);
@@ -139,12 +141,12 @@ for (const [label, stop1, stop2] of [
   ["done-stopped", false, true], ["stopped-done", true, false], ["stopped-stopped", true, true],
 ] as const) {
   test(`offline evidence is truthful for ${label}`, async () => {
-    const { root, manifest } = fixture(label);
+    const { root, manifestPath } = fixture(label);
     process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
     const provider = createFakeBoundedProvider({ results: {
       ...(stop1 ? { 1: "not-json" } : {}), ...(stop2 ? { 2: "not-json" } : {}),
     } });
-    const result = await runConcurrentFake(root, manifest, { provider });
+    const result = await runConcurrentFromManifestPath(root, manifestPath, { fakeProvider: provider });
     assert.deepEqual(result.tasks.map((task) => task.disposition), [stop1 ? "STOPPED" : "DONE", stop2 ? "STOPPED" : "DONE"]);
     const welcome = readFileSync(join(root, "content/welcome.txt"), "utf8");
     const addBook = readFileSync(join(root, "content/add-book.txt"), "utf8");
@@ -157,9 +159,9 @@ for (const [label, stop1, stop2] of [
 }
 
 test("admission creates exactly two temporary worktrees and a closed durable state", () => {
-  const { root, manifest } = fixture("admit-only");
+  const { root, manifestPath } = fixture("admit-only");
   process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
-  const state = admitConcurrentRun(root, manifest);
+  const state = admitConcurrentFromManifestPath(root, manifestPath);
   assert.equal(state.tasks.length, 2);
   assert.ok(state.tasks.every((task) => task.worktree.startsWith(tmpdir())));
   assert.equal(git(root, ["branch", "--list", "cairn/task-*"]).split(/\r?\n/).filter(Boolean).length, 2);
@@ -168,12 +170,73 @@ test("admission creates exactly two temporary worktrees and a closed durable sta
   assert.deepEqual(inspectConcurrentCleanup(root), { cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });
 });
 
+test("the exact emergency switch blocks before admission while the legacy misspelling has no authority", () => {
+  const blocked = fixture("disable-exact");
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  process.env.CAIRN_BOUNDED_CONCURRENCY_DISABLE = "1";
+  try {
+    assert.throws(() => admitConcurrentFromManifestPath(blocked.root, blocked.manifestPath), /FINAL_DISABLED/);
+    assert.equal(git(blocked.root, ["branch", "--list", "cairn/task-*"]), "");
+  } finally { delete process.env.CAIRN_BOUNDED_CONCURRENCY_DISABLE; }
+
+  const legacy = fixture("disable-legacy");
+  process.env.CAIRN_DISABLE_BOUNDED_CONCURRENCY = "1";
+  try {
+    const state = admitConcurrentFromManifestPath(legacy.root, legacy.manifestPath);
+    assert.equal(state.tasks.length, 2);
+    recoverConcurrentRun(legacy.root, state.runId);
+  } finally { delete process.env.CAIRN_DISABLE_BOUNDED_CONCURRENCY; }
+});
+
+test("approval extra fields fail before state, branch, or worktree effects", () => {
+  const { root, manifestPath } = fixture("approval-extra");
+  const path = join(root, "docs/ai-work/tasks/001-approval.json");
+  const approval = JSON.parse(readFileSync(path, "utf8"));
+  writeFileSync(path, JSON.stringify({ ...approval, extra: true }, null, 2) + "\n");
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  assert.throws(() => admitConcurrentFromManifestPath(root, manifestPath), /FROZEN_GATE_FAILED/);
+  assert.equal(git(root, ["branch", "--list", "cairn/task-*"]), "");
+  assert.equal(existsSync(join(root, ".git", "cairn")), false);
+});
+
+test("renderer-facing bounded status contains no repository, worktree, token, manifest, or authorization data", () => {
+  const { root, manifestPath } = fixture("sanitized-view");
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  const state = admitConcurrentFromManifestPath(root, manifestPath);
+  const view = concurrentRunView(root);
+  const raw = JSON.stringify(view);
+  assert.ok(view);
+  for (const forbidden of [root, state.worktreeRoot, state.gitDir, state.ownerToken, "manifestSha256", "liveAuthorization"]) {
+    assert.equal(raw.includes(forbidden), false);
+  }
+  recoverConcurrentRun(root, state.runId);
+});
+
+for (const crashAt of ["after:task-worktree:1", "after:main-fast-forward:1"] as const) {
+  test(`a separate process crash at ${crashAt} recovers without duplicate evidence or an extra call`, () => {
+    const { root, manifestPath } = fixture(`process-${crashAt.replace(/:/g, "-")}`);
+    const moduleUrl = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "index.js")).href;
+    const script = `import { runConcurrentFromManifestPath } from ${JSON.stringify(moduleUrl)}; await runConcurrentFromManifestPath(${JSON.stringify(root)}, ${JSON.stringify(manifestPath)});`;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+      encoding: "utf8",
+      timeout: 120_000,
+      env: { ...process.env, CAIRN_BOUNDED_CONCURRENCY_REHEARSAL: "1", CAIRN_TASK_026_CRASH_AT: crashAt },
+    });
+    assert.equal(child.status, 86, child.stderr || child.stdout);
+    const recovered = recoverConcurrentRun(root, `proof-process-${crashAt.replace(/[^a-z0-9-]/g, "-")}`);
+    assert.equal(recovered.providerCalls <= 2, true);
+    const log = readFileSync(join(root, "docs/ai-work/LOG.md"), "utf8");
+    for (const task of ["001", "002"]) assert.equal((log.match(new RegExp(`\\| ${task} \\|`, "g")) ?? []).length, 1);
+    assert.deepEqual(inspectConcurrentCleanup(root), { cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });
+  });
+}
+
 for (const faultAt of ["after-building-state", "after-builds"] as const) {
   test(`recovery closes the owned run after ${faultAt} without another call`, async () => {
-    const { root, manifest } = fixture(`fault-${faultAt}`);
+    const { root, manifest, manifestPath } = fixture(`fault-${faultAt}`);
     process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
     const provider = createFakeBoundedProvider({ delayMs: 5 });
-    await assert.rejects(() => runConcurrentFake(root, manifest, { provider, faultAt }), /INJECTED_FAULT/);
+    await assert.rejects(() => runConcurrentFromManifestPath(root, manifestPath, { fakeProvider: provider, faultAt }), /INJECTED_FAULT/);
     const callsBefore = provider.snapshot().totalCalls;
     const recovered = recoverConcurrentRun(root, manifest.runId);
     assert.equal(provider.snapshot().totalCalls, callsBefore);

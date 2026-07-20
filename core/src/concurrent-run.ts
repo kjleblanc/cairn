@@ -1,10 +1,12 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
@@ -16,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createFakeBoundedProvider,
   createOfficialBoundedProvider,
@@ -23,15 +26,24 @@ import {
   validateBoundedProviderRequest,
   type BoundedProvider,
   type ProofTaskNumber,
-  type Task024LiveAuthorization,
+  type Task026LiveAuthorization,
   PROOF_TOTAL_COST_CAP_USD,
-  validateTask024LiveAuthorization,
+  validateTask026LiveAuthorization,
 } from "./bounded-provider.js";
 import { appendLogRow, pad, sha256File, type LogRow } from "./files.js";
+import {
+  beginConcurrentTransition,
+  completeConcurrentTransition,
+  newConcurrentJournal,
+  parseConcurrentState,
+  type ConcurrentJournal,
+  type ConcurrentTransitionName,
+} from "./concurrent-state.js";
+import { CONCURRENT_ACTIVATION_PATH, concurrentActivationDecision } from "./concurrent-activation.js";
 
 export const CONCURRENT_SCHEMA = 1 as const;
 export const CONCURRENT_REHEARSAL_ENV = "CAIRN_BOUNDED_CONCURRENCY_REHEARSAL";
-export const CONCURRENT_DISABLE_ENV = "CAIRN_DISABLE_BOUNDED_CONCURRENCY";
+export const CONCURRENT_DISABLE_ENV = "CAIRN_BOUNDED_CONCURRENCY_DISABLE";
 export const CONCURRENT_STATE_FILE = "concurrent-final-v1.json";
 
 export interface ConcurrentCheck {
@@ -96,16 +108,21 @@ export interface ConcurrentTaskState {
   integrationCommit?: string;
   checksPassed: boolean;
   testHashes: Record<string, string>;
+  approvalSha256: string;
+  branchCreated: boolean;
+  worktreeCreated: boolean;
+  sealedResultSha256?: string;
 }
 
 export interface ConcurrentRunState {
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
   runId: string;
   ownerToken: string;
   projectRoot: string;
   gitDir: string;
   manifestSha256: string;
+  manifestPath: string;
   manifest: ConcurrentManifest;
   startMain: string;
   expectedMain: string;
@@ -114,9 +131,26 @@ export interface ConcurrentRunState {
   phase: "admitted" | "building" | "integrating" | "recovering" | "complete";
   integrationOrder: ProofTaskNumber[];
   cleanedUp: boolean;
-  liveAuthorization?: Task024LiveAuthorization;
+  liveAuthorization?: Task026LiveAuthorization;
+  journal: ConcurrentJournal;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ConcurrentRunView {
+  runId: string;
+  phase: ConcurrentRunState["phase"];
+  integrationOrder: ProofTaskNumber[];
+  cleanedUp: boolean;
+  tasks: Array<{
+    taskNumber: ProofTaskNumber;
+    phase: ConcurrentTaskPhase;
+    callConsumed: boolean;
+    blocker?: string;
+    checksPassed: boolean;
+    writablePaths: string[];
+    testPaths: string[];
+  }>;
 }
 
 export interface ConcurrentRunResult {
@@ -154,6 +188,7 @@ const TASK_KEYS = [
 const PROVIDER_KEYS = ["inputSha256", "maxCalls", "maxCostUsd", "model", "provider"].sort();
 const RECORD_KEYS = ["approval", "brief", "evidence", "report"].sort();
 const CHECK_KEYS = ["args", "command"].sort();
+const workerChildEntry = fileURLToPath(new URL("./concurrent-worker-child.js", import.meta.url));
 
 function now(): string { return new Date().toISOString(); }
 
@@ -163,6 +198,14 @@ function git(root: string, args: string[]): string {
 
 function hashText(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+export function concurrentRuntimeDigest(): string {
+  const names = ["concurrent-run.js", "concurrent-state.js", "concurrent-activation.js", "bounded-provider.js",
+    "bounded-broker-protocol.js", "bounded-broker-child.js", "bounded-network-guard.js", "concurrent-worker-child.js"];
+  const hash = createHash("sha256");
+  for (const name of names) hash.update(readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url))));
+  return hash.digest("hex");
 }
 
 function under(parent: string, child: string): boolean {
@@ -322,8 +365,13 @@ function validateTask(root: string | undefined, raw: unknown): ConcurrentTaskMan
     if (!existsSync(approvalPath)) throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Task ${n} approval is missing.`);
     let approval: unknown;
     try { approval = JSON.parse(readFileSync(approvalPath, "utf8")); } catch { throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Task ${n} approval is malformed.`); }
+    if (!approval || typeof approval !== "object" || Array.isArray(approval) ||
+        JSON.stringify(Object.keys(approval).sort()) !== JSON.stringify(["approvedAt", "briefPath", "briefSha256", "schemaVersion", "taskNumber"])) {
+      throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Task ${n} approval schema is not exact.`);
+    }
     const a = approval as Record<string, unknown>;
-    if (a.taskNumber !== taskNumber || a.briefPath !== briefPath || a.briefSha256 !== task.briefSha256) {
+    if (a.schemaVersion !== 1 || a.taskNumber !== taskNumber || a.briefPath !== briefPath || a.briefSha256 !== task.briefSha256 ||
+        typeof a.approvedAt !== "string" || !a.approvedAt) {
       throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Task ${n} approval does not bind the frozen brief.`);
     }
     for (const testPath of testPaths) {
@@ -439,6 +487,8 @@ export function loadConcurrentManifest(root: string, repositoryRelativePath: str
   const absolute = resolve(root, path);
   if (!under(root, absolute) || !existsSync(absolute)) throw new ConcurrentRunError("MANIFEST_MISSING", "The exact repository-relative manifest does not exist.");
   assertNoLinkEscape(root, path);
+  try { git(root, ["ls-files", "--error-unmatch", "--", path]); }
+  catch { throw new ConcurrentRunError("FROZEN_GATE_FAILED", "The manifest must be tracked before admission."); }
   return parseConcurrentManifest(readFileSync(absolute, "utf8"), root);
 }
 
@@ -452,12 +502,22 @@ function assertRepository(
   if (projectRoot !== resolve(root)) throw new ConcurrentRunError("PROJECT_ROOT_MISMATCH", "Open the exact Git project root.");
   if (process.platform !== "win32") throw new ConcurrentRunError("UNSUPPORTED_PLATFORM", "The Final supports Windows only.");
   if (process.env[CONCURRENT_DISABLE_ENV] === "1") throw new ConcurrentRunError("FINAL_DISABLED", "The emergency disable is set.");
-  if (!under(tmpdir(), projectRoot)) throw new ConcurrentRunError("FINAL_DISABLED", "No activation record exists; only a new disposable temporary repository is allowed.");
+  if (!under(tmpdir(), projectRoot)) {
+    const activationPath = join(projectRoot, CONCURRENT_ACTIVATION_PATH);
+    if (!existsSync(activationPath)) throw new ConcurrentRunError("FINAL_DISABLED", "No activation record exists; only a new disposable temporary repository is allowed.");
+    let activation: unknown;
+    try { activation = JSON.parse(readFileSync(activationPath, "utf8")); }
+    catch { throw new ConcurrentRunError("FINAL_DISABLED", "The activation record is malformed."); }
+    try {
+      concurrentActivationDecision(activation, { repositoryRoot: projectRoot, repositoryGitDir: resolve(root, git(root, ["rev-parse", "--git-common-dir"])),
+        implementationDigest: concurrentRuntimeDigest() }, process.env[CONCURRENT_DISABLE_ENV]);
+    } catch { throw new ConcurrentRunError("FINAL_DISABLED", "The repository-bound activation record is absent, mismatched, or disabled."); }
+  }
   if (mode === "offline-proof" && process.env[CONCURRENT_REHEARSAL_ENV] !== "1") {
     throw new ConcurrentRunError("FINAL_DISABLED", `${CONCURRENT_REHEARSAL_ENV}=1 is required for the offline proof.`);
   }
   if (mode === "live-proof") {
-    try { validateTask024LiveAuthorization(liveAuthorization, requireFreshLiveApproval); }
+    try { validateTask026LiveAuthorization(liveAuthorization, requireFreshLiveApproval); }
     catch { throw new ConcurrentRunError("LIVE_APPROVAL_REQUIRED", "Live mode requires the four exact, fresh Task 024 approvals at the execution boundary."); }
   }
   if (git(root, ["branch", "--show-current"]) !== "main") throw new ConcurrentRunError("MAIN_REQUIRED", "The disposable repository must be on main.");
@@ -481,29 +541,72 @@ function writeState(root: string, state: ConcurrentRunState): void {
   state.revision += 1;
   state.updatedAt = now();
   const next = `${p.state}.${process.pid}.${randomUUID()}.tmp`;
-  writeFileSync(next, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  const fd = openSync(next, "wx");
+  try {
+    writeFileSync(fd, JSON.stringify(state, null, 2) + "\n", { encoding: "utf8" });
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
   if (existsSync(p.state)) {
-    writeFileSync(p.backup, readFileSync(p.state));
+    writeFileSync(p.backup, readFileSync(p.state), { flag: "w" });
   }
   renameSync(next, p.state);
+}
+
+function journaledEffect(
+  root: string,
+  state: ConcurrentRunState,
+  name: ConcurrentTransitionName,
+  taskNumber: ProofTaskNumber | null,
+  target: string,
+  before: string,
+  after: string,
+  effect: () => void,
+): void {
+  beginConcurrentTransition(state.journal, name, taskNumber, target, before, after);
+  writeState(root, state);
+  const crashKey = `${name}:${taskNumber ?? "run"}`;
+  if (process.env.CAIRN_TASK_026_CRASH_AT === `before:${crashKey}`) process.exit(86);
+  effect();
+  if (process.env.CAIRN_TASK_026_CRASH_AT === `after:${crashKey}`) process.exit(86);
+  completeConcurrentTransition(state.journal, after);
+  writeState(root, state);
 }
 
 export function readConcurrentRunState(root: string): ConcurrentRunState | null {
   const p = statePaths(root);
   if (!existsSync(p.state)) return null;
-  let value: unknown;
-  try { value = JSON.parse(readFileSync(p.state, "utf8")); } catch { throw new ConcurrentRunError("CORRUPT_STATE", "Concurrent state is not valid JSON."); }
-  if (!value || typeof value !== "object" || (value as Record<string, unknown>).schemaVersion !== 1) {
-    throw new ConcurrentRunError("UNSUPPORTED_STATE", "Concurrent state schema is unsupported.");
+  let value: Record<string, unknown>;
+  try { value = parseConcurrentState(readFileSync(p.state, "utf8")); }
+  catch (error) { throw new ConcurrentRunError(error instanceof Error ? error.message : "CORRUPT_STATE", "Concurrent state failed strict validation."); }
+  const expected = ["cleanedUp", "createdAt", "expectedMain", "gitDir", "integrationOrder", "journal", "manifest",
+    "manifestPath", "manifestSha256", "ownerToken", "phase", "projectRoot", "revision", "runId", "schemaVersion",
+    "startMain", "tasks", "updatedAt", "worktreeRoot", ...(Object.hasOwn(value, "liveAuthorization") ? ["liveAuthorization"] : [])].sort();
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expected) || !Array.isArray(value.tasks)) {
+    throw new ConcurrentRunError("CORRUPT_STATE", "Concurrent state contains missing or unknown fields.");
   }
-  return value as ConcurrentRunState;
+  return value as unknown as ConcurrentRunState;
 }
 
-function acquireLock(root: string): () => void {
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function acquireLock(root: string, recovery = false): () => void {
   const p = statePaths(root);
   mkdirSync(p.dir, { recursive: true });
   let fd: number;
-  try { fd = openSync(p.lock, "wx"); } catch { throw new ConcurrentRunError("RUN_BUSY", "The bounded-run lock is already held."); }
+  try { fd = openSync(p.lock, "wx"); } catch {
+    if (!recovery) throw new ConcurrentRunError("RUN_BUSY", "The bounded-run lock is already held.");
+    let lock: unknown;
+    try { lock = JSON.parse(readFileSync(p.lock, "utf8")); } catch { throw new ConcurrentRunError("EXTERNAL_INTERFERENCE", "The stale lock is malformed."); }
+    const value = lock as Record<string, unknown>;
+    if (!value || typeof value !== "object" || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(["createdAt", "pid"]) ||
+        !Number.isSafeInteger(value.pid) || processAlive(value.pid as number)) {
+      throw new ConcurrentRunError("RUN_BUSY", "The bounded-run lock still belongs to a live or unproved process.");
+    }
+    unlinkSync(p.lock);
+    try { fd = openSync(p.lock, "wx"); } catch { throw new ConcurrentRunError("RUN_BUSY", "The recovery lock raced with another process."); }
+  }
   writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: now() }) + "\n");
   return () => {
     closeSync(fd);
@@ -513,8 +616,11 @@ function acquireLock(root: string): () => void {
 
 function assertFrozen(root: string, state: ConcurrentRunState): void {
   const repo = assertRepository(root, state.manifest.mode, state.liveAuthorization);
+  const manifestHash = state.manifestPath === "<programmatic-offline-test>"
+    ? hashText(JSON.stringify(state.manifest))
+    : sha256File(join(root, state.manifestPath));
   if (repo.projectRoot !== state.projectRoot || repo.gitDir !== state.gitDir || repo.main !== state.expectedMain ||
-      state.manifestSha256 !== hashText(JSON.stringify(state.manifest))) {
+      state.manifestSha256 !== manifestHash || state.journal.pending) {
     throw new ConcurrentRunError("FROZEN_GATE_FAILED", "Repository, main, or frozen manifest changed.");
   }
   validateConcurrentManifest(state.manifest, root);
@@ -523,6 +629,9 @@ function assertFrozen(root: string, state: ConcurrentRunState): void {
     if (!manifestTask || !under(state.worktreeRoot, task.worktree) || task.branch !== `cairn/task-${pad(task.taskNumber)}` ||
         git(root, ["rev-parse", task.branch]) !== git(task.worktree, ["rev-parse", "HEAD"])) {
       throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Task ${pad(task.taskNumber)} ownership changed.`);
+    }
+    if (sha256File(join(root, manifestTask.records.approval)) !== task.approvalSha256) {
+      throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Task ${pad(task.taskNumber)} approval bytes changed.`);
     }
     const status = git(task.worktree, ["status", "--porcelain=v1", "--untracked-files=all"]);
     if (["admitted", "calling"].includes(task.phase) && status) {
@@ -536,14 +645,14 @@ function assertFrozen(root: string, state: ConcurrentRunState): void {
   }
 }
 
-export function admitConcurrentRun(
+function admitConcurrentRun(
   root: string,
   rawManifest: unknown,
-  options: { liveAuthorization?: unknown } = {},
+  options: { liveAuthorization?: unknown; manifestPath?: string } = {},
 ): ConcurrentRunState {
   const manifest = validateConcurrentManifest(rawManifest, root);
   const liveAuthorization = manifest.mode === "live-proof"
-    ? validateTask024LiveAuthorization(options.liveAuthorization)
+    ? validateTask026LiveAuthorization(options.liveAuthorization)
     : undefined;
   const repo = assertRepository(root, manifest.mode, liveAuthorization);
   if (readConcurrentRunState(root)) throw new ConcurrentRunError("RUN_ACTIVE", "Recover or finish the existing run before new admission.");
@@ -555,27 +664,40 @@ export function admitConcurrentRun(
   try {
     const recheck = assertRepository(root, manifest.mode, liveAuthorization);
     if (recheck.main !== repo.main || readConcurrentRunState(root)) throw new ConcurrentRunError("ADMISSION_RACE", "Repository state changed during admission.");
-    mkdirSync(worktreeRoot);
     const state: ConcurrentRunState = {
-      schemaVersion: 1, revision: 0, runId: manifest.runId, ownerToken: randomUUID(), projectRoot: repo.projectRoot,
-      gitDir: repo.gitDir, manifestSha256: hashText(JSON.stringify(manifest)), manifest, startMain: repo.main,
-      expectedMain: repo.main, worktreeRoot, tasks: [], phase: "admitted", integrationOrder: [], cleanedUp: false,
+      schemaVersion: 2, revision: 0, runId: manifest.runId, ownerToken: randomUUID(), projectRoot: repo.projectRoot,
+      gitDir: repo.gitDir, manifestSha256: options.manifestPath ? sha256File(join(root, options.manifestPath)) : hashText(JSON.stringify(manifest)),
+      manifestPath: options.manifestPath ?? "<programmatic-offline-test>", manifest, startMain: repo.main,
+      expectedMain: repo.main, worktreeRoot,
+      tasks: manifest.tasks.map((task) => ({
+        taskNumber: task.taskNumber,
+        branch: `cairn/task-${pad(task.taskNumber)}`,
+        worktree: join(worktreeRoot, `task-${pad(task.taskNumber)}`),
+        baseCommit: repo.main,
+        phase: "admitted",
+        callConsumed: false,
+        checksPassed: false,
+        testHashes: {},
+        approvalSha256: sha256File(join(root, task.records.approval)),
+        branchCreated: false,
+        worktreeCreated: false,
+      })),
+      phase: "admitted", integrationOrder: [], cleanedUp: false,
       createdAt: now(), updatedAt: now(),
       ...(liveAuthorization ? { liveAuthorization } : {}),
+      journal: newConcurrentJournal(),
     };
-    for (const task of manifest.tasks) {
-      const branch = `cairn/task-${pad(task.taskNumber)}`;
-      const worktree = join(worktreeRoot, `task-${pad(task.taskNumber)}`);
-      git(root, ["worktree", "add", "-b", branch, worktree, repo.main]);
-      state.tasks.push({
-        taskNumber: task.taskNumber, branch, worktree, baseCommit: repo.main, phase: "admitted", callConsumed: false,
-        checksPassed: false,
-        // A fresh worktree can apply Git's platform line-ending policy. Freeze
-        // the actual isolated builder bytes, not the main-worktree rendering.
-        testHashes: Object.fromEntries(task.testPaths.map((path) => [path, sha256File(join(worktree, path))])),
+    journaledEffect(root, state, "admission", null, manifest.runId, "absent", "admitted", () => {});
+    journaledEffect(root, state, "worktree-root", null, worktreeRoot, "absent", "created", () => mkdirSync(worktreeRoot));
+    for (const taskState of state.tasks) {
+      const task = manifest.tasks.find((item) => item.taskNumber === taskState.taskNumber)!;
+      journaledEffect(root, state, "task-worktree", task.taskNumber, taskState.worktree, repo.main, "created", () => {
+        git(root, ["worktree", "add", "-b", taskState.branch, taskState.worktree, repo.main]);
+        taskState.branchCreated = true;
+        taskState.worktreeCreated = true;
+        taskState.testHashes = Object.fromEntries(task.testPaths.map((path) => [path, sha256File(join(taskState.worktree, path))]));
       });
     }
-    writeState(root, state);
     return structuredClone(state);
   } catch (error) {
     for (const task of manifest.tasks) {
@@ -584,6 +706,8 @@ export function admitConcurrentRun(
       try { if (git(root, ["branch", "--list", `cairn/task-${pad(task.taskNumber)}`])) git(root, ["branch", "-D", `cairn/task-${pad(task.taskNumber)}`]); } catch { /* recovery will identify remnants */ }
     }
     if (existsSync(worktreeRoot)) rmSync(worktreeRoot, { recursive: true, force: true });
+    const p = statePaths(root);
+    for (const file of [p.state, p.backup]) if (existsSync(file)) unlinkSync(file);
     throw error;
   } finally {
     release();
@@ -608,7 +732,16 @@ function writeTaskResult(root: string, state: ConcurrentRunState, taskState: Con
   const disposition = replacement === undefined ? "STOPPED" : "DONE";
   if (replacement !== undefined) {
     if (task.writablePaths.length !== 1) throw new ConcurrentRunError("MALFORMED_SCOPE", "The fixed proof writes exactly one implementation path.");
-    writeFileSync(join(taskState.worktree, task.writablePaths[0]), replacement + "\n", "utf8");
+    const worker = spawnSync(process.execPath, [workerChildEntry], {
+      cwd: taskState.worktree,
+      input: JSON.stringify({ schemaVersion: 1, worktree: taskState.worktree, path: task.writablePaths[0], replacement }),
+      encoding: "utf8",
+      windowsHide: true,
+      env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR, TEMP: process.env.TEMP, TMP: process.env.TMP },
+    });
+    if (worker.status !== 0 || !/^\{"schemaVersion":1,"ok":true,"pid":\d+\}\r?\n$/.test(worker.stdout)) {
+      throw new ConcurrentRunError("ISOLATION_FAILED", "Credentialless worker failed its strict one-shot protocol.");
+    }
   }
   mkdirSync(dirname(join(taskState.worktree, task.records.report)), { recursive: true });
   writeFileSync(join(taskState.worktree, task.records.report), reportText(task, disposition, blocker), "utf8");
@@ -652,38 +785,53 @@ function logRow(task: ConcurrentTaskManifest, disposition: "DONE" | "STOPPED", b
 function integrateTask(root: string, state: ConcurrentRunState, taskState: ConcurrentTaskState): void {
   assertFrozen(root, state);
   const task = state.manifest.tasks.find((item) => item.taskNumber === taskState.taskNumber)!;
-  taskState.phase = "integrating";
-  writeState(root, state);
+  journaledEffect(root, state, "integration-lease", task.taskNumber, `task-${pad(task.taskNumber)}`, taskState.phase, "integrating", () => {
+    taskState.phase = "integrating";
+  });
   const candidate = join(state.worktreeRoot, `integration-${pad(task.taskNumber)}`);
-  git(root, ["worktree", "add", "--detach", candidate, state.expectedMain]);
+  journaledEffect(root, state, "integration-candidate", task.taskNumber, candidate, "absent", state.expectedMain, () => {
+    git(root, ["worktree", "add", "--detach", candidate, state.expectedMain]);
+  });
   try {
     if (!taskState.taskCommit) throw new ConcurrentRunError("EVIDENCE_MISMATCH", "The frozen task commit is missing.");
-    git(candidate, ["cherry-pick", taskState.taskCommit]);
-    if (!taskState.blocker) {
-      runChecks(candidate, task.checks);
-      taskState.checksPassed = true;
-    }
-    const evidencePath = join(candidate, task.records.evidence);
-    const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as Record<string, unknown>;
-    evidence.checksPassed = taskState.checksPassed;
-    evidence.integrationBase = state.expectedMain;
-    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2) + "\n", "utf8");
-    appendLogRow(candidate, logRow(task, taskState.blocker ? "STOPPED" : "DONE", taskState.blocker));
-    git(candidate, ["add", "--", task.records.evidence, "docs/ai-work/LOG.md"]);
-    git(candidate, ["commit", "-m", `Task ${pad(task.taskNumber)}: record bounded proof outcome`]);
+    journaledEffect(root, state, "candidate-checks", task.taskNumber, candidate, state.expectedMain, "checked", () => {
+      git(candidate, ["cherry-pick", taskState.taskCommit!]);
+      if (!taskState.blocker) {
+        for (const [testPath, frozenHash] of Object.entries(taskState.testHashes)) {
+          if (sha256File(join(candidate, testPath)) !== frozenHash) throw new ConcurrentRunError("FROZEN_GATE_FAILED", `Candidate test changed: ${testPath}`);
+        }
+        runChecks(candidate, task.checks);
+        taskState.checksPassed = true;
+      }
+    });
+    journaledEffect(root, state, "evidence-finalize", task.taskNumber, task.records.evidence, "task", "final", () => {
+      const evidencePath = join(candidate, task.records.evidence);
+      const evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as Record<string, unknown>;
+      evidence.checksPassed = taskState.checksPassed;
+      evidence.integrationBase = state.expectedMain;
+      writeFileSync(evidencePath, JSON.stringify(evidence, null, 2) + "\n", "utf8");
+      appendLogRow(candidate, logRow(task, taskState.blocker ? "STOPPED" : "DONE", taskState.blocker));
+      git(candidate, ["add", "--", task.records.evidence, "docs/ai-work/LOG.md"]);
+      git(candidate, ["commit", "-m", `Task ${pad(task.taskNumber)}: record bounded proof outcome`]);
+    });
     const integrationCommit = git(candidate, ["rev-parse", "HEAD"]);
     if (git(root, ["rev-parse", "refs/heads/main"]) !== state.expectedMain ||
         git(root, ["status", "--porcelain=v1", "--untracked-files=all"])) {
       throw new ConcurrentRunError("SERIALIZATION_FAILED", "main changed before its exact fast-forward.");
     }
-    git(root, ["merge", "--ff-only", integrationCommit]);
-    state.expectedMain = integrationCommit;
-    taskState.integrationCommit = integrationCommit;
-    taskState.phase = "integrated";
-    state.integrationOrder.push(task.taskNumber);
-    writeState(root, state);
+    journaledEffect(root, state, "main-fast-forward", task.taskNumber, "refs/heads/main", state.expectedMain, integrationCommit, () => {
+      git(root, ["merge", "--ff-only", integrationCommit]);
+      state.expectedMain = integrationCommit;
+      taskState.integrationCommit = integrationCommit;
+      taskState.phase = "integrated";
+      state.integrationOrder.push(task.taskNumber);
+    });
   } finally {
-    try { git(root, ["worktree", "remove", "--force", candidate]); } catch { /* recoverConcurrentRun owns this exact path */ }
+    try {
+      if (existsSync(candidate)) journaledEffect(root, state, "integration-cleanup", task.taskNumber, candidate, "present", "absent", () => {
+        git(root, ["worktree", "remove", "--force", candidate]);
+      });
+    } catch { /* recoverConcurrentRun owns this exact path */ }
   }
 }
 
@@ -695,8 +843,21 @@ function cleanupOwned(root: string, state: ConcurrentRunState): void {
     if (!under(state.worktreeRoot, task.worktree) || task.branch !== `cairn/task-${pad(task.taskNumber)}`) {
       throw new ConcurrentRunError("RECOVERY_OWNERSHIP_UNPROVEN", "A generated task path or branch no longer matches its frozen owner.");
     }
-    if (existsSync(task.worktree)) git(root, ["worktree", "remove", "--force", task.worktree]);
-    if (git(root, ["branch", "--list", task.branch])) git(root, ["branch", "-D", task.branch]);
+    if (existsSync(task.worktree)) {
+      const manifestTask = state.manifest.tasks.find((item) => item.taskNumber === task.taskNumber)!;
+      const changed = changedPaths(task.worktree, task.baseCommit);
+      const permitted = new Set([...manifestTask.writablePaths, manifestTask.records.report, manifestTask.records.evidence]);
+      const outside = changed.filter((path) => !permitted.has(path));
+      if (outside.length) throw new ConcurrentRunError("RECOVERY_OWNERSHIP_UNPROVEN", `Task ${pad(task.taskNumber)} has unowned paths: ${outside.join(", ")}`);
+      const branchHead = git(root, ["rev-parse", task.branch]);
+      if (branchHead !== task.baseCommit && branchHead !== task.taskCommit) {
+        throw new ConcurrentRunError("RECOVERY_OWNERSHIP_UNPROVEN", `Task ${pad(task.taskNumber)} branch moved outside its recorded commits.`);
+      }
+      journaledEffect(root, state, "task-cleanup", task.taskNumber, task.worktree, "present", "absent", () => {
+        git(root, ["worktree", "remove", ...(changed.length ? ["--force"] : []), task.worktree]);
+        if (git(root, ["branch", "--list", task.branch])) git(root, ["branch", "-D", task.branch]);
+      });
+    }
   }
   for (const task of state.tasks) {
     const candidate = join(state.worktreeRoot, `integration-${pad(task.taskNumber)}`);
@@ -704,18 +865,26 @@ function cleanupOwned(root: string, state: ConcurrentRunState): void {
   }
   if (existsSync(state.worktreeRoot)) rmSync(state.worktreeRoot, { recursive: true, force: true });
   const p = statePaths(root);
+  journaledEffect(root, state, "process-cleanup", null, state.worktreeRoot, "stopped", "verified", () => {});
+  for (const task of state.tasks) {
+    const sealed = join(p.dir, `sealed-${pad(task.taskNumber)}.json`);
+    if (existsSync(sealed)) unlinkSync(sealed);
+  }
+  beginConcurrentTransition(state.journal, "run-cleanup", null, p.dir, "present", "absent");
+  writeState(root, state);
   for (const file of [p.state, p.backup]) if (existsSync(file)) unlinkSync(file);
 }
 
 async function runConcurrentWithProvider(
   root: string,
   rawManifest: unknown,
-  options: { provider: BoundedProvider; faultAt?: string; liveAuthorization?: unknown },
+  options: { provider: BoundedProvider; faultAt?: string; liveAuthorization?: unknown; manifestPath?: string },
 ): Promise<ConcurrentRunResult> {
   const manifest = validateConcurrentManifest(rawManifest, root);
   let state = readConcurrentRunState(root);
-  if (!state) state = admitConcurrentRun(root, manifest, { liveAuthorization: options.liveAuthorization });
-  if (state.runId !== manifest.runId || state.manifestSha256 !== hashText(JSON.stringify(manifest))) {
+  if (!state) state = admitConcurrentRun(root, manifest, { liveAuthorization: options.liveAuthorization, manifestPath: options.manifestPath });
+  const requestedHash = options.manifestPath ? sha256File(join(root, options.manifestPath)) : hashText(JSON.stringify(manifest));
+  if (state.runId !== manifest.runId || state.manifestSha256 !== requestedHash) {
     throw new ConcurrentRunError("FROZEN_GATE_FAILED", "The requested manifest is not the admitted closed batch.");
   }
   const provider = options.provider;
@@ -729,18 +898,29 @@ async function runConcurrentWithProvider(
       const task = state!.manifest.tasks.find((item) => item.taskNumber === taskState.taskNumber)!;
       if (taskState.callConsumed) throw new ConcurrentRunError("PROVIDER_CALL_LIMIT", `Task ${pad(task.taskNumber)} call is already consumed.`);
       assertFrozen(root, state!);
-      taskState.callConsumed = true;
-      taskState.phase = "calling";
-      writeState(root, state!);
+      journaledEffect(root, state!, "call-consume", task.taskNumber, `task-${pad(task.taskNumber)}`, "unused", "consumed", () => {
+        taskState.callConsumed = true;
+        taskState.phase = "calling";
+      });
       try {
         const result = await provider.call(proofProviderRequest(task.taskNumber));
         assertFrozen(root, state!);
-        writeTaskResult(root, state!, taskState, result.replacement);
+        const sealedPath = join(statePaths(root).dir, `sealed-${pad(task.taskNumber)}.json`);
+        const sealedBytes = JSON.stringify({ schemaVersion: 1, taskNumber: task.taskNumber, replacement: result.replacement,
+          model: result.model, costUsd: result.costUsd, requestCount: result.requestCount }) + "\n";
+        journaledEffect(root, state!, "broker-result", task.taskNumber, sealedPath, "absent", hashText(sealedBytes), () => {
+          writeFileSync(sealedPath, sealedBytes, { encoding: "utf8", flag: "wx" });
+          taskState.sealedResultSha256 = hashText(sealedBytes);
+        });
+        journaledEffect(root, state!, "result-apply", task.taskNumber, task.writablePaths[0], "frozen", "applied", () => {
+          writeTaskResult(root, state!, taskState, result.replacement);
+        });
       } catch (error) {
         const blocker = error instanceof Error ? error.message.split(":")[0] : "PROVIDER_CALL_FAILED";
-        writeTaskResult(root, state!, taskState, undefined, blocker);
+        journaledEffect(root, state!, "result-apply", task.taskNumber, task.records.report, "absent", "stopped", () => {
+          writeTaskResult(root, state!, taskState, undefined, blocker);
+        });
       }
-      writeState(root, state!);
     }));
     if (options.faultAt === "after-builds") throw new ConcurrentRunError("INJECTED_FAULT", options.faultAt);
     state.phase = "integrating";
@@ -768,7 +948,7 @@ async function runConcurrentWithProvider(
   }
 }
 
-export async function runConcurrentFake(
+async function runConcurrentFake(
   root: string,
   rawManifest: unknown,
   options: { provider?: BoundedProvider; faultAt?: string } = {},
@@ -778,7 +958,7 @@ export async function runConcurrentFake(
   return runConcurrentWithProvider(root, manifest, { provider: options.provider ?? createFakeBoundedProvider({ delayMs: 25 }), faultAt: options.faultAt });
 }
 
-export async function runConcurrentOfficialProof(
+async function runConcurrentOfficialProof(
   root: string,
   rawManifest: unknown,
   authorization: unknown,
@@ -788,9 +968,39 @@ export async function runConcurrentOfficialProof(
   if (manifest.mode !== "live-proof" || manifest.tasks.length !== 2) {
     throw new ConcurrentRunError("LIVE_PROOF_INVALID", "The live proof is the fixed two-task closed batch only.");
   }
-  const liveAuthorization = validateTask024LiveAuthorization(authorization);
+  const liveAuthorization = validateTask026LiveAuthorization(authorization);
   const provider = createOfficialBoundedProvider(liveAuthorization, brokerRoot);
   return runConcurrentWithProvider(root, manifest, { provider, liveAuthorization });
+}
+
+export function admitConcurrentFromManifestPath(
+  root: string,
+  manifestPath: string,
+  options: { liveAuthorization?: unknown } = {},
+): ConcurrentRunState {
+  const path = exactPath(manifestPath);
+  const manifest = loadConcurrentManifest(root, path);
+  return admitConcurrentRun(root, manifest, { manifestPath: path, liveAuthorization: options.liveAuthorization });
+}
+
+export async function runConcurrentFromManifestPath(
+  root: string,
+  manifestPath: string,
+  options: { liveAuthorization?: unknown; fakeProvider?: BoundedProvider; faultAt?: string } = {},
+): Promise<ConcurrentRunResult> {
+  const path = exactPath(manifestPath);
+  const manifest = loadConcurrentManifest(root, path);
+  if (manifest.mode === "offline-proof") {
+    return runConcurrentWithProvider(root, manifest, {
+      provider: options.fakeProvider ?? createFakeBoundedProvider({ delayMs: 25 }),
+      faultAt: options.faultAt,
+      manifestPath: path,
+    });
+  }
+  const liveAuthorization = validateTask026LiveAuthorization(options.liveAuthorization);
+  const brokerRoot = mkdtempSync(join(tmpdir(), `cairn-task-026-broker-${manifest.runId}-`));
+  const provider = createOfficialBoundedProvider(liveAuthorization, brokerRoot);
+  return runConcurrentWithProvider(root, manifest, { provider, liveAuthorization, manifestPath: path });
 }
 
 function recordRecoveredStops(root: string, state: ConcurrentRunState): void {
@@ -801,10 +1011,25 @@ function recordRecoveredStops(root: string, state: ConcurrentRunState): void {
     if (taskState.phase === "integrated") continue;
     const task = state.manifest.tasks.find((item) => item.taskNumber === taskState.taskNumber)!;
     mkdirSync(dirname(join(root, task.records.report)), { recursive: true });
-    writeFileSync(join(root, task.records.report), reportText(task, "STOPPED", "RECOVERED_AFTER_INTERRUPTION"), "utf8");
-    appendLogRow(root, logRow(task, "STOPPED", "RECOVERED_AFTER_INTERRUPTION"));
-    git(root, ["add", "--", task.records.report, "docs/ai-work/LOG.md"]);
-    git(root, ["commit", "-m", `Task ${pad(task.taskNumber)}: preserve stopped recovery evidence`]);
+    const reportPath = join(root, task.records.report);
+    const expectedReport = reportText(task, "STOPPED", "RECOVERED_AFTER_INTERRUPTION");
+    if (existsSync(reportPath)) {
+      if (readFileSync(reportPath, "utf8") !== expectedReport) throw new ConcurrentRunError("EVIDENCE_MISMATCH", `Task ${pad(task.taskNumber)} report already has different bytes.`);
+    } else {
+      writeFileSync(reportPath, expectedReport, { encoding: "utf8", flag: "wx" });
+    }
+    const logText = readFileSync(join(root, "docs/ai-work/LOG.md"), "utf8");
+    const taskPrefix = `| ${pad(task.taskNumber)} |`;
+    const existingRows = logText.split(/\r?\n/).filter((line) => line.startsWith(taskPrefix));
+    if (existingRows.length > 1 || (existingRows.length === 1 && !existingRows[0].includes("| STOPPED | stopped |"))) {
+      throw new ConcurrentRunError("EVIDENCE_MISMATCH", `Task ${pad(task.taskNumber)} log evidence conflicts.`);
+    }
+    if (existingRows.length === 0) appendLogRow(root, logRow(task, "STOPPED", "RECOVERED_AFTER_INTERRUPTION"));
+    const changed = git(root, ["status", "--porcelain=v1", "--", task.records.report, "docs/ai-work/LOG.md"]);
+    if (changed) {
+      git(root, ["add", "--", task.records.report, "docs/ai-work/LOG.md"]);
+      git(root, ["commit", "-m", `Task ${pad(task.taskNumber)}: preserve stopped recovery evidence`]);
+    }
     state.expectedMain = git(root, ["rev-parse", "HEAD"]);
     taskState.phase = "integrated";
     taskState.blocker = "RECOVERED_AFTER_INTERRUPTION";
@@ -813,14 +1038,38 @@ function recordRecoveredStops(root: string, state: ConcurrentRunState): void {
   }
 }
 
+function reconcilePendingTransition(root: string, state: ConcurrentRunState): void {
+  const pending = state.journal.pending;
+  if (!pending) return;
+  if (pending.name === "main-fast-forward" && pending.taskNumber) {
+    const currentMain = git(root, ["rev-parse", "refs/heads/main"]);
+    if (currentMain === pending.intendedAfter) {
+      const task = state.tasks.find((item) => item.taskNumber === pending.taskNumber)!;
+      task.phase = "integrated";
+      task.integrationCommit = currentMain;
+      state.expectedMain = currentMain;
+      if (!state.integrationOrder.includes(task.taskNumber)) state.integrationOrder.push(task.taskNumber);
+      completeConcurrentTransition(state.journal, pending.intendedAfter);
+    } else if (currentMain === pending.before) {
+      state.journal.pending = null;
+    } else {
+      throw new ConcurrentRunError("EXTERNAL_INTERFERENCE", "main moved outside the pending fast-forward transition.");
+    }
+  } else {
+    state.journal.pending = null;
+  }
+  writeState(root, state);
+}
+
 export function recoverConcurrentRun(root: string, runId: string): ConcurrentRunResult {
   const state = readConcurrentRunState(root);
   if (!state || state.runId !== runId) throw new ConcurrentRunError("RUN_NOT_FOUND", "No exact owned run has that id.");
   assertRepository(root, state.manifest.mode, state.liveAuthorization, false);
-  const release = acquireLock(root);
+  const release = acquireLock(root, true);
   try {
     state.phase = "recovering";
     writeState(root, state);
+    reconcilePendingTransition(root, state);
     recordRecoveredStops(root, state);
     const result: ConcurrentRunResult = {
       runId: state.runId, projectRoot: state.projectRoot, startMain: state.startMain, finalMain: state.expectedMain,
@@ -857,8 +1106,31 @@ export function inspectConcurrentCleanup(root: string): {
   };
 }
 
-export function concurrentRunStatus(root: string): ConcurrentRunState | null {
+function concurrentRunStatus(root: string): ConcurrentRunState | null {
   try { return readConcurrentRunState(root); } catch { return null; }
+}
+
+export function concurrentRunView(root: string): ConcurrentRunView | null {
+  const state = concurrentRunStatus(root);
+  if (!state) return null;
+  return {
+    runId: state.runId,
+    phase: state.phase,
+    integrationOrder: [...state.integrationOrder],
+    cleanedUp: state.cleanedUp,
+    tasks: state.tasks.map((taskState) => {
+      const task = state!.manifest.tasks.find((item) => item.taskNumber === taskState.taskNumber)!;
+      return {
+        taskNumber: taskState.taskNumber,
+        phase: taskState.phase,
+        callConsumed: taskState.callConsumed,
+        ...(taskState.blocker ? { blocker: taskState.blocker } : {}),
+        checksPassed: taskState.checksPassed,
+        writablePaths: [...task.writablePaths],
+        testPaths: [...task.testPaths],
+      };
+    }),
+  };
 }
 
 export function assertNoConcurrentRun(root: string): void {

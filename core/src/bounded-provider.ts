@@ -1,8 +1,11 @@
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { brokerChildEntry, parseBrokerResponse } from "./bounded-broker-protocol.js";
+import { createBoundedNetworkGuard } from "./bounded-network-guard.js";
 
 export const PROOF_PROVIDER = "anthropic" as const;
 export const PROOF_MODEL = "claude-haiku-4-5" as const;
@@ -10,12 +13,12 @@ export const PROOF_MAX_COST_USD = 0.25 as const;
 export const PROOF_TOTAL_COST_CAP_USD = 0.50 as const;
 export const PROOF_MAX_CALLS_PER_TASK = 1 as const;
 export const PROOF_SYSTEM = "Return only strict JSON matching {\"replacement\":\"string\"}. Do not use tools, request more information, or include extra fields.";
-export const FAKE_PROVIDER_CANARY = "CAIRN_024_FAKE_SECRET_CANARY_DO_NOT_PERSIST";
-export const TASK_024_BRIEF_COMMIT = "73590ee0223c22402fc3e2c2e25c9829992c8a16";
-export const LIVE_CREDENTIAL_APPROVAL = "For High-Stakes task 024's disposable proof only, I confirm my Claude credential is owner-managed through Anthropic's official installed authentication or operating-system store, and I approve the verified broker to use it only for the two named tool-free tasks. Do not reveal, inspect, copy, or log its value.";
-export const LIVE_TASK_001_APPROVAL = "For High-Stakes task 024 disposable Task 001 only, approve exactly one tool-free request to api.anthropic.com using claude-haiku-4-5 and input SHA-256 3f50f7d24b6e52247aa05eae652d6a0bed39ce8bd7ce6da42642b74ee117bfe8, with no retry, fallback, tool, or other destination.";
-export const LIVE_TASK_002_APPROVAL = "For High-Stakes task 024 disposable Task 002 only, approve exactly one tool-free request to api.anthropic.com using claude-haiku-4-5 and input SHA-256 2196cff705d1b7e4dff0507afc0ba808871e377aadf14da1e9a7631f2fb6bdd8, with no retry, fallback, tool, or other destination.";
-export const LIVE_COST_APPROVAL = "For High-Stakes task 024's disposable proof, approve one fixed total provider-cost cap of US$0.50: at most US$0.25 allocated to Task 001 and at most US$0.25 allocated to Task 002. Allocations are not transferable; no retry, second call for either task, fallback model, higher cost, or billing change is approved.";
+export const FAKE_PROVIDER_CANARY = "CAIRN_026_FAKE_SECRET_CANARY_DO_NOT_PERSIST";
+export const TASK_026_BRIEF_COMMIT = "87eb01d10fae6d2e68d3a53bff82d8a182008565";
+export const LIVE_CREDENTIAL_APPROVAL = "For High-Stakes task 026's disposable proof only, I confirm my Claude credential is owner-managed through Anthropic's official installed authentication or operating-system store, and I approve the verified isolated broker processes to use it only for the two named tool-free tasks. Do not reveal, inspect, copy, or log its value.";
+export const LIVE_TASK_001_APPROVAL = "For High-Stakes task 026 disposable Task 001 only, approve exactly one tool-free provider call to api.anthropic.com using claude-haiku-4-5 and input SHA-256 3f50f7d24b6e52247aa05eae652d6a0bed39ce8bd7ce6da42642b74ee117bfe8, with no retry, fallback, tool, or other destination.";
+export const LIVE_TASK_002_APPROVAL = "For High-Stakes task 026 disposable Task 002 only, approve exactly one tool-free provider call to api.anthropic.com using claude-haiku-4-5 and input SHA-256 2196cff705d1b7e4dff0507afc0ba808871e377aadf14da1e9a7631f2fb6bdd8, with no retry, fallback, tool, or other destination.";
+export const LIVE_COST_APPROVAL = "For High-Stakes task 026's disposable proof, approve one fixed total provider-cost cap of US$0.50: at most US$0.25 allocated to Task 001 and at most US$0.25 allocated to Task 002. Allocations are not transferable; no retry, second call for either task, fallback model, higher cost, or billing change is approved.";
 
 export type ProofTaskNumber = 1 | 2;
 
@@ -47,11 +50,15 @@ export interface ProviderLedgerSnapshot {
   totalCostUsd: number;
   callsByTask: Readonly<Record<string, number>>;
   outcomesByTask: Readonly<Record<string, "started" | "succeeded" | "failed" | "unknown">>;
+  queryCountsByTask?: Readonly<Record<string, number>>;
+  destinations?: readonly string[];
+  brokerPids?: readonly number[];
 }
 
-export interface Task024LiveAuthorization {
+export interface Task026LiveAuthorization {
   schemaVersion: 1;
-  briefCommit: typeof TASK_024_BRIEF_COMMIT;
+  briefCommit: typeof TASK_026_BRIEF_COMMIT;
+  implementationDigest: string;
   approvedAt: string;
   credentialApproval: typeof LIVE_CREDENTIAL_APPROVAL;
   task001Approval: typeof LIVE_TASK_001_APPROVAL;
@@ -89,15 +96,16 @@ export function proofProviderRequest(taskNumber: ProofTaskNumber): BoundedProvid
   };
 }
 
-export function validateTask024LiveAuthorization(value: unknown, requireFresh = true): Task024LiveAuthorization {
+export function validateTask026LiveAuthorization(value: unknown, requireFresh = true): Task026LiveAuthorization {
   if (!value || typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new BoundedProviderError("LIVE_APPROVAL_REQUIRED");
   }
   const keys = Object.keys(value).sort();
-  const expected = ["approvedAt", "briefCommit", "costApproval", "credentialApproval", "schemaVersion", "task001Approval", "task002Approval"].sort();
+  const expected = ["approvedAt", "briefCommit", "costApproval", "credentialApproval", "implementationDigest", "schemaVersion", "task001Approval", "task002Approval"].sort();
   if (JSON.stringify(keys) !== JSON.stringify(expected)) throw new BoundedProviderError("LIVE_APPROVAL_REQUIRED");
-  const authorization = value as Task024LiveAuthorization;
-  if (authorization.schemaVersion !== 1 || authorization.briefCommit !== TASK_024_BRIEF_COMMIT ||
+  const authorization = value as Task026LiveAuthorization;
+  if (authorization.schemaVersion !== 1 || authorization.briefCommit !== TASK_026_BRIEF_COMMIT ||
+      !/^[0-9a-f]{64}$/.test(authorization.implementationDigest) ||
       authorization.credentialApproval !== LIVE_CREDENTIAL_APPROVAL || authorization.task001Approval !== LIVE_TASK_001_APPROVAL ||
       authorization.task002Approval !== LIVE_TASK_002_APPROVAL || authorization.costApproval !== LIVE_COST_APPROVAL ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(authorization.approvedAt)) {
@@ -256,11 +264,10 @@ export function installedOfficialSdk(): { version: string; entry: string; packag
   return { version: pkg.version, entry, packageJson, entrySha256: createHash("sha256").update(readFileSync(entry)).digest("hex") };
 }
 
-function brokerEnvironment(): Record<string, string | undefined> {
+function brokerProcessEnvironment(): Record<string, string | undefined> {
   const names = ["PATH", "SystemRoot", "WINDIR", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "ComSpec", "PATHEXT"];
-  const env = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   return {
-    ...env,
+    ...Object.fromEntries(names.map((name) => [name, process.env[name]])),
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     DISABLE_TELEMETRY: "1",
     DISABLE_ERROR_REPORTING: "1",
@@ -269,15 +276,15 @@ function brokerEnvironment(): Record<string, string | undefined> {
 }
 
 /**
- * Credential-facing seam for the separately approved live proof. It is never
- * selected by runConcurrentFake or by Desktop. All raw SDK errors and messages
- * are reduced to fixed Cairn-owned codes at this boundary.
+ * Credentialless parent seam for the separately approved live proof. The SDK is
+ * imported only by bounded-broker-child in an empty directory. Parent IPC is one
+ * request and one redacted response; stderr is discarded.
  */
 export function createOfficialBoundedProvider(
   authorizationValue: unknown,
   brokerRootValue: string,
 ): BoundedProvider {
-  validateTask024LiveAuthorization(authorizationValue);
+  validateTask026LiveAuthorization(authorizationValue);
   installedOfficialSdk();
   const brokerRoot = resolve(brokerRootValue);
   if (process.platform !== "win32" || !inside(tmpdir(), brokerRoot) || !existsSync(brokerRoot) || readdirSync(brokerRoot).length !== 0) {
@@ -285,66 +292,56 @@ export function createOfficialBoundedProvider(
   }
   const calls = new Map<ProofTaskNumber, number>();
   const outcomes = new Map<ProofTaskNumber, "started" | "succeeded" | "failed" | "unknown">();
+  const queryCounts = new Map<ProofTaskNumber, number>();
+  const destinations: string[] = [];
+  const brokerPids: number[] = [];
   let totalCostUsd = 0;
   return {
     async call(input): Promise<BoundedProviderResult> {
-      const authorization = validateTask024LiveAuthorization(authorizationValue);
-      void authorization;
+      validateTask026LiveAuthorization(authorizationValue);
       const request = validateBoundedProviderRequest(input);
       if ((calls.get(request.taskNumber) ?? 0) >= 1) throw new BoundedProviderError("PROVIDER_CALL_LIMIT");
       calls.set(request.taskNumber, 1);
       outcomes.set(request.taskNumber, "started");
       const brokerDir = join(brokerRoot, `task-${String(request.taskNumber).padStart(3, "0")}`);
       mkdirSync(brokerDir, { recursive: false });
+      const guard = await createBoundedNetworkGuard();
       try {
-        const { query } = await import("@anthropic-ai/claude-agent-sdk");
-        const stream = query({
-          prompt: request.user,
-          options: {
+        const response = await new Promise<ReturnType<typeof parseBrokerResponse>>((resolveResponse, rejectResponse) => {
+          const child = spawn(process.execPath, [brokerChildEntry], {
             cwd: brokerDir,
-            model: request.model,
-            systemPrompt: request.system,
-            tools: [],
-            allowedTools: [],
-            disallowedTools: ["Bash", "Edit", "Write", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Task", "Skill"],
-            canUseTool: (async () => ({ behavior: "deny", message: "CAIRN_TOOL_DENIED" })) as never,
-            maxTurns: 1,
-            maxBudgetUsd: request.maxCostUsd,
-            outputFormat: {
-              type: "json_schema",
-              schema: { type: "object", additionalProperties: false, required: ["replacement"], properties: { replacement: { type: "string" } } },
-            },
-            settingSources: [],
-            skills: [],
-            mcpServers: {},
-            strictMcpConfig: true,
-            agents: {},
-            plugins: [],
-            hooks: {},
-            persistSession: false,
-            enableFileCheckpointing: false,
-            permissionMode: "dontAsk",
-            env: brokerEnvironment(),
-            debug: false,
-            stderr: () => { /* raw provider/credential-facing stderr is never retained */ },
-          } as never,
+            env: brokerProcessEnvironment(),
+            stdio: ["pipe", "pipe", "ignore"],
+            windowsHide: true,
+          });
+          if (child.pid) brokerPids.push(child.pid);
+          let stdout = "";
+          child.stdout.setEncoding("utf8");
+          child.stdout.on("data", (chunk: string) => { stdout += chunk; if (stdout.length > 65_536) child.kill(); });
+          child.once("error", () => rejectResponse(new BoundedProviderError("CALL_OUTCOME_UNKNOWN")));
+          child.once("close", () => {
+            try { resolveResponse(parseBrokerResponse(stdout.trim())); }
+            catch { rejectResponse(new BoundedProviderError("CALL_OUTCOME_UNKNOWN")); }
+          });
+          child.stdin.end(JSON.stringify({ schemaVersion: 1, taskNumber: request.taskNumber, proxyUrl: guard.proxyUrl }));
         });
-        let result: { subtype?: string; total_cost_usd?: number; structured_output?: unknown; num_turns?: number } | null = null;
-        for await (const message of stream as AsyncIterable<unknown>) {
-          const item = message as { type?: string; subtype?: string; total_cost_usd?: number; structured_output?: unknown; num_turns?: number };
-          if (item.type === "result") result = item;
-        }
-        if (!result || result.subtype !== "success" || result.num_turns !== 1) throw new BoundedProviderError("PROVIDER_CALL_FAILED");
-        const cost = result.total_cost_usd ?? Number.NaN;
-        const validated = validateBoundedProviderResult(request.taskNumber, result.structured_output, cost);
-        if (totalCostUsd + cost > PROOF_TOTAL_COST_CAP_USD) throw new BoundedProviderError("PROVIDER_TOTAL_COST_LIMIT");
-        totalCostUsd += cost;
+        queryCounts.set(request.taskNumber, response.queryCount);
+        const observed = guard.snapshot();
+        destinations.push(...observed.destinations);
+        if (!response.ok) throw new BoundedProviderError(response.code);
+        if (resolve(response.cwd) !== brokerDir || response.queryCount !== 1 || observed.rejected !== 0 ||
+            observed.destinations.some((value) => value !== "api.anthropic.com:443")) throw new BoundedProviderError("PROVIDER_BOUNDARY_UNPROVEN");
+        const validated = validateBoundedProviderResult(request.taskNumber, { replacement: response.replacement }, response.costUsd);
+        if (totalCostUsd + validated.costUsd > PROOF_TOTAL_COST_CAP_USD) throw new BoundedProviderError("PROVIDER_TOTAL_COST_LIMIT");
+        totalCostUsd += validated.costUsd;
         outcomes.set(request.taskNumber, "succeeded");
         return validated;
       } catch (error) {
         outcomes.set(request.taskNumber, error instanceof BoundedProviderError ? "failed" : "unknown");
         if (error instanceof BoundedProviderError) throw error;
         throw new BoundedProviderError("CALL_OUTCOME_UNKNOWN");
+      } finally {
+        await guard.close();
       }
     },
     snapshot(): ProviderLedgerSnapshot {
@@ -352,6 +349,9 @@ export function createOfficialBoundedProvider(
         totalCalls: [...calls.values()].reduce((sum, value) => sum + value, 0), totalCostUsd,
         callsByTask: Object.fromEntries([...calls].map(([task, count]) => [String(task), count])),
         outcomesByTask: Object.fromEntries([...outcomes].map(([task, outcome]) => [String(task), outcome])),
+        queryCountsByTask: Object.fromEntries([...queryCounts].map(([task, count]) => [String(task), count])),
+        destinations: [...destinations],
+        brokerPids: [...brokerPids],
       };
     },
   };

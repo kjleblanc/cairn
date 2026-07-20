@@ -1,10 +1,11 @@
 import pc from "picocolors";
+import { readFileSync } from "node:fs";
 import {
-  concurrentRunStatus,
+  concurrentRunView,
   inspectConcurrentCleanup,
   loadConcurrentManifest,
   recoverConcurrentRun,
-  runConcurrentFake,
+  runConcurrentFromManifestPath,
   type ConcurrentRunResult,
 } from "@cairn/core";
 
@@ -29,7 +30,7 @@ export function concurrentResultLines(result: ConcurrentRunResult): string[] {
 }
 
 export function concurrentStatusLines(root: string): string[] {
-  const state = concurrentRunStatus(root);
+  const state = concurrentRunView(root);
   if (!state) return [];
   const lines = [`Bounded Final run ${state.runId} — ${state.phase}:`];
   for (const task of state.tasks) {
@@ -45,15 +46,22 @@ export async function concurrentFlow(root: string, args: string[]): Promise<void
     const manifestPath = option(args, "--manifest");
     if (!manifestPath) throw new Error("Use: cairn concurrent run --manifest <exact-repository-relative-manifest-path>");
     const manifest = loadConcurrentManifest(root, manifestPath);
-    if (manifest.mode !== "offline-proof") {
-      throw new Error("LIVE_APPROVAL_REQUIRED: live provider use needs the four separate Task 024 approvals immediately before execution.");
-    }
     console.log(pc.bold(`Closed batch ${manifest.runId}: ${manifest.tasks.length} independently useful Standard task${manifest.tasks.length === 1 ? "" : "s"}.`));
     for (const task of manifest.tasks) {
       console.log(`  Task ${String(task.taskNumber).padStart(3, "0")} · write ${task.writablePaths.join(", ")} · test ${task.testPaths.join(", ")} · ${task.provider.model} · one call ≤ $${task.provider.maxCostUsd.toFixed(2)}`);
     }
-    console.log(pc.dim("Offline fake provider only; no credential, network request, or activation."));
-    const result = await runConcurrentFake(root, manifest);
+    let liveAuthorization: unknown;
+    if (manifest.mode === "live-proof") {
+      const authorizationPath = option(args, "--authorization");
+      if (!authorizationPath) throw new Error("LIVE_APPROVAL_REQUIRED: use --authorization <exact-new-authorization-file> after all four Task 026 approvals.");
+      const raw = readFileSync(authorizationPath, "utf8");
+      if (raw.length > 32_768) throw new Error("LIVE_APPROVAL_REQUIRED: authorization file is too large.");
+      try { liveAuthorization = JSON.parse(raw); } catch { throw new Error("LIVE_APPROVAL_REQUIRED: authorization file is not strict JSON."); }
+      console.log(pc.dim("Live disposable proof: exact approvals, isolated brokers, one call per task, no retry."));
+    } else {
+      console.log(pc.dim("Offline fake provider only; no credential, network request, or activation."));
+    }
+    const result = await runConcurrentFromManifestPath(root, manifestPath, { liveAuthorization });
     console.log(concurrentResultLines(result).join("\n"));
     return;
   }

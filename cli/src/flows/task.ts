@@ -4,7 +4,7 @@ import {
   approveBrief, buildTask, checkDirectionGate, closeTask, defineTask, isCairnProject,
   pad, parseFacts, parseLog, pickEngine, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck,
   type OwnerQuestion, type RunEvents,
-  parallelDraftEnabled, hasCoordinator, coordinatorSummary, concurrentRunStatus,
+  parallelDraftEnabled, hasCoordinator, coordinatorSummary, concurrentRunView,
 } from "@cairn/core";
 import { banner, label, spinnerLine } from "../ui.js";
 
@@ -61,7 +61,7 @@ function events(spin: { message: (m: string) => void }): RunEvents {
 const cost = (usd?: number) => (usd ? pc.dim(`  ($${usd.toFixed(2)})`) : "");
 
 export function parallelTaskRefusal(root: string): string | null {
-  const bounded = concurrentRunStatus(root);
+  const bounded = concurrentRunView(root);
   if (bounded) return `Bounded Final run ${bounded.runId} is coordinator-owned. Continue with \`cairn concurrent recover --run ${bounded.runId}\`; serial task controls are disabled.`;
   if (!parallelDraftEnabled()) return null;
   const active = hasCoordinator(root)

@@ -31,7 +31,7 @@ import {
   type CoordinatorSummary,
   type CoordinatorTaskView,
 } from "./coordinator.js";
-import { assertNoConcurrentRun, concurrentRunStatus, type ConcurrentRunState } from "./concurrent-run.js";
+import { assertNoConcurrentRun, concurrentRunView, type ConcurrentRunView } from "./concurrent-run.js";
 
 /**
  * The gated loop as resumable steps. Every skin (CLI, desktop) sequences these;
@@ -71,7 +71,7 @@ export interface ProjectStatus {
   unfinished: UnfinishedTask | null;
   unfinishedTasks?: UnfinishedTask[];
   parallel?: CoordinatorSummary;
-  bounded?: ConcurrentRunState | null;
+  bounded?: ConcurrentRunView | null;
 }
 
 function coordinatedTaskRoot(root: string, taskNumber: number): string {
@@ -282,7 +282,7 @@ export function projectStatus(root: string): ProjectStatus {
   const stones = log.filter((r) => /DONE/i.test(r.outcome)).length;
   const gate = checkDirectionGate(log);
   const parallel = parallelDraftEnabled() && hasCoordinator(root) ? coordinatorSummary(root) : undefined;
-  const bounded = concurrentRunStatus(root);
+  const bounded = concurrentRunView(root);
   if (parallel) {
     const unfinishedTasks = parallel.tasks
       .filter((task) => task.phase !== "integrated")
