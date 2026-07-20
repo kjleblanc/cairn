@@ -4,6 +4,7 @@ import { DEFAULT_MODEL, EFFORT_LEVELS } from "@cairn/core";
 import { initFlow } from "./flows/init.js";
 import { taskFlow, parseModel, parseEffort } from "./flows/task.js";
 import { statusFlow } from "./flows/status.js";
+import { concurrentFlow } from "./flows/concurrent.js";
 import { banner } from "./ui.js";
 
 /** Current Claude models offered as picks; any model id typed after --model still works. */
@@ -40,6 +41,9 @@ async function main(): Promise<void> {
     case "status":
       statusFlow(root);
       break;
+    case "concurrent":
+      await concurrentFlow(root, args);
+      break;
     case "":
     case "help":
     default:
@@ -47,6 +51,7 @@ async function main(): Promise<void> {
       console.log(`${pc.bold("cairn init")}     turn an empty folder into a Cairn project (contract, log, pilot, git)`);
       console.log(`${pc.bold("cairn task")}     run one task through the gated loop: define → approve → build → verify → decide`);
       console.log(`${pc.bold("cairn status")}   your project at a glance — facts, cairn, recent work, Direction Gate`);
+      console.log(`${pc.bold("cairn concurrent")} run or recover one closed, bounded one-or-two-task batch`);
       console.log("");
       console.log(pc.dim(`Flags: --mock (offline demo engine, no AI calls) · --model <id> (choose the Claude model; default: ${DEFAULT_MODEL}) · --effort <${EFFORT_LEVELS.join("|")}> (how hard the model thinks; default: the model decides)`));
       console.log(pc.dim(`Model picks: ${MODEL_PICKS.map((m) => (m === DEFAULT_MODEL ? `${m} (default)` : m)).join(" · ")} — any model id works`));

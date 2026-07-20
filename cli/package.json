@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "npm run build && node --test dist/test/ui.test.js dist/test/model.test.js dist/test/effort.test.js dist/test/coordinator.test.js",
+    "test": "npm run build && node --test dist/test/ui.test.js dist/test/model.test.js dist/test/effort.test.js dist/test/coordinator.test.js dist/test/concurrent.test.js",
     "start": "npm run build && node dist/src/index.js"
   },
   "dependencies": {

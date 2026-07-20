@@ -1,4 +1,5 @@
 import type { WizardStatus } from "../screens/Wizard";
+import type { ConcurrentRunState } from "@cairn/core";
 
 export interface TaskDeckItem {
   sessionId: number;
@@ -47,6 +48,34 @@ export function TaskDeck({ items, activeSessionId, onReturn }: {
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+/** Read-only: a bounded run is started and recovered only by the exact CLI commands. */
+export function BoundedTaskDeck({ state }: { state: ConcurrentRunState }) {
+  return (
+    <section className="task-deck" aria-label="Bounded Final tasks">
+      <div className="task-deck-title">
+        <strong>Bounded Final · read-only observation</strong>
+        <span>closed batch · integration order {state.integrationOrder.map((task) => pad(task)).join(" → ") || "pending"}</span>
+      </div>
+      <div className="task-deck-grid">
+        {state.tasks.map((taskState) => {
+          const manifest = state.manifest.tasks.find((task) => task.taskNumber === taskState.taskNumber);
+          return (
+            <div className="task-deck-card" key={taskState.taskNumber} data-testid={`bounded-task-${pad(taskState.taskNumber)}`}>
+              <span className="task-deck-card-head"><strong>Task {pad(taskState.taskNumber)}</strong><span>{taskState.phase}</span></span>
+              <span>call {taskState.callConsumed ? "consumed" : "unused"} · checks {taskState.checksPassed ? "passed" : "pending"}</span>
+              {taskState.blocker ? <span>STOPPED · {taskState.blocker}</span> : null}
+              <span className="mono small">write: {manifest?.writablePaths.join(", ")}</span>
+              <span className="mono small">test: {manifest?.testPaths.join(", ")}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="small mono">Recovery only: cairn concurrent recover --run {state.runId}</p>
+      <p className="small muted">Desktop cannot build, retry, integrate, call a provider, or change this run.</p>
     </section>
   );
 }

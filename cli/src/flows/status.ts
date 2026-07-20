@@ -1,6 +1,7 @@
 import pc from "picocolors";
 import { projectStatus } from "@cairn/core";
 import { banner, label, stack } from "../ui.js";
+import { concurrentStatusLines } from "./concurrent.js";
 
 export function parallelStatusLines(status: ReturnType<typeof projectStatus>): string[] {
   if (!status.parallel) return [];
@@ -34,6 +35,8 @@ export function statusFlow(root: string): void {
 
   const parallelLines = parallelStatusLines(s);
   if (parallelLines.length) console.log(`\n${parallelLines.join("\n")}`);
+  const boundedLines = concurrentStatusLines(root);
+  if (boundedLines.length) console.log(`\n${boundedLines.join("\n")}`);
 
   const recent = s.log.slice(-5).reverse();
   if (recent.length) {

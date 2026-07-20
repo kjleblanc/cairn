@@ -23,6 +23,7 @@ import {
   parseTaskMetadata,
   queueTaskDecision,
   readCoordinatorState,
+  refuseTaskAfterInvalidRefinement,
   recordCoordinatorApproval,
   refuseTaskClassification,
   registerTaskMetadata,
@@ -30,6 +31,7 @@ import {
   type CoordinatorSummary,
   type CoordinatorTaskView,
 } from "./coordinator.js";
+import { assertNoConcurrentRun, concurrentRunStatus, type ConcurrentRunState } from "./concurrent-run.js";
 
 /**
  * The gated loop as resumable steps. Every skin (CLI, desktop) sequences these;
@@ -69,6 +71,7 @@ export interface ProjectStatus {
   unfinished: UnfinishedTask | null;
   unfinishedTasks?: UnfinishedTask[];
   parallel?: CoordinatorSummary;
+  bounded?: ConcurrentRunState | null;
 }
 
 function coordinatedTaskRoot(root: string, taskNumber: number): string {
@@ -95,6 +98,7 @@ function assertGoverned(root: string): ProjectFacts {
   if (facts.status && facts.status !== "ACTIVE") {
     throw new Error(`The contract status is "${facts.status}" — it doesn't govern this project yet. Finish the conversion first.`);
   }
+  assertNoConcurrentRun(root);
   return facts;
 }
 
@@ -180,7 +184,14 @@ export async function refineBrief(root: string, taskNumber: number, message: str
     events,
   );
   const after = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "";
-  if (taskRoot !== root && after !== before) registerTaskMetadata(root, taskNumber, parseTaskMetadata(after));
+  if (taskRoot !== root && after !== before) {
+    try {
+      registerTaskMetadata(root, taskNumber, parseTaskMetadata(after));
+    } catch {
+      refuseTaskAfterInvalidRefinement(root, taskNumber);
+      throw new Error("PARALLEL_CLASSIFICATION_REFUSED: Refined task metadata is malformed or incomplete. The retained task was refused before approval.");
+    }
+  }
   return { briefPath, briefText: after, briefChanged: after !== before, reply: res.text, costUsd: res.costUsd };
 }
 
@@ -271,6 +282,7 @@ export function projectStatus(root: string): ProjectStatus {
   const stones = log.filter((r) => /DONE/i.test(r.outcome)).length;
   const gate = checkDirectionGate(log);
   const parallel = parallelDraftEnabled() && hasCoordinator(root) ? coordinatorSummary(root) : undefined;
+  const bounded = concurrentRunStatus(root);
   if (parallel) {
     const unfinishedTasks = parallel.tasks
       .filter((task) => task.phase !== "integrated")
@@ -292,7 +304,7 @@ export function projectStatus(root: string): ProjectStatus {
           blocker: task.blocker,
         };
       });
-    return { facts, log, stones, gate, unfinished: unfinishedTasks[0] ?? null, unfinishedTasks, parallel };
+    return { facts, log, stones, gate, unfinished: unfinishedTasks[0] ?? null, unfinishedTasks, parallel, bounded };
   }
   const last = nextTaskNumber(root) - 1;
   let unfinished: UnfinishedTask | null = null;
@@ -310,7 +322,7 @@ export function projectStatus(root: string): ProjectStatus {
       reportText,
     };
   }
-  return { facts, log, stones, gate, unfinished, unfinishedTasks: unfinished ? [unfinished] : [] };
+  return { facts, log, stones, gate, unfinished, unfinishedTasks: unfinished ? [unfinished] : [], bounded };
 }
 
 export function initProject(root: string, facts: { name: string; what: string; who: string; milestone: string; timebox: string }): { created: string[]; gitReady: boolean } {

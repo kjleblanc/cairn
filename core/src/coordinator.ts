@@ -612,6 +612,23 @@ export function refuseTaskClassification(root: string, taskNumber: number): Coor
   }), taskNumber);
 }
 
+/**
+ * A refinement can invalidate metadata that was valid when the task was first
+ * admitted.  Refusal is terminal and happens before an approval can be written.
+ */
+export function refuseTaskAfterInvalidRefinement(root: string, taskNumber: number): CoordinatorTask {
+  return findTask(updateState(root, (draft) => {
+    const current = findTask(draft, taskNumber);
+    if (current.phase !== "defined" || !current.admitted || current.approvalSha256) {
+      throw new CoordinatorError("TASK_PHASE", "Only an admitted, unapproved definition can be refused after refinement.");
+    }
+    current.admitted = false;
+    current.phase = "refused";
+    current.blocker = "PARALLEL_CLASSIFICATION_REFUSED";
+    current.updatedAt = now();
+  }), taskNumber);
+}
+
 export function registerTaskMetadata(root: string, taskNumber: number, metadata: TaskMetadata): CoordinatorTask {
   const valid = validateTaskMetadata(metadata);
   const state = readCoordinatorState(root);
@@ -640,6 +657,10 @@ export function registerTaskMetadata(root: string, taskNumber: number, metadata:
       refusal = "PARALLEL_EXTERNAL_ACTION_REFUSED";
     } else if (valid.lane !== "Standard" || valid.mode !== "Draft" || valid.dependencies.length > 0) {
       refusal = "PARALLEL_EXCLUSIVE_REFUSED";
+    } else if (peers.length >= 2) {
+      // The limit is enforced in the same locked state transition that admits
+      // the task. Reservations are intentionally unlimited; admissions are not.
+      refusal = "CONCURRENCY_LIMIT";
     } else if (valid.allowedPaths.some((path) => peers.some((peer) => peer.allowedPaths.some((owned) => pathsConflict(path, owned))))) {
       refusal = "PARALLEL_SCOPE_OVERLAP";
     }

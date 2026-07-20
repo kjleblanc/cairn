@@ -4,6 +4,7 @@ import { Badge, Card, Pill } from "../components/Ui";
 import { Scene } from "../components/Scene";
 import { ModelEffort } from "../components/ModelEffort";
 import { ProjectSwitcher } from "../components/ProjectSwitcher";
+import { BoundedTaskDeck } from "../components/TaskDeck";
 import { pluck } from "../sound";
 
 export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
@@ -15,6 +16,7 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
   const { facts, log, stones, gate, unfinished } = status;
   const recent = log.slice(-6).reverse();
   const unfinishedTasks = status.unfinishedTasks?.length ? status.unfinishedTasks : unfinished ? [unfinished] : [];
+  const bounded = status.bounded ?? null;
 
   return (
     <div>
@@ -28,8 +30,10 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
 
       <div className="row spread" style={{ marginBottom: 12 }}>
         <span className="status-pill">▸ idle · {stones} {stones === 1 ? "stone" : "stones"} · gate {gate.tripped ? "tripped" : "quiet"}</span>
-        {!gate.tripped ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
+        {!gate.tripped && !bounded ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
       </div>
+
+      {bounded ? <BoundedTaskDeck state={bounded} /> : null}
 
       {parallelDraft ? (
         <div className="gate-banner">
@@ -38,7 +42,7 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
         </div>
       ) : null}
 
-      {!gate.tripped ? <ModelEffort mock={mock} /> : null}
+      {!gate.tripped && !bounded ? <ModelEffort mock={mock} /> : null}
 
       {gate.tripped ? (
         <div className="gate-banner">
@@ -47,7 +51,7 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
         </div>
       ) : null}
 
-      {unfinishedTasks.map((task) => (
+      {!bounded ? unfinishedTasks.map((task) => (
         <Card title={/^PARALLEL_/.test(task.blocker ?? "") ? "retained refusal evidence" : "unfinished task"} key={task.taskNumber}>
           {(() => {
             const coordinatorTask = status.parallel?.tasks.find((item) => item.taskNumber === task.taskNumber);
@@ -89,7 +93,7 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
             </p>
           ) : null}
         </Card>
-      ))}
+      )) : null}
 
       <Card title="recent stones">
         {recent.length === 0 ? <p className="muted">No tasks closed yet — start the first one.</p> : null}
