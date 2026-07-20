@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { types as nodeTypes } from "node:util";
 
 export const PROVIDER_CONNECTION_DRAFT_ENV = "CAIRN_PROVIDER_CONNECTION_DRAFT";
 
@@ -52,15 +53,19 @@ function isConnectionStatus(value: unknown): value is ProviderConnectionStatus {
 
 function validateAdapterResponse(value: unknown): ProviderConnectionStatus {
   try {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    if (typeof value !== "object" || value === null || Array.isArray(value) || nodeTypes.isProxy(value)) {
       throw fixedError("PROVIDER_STATUS_INVALID", "The provider adapter returned an invalid response.");
     }
     const prototype = Object.getPrototypeOf(value);
-    const keys = Object.keys(value);
+    const keys = Reflect.ownKeys(value);
     if ((prototype !== Object.prototype && prototype !== null) || keys.length !== 1 || keys[0] !== "status") {
       throw fixedError("PROVIDER_STATUS_INVALID", "The provider adapter returned an invalid response.");
     }
-    const status = (value as Record<string, unknown>).status;
+    const descriptor = Object.getOwnPropertyDescriptor(value, "status");
+    if (!descriptor || !descriptor.enumerable || !Object.prototype.hasOwnProperty.call(descriptor, "value")) {
+      throw fixedError("PROVIDER_STATUS_INVALID", "The provider adapter returned an invalid response.");
+    }
+    const status = descriptor.value;
     if (!isConnectionStatus(status)) {
       throw fixedError("PROVIDER_STATUS_INVALID", "The provider adapter returned an invalid response.");
     }

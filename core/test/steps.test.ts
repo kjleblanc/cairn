@@ -270,6 +270,95 @@ test("serial v2 provider connection Draft redacts tainted fake adapters and writ
   });
 });
 
+test("serial v2 provider connection Draft rejects hidden, symbol, accessor, and Proxy shapes before writes", () => {
+  withProviderDraftEnvironment(() => {
+    let accessorCalls = 0;
+    let extraAccessorCalls = 0;
+    let proxyTrapCalls = 0;
+
+    const hiddenExtra: Record<string, unknown> = { status: "connected" };
+    Object.defineProperty(hiddenExtra, "rawOutput", {
+      value: TASK_019_CANARY,
+      enumerable: false,
+    });
+
+    const symbolExtra = {
+      status: "connected",
+      [Symbol("rawOutput")]: TASK_019_CANARY,
+    };
+
+    const hiddenStatus: Record<string, unknown> = {};
+    Object.defineProperty(hiddenStatus, "status", {
+      value: "connected",
+      enumerable: false,
+    });
+
+    const accessorStatus: Record<string, unknown> = {};
+    Object.defineProperty(accessorStatus, "status", {
+      enumerable: true,
+      get: () => {
+        accessorCalls += 1;
+        throw new Error(TASK_019_CANARY);
+      },
+      set: () => {
+        accessorCalls += 1;
+      },
+    });
+
+    const accessorExtra: Record<string, unknown> = { status: "connected" };
+    Object.defineProperty(accessorExtra, "rawOutput", {
+      enumerable: false,
+      get: () => {
+        extraAccessorCalls += 1;
+        throw new Error(TASK_019_CANARY);
+      },
+    });
+
+    const proxyResponse = new Proxy(
+      { status: "connected" },
+      {
+        getPrototypeOf: () => {
+          proxyTrapCalls += 1;
+          throw new Error(TASK_019_CANARY);
+        },
+        ownKeys: () => {
+          proxyTrapCalls += 1;
+          throw new Error(TASK_019_CANARY);
+        },
+        getOwnPropertyDescriptor: () => {
+          proxyTrapCalls += 1;
+          throw new Error(TASK_019_CANARY);
+        },
+      },
+    );
+
+    const cases: Array<{ response: unknown; calls?: () => number }> = [
+      { response: hiddenExtra },
+      { response: symbolExtra },
+      { response: hiddenStatus },
+      { response: accessorStatus, calls: () => accessorCalls },
+      { response: accessorExtra, calls: () => extraAccessorCalls },
+      { response: proxyResponse, calls: () => proxyTrapCalls },
+    ];
+
+    for (const item of cases) {
+      const dir = freshProject();
+      const originalLog = readFileSync(paths.log(dir), "utf8");
+      const error = captureError(
+        () => runSerialV2ProviderMockStandardTask(dir, "claude", fakeAdapters("claude", item.response)),
+      );
+      assert.equal(
+        error.message,
+        "PROVIDER_STATUS_INVALID: The provider adapter returned an invalid response.",
+      );
+      assert.doesNotMatch(`${error.message}\n${error.stack ?? ""}`, new RegExp(TASK_019_CANARY));
+      assertNoTaskWrites(dir, originalLog);
+      assert.doesNotMatch(allFileText(dir), new RegExp(TASK_019_CANARY));
+      if (item.calls) assert.equal(item.calls(), 0);
+    }
+  });
+});
+
 test("serial v2 provider connection Draft handles every allowed non-secret status", () => {
   withProviderDraftEnvironment(() => {
     for (const status of ["unknown", "disconnected"] as const satisfies readonly ProviderConnectionStatus[]) {
