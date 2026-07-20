@@ -5,6 +5,21 @@ project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates
 [EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
 automatic.
 
+## Contract v2.1 — 2026-07-20
+
+- Made the Direction Gate advisory. It still pauses patching, preserves failed
+  evidence, and compares real alternatives, but the owner may explicitly continue
+  the same approach with an `Owner override:` decision.
+- Replaced the mandatory qualified-human, synthetic-canary, and OS/process-isolation
+  prerequisites for owner-managed local AI provider authentication. One newly
+  created disposable, tool-free provider call may use official installed
+  authentication after the owner separately approves the exact credential use,
+  provider network call, and fixed cost cap.
+- Kept the hard non-exposure boundary: credential values never enter chat, commands,
+  model-visible tools, output, logs, evidence, project files, or Git. The exception
+  does not cover application-user authentication, billing changes, valuable
+  repositories, model tools, or multi-call agent sessions.
+
 ## Contract v2.0 — 2026-07-19
 
 - Replaced the mandatory multi-chat Define → Build → Verify → Decide sequence with

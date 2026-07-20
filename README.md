@@ -45,6 +45,19 @@ Plan a High-Stakes task: [the result you want]
 High-Stakes work keeps exact approval, safe rehearsal, mandatory fresh-context
 review, qualified-human boundaries, and separate authority for every live action.
 
+## What Cairn changed in v2.1
+
+Contract v2.1 makes the Direction Gate advisory. It still stops patching long enough
+to show the owner what failed and compare real alternatives, but the owner may
+explicitly continue the same approach after seeing that evidence.
+
+It also permits one disposable, tool-free AI-provider call through the provider's
+official installed authentication without requiring a qualified-human review,
+synthetic credential canary, or operating-system isolation layer. The credential
+value still never enters chat, commands, model-visible tools, output, logs, project
+files, or Git, and the owner still approves the exact credential use, provider call,
+and fixed cost cap separately.
+
 ## Why Cairn changed in v2.0
 
 Earlier Cairn versions used the same multi-chat gated loop for nearly every feature.
@@ -109,7 +122,7 @@ guessing. Existing `PILOT.md` files may remain, but the pilot no longer gates wo
 The AI stops when the project root or ownership is unclear, protected work changes,
 the task crosses into High-Stakes work, required authority or expertise is missing,
 a secret could leak, rollback is not credible, an external effect is unapproved, or
-the Direction Gate requires a different approach.
+the Direction Gate is waiting for the owner's direction.
 
 An ordinary compile error, behavior mismatch, or broken fixture is normally repaired
 and rerun inside the same task.
@@ -126,16 +139,20 @@ If the same approach keeps failing, type:
 Direction check: [what keeps going wrong]
 ```
 
-A second Direction Gate on the same implementation ends that approach. The next
-choice must be a smaller milestone, different architecture, experienced help, or
-deferral—not another renamed repair.
+The Direction Gate compares a smaller milestone, different architecture, experienced
+help, deferral, and the cost of continuing. It does not ban the current approach. To
+continue it after seeing that evidence, type:
+
+```text
+Owner override: continue this approach after the Direction Gate.
+```
 
 ## Current software status
 
-The written protocol and browser companion describe Contract v2.0. The current Cairn
+The written protocol and browser companion describe Contract v2.1. The current Cairn
 CLI and Desktop runtime still implement the older gated sequence and are **legacy
 until a separate bootstrap implementation updates them**. Do not treat their extra
-approval screens or parallel coordinator as the v2.0 workflow.
+approval screens or parallel coordinator as the v2.1 workflow.
 
 The written commands can be used with any coding agent that can read and edit project
 files. Cairn's existing CLI and Desktop use Claude models; no provider credential
@@ -146,6 +163,6 @@ should ever be pasted into Cairn or chat.
 Share this folder or the repository link. Cairn is language-independent and licensed
 under the [MIT License](LICENSE).
 
-The project contract carries a version number (`Cairn Contract v2.0`).
+The project contract carries a version number (`Cairn Contract v2.1`).
 [CHANGELOG.md](CHANGELOG.md) records each version, and
 [Everyday Workflow](EVERYDAY-WORKFLOW.md) explains reviewed updates.

@@ -72,14 +72,14 @@ word confuses you.
 | **DONE / STOPPED** | DONE means the bounded outcome and its checks completed. STOPPED means they did not. Both are honest outcomes. |
 | **Lane** | The task's risk level: Tiny, Standard, or High-Stakes. Tiny and Standard proceed; High-Stakes pauses for approval and review. |
 | **Risk-based autonomy** | Cairn's default: local reversible work proceeds continuously, while costly, external, destructive, or hard-to-reverse work pauses for the owner. |
-| **Direction Gate** | The rule that stops endless patching. A second gate on the same implementation ends that approach. |
+| **Direction Gate** | A pause that shows what failed and compares real options. It advises the owner but does not ban another attempt on the same approach after an explicit owner decision. |
 | **Fresh-context review** | Asking a brand-new chat to check finished work. It is optional for routine work and mandatory for High-Stakes work. |
 | **Repair and rerun** | Fixing a correctable implementation or test-harness mistake inside the same bounded task, preserving important failed evidence, and rerunning affected checks. |
 | **Bootstrap Cairn** | The temporary serial workflow Cairn's maintainers use to improve Cairn directly until reliable self-hosting works. It bypasses the unproven runtime, not the safety rules. |
 | **Owner override** | Your explicit instruction to change a process-only next step. It cannot expand the task's bounded scope or waive protection, authority, secret, external-effect, rollback, or product-safety boundaries. |
 | **Contract amendment** | Your always-available way to pause product work, change the rules, inspect the complete rule diff, and reactivate only with a separate exact approval. |
 | **Secret** | Any password, key, token, or private detail. Ordinary secrets never go into a chat or an AI-accessible surface. |
-| **Owner-managed local AI credential** | A provider login the owner manages through the provider's official local login or the operating system's credential store. Its value never enters Cairn, chat, project files, logs, the renderer, or any model tool. It is different from an ordinary secret only after every isolation check in the High-Stakes guide passes. |
+| **Owner-managed local AI credential** | A provider login the owner manages through the provider's official installed authentication or operating-system credential store. It may support one disposable tool-free call without expert, canary, or OS-isolation prerequisites, but its value never enters chat, commands, model-visible tools, output, logs, project files, or Git, and the owner separately approves its use, provider call, and cost cap. |
 
 ## Ready?
 

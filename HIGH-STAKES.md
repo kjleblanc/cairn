@@ -1,6 +1,6 @@
 # High-Stakes — when autonomy must pause
 
-Cairn Contract v2.0 lets Tiny and Standard work move continuously. This guide covers
+Cairn Contract v2.1 lets Tiny and Standard work move continuously. This guide covers
 the smaller set of changes where a mistake could be costly, hard to reverse, or
 externally visible.
 
@@ -180,23 +180,31 @@ Without that person, preparation may continue safely, but the live outcome is
 
 ## Owner-managed local AI credentials
 
-A provider credential can avoid expert review solely for provider authentication
-only when a real process or operating-system boundary keeps its value out of:
+A provider credential can avoid expert review solely for provider authentication.
+The owner manages it through the provider's official installed local authentication
+or an operating-system credential store. This exception intentionally does not
+require a qualified-human review, synthetic credential canary, or separate process or
+operating-system isolation layer.
 
-- chat, prompts, model context, and model output;
-- tool requests, results, subprocess environments, and command arguments;
-- project files, Git, logs, errors, crash output, analytics, and telemetry; and
-- renderer memory, IPC, browser APIs, and browser storage.
+The supported operation is one newly created disposable, tool-free provider call.
+The model receives no tools, plugins, hooks, skills, MCP servers, arbitrary paths,
+commands, valuable repository, or user data. The AI never requests, inspects, prints,
+copies, stores, or exposes the credential value. It remains out of chat, prompts,
+model context and output, model-visible tool requests and results, command arguments,
+project files, Git, logs, evidence, renderer and browser surfaces, analytics,
+telemetry, and crash output.
 
-The owner must manage the credential through the provider's official local login or
-an operating-system credential store. The provider-facing component may return only
-non-secret status, opaque handles, and redacted errors. A synthetic canary rehearsal
-and boundary inspection must support the claim before real use.
+The AI does not perform login, credential creation, rotation, refresh, recovery, or
+billing changes. Immediately before the call, the owner separately approves the
+exact credential use, provider network call, and fixed cost cap. The brief names the
+provider, model, disposable input, single-call limit, and maximum cost. Evidence is
+limited to non-secret status, validated output, model id, bounded cost, timing,
+disposition, and fixed redacted errors.
 
-The owner separately approves credential use, provider network access, and any cost.
 This exception does not cover application-user authentication, permissions, billing,
-money movement, or another secret class. Cairn's current broad model-tool runtime is
-not automatically qualified.
+money movement, another secret class, valuable repositories, model tools, or
+multi-call agent sessions. If official installed authentication cannot work without
+exposing the credential or starting a login or billing flow, stop.
 
 ## Evidence without theater
 

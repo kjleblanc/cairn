@@ -1,7 +1,7 @@
 # Project Contract
 
 > **What this file is.** This is the rulebook for AI work in this project — Cairn
-> Contract v2.0, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
+> Contract v2.1, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
 > copied into the project during setup and saved as `AGENTS.md` in the project root.
 > The AI must read it at the start of every chat and follow it exactly. The owner is a
 > beginner: explain everything in plain language.
@@ -314,10 +314,16 @@ risk, and fastest visible test. Wait for the owner's choice.
 
 The Direction Gate triggers when the same blocker occurs twice, two attempts produce
 no visible milestone progress, a supposedly fixed problem reopens twice, or the
-Project facts timebox expires. A second Direction Gate on the same implementation
-ends that approach: do not propose another narrow repair or renamed version of the
-same design. The owner must choose a smaller milestone, different architecture,
-experienced help, or deferral.
+Project facts timebox expires. It advises the owner; it does not prohibit another
+attempt. After seeing the evidence and alternatives, the owner may choose a smaller
+milestone, different architecture, experienced help, deferral, or the same approach.
+Continuing the same approach requires this explicit process decision:
+
+`Owner override: continue this approach after the Direction Gate.`
+
+Preserve the failed evidence and use a new task for a materially new attempt. The
+owner's choice does not waive scope, approval, secret, external-effect, rollback, or
+product-safety boundaries.
 
 ## Owner override: [specific instruction]
 
@@ -380,26 +386,33 @@ migrations, production infrastructure or security controls, public legal
 commitments, or safety-critical behavior.
 
 An owner-managed local AI credential avoids that requirement solely for provider
-authentication only when all of these are established:
+authentication. It does not require qualified-human review, a synthetic-canary
+rehearsal, or a process or operating-system allow-list when all of these are true:
 
 1. The owner creates, installs, rotates, and revokes it through the provider's
-   official local login or an operating-system credential store.
-2. Its value never enters chat, prompts, model context, model output, tool requests,
-   tool results, project files, Git, logs, command arguments, or environment inherited
-   by model-accessible tools.
-3. Its value never enters the renderer, IPC, browser storage, analytics, telemetry,
-   or crash output.
-4. A real process or operating-system allow-list boundary — not a prompt, path
-   filter, or command deny-list — prevents model tools from reading it.
-5. The provider-facing component returns only non-secret status, opaque handles, and
-   redacted errors.
-6. A synthetic canary rehearsal and boundary inspection support the isolation claim.
-7. The owner separately approves the exact credential use, provider network access,
-   and any cost before the live call.
+   official installed local authentication or an operating-system credential store.
+2. The supported operation is one newly created disposable, tool-free provider call.
+   The model receives no tools, plugins, hooks, skills, MCP servers, arbitrary paths,
+   commands, or access to valuable project or user data.
+3. The credential value is never requested, inspected, printed, copied, stored, or
+   exposed by the AI. It never enters chat, prompts, model context, model output,
+   model-visible tool requests or results, command arguments, project files, Git,
+   logs, evidence, renderer or browser surfaces, analytics, telemetry, or crash
+   output.
+4. The AI does not perform login, credential creation, rotation, refresh, recovery,
+   or billing changes. If official installed authentication cannot complete without
+   exposing the value or starting one of those flows, stop.
+5. Immediately before the call, the owner separately approves the exact credential
+   use, provider network call, and fixed cost cap. The brief names the provider,
+   model, disposable input, call count, and maximum cost.
+6. Evidence contains only non-secret status, validated model output, model id, bounded
+   cost, timing, disposition, and fixed redacted errors. It never captures raw
+   authentication material, headers, account data, or provider debug output.
 
 This exception never covers application-user authentication, permissions, billing,
-money movement, or another secret class. Cairn's current broad model-tool runtime is
-not grandfathered into it.
+money movement, another secret class, valuable repositories, model tools, or
+multi-call agent sessions. Those remain subject to the ordinary High-Stakes and
+qualified-human boundaries above.
 
 ## Task records
 
@@ -430,7 +443,7 @@ the pilot does not gate new work.
 - a check reveals actual or imminent unauthorized access, secret exposure, protected
   data loss or corruption, irreversible damage, or an uncontrolled external effect;
   or
-- the Direction Gate requires a different approach.
+- the Direction Gate is awaiting the owner's direction.
 
 An ordinary compile error, behavior mismatch, or broken test fixture is not a safety
 failure by itself. Repair and rerun when the bounded correction is safe. Stopping is

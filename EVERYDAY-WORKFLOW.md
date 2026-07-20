@@ -1,6 +1,6 @@
 # Everyday Workflow — the commands you actually use
 
-Cairn Contract v2.0 uses **risk-based autonomy**: routine local work moves forward;
+Cairn Contract v2.1 uses **risk-based autonomy**: routine local work moves forward;
 real risk pauses for you.
 
 ## The normal path
@@ -164,9 +164,13 @@ Direction check: [what keeps going wrong]
 ```
 
 The AI makes no patch. It compares genuinely different options: reduce the
-milestone, change architecture, get experienced help, or defer the work. A second
-Direction Gate on the same implementation ends that approach; it cannot lead to
-another renamed repair of the same design.
+milestone, change architecture, get experienced help, defer the work, or continue
+with clear eyes. The gate advises you; it does not ban the current approach. To
+continue it after reading the evidence, type:
+
+```text
+Owner override: continue this approach after the Direction Gate.
+```
 
 ### You need to change a process step
 
@@ -243,3 +247,10 @@ proportionate checks, local previews, and safe exact-name commits. The AI still 
 approval for installs, network access, credentials, money, deployment, messages,
 external writes, destructive or irreversible actions, production changes, or
 valuable data. Never paste a secret into chat.
+
+For provider authentication only, one disposable tool-free AI call may use the
+provider's official installed authentication without a qualified-human review,
+synthetic canary, or operating-system isolation layer. The credential value must
+remain out of chat, commands, model-visible tools, output, logs, project files, and
+Git. You separately approve the exact credential use, provider call, and fixed cost
+cap immediately before the call.
