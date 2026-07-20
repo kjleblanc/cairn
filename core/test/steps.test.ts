@@ -218,7 +218,7 @@ test("serial v2 provider connection Draft refuses before writes when any guard i
 
     run((dir) => {
       const contract = readFileSync(paths.contract(dir), "utf8");
-      writeFileSync(paths.contract(dir), contract.replace(/Contract v2\.0/, "Contract v1.9"));
+      writeFileSync(paths.contract(dir), contract.replace(/Contract v2(?:\.\d+)?/, "Contract v1.9"));
     }, /SERIAL_V2_CONTRACT_REQUIRED/);
 
     run((dir) => {

@@ -20,3 +20,4 @@
 | 020 | 2026-07-19 | High-Stakes | Draft | DONE | accept | Review PASS: accepted the disabled fake-only Experimental Draft at 2444759; strict hidden-field rejection held, with no real-provider activation | YES |
 | 022 | 2026-07-20 | Standard | Applied | DONE | completed | Recorded active Contract v2.1 and accepted historical evidence by exact path so main is clean without deleting, hiding, or rewriting anything | NO |
 | 023 | 2026-07-20 | Standard | Applied | DONE | completed | Recorded active Contract v2.2 and all required mirrors by exact path without activating parallel mode or altering Task 016 or runtime code | NO |
+| 025 | 2026-07-20 | Standard | Applied | DONE | completed | Repaired the Contract v2.x regression fixture so the full core suite exercises the intended guard | NO |
