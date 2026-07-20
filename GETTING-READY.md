@@ -75,11 +75,11 @@ word confuses you.
 | **Direction Gate** | A pause that shows what failed and compares real options. It advises the owner but does not ban another attempt on the same approach after an explicit owner decision. |
 | **Fresh-context review** | Asking a brand-new chat to check finished work. It is optional for routine work and mandatory for High-Stakes work. |
 | **Repair and rerun** | Fixing a correctable implementation or test-harness mistake inside the same bounded task, preserving important failed evidence, and rerunning affected checks. |
-| **Bootstrap Cairn** | The temporary serial workflow Cairn's maintainers use to improve Cairn directly until reliable self-hosting works. It bypasses the unproven runtime, not the safety rules. |
+| **Bootstrap Cairn** | The temporary workflow Cairn's maintainers use to improve Cairn directly until reliable self-hosting works. It normally runs serially, with one bounded exception for up to two independent Standard tasks in isolated temporary worktrees and serial integration into main. |
 | **Owner override** | Your explicit instruction to change a process-only next step. It cannot expand the task's bounded scope or waive protection, authority, secret, external-effect, rollback, or product-safety boundaries. |
 | **Contract amendment** | Your always-available way to pause product work, change the rules, inspect the complete rule diff, and reactivate only with a separate exact approval. |
 | **Secret** | Any password, key, token, or private detail. Ordinary secrets never go into a chat or an AI-accessible surface. |
-| **Owner-managed local AI credential** | A provider login the owner manages through the provider's official installed authentication or operating-system credential store. It may support one disposable tool-free call without expert, canary, or OS-isolation prerequisites, but its value never enters chat, commands, model-visible tools, output, logs, project files, or Git, and the owner separately approves its use, provider call, and cost cap. |
+| **Owner-managed local AI credential** | A provider login the owner manages through the provider's official installed authentication or operating-system credential store. It may support one disposable tool-free call, or up to two separately bounded calls for the concurrent Bootstrap path, without expert, canary, or OS-isolation prerequisites. Its value never enters chat, commands, model-visible tools, output, logs, project files, or Git; the owner approves the exact credential use, each provider call, and the applicable fixed cost cap. |
 
 ## Ready?
 

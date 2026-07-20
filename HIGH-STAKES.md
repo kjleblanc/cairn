@@ -1,6 +1,6 @@
 # High-Stakes — when autonomy must pause
 
-Cairn Contract v2.1 lets Tiny and Standard work move continuously. This guide covers
+Cairn Contract v2.2 lets Tiny and Standard work move continuously. This guide covers
 the smaller set of changes where a mistake could be costly, hard to reverse, or
 externally visible.
 
@@ -186,25 +186,31 @@ or an operating-system credential store. This exception intentionally does not
 require a qualified-human review, synthetic credential canary, or separate process or
 operating-system isolation layer.
 
-The supported operation is one newly created disposable, tool-free provider call.
-The model receives no tools, plugins, hooks, skills, MCP servers, arbitrary paths,
-commands, valuable repository, or user data. The AI never requests, inspects, prints,
-copies, stores, or exposes the credential value. It remains out of chat, prompts,
-model context and output, model-visible tool requests and results, command arguments,
-project files, Git, logs, evidence, renderer and browser surfaces, analytics,
-telemetry, and crash output.
+The ordinary supported operation is one newly created disposable, tool-free provider
+call. The bounded concurrent Bootstrap path may instead use at most two separately
+bounded calls, exactly one for each admitted Standard task. Every model receives no
+tools, plugins, hooks, skills, MCP servers, arbitrary paths, commands, valuable
+repository, or user data. The AI never requests, inspects, prints, copies, stores, or
+exposes the credential value. It remains out of chat, prompts, model context and
+output, model-visible tool requests and results, command arguments, project files,
+Git, logs, evidence, renderer and browser surfaces, analytics, telemetry, and crash
+output.
 
 The AI does not perform login, credential creation, rotation, refresh, recovery, or
-billing changes. Immediately before the call, the owner separately approves the
-exact credential use, provider network call, and fixed cost cap. The brief names the
-provider, model, disposable input, single-call limit, and maximum cost. Evidence is
-limited to non-secret status, validated output, model id, bounded cost, timing,
-disposition, and fixed redacted errors.
+billing changes. Immediately before execution, the owner separately approves the
+exact credential use and each exact provider network call. For a concurrent pair,
+the owner approves one fixed total cost cap; each brief names its provider, model,
+disposable input, one-call limit, and allocated maximum cost, and both allocations
+must fit within that cap. A retry is another call and is not authorized after a
+task's one-call allocation is used. Evidence is limited to non-secret status,
+validated output, model id, bounded cost, timing, disposition, and fixed redacted
+errors.
 
 This exception does not cover application-user authentication, permissions, billing,
 money movement, another secret class, valuable repositories, model tools, or
-multi-call agent sessions. If official installed authentication cannot work without
-exposing the credential or starting a login or billing flow, stop.
+multi-call agent sessions beyond the two separately bounded calls for concurrent
+Bootstrap. If official installed authentication cannot work without exposing the
+credential or starting a login or billing flow, stop.
 
 ## Evidence without theater
 

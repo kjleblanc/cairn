@@ -1,7 +1,7 @@
 # Project Contract
 
 > **What this file is.** This is the rulebook for AI work in this project — Cairn
-> Contract v2.1, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
+> Contract v2.2, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
 > copied into the project during setup and saved as `AGENTS.md` in the project root.
 > The AI must read it at the start of every chat and follow it exactly. The owner is a
 > beginner: explain everything in plain language.
@@ -31,10 +31,11 @@ contract is not active yet; follow the project's existing rules instead.
 **Use autonomy for reversible work and gates for real risk.** Process exists to help
 the owner get a visible result safely. It must not become the result itself.
 
-- **One outcome at a time, not one chat per task.** A task may continue in the same
-  chat through planning, implementation, repair, verification, and owner feedback.
-  If context becomes unwieldy, save a clear checkpoint and continue in a fresh chat;
-  a fresh chat is a tool, not a mandatory gate.
+- **One bounded outcome per task, not one chat per task.** A task may continue in the
+  same chat through planning, implementation, repair, verification, and owner
+  feedback. If context becomes unwieldy, save a clear checkpoint and continue in a
+  fresh chat; a fresh chat is a tool, not a mandatory gate. Bootstrap Cairn has one
+  explicit exception that may run two independent Standard tasks concurrently.
 - **Standard work proceeds.** Local, reversible work inside the repository does not
   wait for a separate brief approval, build chat, review chat, or owner decision.
 - **High-Stakes work pauses.** When a mistake could be costly, hard to reverse, or
@@ -73,7 +74,7 @@ an action, quote it to the owner and wait.
 | `How do I try it?` | Gives safe exact steps to see the result and changes nothing |
 | `Review High-Stakes task NNN.` | Performs the mandatory skeptical review in a fresh chat |
 | `My decision for High-Stakes task NNN: …` | Records the owner's post-review decision |
-| `Bootstrap Cairn: …` | Improves Cairn serially without relying on its unproven runtime |
+| `Bootstrap Cairn: …` | Improves Cairn directly, with bounded two-task concurrency when eligible |
 | `Stop. What just happened?` | Freezes and explains the current state and options |
 | `Direction check: …` | Stops patching and compares genuinely different directions |
 | `Owner override: …` | Changes one process step without weakening safety boundaries |
@@ -254,24 +255,44 @@ task must name the exact candidate and every retained concern before activation.
 This command exists only for maintainers working in the Cairn framework repository
 while Cairn cannot yet complete a reliable self-hosted task.
 
-1. Use the current coding agent directly. Do not route the work through Cairn's app,
-   CLI, coordinator, generated agent prompts, or parallel worktrees.
-2. Work serially: one implementation outcome at a time. Parallel execution is out of
-   scope for Cairn's current milestone. Preserve every disabled parallel candidate as
-   historical evidence; do not repair or activate it under bootstrap.
-3. Apply the same Tiny, Standard, and High-Stakes classification in this contract.
+1. Use the current coding agent directly for ordinary serial bootstrap work. Do not
+   route work through Cairn's app, CLI, coordinator, generated agent prompts, or
+   parallel worktrees unless the bounded concurrent path below has been activated by
+   a separately approved, reviewed, and accepted High-Stakes Final task.
+2. The bounded concurrent path may admit at most two tasks at once. Each task must be
+   Standard, independently useful, and assigned its own isolated worktree under the
+   operating system's temporary directory. Before admission, each brief declares
+   exact implementation and test paths. Those paths must not be identical or have a
+   file/directory ancestor conflict with the other task's paths.
+3. Concurrent tasks have no task-to-task dependencies and no task-level external
+   actions. A provider call allowed by the credential exception below is execution
+   transport, not permission for the task or its model output to contact another
+   service, use tools, spend money elsewhere, or cause any external effect.
+4. Builders may write only their declared paths and unique task records. Shared
+   coordinator state, `docs/ai-work/LOG.md`, and `main` are coordinator-owned and
+   never builder-writable. Completed tasks integrate into `main` one at a time, each
+   against the latest `main`, with its declared checks rerun before `main` advances.
+   A conflict, scope overlap, changed dependency, or failed check stops that task; it
+   never authorizes a concurrent merge or a broad repair.
+5. Apply the same Tiny, Standard, and High-Stakes classification in this contract.
    Standard bootstrap work proceeds continuously. High-Stakes bootstrap work still
    requires a pinned plan, explicit approval, mandatory fresh-context review, and any
    qualified human or live-action approval.
-4. Use the normal task brief, report, log, checks, and exact-name commit so the work
+6. Use the normal task brief, report, log, checks, and exact-name commit for each task
    remains inspectable without depending on the runtime being repaired.
-5. Prefer the smallest serial path that produces a visible improvement and moves the
-   current milestone. Do not build orchestration infrastructure unless the current
-   milestone directly requires it.
+7. Prefer the smallest path that produces a visible improvement and moves the current
+   milestone. Use concurrency only when two genuinely independent outcomes make that
+   result faster or more decisive.
 
-Bootstrap is temporary scaffolding, not a hidden lower safety standard. It ends only
-through a later contract amendment after Cairn has demonstrated a reliable serial
-self-improvement task end to end.
+Task 016 remains immutable historical evidence and is not activated by this contract
+amendment. A new High-Stakes Final task may name Task 016's exact implementation and
+retained review concerns, reuse or repair its code within a new pinned brief, and
+prove the v2.2 boundary. It must remain disabled until that Final is built, reviewed,
+accepted, and separately authorized for activation. Never rewrite or resume Task 016.
+
+Bootstrap is temporary scaffolding, not a hidden lower safety standard. Contract v2.2
+ends its serial-only restriction; it does not claim that the current runtime already
+implements the bounded concurrent path.
 
 ## Repair and rerun
 
@@ -391,9 +412,11 @@ rehearsal, or a process or operating-system allow-list when all of these are tru
 
 1. The owner creates, installs, rotates, and revokes it through the provider's
    official installed local authentication or an operating-system credential store.
-2. The supported operation is one newly created disposable, tool-free provider call.
-   The model receives no tools, plugins, hooks, skills, MCP servers, arbitrary paths,
-   commands, or access to valuable project or user data.
+2. The ordinary supported operation is one newly created disposable, tool-free
+   provider call. The bounded concurrent Bootstrap path may instead use at most two
+   separately bounded provider calls, exactly one for each admitted Standard task.
+   Every model receives no tools, plugins, hooks, skills, MCP servers, arbitrary
+   paths, commands, or access to valuable project or user data.
 3. The credential value is never requested, inspected, printed, copied, stored, or
    exposed by the AI. It never enters chat, prompts, model context, model output,
    model-visible tool requests or results, command arguments, project files, Git,
@@ -402,17 +425,21 @@ rehearsal, or a process or operating-system allow-list when all of these are tru
 4. The AI does not perform login, credential creation, rotation, refresh, recovery,
    or billing changes. If official installed authentication cannot complete without
    exposing the value or starting one of those flows, stop.
-5. Immediately before the call, the owner separately approves the exact credential
-   use, provider network call, and fixed cost cap. The brief names the provider,
-   model, disposable input, call count, and maximum cost.
+5. Immediately before execution, the owner separately approves the exact credential
+   use and each exact provider network call. For a concurrent pair, the owner also
+   approves one fixed total cost cap covering both calls; each brief names its
+   provider, model, disposable input, one-call limit, and allocated maximum cost, and
+   the two allocations must not exceed that total cap. A retry is another call and
+   is not authorized after either task's one-call allocation is used.
 6. Evidence contains only non-secret status, validated model output, model id, bounded
    cost, timing, disposition, and fixed redacted errors. It never captures raw
    authentication material, headers, account data, or provider debug output.
 
 This exception never covers application-user authentication, permissions, billing,
 money movement, another secret class, valuable repositories, model tools, or
-multi-call agent sessions. Those remain subject to the ordinary High-Stakes and
-qualified-human boundaries above.
+multi-call agent sessions beyond the two separately bounded calls for the concurrent
+Bootstrap path. Those remain subject to the ordinary High-Stakes and qualified-human
+boundaries above.
 
 ## Task records
 

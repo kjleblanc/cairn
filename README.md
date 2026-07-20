@@ -45,6 +45,19 @@ Plan a High-Stakes task: [the result you want]
 High-Stakes work keeps exact approval, safe rehearsal, mandatory fresh-context
 review, qualified-human boundaries, and separate authority for every live action.
 
+## What Cairn changed in v2.2
+
+Contract v2.2 ends Bootstrap Cairn's serial-only restriction. An activated concurrent
+path may run at most two independent Standard tasks in isolated temporary worktrees
+when their declared paths do not overlap, they have no dependencies or task-level
+external actions, and completed work integrates into `main` one task at a time.
+
+That disposable concurrent path may make at most two separately bounded, tool-free
+provider calls through official installed authentication — one per task — after the
+owner approves both exact calls and one total cost cap. Task 016 remains historical
+evidence; only a new approved, reviewed, and accepted High-Stakes Final task may
+reuse or repair its implementation. The v2.2 amendment itself does not activate it.
+
 ## What Cairn changed in v2.1
 
 Contract v2.1 makes the Direction Gate advisory. It still stops patching long enough
@@ -77,13 +90,14 @@ Cairn cannot require an unreliable Cairn runtime to repair itself. Maintainers u
 Bootstrap Cairn: [the visible improvement]
 ```
 
-Bootstrap work runs directly through the current coding agent, serially and one
-outcome at a time. Standard work proceeds continuously; High-Stakes work retains all
-of its gates. Parallel execution and coordinator repair are outside the current
-milestone, and existing parallel candidates remain disabled historical evidence.
+Bootstrap work normally runs directly through the current coding agent. Contract
+v2.2 also permits an activated bounded path with at most two independent Standard
+tasks in isolated temporary worktrees and serial integration into `main`. Genuine
+High-Stakes work retains all of its gates.
 
-Bootstrap ends only after a later contract amendment records that Cairn completed a
-reliable serial self-improvement task end to end.
+Task 016 remains disabled historical evidence. A new High-Stakes Final task may name
+its exact implementation and retained concerns, reuse or repair the code, and prove
+the v2.2 boundary before any separate activation decision.
 
 ## The safety boundary
 
@@ -149,10 +163,10 @@ Owner override: continue this approach after the Direction Gate.
 
 ## Current software status
 
-The written protocol and browser companion describe Contract v2.1. The current Cairn
+The written protocol and browser companion describe Contract v2.2. The current Cairn
 CLI and Desktop runtime still implement the older gated sequence and are **legacy
 until a separate bootstrap implementation updates them**. Do not treat their extra
-approval screens or parallel coordinator as the v2.1 workflow.
+approval screens or Task 016's disabled parallel coordinator as the v2.2 workflow.
 
 The written commands can be used with any coding agent that can read and edit project
 files. Cairn's existing CLI and Desktop use Claude models; no provider credential
@@ -163,6 +177,6 @@ should ever be pasted into Cairn or chat.
 Share this folder or the repository link. Cairn is language-independent and licensed
 under the [MIT License](LICENSE).
 
-The project contract carries a version number (`Cairn Contract v2.1`).
+The project contract carries a version number (`Cairn Contract v2.2`).
 [CHANGELOG.md](CHANGELOG.md) records each version, and
 [Everyday Workflow](EVERYDAY-WORKFLOW.md) explains reviewed updates.

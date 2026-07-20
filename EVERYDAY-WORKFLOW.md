@@ -1,6 +1,6 @@
 # Everyday Workflow — the commands you actually use
 
-Cairn Contract v2.1 uses **risk-based autonomy**: routine local work moves forward;
+Cairn Contract v2.2 uses **risk-based autonomy**: routine local work moves forward;
 real risk pauses for you.
 
 ## The normal path
@@ -108,7 +108,7 @@ See [HIGH-STAKES.md](HIGH-STAKES.md) for the full boundary and examples.
 ## Cairn's bootstrap workflow
 
 While Cairn cannot reliably improve itself through its own app or CLI, maintainers
-use the coding agent directly and work serially:
+normally use the coding agent directly:
 
 ```text
 Bootstrap Cairn: [the visible improvement]
@@ -116,11 +116,15 @@ Bootstrap Cairn: [the visible improvement]
 
 This is not a safety bypass. Standard bootstrap work proceeds continuously; genuine
 High-Stakes work still uses planning, approval, review, and expert requirements.
-Parallel execution, coordinator repair, and parallel worktrees are outside Cairn's
-current milestone. Existing parallel candidates stay disabled as historical evidence.
+Once a separate High-Stakes Final has been approved, reviewed, accepted, and
+activated, a bounded concurrent path may run at most two independent Standard tasks
+in isolated operating-system temporary worktrees. Their declared implementation and
+test paths cannot overlap, they have no task-to-task dependencies or task-level
+external actions, and they integrate into `main` one at a time.
 
-Bootstrap ends only through a later contract amendment after Cairn demonstrates one
-reliable serial self-improvement task end to end.
+Task 016 stays immutable historical evidence. A new High-Stakes Final may reuse or
+repair its exact implementation while retaining its review concerns; the v2.2
+contract amendment does not itself activate parallel mode.
 
 ## Optional review for routine work
 
@@ -248,9 +252,10 @@ approval for installs, network access, credentials, money, deployment, messages,
 external writes, destructive or irreversible actions, production changes, or
 valuable data. Never paste a secret into chat.
 
-For provider authentication only, one disposable tool-free AI call may use the
-provider's official installed authentication without a qualified-human review,
-synthetic canary, or operating-system isolation layer. The credential value must
-remain out of chat, commands, model-visible tools, output, logs, project files, and
-Git. You separately approve the exact credential use, provider call, and fixed cost
-cap immediately before the call.
+For provider authentication only, one disposable tool-free AI call may ordinarily
+use the provider's official installed authentication without a qualified-human
+review, synthetic canary, or operating-system isolation layer. The bounded concurrent
+Bootstrap path may use at most two separately bounded calls, one per admitted task.
+The credential value must remain out of chat, commands, model-visible tools, output,
+logs, project files, and Git. Immediately beforehand, you approve the exact
+credential use, each exact provider call, and one fixed total cost cap for the pair.

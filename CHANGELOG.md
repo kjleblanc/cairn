@@ -5,6 +5,21 @@ project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates
 [EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
 automatic.
 
+## Contract v2.2 — 2026-07-20
+
+- Ended Bootstrap Cairn's serial-only restriction. A bounded concurrent path may
+  admit at most two independent Standard tasks with declared non-overlapping paths,
+  isolated operating-system temporary worktrees, no task-to-task dependencies or
+  task-level external actions, and one-at-a-time integration into `main`.
+- Permitted that disposable concurrent path to use at most two separately bounded,
+  tool-free provider calls through official installed authentication, exactly one per
+  task, after the owner approves both exact calls and one fixed total cost cap.
+- Preserved Task 016 as immutable historical evidence while allowing a new
+  High-Stakes Final task to name its exact implementation and retained concerns,
+  reuse or repair the code, and prove the v2.2 boundary before separate activation.
+- Kept parallel mode disabled during the amendment. Contract permission does not
+  claim that the current runtime implements or activates the concurrent path.
+
 ## Contract v2.1 — 2026-07-20
 
 - Made the Direction Gate advisory. It still pauses patching, preserves failed
