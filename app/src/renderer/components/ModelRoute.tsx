@@ -16,7 +16,7 @@ export function ModelRoute({ route, reason }: { route: AdapterDescriptor; reason
           <p className="demo-note">This is a deterministic adapter demonstration, not a local model and not implementation of your requested change.</p>
         ) : null}
         {route.id === "codex-exec" ? (
-          <p className="demo-note">Cairn retained only installed/connected status. This build prepares the workspace-scoped call and stops before starting the real Codex Exec process.</p>
+          <p className="demo-note">Cairn retained only installed/connected status. Starting this route requires a separate confirmation of the exact real-call boundary shown next.</p>
         ) : null}
       </Card>
     </section>

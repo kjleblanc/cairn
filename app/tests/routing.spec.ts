@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -13,16 +13,54 @@ function scaffold(proj: string): void {
     `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Routing", what: "w", who: "me", milestone: "see it" });`,
     proj,
   ]);
+  execFileSync("git", ["config", "user.name", "Cairn Test"], { cwd: proj });
+  execFileSync("git", ["config", "user.email", "cairn-test@example.invalid"], { cwd: proj });
 }
 
-function fakeCodexEnvironment(project: string, connected: boolean): { env: NodeJS.ProcessEnv; marker: string } {
+function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
   const bin = mkdtempSync(join(tmpdir(), "cairn-fake-codex-"));
-  const executable = join(bin, process.platform === "win32" ? "codex.exe" : "codex");
-  if (process.platform === "win32") copyFileSync(process.execPath, executable);
-  else { symlinkSync(process.execPath, executable); chmodSync(executable, 0o755); }
   const marker = join(bin, "real-exec-started.txt");
-  writeFileSync(join(project, "login"), `process.exit(${connected ? 0 : 1});\n`);
-  writeFileSync(join(project, "exec"), 'require("node:fs").writeFileSync(process.env.CAIRN_FAKE_CODEX_MARKER, "started\\n");\n');
+  const dispatcher = join(bin, "fake-codex.cjs");
+  const dispatcherSource = `
+const fs = require("node:fs");
+const path = require("node:path");
+const child = require("node:child_process");
+const args = process.argv.slice(2);
+if (args.includes("--version")) process.exit(0);
+if (args[0] === "login" && args[1] === "status") process.exit(${connected ? 0 : 1});
+if (!args.includes("exec")) process.exit(2);
+process.stdin.resume();
+process.stdin.on("end", () => {
+  fs.writeFileSync(process.env.CAIRN_FAKE_CODEX_MARKER, "started\\n");
+  if (${JSON.stringify(behavior)} === "invalid-jsonl") {
+    process.stdout.write("secret-looking malformed provider output\\n");
+    return;
+  }
+  const root = process.cwd();
+  const tasks = path.join(root, "docs", "ai-work", "tasks");
+  const brief = fs.readdirSync(tasks).find((name) => /^\\d{3}-brief\\.md$/.test(name) && !fs.existsSync(path.join(tasks, name.replace("-brief", "-report"))));
+  if (!brief) process.exit(2);
+  const number = brief.slice(0, 3);
+  const report = path.join(tasks, number + "-report.md");
+  const visible = path.join(root, "visible.txt");
+  fs.writeFileSync(visible, "model-authored result\\n");
+  fs.writeFileSync(report, "# Task " + number + " report\\n\\n## Result\\n\\nAdded the requested visible result and verified it.\\n\\nMilestone movement: **YES**\\n\\nDisposition: **DONE**\\n");
+  const log = path.join(root, "docs", "ai-work", "LOG.md");
+  fs.appendFileSync(log, "| " + number + " | 2026-07-21 | Standard | Applied | DONE | completed | Added and verified the visible result. | YES |\\n");
+  child.execFileSync("git", ["add", "--", "visible.txt", "docs/ai-work/tasks/" + brief, "docs/ai-work/tasks/" + number + "-report.md", "docs/ai-work/LOG.md"], { cwd: root });
+  child.execFileSync("git", ["commit", "-q", "-m", "Task " + number + ": add visible result"], { cwd: root });
+  process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "fake" }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
+});
+`;
+  writeFileSync(dispatcher, dispatcherSource);
+  if (process.platform === "win32") {
+    writeFileSync(join(bin, "codex.cmd"), `@"${process.execPath}" "${dispatcher}" %*\r\n`);
+  } else {
+    const executable = join(bin, "codex");
+    writeFileSync(executable, `#!${process.execPath}\n${dispatcherSource}`);
+    chmodSync(executable, 0o755);
+  }
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   return {
     marker,
@@ -62,8 +100,8 @@ test("normal mode shows connection-required and creates no task records", async 
   await app.close();
 });
 
-test("connected Codex readiness reaches the honest real-call boundary without starting exec", async () => {
-  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-boundary-"));
+test("connected Codex requires confirmation then completes one fake-process real-call path", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-real-path-"));
   scaffold(proj);
   const fakeCodex = fakeCodexEnvironment(proj, true);
   const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
@@ -75,13 +113,66 @@ test("connected Codex readiness reaches the honest real-call boundary without st
   const route = win.getByRole("region", { name: "Recommended route" });
   await expect(route).toContainText("Codex Exec");
   await expect(route.locator(".route-facts p", { hasText: "Provider" })).toContainText("OpenAI");
-  await win.getByRole("button", { name: "Prepare Codex Exec run" }).click();
-  await expect(win.getByRole("heading", { name: "Stopped before the real model call" })).toBeVisible();
-  await expect(win.getByText("Real Codex Exec process: not started")).toBeVisible();
+  await expect(win.getByText("gpt-5.6-sol", { exact: true }).first()).toBeVisible();
+  await expect(win.getByText(proj, { exact: true })).toBeVisible();
+  await expect(win.getByText(/any file inside the selected project/i)).toBeVisible();
+  await expect(win.getByText(/Exactly one ephemeral Codex Exec process/i)).toBeVisible();
+  const start = win.getByRole("button", { name: "Start one real Codex Exec call" });
+  await expect(start).toBeDisabled();
+  const denied = await win.evaluate(async ({ project }) => window.cairn.taskRun(
+    project,
+    "Improve Cairn safely",
+    123,
+    "codex-exec",
+    false,
+  ), { project: proj });
+  expect(denied.ok).toBe(false);
+  const mismatched = await win.evaluate(async ({ project }) => {
+    const preview = await window.cairn.taskRoute(project, "Improve Cairn safely");
+    if (!preview.ok || !preview.value.disclosure) return preview;
+    return window.cairn.taskRun(
+      project,
+      "A changed task instruction",
+      124,
+      "codex-exec",
+      true,
+      preview.value.disclosure,
+    );
+  }, { project: proj });
+  expect(mismatched.ok).toBe(false);
   expect(existsSync(fakeCodex.marker)).toBe(false);
+  expect(existsSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await expect(start).toBeEnabled();
+  await start.click();
+  await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
+  await expect(win.getByText("Requested product change: completed and verified")).toBeVisible();
+  expect(existsSync(fakeCodex.marker)).toBe(true);
+  expect(readFileSync(join(proj, "visible.txt"), "utf8")).toBe("model-authored result\n");
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
-  expect(report).toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
-  expect(report).toContain("No task data was sent to OpenAI");
+  expect(report).toContain("Disposition: **DONE**");
+  expect(execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: proj, encoding: "utf8" })).toBe("");
+  await app.close();
+});
+
+test("malformed Codex JSONL fails closed without exposing raw process output", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-invalid-jsonl-"));
+  scaffold(proj);
+  const fakeCodex = fakeCodexEnvironment(proj, true, "invalid-jsonl");
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
+  await win.getByRole("button", { name: "Find a route" }).click();
+  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+  await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
+  expect(existsSync(fakeCodex.marker)).toBe(true);
+  const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
+  expect(report).toContain("ADAPTER_FAILED");
+  expect(report).not.toContain("secret-looking malformed provider output");
+  expect(existsSync(join(proj, "visible.txt"))).toBe(false);
   await app.close();
 });
 

@@ -19,10 +19,12 @@ Normal `cairn task` checks the official Codex CLI with `codex --version` and
 and connected booleans. If either check fails, it shows the exact non-secret
 readiness state and writes no task records.
 
-If both checks pass, the only normal model route is Codex Exec. Running it prepares
-one ephemeral workspace-scoped request and records STOPPED with
-`REAL_MODEL_CALL_NOT_AUTHORIZED` before starting the real process. No task data is
-sent and no model is called in this build.
+If both checks pass, the only normal model route is Codex Exec. Before it starts, the
+CLI shows OpenAI, pinned model `gpt-5.6-sol`, the exact project, workspace data scope,
+and the one-process quota. A default-no confirmation authorizes exactly one
+ephemeral workspace-scoped process. Cairn retains only bounded JSONL terminal and
+numeric usage evidence, verifies the model-authored task records and Git result,
+and never retries or continues the run.
 
 Use the explicit offline demonstration with:
 
@@ -35,7 +37,8 @@ one report, and one append-only log row. The report states that the requested
 product change was not attempted and milestone movement was NO.
 
 There are no active define/approve/build/review/decide commands, model-effort flags,
-concurrent commands, scheduler commands, retries, or continuation paths.
+concurrent commands, scheduler commands, retries, continuation paths, provider
+fallbacks, or generic provider framework.
 
 ## Development
 

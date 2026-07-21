@@ -1,7 +1,7 @@
 {
   "name": "@cairn/core",
   "version": "0.1.0",
-  "description": "The Cairn serial router, Codex Exec boundary, offline adapter, records, and Git protections",
+  "description": "The Cairn serial router, one-call Codex Exec adapter, offline adapter, records, and Git protections",
   "license": "MIT",
   "type": "module",
   "main": "dist/src/index.js",

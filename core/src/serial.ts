@@ -7,13 +7,14 @@ import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog
 import {
   routeTask,
   type AdapterTaskContract,
+  type CodexExecResult,
   type OfflineDemoResult,
   type RouteResult,
   type TaskAdapter,
 } from "./routing.js";
 
 const OFFLINE_SUPPORTED_OUTCOME = "Demonstrate serial routing and verify honest task records without implementing the requested product change.";
-const CODEX_SUPPORTED_OUTCOME = "Detect Codex Exec readiness, prepare one ephemeral workspace-scoped request, and stop before any real process or model call.";
+const CODEX_SUPPORTED_OUTCOME = "Run one explicitly confirmed, ephemeral, workspace-scoped Codex Exec task and verify its task records and Git result.";
 const RESULT_STATEMENT = "The offline route completed without attempting the requested product change.";
 const activeRoots = new Set<string>();
 
@@ -52,13 +53,16 @@ export type SerialStopReason =
   | "INVALID_ADAPTER_RESULT"
   | "PROTECTED_WORK_CHANGED"
   | "RECORD_VERIFICATION_FAILED"
-  | "REAL_MODEL_CALL_NOT_AUTHORIZED";
+  | "REAL_MODEL_CALL_NOT_AUTHORIZED"
+  | "MODEL_REPORTED_STOPPED"
+  | "MODEL_RESULT_NOT_VERIFIED";
 
 interface GitSnapshot {
   head: string;
   status: string[];
   staged: string[];
   logText: string;
+  protectedPaths: ReadonlyMap<string, { worktree: string; index: string }>;
 }
 
 function git(root: string, args: string[]): string {
@@ -74,14 +78,41 @@ function lines(text: string): string[] {
   return text ? text.split(/\r?\n/).filter(Boolean) : [];
 }
 
+function statusPath(entry: string): string {
+  const raw = entry.length > 3 ? entry.slice(3) : entry;
+  const rename = raw.lastIndexOf(" -> ");
+  return (rename >= 0 ? raw.slice(rename + 4) : raw).replace(/\\/g, "/");
+}
+
+function worktreeHash(root: string, path: string): string {
+  const absolute = resolve(root, path);
+  if (!existsSync(absolute)) return "missing";
+  return createHash("sha256").update(readFileSync(absolute)).digest("hex");
+}
+
+function protectedPathSnapshot(root: string, status: readonly string[]): ReadonlyMap<string, { worktree: string; index: string }> {
+  const values = new Map<string, { worktree: string; index: string }>();
+  const pathsToProtect = new Set(status.map(statusPath));
+  for (const path of lines(git(root, ["ls-files", "--", "docs/ai-work/tasks"]))) pathsToProtect.add(path.replace(/\\/g, "/"));
+  for (const path of pathsToProtect) {
+    values.set(path, {
+      worktree: worktreeHash(root, path),
+      index: git(root, ["ls-files", "--stage", "--", path]),
+    });
+  }
+  return values;
+}
+
 function snapshot(root: string): GitSnapshot {
   const top = resolve(git(root, ["rev-parse", "--show-toplevel"]));
   if (top.toLowerCase() !== resolve(root).toLowerCase()) throw new Error("PROJECT_ROOT_MISMATCH");
+  const status = lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]));
   return {
     head: git(root, ["rev-parse", "HEAD"]),
-    status: lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"])),
+    status,
     staged: lines(git(root, ["diff", "--cached", "--name-only"])),
     logText: readFileSync(paths.log(root), "utf8"),
+    protectedPaths: protectedPathSnapshot(root, status),
   };
 }
 
@@ -92,10 +123,7 @@ function rel(root: string, path: string): string {
 }
 
 function statusWithoutOwned(status: readonly string[], owned: ReadonlySet<string>): string[] {
-  return status.filter((entry) => {
-    const path = entry.length > 3 ? entry.slice(3).replace(/\\/g, "/") : entry;
-    return !owned.has(path);
-  });
+  return status.filter((entry) => !owned.has(statusPath(entry)));
 }
 
 function sameLines(a: readonly string[], b: readonly string[]): boolean {
@@ -131,15 +159,15 @@ function escapeLine(text: string): string {
 function briefText(contract: AdapterTaskContract): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
   const codex = contract.route.adapterId === "codex-exec";
-  const title = codex ? "Codex Exec real-call boundary" : "offline serial demonstration";
+  const title = codex ? "one confirmed real Codex Exec task" : "offline serial demonstration";
   const lane = codex
-    ? "local preparation and credential-opaque readiness detection; no real model call is authorized"
+    ? "one explicitly confirmed OpenAI Codex Exec call; the model may make in-scope local workspace changes"
     : "local, deterministic, record-only demonstration";
   const done = codex
-    ? "DONE is not available until a separately authorized real model call completes and is verified."
+    ? "DONE means the one Codex Exec process completed, the requested outcome and checks are reported, the append-only log row matches, protected starting work remains intact, and Git isolation is verified."
     : "DONE means the offline route and its three records are verified. It does not mean the requested product change was implemented.";
   const stopped = codex
-    ? "STOPPED means Cairn reached the real model-call boundary without starting Codex Exec."
+    ? "STOPPED means the call was not authorized, the model reported a stop, process evidence failed, protected work changed, or the result records could not be verified."
     : "STOPPED means the serial demonstration or its protection checks did not complete.";
   return `# Task ${pad(contract.taskNumber)} — ${title}
 
@@ -245,15 +273,15 @@ Disposition: **STOPPED**
 
 Routing demonstration: **stopped**
 
-Requested product change: **not attempted**
+Requested product change: **${codex ? "not verified" : "not attempted"}**
 
-The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter error text.
+The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}
 
 ## Verification
 
 - Existing work was not cleaned, reset, stashed, moved, or overwritten by Cairn.
 - Unexpected changes, if any, were retained as evidence.
-- No product implementation or model work was claimed.
+- No unverified product implementation or model work was claimed as complete.
 
 Milestone movement: **NO**
 
@@ -271,6 +299,7 @@ function expectedLogLine(row: LogRow): string {
 
 function rowFor(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null): LogRow {
   const codexBoundary = contract.route.adapterId === "codex-exec" && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
+  const codex = contract.route.adapterId === "codex-exec";
   return {
     task: pad(contract.taskNumber),
     date: new Date().toISOString().slice(0, 10),
@@ -280,6 +309,8 @@ function rowFor(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", 
     decision: disposition === "DONE" ? "completed" : "stopped",
     summary: codexBoundary
       ? "Codex Exec was installed and connected; Cairn stopped before the real process or model call."
+      : codex
+        ? `Codex Exec stopped safely (${reason}); requested change was not verified.`
       : disposition === "DONE"
         ? "Offline routing demonstration verified; requested product change not attempted."
         : `Offline routing demonstration stopped safely (${reason}); requested product change not attempted.`,
@@ -307,6 +338,102 @@ function validateAdapterResult(value: unknown, contract: AdapterTaskContract): v
   } catch {
     return false;
   }
+}
+
+function validateCodexResult(value: unknown, contract: AdapterTaskContract): value is CodexExecResult {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const keys = Reflect.ownKeys(value);
+    const expected = [
+      "cachedInputTokens", "exitCode", "inputTokens", "kind", "outputTokens",
+      "processCount", "reasoningOutputTokens", "requestedOutcomeSha256", "statement",
+      "taskNumber", "terminalEvent",
+    ].sort();
+    if (keys.some((key) => typeof key !== "string") || !sameLines((keys as string[]).sort(), expected)) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const key of expected) {
+      const descriptor = descriptors[key];
+      if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return false;
+    }
+    const terminalEvents = new Set(["turn.completed", "turn.failed", "error", "missing"]);
+    const counts = ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens"];
+    return descriptors.kind.value === "codex-exec-result" &&
+      descriptors.taskNumber.value === contract.taskNumber &&
+      descriptors.requestedOutcomeSha256.value === contract.requestedOutcomeSha256 &&
+      descriptors.processCount.value === 1 &&
+      Number.isInteger(descriptors.exitCode.value) &&
+      terminalEvents.has(descriptors.terminalEvent.value) &&
+      counts.every((key) => Number.isFinite(descriptors[key].value) && descriptors[key].value >= 0) &&
+      descriptors.statement.value === "One Codex Exec process returned bounded completion evidence.";
+  } catch {
+    return false;
+  }
+}
+
+function verifyProtectedStartingPaths(root: string, start: GitSnapshot): boolean {
+  const currentStaged = lines(git(root, ["diff", "--cached", "--name-only"]));
+  if (!sameLines(currentStaged, start.staged)) return false;
+  for (const [path, expected] of start.protectedPaths) {
+    if (worktreeHash(root, path) !== expected.worktree) return false;
+    if (git(root, ["ls-files", "--stage", "--", path]) !== expected.index) return false;
+  }
+  return true;
+}
+
+interface ModelRecords {
+  disposition: "DONE" | "STOPPED";
+  reportText: string;
+  row: LogRow;
+}
+
+function readModelRecords(root: string, contract: AdapterTaskContract, start: GitSnapshot): ModelRecords | null {
+  const briefPath = paths.brief(root, contract.taskNumber);
+  const reportPath = paths.report(root, contract.taskNumber);
+  if (!existsSync(reportPath) || readFileSync(briefPath, "utf8") !== briefText(contract)) return null;
+  const report = readFileSync(reportPath, "utf8");
+  if (!new RegExp(`^# Task ${pad(contract.taskNumber)}\\b`, "m").test(report)) return null;
+  const dispositions = [...report.matchAll(/^Disposition:\s*(?:\*\*)?(DONE|STOPPED)\b/gm)];
+  if (dispositions.length !== 1) return null;
+  const milestones = [...report.matchAll(/^Milestone movement:\s*(?:\*\*)?(YES|NO|UNCLEAR)\b/gm)];
+  if (milestones.length !== 1) return null;
+  const disposition = dispositions[0][1] as "DONE" | "STOPPED";
+  const actualLog = readFileSync(paths.log(root), "utf8");
+  if (!actualLog.startsWith(start.logText)) return null;
+  const taskRows = parseLog(root).filter((item) => item.task === pad(contract.taskNumber));
+  if (taskRows.length !== 1 || taskRows[0].outcome !== disposition) return null;
+  const row = taskRows[0];
+  if (row.lane !== "Standard" || row.mode !== "Applied" ||
+      row.decision !== (disposition === "DONE" ? "completed" : "stopped") ||
+      row.moved !== milestones[0][1]) return null;
+  if (actualLog !== start.logText + expectedLogLine(row)) return null;
+  return { disposition, reportText: report, row };
+}
+
+function isAncestor(root: string, ancestor: string, descendant: string): boolean {
+  try {
+    git(root, ["merge-base", "--is-ancestor", ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function verifyModelGitResult(root: string, start: GitSnapshot, disposition: "DONE" | "STOPPED"): RecordCommit | null {
+  if (!verifyProtectedStartingPaths(root, start)) return null;
+  const head = git(root, ["rev-parse", "HEAD"]);
+  if (disposition === "STOPPED") {
+    return { status: "skipped", reason: "The model reported STOPPED; retained workspace evidence was not committed by Cairn." };
+  }
+  if (start.status.length > 0) {
+    if (head !== start.head) return null;
+    return { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
+  }
+  if (!isAncestor(root, start.head, head)) return null;
+  if (Number(git(root, ["rev-list", "--count", `${start.head}..${head}`])) !== 1) return null;
+  if (lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"])).length > 0) return null;
+  return { status: "created", reason: "The model created one isolated local task commit.", hash: head };
 }
 
 function freezeContract(contract: AdapterTaskContract): AdapterTaskContract {
@@ -367,6 +494,18 @@ function writeClosedRecords(
   };
   const verified = checks.brief && checks.report && checks.log && checks.row;
   return { reportText: report, row, verified };
+}
+
+function writeSafetyRecordsWhenUnclaimed(
+  root: string,
+  contract: AdapterTaskContract,
+  reason: SerialStopReason,
+  start: GitSnapshot,
+  commitRequested: boolean,
+): { reportText: string; row: LogRow; verified: boolean } | null {
+  if (existsSync(paths.report(root, contract.taskNumber))) return null;
+  if (readFileSync(paths.log(root), "utf8") !== start.logText) return null;
+  return writeClosedRecords(root, contract, "STOPPED", reason, start, commitRequested);
 }
 
 function replaceDoneRecordsWithStopped(
@@ -446,9 +585,9 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         staged: start.staged.length > 0,
       },
       checks: codex ? [
-        "Confirm the adapter stops before starting a real Codex Exec process.",
-        "Confirm only the three owned records changed beyond the protected starting state.",
-        "Confirm one STOPPED disposition and one append-only log row.",
+        "Confirm exactly one Codex Exec process returns a completed JSONL terminal event.",
+        "Confirm the model-authored report has one terminal disposition and the append-only log has one matching row.",
+        "Confirm protected starting work is byte-identical and any clean-start DONE result has one isolated local commit.",
       ] : [
         "Validate the adapter result against the exact fixed schema.",
         "Confirm only the three owned records changed beyond the protected starting state.",
@@ -456,6 +595,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       ],
       stopConditions: codex ? [
         "A real Codex Exec process or model call would start without separate authorization.",
+        "The process fails, returns invalid bounded evidence, or the model reports STOPPED.",
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
       ] : [
@@ -471,7 +611,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       stage: "Run",
       state: "working",
       detail: codex
-        ? "Preparing one ephemeral workspace-scoped Codex Exec request."
+        ? "Running one confirmed ephemeral workspace-scoped Codex Exec request."
         : "Running the deterministic offline demonstration.",
     });
     let adapterValue: unknown;
@@ -488,7 +628,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           ? "Stopped before starting the real Codex Exec process."
           : "The adapter stopped safely.",
       });
-      const closed = writeClosedRecords(projectRoot, contract, "STOPPED", reason, start, Boolean(options.commitRecords));
+      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, reason, start, Boolean(options.commitRecords));
+      if (!closed?.verified) {
+        throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
+      }
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
       return {
         status: "stopped", reason, taskNumber, disposition: "STOPPED",
@@ -500,9 +643,58 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     emit(activities, options.events, {
       stage: "Run",
       state: "done",
-      detail: codex ? "The injected fake process returned one verification result." : "The offline adapter returned one result.",
+      detail: codex ? "One Codex Exec process returned bounded terminal evidence." : "The offline adapter returned one result.",
     });
     emit(activities, options.events, { stage: "Check", state: "working", detail: "Checking the result, records, and protected Git state." });
+    if (codex) {
+      const codexResult = validateCodexResult(adapterValue, contract) ? adapterValue : null;
+      const resultValid = codexResult !== null;
+      const processCompleted = codexResult?.exitCode === 0 && codexResult.terminalEvent === "turn.completed";
+      const modelRecords = resultValid ? readModelRecords(projectRoot, contract, start) : null;
+      const protectedValid = verifyProtectedStartingPaths(projectRoot, start);
+      const modelCommit = modelRecords && protectedValid
+        ? verifyModelGitResult(projectRoot, start, modelRecords.disposition)
+        : null;
+      const stopReason: SerialStopReason | null = !resultValid
+        ? "INVALID_ADAPTER_RESULT"
+        : !processCompleted
+          ? "ADAPTER_FAILED"
+          : !modelRecords
+            ? "RECORD_VERIFICATION_FAILED"
+            : !protectedValid
+              ? "PROTECTED_WORK_CHANGED"
+              : !modelCommit
+                ? "MODEL_RESULT_NOT_VERIFIED"
+                : modelRecords.disposition === "STOPPED"
+                  ? "MODEL_REPORTED_STOPPED"
+                  : null;
+      if (stopReason) {
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReason}.` });
+        const safety = modelRecords?.disposition === "STOPPED" ? modelRecords : writeSafetyRecordsWhenUnclaimed(
+          projectRoot,
+          contract,
+          stopReason,
+          start,
+          Boolean(options.commitRecords),
+        );
+        if (!safety) throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED â€” ${stopReason}` });
+        return {
+          status: "stopped", reason: stopReason, taskNumber, disposition: "STOPPED",
+          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+          reportText: safety.reportText, row: safety.row, route, activities,
+          commit: modelCommit ?? { status: "skipped", reason: "Stopped evidence was retained for inspection." },
+        };
+      }
+      if (!modelRecords || !modelCommit) throw new Error("MODEL_RESULT_NOT_VERIFIED");
+      emit(activities, options.events, { stage: "Check", state: "done", detail: "The model result, task records, protected work, and Git isolation were verified." });
+      emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE â€” one real Codex Exec task completed and was verified." });
+      return {
+        status: "done", taskNumber, disposition: "DONE",
+        briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+        reportText: modelRecords.reportText, row: modelRecords.row, route, activities, commit: modelCommit,
+      };
+    }
     const resultValid = chosen.kind === "offline-demo" && validateAdapterResult(adapterValue, contract);
     const protectedValid = verifyProtected(projectRoot, start, ownedSet);
     const stopReason: SerialStopReason | null = !resultValid

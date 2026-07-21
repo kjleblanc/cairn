@@ -39,16 +39,21 @@ export interface OfflineDemoResult {
   statement: "The offline route completed without attempting the requested product change.";
 }
 
-export interface CodexExecFakeProcessResult {
-  kind: "codex-exec-fake-process-result";
+export interface CodexExecResult {
+  kind: "codex-exec-result";
   taskNumber: number;
   requestedOutcomeSha256: string;
   processCount: 1;
   exitCode: number;
-  statement: "A fake process verified one Codex Exec request; no real process or model call ran.";
+  terminalEvent: "turn.completed" | "turn.failed" | "error" | "missing";
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  statement: "One Codex Exec process returned bounded completion evidence.";
 }
 
-export type TaskAdapterResult = OfflineDemoResult | CodexExecFakeProcessResult;
+export type TaskAdapterResult = OfflineDemoResult | CodexExecResult;
 
 /**
  * The only execution seam in the serial foundation. An adapter receives a

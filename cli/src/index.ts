@@ -23,7 +23,7 @@ async function main(): Promise<void> {
       console.log(`${pc.bold("cairn status")}   show the milestone and honest records`);
       console.log("");
       console.log(pc.dim("Offline demonstration: cairn task --mock \"Describe one visible outcome\""));
-      console.log(pc.dim("Without --mock, Cairn checks the official Codex CLI and stops before any real model call."));
+      console.log(pc.dim("Without --mock, Cairn checks Codex and requires an exact confirmation before one real ephemeral call."));
       if (command && command !== "help") process.exitCode = 1;
   }
 }

@@ -26,3 +26,4 @@
 | 029 | 2026-07-21 | High-Stakes | Draft | DONE | accept | Review FAIL: owner accepted the disabled offline/mock Experimental Draft with the reported coordinator-state and future real-model containment concerns; no activation authorized | UNCLEAR |
 | 032 | 2026-07-21 | Standard | Applied | DONE | completed | Removed Direction, timebox, PILOT, and unmatched-record process gates from the active serial runtime while preserving legacy-state protection and historical evidence | NO |
 | 033 | 2026-07-21 | Standard | Applied | DONE | completed | Added one credential-opaque Codex Exec readiness adapter and stopped before every real model call. | NO |
+| 034 | 2026-07-21 | Standard | Applied | DONE | completed | Enabled one explicitly confirmed, fake-verified Codex Exec task with exact disclosure and result verification; no live model call ran. | NO |

@@ -1,5 +1,7 @@
 import * as p from "@clack/prompts";
 import {
+  authorizeCodexExec,
+  codexExecDisclosure,
   codexExecConnectionReason,
   codexExecStatusText,
   createCodexExecAdapter,
@@ -72,31 +74,40 @@ export async function taskFlow(root: string, options: TaskArguments): Promise<vo
     p.outro("No task records were created. Cairn did not install Codex, open login, or inspect credentials.");
     return;
   }
+  if (!options.mock) {
+    const disclosure = codexExecDisclosure(root, outcome);
+    p.log.warn("Real model call confirmation");
+    p.log.info(`Provider: ${disclosure.provider}`);
+    p.log.info(`Model: ${disclosure.model}`);
+    p.log.info(`Target project: ${disclosure.project}`);
+    p.log.info(`Task instructions: ${disclosure.task}`);
+    p.log.info(`Data sent or readable: ${disclosure.data}`);
+    p.log.info(`Cost/quota boundary: ${disclosure.quota}`);
+  }
   const proceed = await p.confirm({
     message: options.mock
       ? "Run the offline demonstration? It verifies the serial flow but will not implement your requested change."
-      : "Prepare the Codex Exec route? Cairn will stop before starting the real process or model call.",
-    initialValue: true,
+      : "Start this one real Codex Exec call with the provider, model, project, data scope, and quota shown above?",
+    initialValue: options.mock,
   });
   if (p.isCancel(proceed) || !proceed) { p.cancel("Nothing was changed."); return; }
+  const runAdapters = options.mock
+    ? adapters
+    : [createCodexExecAdapter(root, codexStatus!, authorizeCodexExec(root, outcome))];
   const spin = p.spinner();
   spin.start("Route → run → check → result");
   const result = await runSerialTask(root, outcome, {
-    adapters,
+    adapters: runAdapters,
     events: { onActivity: (activity) => spin.message(`${activity.stage}: ${activity.detail}`) },
   });
   if (result.status === "connection-required") { spin.stop("Connection required."); return; }
-  const realCallBoundary = result.status === "stopped" && result.reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
   spin.stop(result.status === "done"
-    ? "Verified offline result."
-    : realCallBoundary
-      ? "Stopped before the real Codex Exec process."
-      : `Stopped safely: ${result.reason}.`);
-  p.log.info(realCallBoundary
-    ? "Real Codex Exec process: not started"
-    : `Routing demonstration: ${result.status === "done" ? "verified" : "stopped"}`);
-  p.log.info("Requested product change: not attempted");
-  p.log.info("Milestone movement: NO");
+    ? options.mock ? "Verified offline result." : "Verified one real Codex Exec task."
+    : `Stopped safely: ${result.reason}.`);
+  p.log.info(options.mock
+    ? `Routing demonstration: ${result.status === "done" ? "verified" : "stopped"}`
+    : `Codex Exec task: ${result.status === "done" ? "verified" : "stopped"}`);
+  if (options.mock) p.log.info("Requested product change: not attempted");
   p.log.info(`Records: ${result.briefPath} · ${result.reportPath}`);
   p.outro(result.status === "done" ? label.done : label.stopped);
   if (result.status === "stopped") process.exitCode = 1;

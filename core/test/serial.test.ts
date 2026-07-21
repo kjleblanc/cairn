@@ -13,7 +13,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendLogRow } from "../src/files.js";
-import { createCodexExecAdapter } from "../src/codex.js";
+import {
+  authorizeCodexExec,
+  CODEX_EXEC_MODEL,
+  createCodexExecAdapter,
+  type CodexExecProcess,
+} from "../src/codex.js";
 import { createOfflineDemoAdapter, type TaskAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
 
@@ -81,9 +86,9 @@ test("a connected Codex Exec route records STOPPED before any real model call", 
   const brief = readFileSync(result.briefPath, "utf8");
   const report = readFileSync(result.reportPath, "utf8");
   const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
-  assert.match(brief, /Codex Exec real-call boundary/);
+  assert.match(brief, /one confirmed real Codex Exec task/);
   assert.match(brief, /Provider: OpenAI/);
-  assert.match(brief, /Model: Codex configured model/);
+  assert.match(brief, new RegExp(`Model: ${CODEX_EXEC_MODEL}`));
   assert.match(report, /REAL_MODEL_CALL_NOT_AUTHORIZED/);
   assert.match(report, /real `codex exec` process was not started/i);
   assert.match(report, /no model was called/i);
@@ -91,6 +96,63 @@ test("a connected Codex Exec route records STOPPED before any real model call", 
   assert.match(log, /Codex Exec was installed and connected; Cairn stopped before the real process or model call/);
   assert.equal(result.activities.filter((activity) => activity.stage === "Run" && activity.state === "working").length, 1);
   assert.equal(result.activities.some((activity) => activity.stage === "Check"), false);
+});
+
+test("one authorized fake Codex process completes one verified serial task", async () => {
+  const root = project();
+  let calls = 0;
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      calls += 1;
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
+        "# Task 001 report",
+        "",
+        "## Result",
+        "",
+        "Added the requested visible result and verified it.",
+        "",
+        "Milestone movement: **YES**",
+        "",
+        "Disposition: **DONE**",
+        "",
+      ].join("\n"));
+      appendLogRow(root, {
+        task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
+        outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
+      });
+      git(root, ["add", "--", "visible.txt", "docs/ai-work/tasks/001-brief.md", "docs/ai-work/tasks/001-report.md", "docs/ai-work/LOG.md"]);
+      git(root, ["commit", "-q", "-m", "Task 001: add visible result"]);
+      return {
+        exitCode: 0,
+        terminalEvent: "turn.completed",
+        inputTokens: 200,
+        cachedInputTokens: 50,
+        outputTokens: 80,
+        reasoningOutputTokens: 20,
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(
+      root,
+      { installed: true, connected: true },
+      authorizeCodexExec(root, "Add one visible result"),
+      fake,
+    )],
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.disposition, "DONE");
+  assert.equal(result.route.recommended.model, CODEX_EXEC_MODEL);
+  assert.equal(result.commit.status, "created");
+  assert.equal(readFileSync(join(root, "visible.txt"), "utf8"), "model-authored result\n");
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+  assert.match(result.reportText, /Disposition: \*\*DONE\*\*/);
+  assert.match(result.activities.at(-1)?.detail ?? "", /real Codex Exec task completed/i);
 });
 
 test("the offline demonstration writes only one brief, report, and log row", async () => {

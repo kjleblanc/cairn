@@ -14,9 +14,16 @@ Normal mode checks only whether the official Codex CLI is installed and connecte
 discarding every byte of command output. A missing or disconnected CLI stops at the
 connection-required screen and writes nothing.
 
-When Codex is connected, the app recommends one Codex Exec route. **Prepare Codex
-Exec run** writes an honest STOPPED record and stops before the real process or
-model call. Provider setup is never hidden or performed by Cairn.
+When Codex is connected, the app recommends one Codex Exec route. It then displays
+OpenAI, pinned model `gpt-5.6-sol`, the exact project path, workspace data scope, and
+the one-process quota. **Start one real Codex Exec call** remains disabled until the
+owner checks that one-task confirmation. Provider setup is never hidden or performed
+by Cairn.
+
+The confirmed path starts one ephemeral process, reduces JSONL to terminal and
+numeric usage evidence, and verifies the model-authored report, append-only log row,
+protected starting work, and isolated commit. It adds no fallback, retry,
+continuation, scheduler, concurrency, provider framework, or dependency.
 
 ## Offline demonstration
 

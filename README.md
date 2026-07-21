@@ -28,6 +28,8 @@ route. Earlier experiments remain visible in Git, the changelog, and task histor
 - an honest connection-required result when none is connected;
 - one Codex Exec adapter that detects installed/connected readiness without reading
   or displaying credentials or login output;
+- one explicitly confirmed real Codex Exec call pinned to `gpt-5.6-sol`, with the
+  exact project, data scope, and one-call quota shown before it starts;
 - a compact route/run/check/result activity view;
 - protected Git state and exact task records; and
 - an explicit deterministic offline demonstration adapter.
@@ -42,9 +44,10 @@ Milestone movement: NO
 ```
 
 Normal mode checks `codex --version` and `codex login status` with all process output
-discarded. If both succeed, Cairn recommends the single Codex Exec route. Starting
-it writes an honest STOPPED result with `REAL_MODEL_CALL_NOT_AUTHORIZED` before the
-real process starts, so this task does not send project data or call a model.
+discarded. If both succeed, Cairn recommends the single Codex Exec route. The owner
+must then confirm OpenAI, model `gpt-5.6-sol`, the exact project path, the disclosed
+workspace data scope, and a quota of one ephemeral process with no retry or
+continuation. Only that confirmation authorizes the process.
 
 ## Start here
 
@@ -103,15 +106,19 @@ Success is a route labeled `Provider none` and `Model none`, four activity stage
 one brief/report/log append, a verified lifecycle result, and no milestone stone.
 It is not proof of self-hosting or real model work.
 
-## Try Codex readiness without a model call
+## Try one real Codex Exec task
 
 Run ordinary `cairn task` or start a Desktop task without `CAIRN_MOCK`. Cairn will
 report one of three non-secret states: not installed, installed but not connected,
-or installed and connected. If connected, choose **Prepare Codex Exec run**.
+or installed and connected. If connected, review the real-call disclosure, check the
+one-call confirmation, and choose **Start one real Codex Exec call**.
 
-Success for this boundary-only build is a STOPPED report stating that the real
-`codex exec` process was not started and no model was called. Cairn never opens a
-login flow; install and connect Codex yourself through official Codex controls.
+The call sends the task instructions and lets Codex read files inside the selected
+project as needed. It consumes the connected account's pricing, credits, or quota.
+Cairn runs one pinned, ephemeral process, retains no raw process output, verifies the
+model-authored report/log/commit, and does not retry, resume, continue, schedule, or
+start another provider. Cairn never opens a login flow; install and connect Codex
+yourself through official Codex controls.
 
 ## History
 

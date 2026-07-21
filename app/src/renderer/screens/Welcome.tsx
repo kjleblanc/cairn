@@ -19,7 +19,7 @@ export function Welcome({ preflight, hasRecent, onOpenFolder, onNew, onBrowseRec
       <Card title={preflight.mock ? "offline demonstration is available" : "Codex readiness is checked per task"}>
         <p>{preflight.mock
           ? "This local session can demonstrate route → run → check → result without a model. It will clearly say that your requested product change was not attempted."
-          : "When you find a route, Cairn checks only whether the official Codex CLI is installed and connected. A connected route still stops before the real process or model call in this build."}</p>
+          : "When you find a route, Cairn checks only whether the official Codex CLI is installed and connected. Before one real call, it shows the exact provider, model, project, data scope, and quota for your confirmation."}</p>
       </Card>
       <div className="row">
         <Pill kind="primary" onClick={onNew}>Start a new project</Pill>

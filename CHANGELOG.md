@@ -4,6 +4,23 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## One confirmed real Codex Exec call — Task 034 — 2026-07-21
+
+- Enabled one real, ephemeral, workspace-scoped Codex Exec process only after the
+  owner confirms OpenAI, pinned model `gpt-5.6-sol`, the exact target project, the
+  disclosed workspace data scope, and the one-process quota.
+- Added one output-reducing process implementation that discards stderr and all raw
+  JSONL content while retaining only the terminal event and numeric token usage.
+- The model follows the existing Cairn task brief and owns the in-scope product
+  edits, report, append-only log row, and exact-path local commit. Cairn verifies
+  those records, protected starting work, and Git isolation before reporting DONE.
+- Added fake-process core and Electron verification for the exact arguments, stdin
+  prompt, disabled-until-confirmed UI, main-process rejection before task creation,
+  successful model-shaped report/log/commit, and redacted malformed JSONL failure.
+- Added no dependency, provider fallback, retry, continuation, scheduler,
+  concurrency, login flow, generic provider framework, or real model call during
+  implementation and tests.
+
 ## Codex Exec readiness and real-call boundary — Task 033 — 2026-07-21
 
 - Added one Codex Exec adapter to the active serial route. Normal CLI and Desktop

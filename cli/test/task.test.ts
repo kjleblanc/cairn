@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { adaptersForMode, parseTaskArguments, routeSummaryLines } from "../src/flows/task.js";
-import { previewSerialRoute } from "@cairn/core";
+import { CODEX_EXEC_MODEL, codexExecDisclosure, previewSerialRoute } from "@cairn/core";
 
 test("the CLI accepts one offline demo switch and plain outcome text", () => {
   assert.deepEqual(parseTaskArguments(["task", "--mock", "Create", "a", "welcome page"]), { mock: true, outcome: "Create a welcome page" });
@@ -28,6 +28,13 @@ test("normal CLI mode offers only Codex Exec when readiness is connected", () =>
   assert.deepEqual(route.candidates.map((candidate) => candidate.id), ["codex-exec"]);
   assert.match(routeSummaryLines(route).join("\n"), /Codex Exec/);
   assert.match(routeSummaryLines(route).join("\n"), /Provider: OpenAI/);
+  assert.match(routeSummaryLines(route).join("\n"), new RegExp(`Model: ${CODEX_EXEC_MODEL}`));
+  const disclosure = codexExecDisclosure("C:\\fixture", "Create a welcome page");
+  assert.equal(disclosure.provider, "OpenAI");
+  assert.equal(disclosure.model, CODEX_EXEC_MODEL);
+  assert.equal(disclosure.task, "Create a welcome page");
+  assert.match(disclosure.data, /any file inside the selected project/i);
+  assert.match(disclosure.quota, /exactly one ephemeral Codex Exec process/i);
 });
 
 test("explicit mock mode names the adapter, provider, and model honestly", () => {
