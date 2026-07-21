@@ -40,8 +40,8 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, schedul
       {schedulerFinal && !gate.tripped && !bounded ? (
         <div className="gate-banner scheduler-banner">
           <div>
-            <p><strong>Two-task scheduler — Final candidate, still off by default.</strong></p>
-            <p className="small">Plan exact paths first, build disjoint Standard tasks in isolated worktrees, then check and integrate one at a time.</p>
+            <p><strong>Two-task scheduler — passive Experimental Draft, off by default.</strong></p>
+            <p className="small">Offline mock proof only: Cairn creates a disposable project and can produce one or two bounded text artifacts. Real models, code, packages, builds, and executable tests stay outside this Draft.</p>
           </div>
           <Pill onClick={onStartScheduler}>{scheduled ? "Open scheduler" : "Schedule one or two tasks"}</Pill>
         </div>

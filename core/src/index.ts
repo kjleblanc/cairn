@@ -13,3 +13,5 @@ export * from "./bounded-broker-protocol.js";
 export * from "./bounded-messages-fetch.js";
 export * from "./scheduler.js";
 export * from "./scheduler-git.js";
+export * from "./scheduler-checks.js";
+export * from "./scheduler-proof.js";

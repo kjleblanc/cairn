@@ -1,7 +1,7 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
-  approveBrief, buildTask, closeTask, defineTask, integrateNext, parallelDraftEnabled, pickEngine, recoverScheduledBatch, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck, schedulerSummary, startScheduledBatch,
-  type CloseInput, type Engine, type OwnerQuestion, type RunEvents,
+  approveBrief, buildTask, closeTask, createDisposableSchedulerProof, defineTask, integrateNext, parallelDraftEnabled, passiveSchedulerDraftEnabled, pickEngine, recoverPassiveScheduledBatch, recoverScheduledBatch, refineBrief, resolveEffort, resolveModel, reviewTask, runDirectionCheck, schedulerSummary, startPassiveScheduledBatch, startScheduledBatch,
+  type CloseInput, type Engine, type OwnerQuestion, type RunEvents, type SchedulerSummary,
 } from "@cairn/core";
 import type { EngineEvent, Result } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
@@ -137,24 +137,29 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   ipcMain.handle("task:direction", (_e, dir: string, reason: string) =>
     exclusive("task:direction", `direction:${dir}`, parallel, () => runDirectionCheck(dir, reason, engine, forward(win, "direction", 0))));
 
-  // Task 028 owns concurrency inside one closed scheduler batch. The Desktop
-  // remains a thin skin: core owns admission, paths, worktrees, checks, state,
-  // integration, and recovery. A fresh engine instance is made per declared
-  // Planning or Building session, using the same saved model/effort selection.
+  // Task 029's Draft creates its disposable proof project inside the same owner
+  // action. The selected project is only the place from which the owner opens
+  // this screen; neither planner nor builder receives that valuable path.
   ipcMain.handle("scheduler:start", (_e, dir: string, outcomes: string[], sessionId: number) =>
-    exclusive("scheduler:start", `scheduler:${dir}`, false, () =>
-      startScheduledBatch(
-        dir,
-        outcomes,
-        () => pickEngine(mock, chosenModel, chosenEffort),
-        {
-          onState: (summary) => win()?.webContents.send("scheduler:state", { dir, sessionId, summary }),
-          engineEvents: (taskNumber, stage) => forward(win, stage === "planning" ? "planner" : "builder", sessionId, taskNumber),
-        },
-      )));
+    exclusive("scheduler:start", `scheduler:${dir}`, false, async () => {
+      if (passiveSchedulerDraftEnabled() && !mock) throw new Error("The passive Experimental Draft runs only with Cairn's offline mock engine.");
+      const proof = passiveSchedulerDraftEnabled() ? createDisposableSchedulerProof() : null;
+      const sendState = (summary: SchedulerSummary) =>
+        win()?.webContents.send("scheduler:state", { dir, proofDir: proof?.root ?? dir, sessionId, summary });
+      const engineFactory = () => pickEngine(mock, chosenModel, chosenEffort);
+      const events = {
+        onState: sendState,
+        engineEvents: (taskNumber: number, stage: "planning" | "building") => forward(win, stage === "planning" ? "planner" : "builder", sessionId, taskNumber),
+      };
+      const summary = proof
+        ? await startPassiveScheduledBatch(proof, outcomes, engineFactory, events)
+        : await startScheduledBatch(dir, outcomes, engineFactory, events);
+      return { proofDir: proof?.root ?? dir, summary };
+    }));
 
   ipcMain.handle("scheduler:status", (_e, dir: string) => sync("scheduler:status", () => schedulerSummary(dir)));
-  ipcMain.handle("scheduler:recover", (_e, dir: string) => sync("scheduler:recover", () => recoverScheduledBatch(dir)));
+  ipcMain.handle("scheduler:recover", (_e, dir: string) => sync("scheduler:recover", () =>
+    passiveSchedulerDraftEnabled() ? recoverPassiveScheduledBatch(dir) : recoverScheduledBatch(dir)));
 
   // Choose the model for the next run. A blank choice keeps today's default. The
   // renderer's saved effort rides along (see preload), so the app's one boot-time

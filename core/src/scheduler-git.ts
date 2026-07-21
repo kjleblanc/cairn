@@ -8,9 +8,19 @@ export class SchedulerGitError extends Error {
   }
 }
 
+function schedulerGitEnvironment(): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.toLocaleUpperCase("en-US").startsWith("GIT_"))),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
+  };
+}
+
 export function schedulerGit(root: string, args: string[]): string {
   try {
-    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: schedulerGitEnvironment() }).trim();
   } catch (error) {
     const detail = error as { stderr?: string | Buffer; message?: string };
     const stderr = typeof detail.stderr === "string" ? detail.stderr : detail.stderr?.toString("utf8");
@@ -63,7 +73,7 @@ export function changedPaths(worktree: string, baseCommit: string): { paths: str
   const committed = schedulerGit(worktree, ["diff", "--name-only", `${baseCommit}..HEAD`])
     .split(/\r?\n/).filter(Boolean).map((path) => path.replace(/\\/g, "/"));
   const raw = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
-    cwd: worktree, encoding: "utf8",
+    cwd: worktree, encoding: "utf8", env: schedulerGitEnvironment(),
   }).split("\0").filter(Boolean);
   const working: string[] = [];
   const destructive: string[] = [];

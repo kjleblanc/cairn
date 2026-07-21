@@ -11,7 +11,7 @@
   "scripts": {
     "sync-contract": "node scripts/sync-contract.mjs",
     "build": "npm run sync-contract && tsc",
-    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/parse.test.js dist/test/steps.test.js dist/test/agents.test.js dist/test/coordinator.test.js dist/test/coordinator-regressions.test.js dist/test/coordinator-parallel-safe.test.js dist/test/coordinator-final.test.js dist/test/coordinator-recovery.test.js dist/test/bounded-provider.test.js dist/test/bounded-messages-fetch.test.js dist/test/bounded-broker.test.js dist/test/concurrent-activation.test.js dist/test/concurrent-run-review.test.js dist/test/concurrent-run-faults.test.js dist/test/concurrent-run.test.js dist/test/scheduler.test.js dist/test/scheduler-recovery.test.js"
+    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/parse.test.js dist/test/steps.test.js dist/test/agents.test.js dist/test/coordinator.test.js dist/test/coordinator-regressions.test.js dist/test/coordinator-parallel-safe.test.js dist/test/coordinator-final.test.js dist/test/coordinator-recovery.test.js dist/test/bounded-provider.test.js dist/test/bounded-messages-fetch.test.js dist/test/bounded-broker.test.js dist/test/concurrent-activation.test.js dist/test/concurrent-run-review.test.js dist/test/concurrent-run-faults.test.js dist/test/concurrent-run.test.js dist/test/scheduler.test.js dist/test/scheduler-recovery.test.js dist/test/scheduler-checks.test.js dist/test/scheduler-proof.test.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",

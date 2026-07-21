@@ -256,6 +256,8 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
 .scheduler-paths { overflow-wrap: anywhere; }
 .scheduler-metrics { margin: 10px 0 0; }
 .scheduler-recovery-row { justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.scheduler-containment { margin: 0 0 12px; padding: 9px 11px; border-left: 3px solid var(--amber); background: var(--amber-soft); }
+.scheduler-proof-root { margin: 12px 0; padding: 8px 10px; overflow-wrap: anywhere; border-radius: var(--r-sm); background: var(--card-solid); }
 @media (max-width: 620px) {
   .scheduler-grid { grid-template-columns: 1fr; }
   .scheduler-banner, .scheduler-form .row, .scheduler-recovery-row { align-items: stretch; flex-direction: column; }

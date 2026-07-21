@@ -16,6 +16,7 @@ export function Scheduler({ dir, initial, onBack }: {
   const [first, setFirst] = useState("");
   const [second, setSecond] = useState("");
   const [summary, setSummary] = useState(initial);
+  const [proofDir, setProofDir] = useState(initial ? dir : "");
   const [history, setHistory] = useState<SchedulerHistory[]>(() => historyFrom(initial));
   const [running, setRunning] = useState(false);
   const [attention, setAttention] = useState("");
@@ -23,6 +24,7 @@ export function Scheduler({ dir, initial, onBack }: {
 
   useEffect(() => cairn.onSchedulerState((event) => {
     if (event.dir !== dir || event.sessionId !== sessionId) return;
+    setProofDir(event.proofDir);
     setSummary(event.summary);
     setHistory((current) => {
       const next = [...current];
@@ -43,7 +45,8 @@ export function Scheduler({ dir, initial, onBack }: {
     const result = await cairn.schedulerStart(dir, outcomes, sessionId);
     setRunning(false);
     if (result.ok) {
-      setSummary(result.value);
+      setProofDir(result.value.proofDir);
+      setSummary(result.value.summary);
       return;
     }
     setAttention(result.message);
@@ -51,7 +54,7 @@ export function Scheduler({ dir, initial, onBack }: {
 
   const recover = async () => {
     setAttention("");
-    const result = await cairn.schedulerRecover(dir);
+    const result = await cairn.schedulerRecover(proofDir || dir);
     if (result.ok) setSummary(result.value);
     else setAttention(result.message);
   };
@@ -62,21 +65,21 @@ export function Scheduler({ dir, initial, onBack }: {
     <div>
       <div className="row spread scheduler-heading">
         <div>
-          <p className="eyebrow">two-task scheduler</p>
-          <h1>Plan paths, then build safely</h1>
+          <p className="eyebrow">passive-artifact scheduler draft</p>
+          <h1>Prove two contained text results</h1>
         </div>
         <Pill kind="quiet" onClick={onBack}>Back to project</Pill>
       </div>
 
       {!active ? (
         <section className="card scheduler-form" aria-label="Start scheduler batch">
-          <p>Choose one or two independently useful Standard outcomes. Two disjoint tasks normally use four Claude sessions: one Planning and one Building session for each task. Cairn never retries automatically.</p>
+          <p>Choose one or two independently useful passive <code>.md</code> or <code>.txt</code> outcomes. Cairn creates a brand-new disposable proof project for this batch; code, packages, builds, and executable tests are not supported.</p>
           <label htmlFor="scheduler-outcome-one">First outcome</label>
           <textarea id="scheduler-outcome-one" value={first} onChange={(event) => setFirst(event.target.value)} placeholder="What should the first task visibly achieve?" />
           <label htmlFor="scheduler-outcome-two">Second outcome (optional)</label>
           <textarea id="scheduler-outcome-two" value={second} onChange={(event) => setSecond(event.target.value)} placeholder="A separate useful outcome, if you have one" />
           <div className="row spread">
-            <p className="small muted">Planning can read the project but cannot change product files. Building happens only after exact paths are known.</p>
+            <p className="small muted">Planning can read only the new proof project. Checking compares bounded UTF-8 text and never runs model-authored code.</p>
             <Pill kind="primary" disabled={running || first.trim().length < 5} onClick={() => void start()}>{running ? "Scheduler is running…" : "Start this batch"}</Pill>
           </div>
         </section>
@@ -86,6 +89,12 @@ export function Scheduler({ dir, initial, onBack }: {
           <Pill kind="quiet" onClick={() => void recover()}>Reconcile after restart</Pill>
         </div>
       )}
+
+      {proofDir ? (
+        <p className="small mono scheduler-proof-root" data-testid="scheduler-proof-root">
+          Retained disposable proof: {proofDir}
+        </p>
+      ) : null}
 
       <SchedulerDeck summary={summary} history={history} attentionMessage={attention} />
     </div>

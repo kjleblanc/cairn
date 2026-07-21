@@ -53,6 +53,33 @@ test("scheduled Building has exact writes and no shell", () => {
   assert.equal(schedulerToolDecision(spec, { name: "WriteAndRun", input: { file_path: resolve(root, "safe/result.txt") } }).approved, false);
 });
 
+test("passive Planning has no command, owner-question, or write capability", () => {
+  const spec: RunSpec = { role: "definer", root: process.cwd(), system: "", user: "", schedulerProfile: "scheduler-passive-planning" };
+  assert.deepEqual(schedulerToolDecision(spec, { name: "Read", input: { file_path: "PROJECT.md" } }), { approved: true });
+  for (const request of [
+    { name: "Bash", input: { command: "git status" } },
+    { name: "Write", input: { file_path: "result.md" } },
+    { name: "mcp__cairn__ask_owner", input: { question: "May I?" } },
+    { name: "WebFetch", input: { url: "https://example.invalid" } },
+  ]) assert.equal(schedulerToolDecision(spec, request).approved, false);
+});
+
+test("passive Building may edit only exact frozen passive paths and cannot execute", () => {
+  const root = process.cwd();
+  const spec: RunSpec = {
+    role: "builder", root, system: "", user: "", schedulerProfile: "scheduler-passive-building",
+    allowedPaths: ["artifacts/task-001/result.md", "docs/ai-work/tasks/001-report.md"],
+  };
+  assert.deepEqual(schedulerToolDecision(spec, { name: "Write", input: { file_path: resolve(root, "artifacts/task-001/result.md") } }), { approved: true });
+  assert.deepEqual(schedulerToolDecision(spec, { name: "Edit", input: { file_path: resolve(root, "docs/ai-work/tasks/001-report.md") } }), { approved: true });
+  for (const request of [
+    { name: "Write", input: { file_path: resolve(root, "artifacts/task-002/result.md") } },
+    { name: "Bash", input: { command: "node result.md" } },
+    { name: "NotebookEdit", input: { file_path: resolve(root, "artifacts/task-001/result.md") } },
+    { name: "WebSearch", input: { query: "escape" } },
+  ]) assert.equal(schedulerToolDecision(spec, request).approved, false);
+});
+
 const withEnvModel = (value: string | undefined, body: () => void | Promise<void>) =>
   withEnv("CAIRN_MODEL", value, body);
 const withEnvEffort = (value: string | undefined, body: () => void | Promise<void>) =>

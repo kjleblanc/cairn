@@ -25,7 +25,8 @@ export type ReviewPayload = { text: string; finalVerdict: string; costUsd?: numb
 export type OwnerQuestionEvent = { id: number; question: string; asked: number; limit: number; sessionId: number; autoSkipMs?: number };
 export type RefinePayload = { briefText: string; briefChanged: boolean; reply: string; costUsd?: number };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
-export type SchedulerStateEvent = { dir: string; sessionId: number; summary: SchedulerSummary };
+export type SchedulerStartPayload = { proofDir: string; summary: SchedulerSummary };
+export type SchedulerStateEvent = { dir: string; proofDir: string; sessionId: number; summary: SchedulerSummary };
 
 export interface CairnApi {
   preflight(): Promise<Preflight>;
@@ -46,7 +47,7 @@ export interface CairnApi {
   taskReview(dir: string, taskNumber: number, sessionId: number): Promise<Result<ReviewPayload>>;
   taskClose(dir: string, taskNumber: number, input: CloseInput, sessionId: number): Promise<Result<LogRow>>;
   taskDirection(dir: string, reason: string): Promise<Result<{ text: string }>>;
-  schedulerStart(dir: string, outcomes: string[], sessionId: number): Promise<Result<SchedulerSummary>>;
+  schedulerStart(dir: string, outcomes: string[], sessionId: number): Promise<Result<SchedulerStartPayload>>;
   schedulerStatus(dir: string): Promise<Result<SchedulerSummary | null>>;
   schedulerRecover(dir: string): Promise<Result<SchedulerSummary | null>>;
   /** Choose the model for the next run; returns the resolved active model id. Blank = today's default. */

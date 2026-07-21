@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import * as core from "../src/index.js";
 import type { Engine, RunEvents, RunSpec } from "../src/agents.js";
 
@@ -206,4 +206,44 @@ test("the declared interruption matrix never retries a provider or duplicates a 
       assert.ok(core.parseLog(root).filter((row) => row.task === "001").length <= 1, `${boundary} did not duplicate the task log row`);
     }
   });
+});
+
+test("passive hard exits before and after main movement recover without retry, duplicate row, or false Done", () => {
+  const moduleUrl = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "index.js")).href;
+  const childSource = `
+    const core = await import(${JSON.stringify(moduleUrl)});
+    process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT = "1";
+    process.env.CAIRN_MOCK = "1";
+    await core.startPassiveScheduledBatch(
+      { root: process.argv[1], token: process.argv[2] },
+      ["Create a passive recovery note"],
+      () => new core.MockEngine(),
+      { onTransition: (name) => { if (name.startsWith(process.argv[3])) process.exit(73); } },
+    );
+  `;
+  for (const boundary of ["building-start:1", "main-fast-forward-observed:1"]) {
+    const proof = core.createDisposableSchedulerProof();
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", childSource, proof.root, proof.token, boundary], {
+      encoding: "utf8",
+      env: { ...process.env, CAIRN_PASSIVE_SCHEDULER_DRAFT: "1", CAIRN_MOCK: "1" },
+      timeout: 60_000,
+    });
+    assert.equal(child.status, 73, `${boundary}: child must terminate at the declared hard-exit boundary (${child.stderr})`);
+    const before = core.readPassiveSchedulerState(proof.root)!;
+    assert.equal(before.sessionCount, 2, `${boundary}: exactly one Planning and one Building session were recorded`);
+    assert.notEqual(before.tasks[0].phase, "Done", `${boundary}: the interrupted state cannot claim Done`);
+    const rowsBefore = core.parseLog(proof.root).filter((row) => row.task === "001").length;
+    const recovered = core.recoverPassiveScheduledBatch(proof.root)!;
+    assert.equal(recovered.tasks[0].phase, "Needs attention", boundary);
+    assert.equal(core.readPassiveSchedulerState(proof.root)!.sessionCount, 2, `${boundary}: recovery did not retry an engine`);
+    assert.equal(core.parseLog(proof.root).filter((row) => row.task === "001").length, rowsBefore, `${boundary}: recovery did not duplicate the log row`);
+    assert.equal(existsSync(core.passiveSchedulerStatePaths(proof.root).lock), false, `${boundary}: only the proved stale lock was removed`);
+    if (boundary.startsWith("main-fast-forward")) {
+      assert.equal(rowsBefore, 1, "the durably advanced candidate has one task log row");
+      assert.equal(recovered.tasks[0].attention, "INTERRUPTED_AFTER_MAIN_ADVANCE");
+    } else {
+      assert.equal(rowsBefore, 0, "no pre-main interruption may create a log row");
+      assert.equal(recovered.tasks[0].attention, "INTERRUPTED_OPERATION");
+    }
+  }
 });

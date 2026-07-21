@@ -11,6 +11,7 @@ export function SchedulerDeck({ summary, history = [], attentionMessage = "" }: 
 }) {
   return (
     <section className="scheduler-deck" aria-label="Two-task scheduler">
+      <p className="small muted scheduler-containment">Offline mock Experimental Draft: passive UTF-8 artifacts in a coordinator-created disposable project only. No real model or model-authored command, test, package script, or module is executed.</p>
       <div className="scheduler-legend" aria-label="Scheduler states">
         {PHASES.map((phase) => <span className={`scheduler-phase scheduler-phase-${phase.toLowerCase().replace(/\s/g, "-")}`} key={phase}>{phase}</span>)}
       </div>

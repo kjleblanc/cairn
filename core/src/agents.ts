@@ -54,7 +54,7 @@ export interface RunSpec {
   /** Frozen exact paths for a coordinated builder. Absent keeps the legacy path unchanged. */
   allowedPaths?: string[];
   /** Task 028 changes tool authority only; the existing SDK transport stays unchanged. */
-  schedulerProfile?: "scheduler-planning" | "scheduler-building";
+  schedulerProfile?: "scheduler-planning" | "scheduler-building" | "scheduler-passive-planning" | "scheduler-passive-building";
 }
 
 export interface Engine {
@@ -145,6 +145,11 @@ export function schedulerToolDecision(spec: RunSpec, request: unknown): ToolDeci
   const tool = req.tool_name ?? req.name ?? "";
   const input = req.input ?? {};
   const deny = (reason: string): ToolDecision => ({ approved: false, reason });
+
+  if (spec.schedulerProfile === "scheduler-passive-planning") {
+    if (/^(Read|Glob|Grep)$/i.test(tool)) return { approved: true };
+    return deny("Passive Planning may read only the coordinator-created proof project and has no command or write capability.");
+  }
 
   if (spec.schedulerProfile === "scheduler-planning") {
     if (/^(Read|Glob|Grep)$/i.test(tool) || /ask_owner$/i.test(tool)) return { approved: true };
@@ -312,7 +317,9 @@ export class SdkEngine implements Engine {
         systemPrompt: spec.system,
         allowedTools: spec.schedulerProfile === "scheduler-planning"
           ? ["Read", "Glob", "Grep", "Bash", ...(askServer ? [ASK_OWNER_TOOL] : [])]
-          : spec.schedulerProfile === "scheduler-building"
+          : spec.schedulerProfile === "scheduler-passive-planning"
+            ? ["Read", "Glob", "Grep"]
+          : spec.schedulerProfile === "scheduler-building" || spec.schedulerProfile === "scheduler-passive-building"
             ? ["Read", "Glob", "Grep", "Write", "Edit"]
             : ["Read", "Glob", "Grep", "Write", "Edit", "Bash", ...(askServer ? [ASK_OWNER_TOOL] : [])],
         disallowedTools: ["WebFetch", "WebSearch"],
@@ -384,6 +391,33 @@ export class MockEngine implements Engine {
         }),
       };
     }
+    if (spec.schedulerProfile === "scheduler-passive-planning" && spec.taskNumber) {
+      const id = pad(spec.taskNumber);
+      const outcome = spec.user.match(/SCHEDULED OUTCOME:\s*([\s\S]*?)\n\n/)?.[1]?.trim() || `Create passive Task ${id}`;
+      if (/\[mock planning failure\]/i.test(outcome)) throw new Error("Synthetic passive Planning failure (mock).");
+      const artifact = `artifacts/task-${id}/result.md`;
+      const expected = `# Passive Task ${id}\n\n${outcome}\n`;
+      const uncertain = /\[mock uncertain\]/i.test(outcome);
+      const unsupported = /\[mock code\]|\b(source|code|script|test runner|package)\b/i.test(outcome);
+      return {
+        text: JSON.stringify({
+          schemaVersion: 2,
+          taskNumber: spec.taskNumber,
+          outcome,
+          independentlyUseful: "The passive text artifact is visible and useful on its own.",
+          lane: "Standard",
+          artifactPaths: [artifact],
+          assertions: [{ kind: "utf8Equals", path: artifact, expected, lineEndings: "normalize" }],
+          dependencies: [],
+          externalActions: [],
+          certainty: uncertain || unsupported ? "uncertain" : "certain",
+          uncertaintyReason: unsupported
+            ? "Executable code and test tasks are outside the passive Experimental Draft."
+            : uncertain ? "The mock planner could not identify one certain passive artifact." : "",
+          briefMarkdown: `# Task ${id} — passive scheduled brief (mock)\n\nLane: **Standard**\n\nVisible outcome: ${outcome}\n\nArtifact: ${artifact}\n\nDONE when the frozen declarative assertion passes.\nSTOPPED if passive containment cannot be proved.\n`,
+        }),
+      };
+    }
     if (spec.schedulerProfile === "scheduler-building" && spec.taskNumber) {
       const id = pad(spec.taskNumber);
       const reportRel = `docs/ai-work/tasks/${id}-report.md`;
@@ -404,6 +438,21 @@ export class MockEngine implements Engine {
       writeFileSync(resolve(spec.root, reportRel),
         `# Task ${id} — scheduled report (mock)\n\nResult: the exact scheduled output was written.\n\nMilestone movement: YES\n\nDisposition: DONE\n`);
       return { text: say("Scheduled build complete (mock). Disposition: DONE.") };
+    }
+    if (spec.schedulerProfile === "scheduler-passive-building" && spec.taskNumber) {
+      const id = pad(spec.taskNumber);
+      const reportRel = `docs/ai-work/tasks/${id}-report.md`;
+      const artifact = (spec.allowedPaths ?? []).find((path) => path.startsWith(`artifacts/task-${id}/`));
+      const outcome = spec.user.match(/SCHEDULED OUTCOME:\s*([\s\S]*?)\n\n/)?.[1]?.trim() || `Create passive Task ${id}`;
+      if (/\[mock delay\]/i.test(outcome)) await new Promise((resolveDelay) => setTimeout(resolveDelay, 12_000));
+      if (artifact) {
+        mkdirSync(dirname(resolve(spec.root, artifact)), { recursive: true });
+        writeFileSync(resolve(spec.root, artifact), `# Passive Task ${id}\n\n${outcome}\n`);
+      }
+      mkdirSync(dirname(resolve(spec.root, reportRel)), { recursive: true });
+      writeFileSync(resolve(spec.root, reportRel),
+        `# Task ${id} — passive scheduled report (mock)\n\nResult: the exact passive artifact was written.\n\nMilestone movement: UNCLEAR\n\nDisposition: DONE\n`);
+      return { text: say("Passive scheduled build complete (mock). Disposition: DONE.") };
     }
     if (spec.role === "definer" && spec.taskNumber) {
       const briefPath = paths.brief(spec.root, spec.taskNumber);

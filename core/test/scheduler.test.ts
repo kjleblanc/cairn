@@ -150,6 +150,20 @@ async function withScheduler<T>(body: () => Promise<T>): Promise<T> {
   }
 }
 
+async function withPassiveScheduler<T>(body: () => Promise<T>): Promise<T> {
+  const previous = process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT;
+  const previousMock = process.env.CAIRN_MOCK;
+  process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT = "1";
+  process.env.CAIRN_MOCK = "1";
+  try { return await body(); }
+  finally {
+    if (previous === undefined) delete process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT;
+    else process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT = previous;
+    if (previousMock === undefined) delete process.env.CAIRN_MOCK;
+    else process.env.CAIRN_MOCK = previousMock;
+  }
+}
+
 test("two disjoint Standard tasks build together and integrate one at a time", async () => {
   await withScheduler(async () => {
     const root = fixture("disjoint");
@@ -415,4 +429,152 @@ test("tamper, ref movement, duplicate log, and cleanup interference never produc
       }
     }
   });
+});
+
+class PlanningFailureEngine implements Engine {
+  async run(): Promise<{ text: string }> {
+    throw new Error("synthetic Planning transport failure");
+  }
+}
+
+interface PassiveEngineOptions {
+  holdTask?: number;
+  hold?: Promise<void>;
+}
+
+class PassiveFakeEngine implements Engine {
+  builderCalls = 0;
+  constructor(private readonly options: PassiveEngineOptions = {}) {}
+
+  async run(spec: RunSpec): Promise<{ text: string }> {
+    const taskNumber = spec.taskNumber!;
+    const id = String(taskNumber).padStart(3, "0");
+    const artifact = `artifacts/task-${id}/result.md`;
+    const expected = `# Passive result ${id}\n\nThis disposable artifact is independently useful.\n`;
+    if (spec.schedulerProfile === "scheduler-passive-planning") {
+      const plan: core.PassiveScheduledPlan = {
+        schemaVersion: 2,
+        taskNumber,
+        outcome: `Create passive result ${id}`,
+        independentlyUseful: "The passive artifact can be read on its own.",
+        lane: "Standard",
+        artifactPaths: [artifact],
+        assertions: [{ kind: "utf8Equals", path: artifact, expected, lineEndings: "normalize" }],
+        dependencies: [],
+        externalActions: [],
+        certainty: "certain",
+        uncertaintyReason: "",
+        briefMarkdown: `# Task ${id} passive fixture\n\nLane: **Standard**\n\nWrite only ${artifact} and its report.\n`,
+      };
+      return { text: JSON.stringify(plan) };
+    }
+    assert.equal(spec.schedulerProfile, "scheduler-passive-building");
+    this.builderCalls += 1;
+    if (this.options.holdTask === taskNumber && this.options.hold) await this.options.hold;
+    const artifactPath = resolve(spec.root, artifact);
+    mkdirSync(dirname(artifactPath), { recursive: true });
+    writeFileSync(artifactPath, expected);
+    const report = resolve(spec.root, `docs/ai-work/tasks/${id}-report.md`);
+    mkdirSync(dirname(report), { recursive: true });
+    writeFileSync(report, `# Task ${id} report\n\nResult: passive artifact written.\n\nMilestone movement: YES\n\nDisposition: DONE\n`);
+    return { text: "Disposition: DONE" };
+  }
+}
+
+test("a passive Planning engine failure is Needs attention, not Waiting", async () => {
+  await withPassiveScheduler(async () => {
+    const proof = core.createDisposableSchedulerProof();
+    const result = await core.startPassiveScheduledBatch(proof, ["Create one passive result"], () => new PlanningFailureEngine());
+    assert.equal(result.tasks[0].phase, "Needs attention");
+    assert.equal(result.tasks[0].attention, "PLANNING_ENGINE_FAILED");
+  });
+});
+
+test("a ready passive task reaches Done while its peer builder is still active", async () => {
+  await withPassiveScheduler(async () => {
+    const proof = core.createDisposableSchedulerProof();
+    let releaseFirst!: () => void;
+    const holdFirst = new Promise<void>((resolveHold) => { releaseFirst = resolveHold; });
+    const engine = new PassiveFakeEngine({ holdTask: 1, hold: holdFirst });
+    const visible: core.SchedulerSummary[] = [];
+    const batch = core.startPassiveScheduledBatch(proof, ["Create delayed alpha note", "Create ready beta note"], () => engine, {
+      onState: (state) => visible.push(structuredClone(state)),
+    });
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1_500));
+    const secondDoneBeforeRelease = visible.some((state) =>
+      state.tasks[0].phase === "Building" && state.tasks[1].phase === "Done");
+    releaseFirst();
+    const result = await batch;
+    assert.equal(secondDoneBeforeRelease, true, "Task 002 must integrate as soon as it is ready");
+    assert.deepEqual(result.tasks.map((task) => task.phase), ["Done", "Done"]);
+    assert.equal(readFileSync(join(proof.root, "artifacts/task-002/result.md"), "utf8").includes("Passive result 002"), true);
+    assert.equal(core.parseLog(proof.root).filter((row) => ["001", "002"].includes(row.task)).length, 2);
+  });
+});
+
+test("a pre-existing temporary repository has no disposable creation provenance", async () => {
+  await withPassiveScheduler(async () => {
+    const root = fixture("arbitrary-temp");
+    const engine = new PassiveFakeEngine();
+    await assert.rejects(
+      () => core.startPassiveScheduledBatch({ root, token: "not-a-real-proof-token" }, ["Create one passive result"], () => engine),
+      /DISPOSABLE_PROVENANCE_UNPROVED/,
+    );
+    assert.equal(engine.builderCalls, 0);
+  });
+});
+
+test("the passive Draft refuses real transport mode before consuming its proof", async () => {
+  const previousDraft = process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT;
+  const previousMock = process.env.CAIRN_MOCK;
+  const proof = core.createDisposableSchedulerProof();
+  try {
+    process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT = "1";
+    delete process.env.CAIRN_MOCK;
+    await assert.rejects(() => core.startPassiveScheduledBatch(proof, ["Create a passive note"], () => new PassiveFakeEngine()), /SCHEDULER_OFFLINE_ONLY/);
+    assert.doesNotThrow(() => core.verifyDisposableSchedulerProof(proof));
+  } finally {
+    if (previousDraft === undefined) delete process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT;
+    else process.env.CAIRN_PASSIVE_SCHEDULER_DRAFT = previousDraft;
+    if (previousMock === undefined) delete process.env.CAIRN_MOCK;
+    else process.env.CAIRN_MOCK = previousMock;
+  }
+});
+
+test("an executable-code outcome waits and never reaches a passive builder", async () => {
+  await withPassiveScheduler(async () => {
+    const proof = core.createDisposableSchedulerProof();
+    const engine = new PassiveFakeEngine();
+    const result = await core.startPassiveScheduledBatch(proof, ["Write a source code script"], () => engine);
+    assert.equal(result.tasks[0].phase, "Waiting");
+    assert.match(result.tasks[0].waitingReason, /outside the passive Experimental Draft/);
+    assert.equal(engine.builderCalls, 0);
+  });
+});
+
+test("passive plan schema refuses outside, executable, hidden, foreign-task, and legacy check declarations", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-029-plan-schema-"));
+  const artifact = "artifacts/task-001/result.md";
+  const valid: core.PassiveScheduledPlan = {
+    schemaVersion: 2, taskNumber: 1, outcome: "Create one passive note", independentlyUseful: "Readable on its own", lane: "Standard",
+    artifactPaths: [artifact], assertions: [{ kind: "fileExists", path: artifact }], dependencies: [], externalActions: [],
+    certainty: "certain", uncertaintyReason: "", briefMarkdown: "# Passive brief\n\nThis exact passive artifact is bounded and independently useful.\n",
+  };
+  assert.doesNotThrow(() => core.validatePassiveScheduledPlan(valid, root, 1));
+  for (const path of [
+    "../outside.md",
+    "artifacts/task-001/run.js",
+    "artifacts/task-001/package.json",
+    "artifacts/task-001/.hidden.md",
+    "artifacts/task-002/result.md",
+    "docs/ai-work/tasks/001-report.md",
+  ]) {
+    assert.throws(() => core.validatePassiveScheduledPlan({
+      ...valid, artifactPaths: [path], assertions: [{ kind: "fileExists", path }],
+    }, root, 1), /PASSIVE_PATH_ESCAPE|PLAN_INVALID/);
+  }
+  assert.throws(() => core.validatePassiveScheduledPlan({ ...valid, command: "node escape.js" }, root, 1), /PLAN_INVALID/);
+  assert.throws(() => core.validatePassiveScheduledPlan({
+    ...valid, assertions: [{ executable: "npm.cmd", args: ["run", "postinstall"] }],
+  }, root, 1), /DECLARATIVE_CHECK_INVALID/);
 });

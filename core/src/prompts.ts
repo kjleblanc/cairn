@@ -80,6 +80,33 @@ export function scheduledBuilderPrompt(root: string, taskNumber: number): { syst
   };
 }
 
+export function passiveScheduledPlannerPrompt(root: string, taskNumber: number, outcome: string): { system: string; user: string } {
+  return {
+    system: `${COMMON}\n\nYour role: PASSIVE SCHEDULED PLANNER. You are inside a coordinator-created disposable proof project. Read only. Return one strict JSON object and write nothing. Never propose source code, tests, commands, scripts, packages, configuration, or executable checks.`,
+    user:
+      `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
+      `SCHEDULED OUTCOME: ${outcome}\n\n` +
+      `Task number: ${taskNumber}. This Experimental Draft supports only passive UTF-8 .md or .txt artifacts beneath artifacts/task-${pad(taskNumber)}/. ` +
+      `Return JSON with exactly: schemaVersion (2), taskNumber, outcome, independentlyUseful, lane, artifactPaths, assertions, dependencies, externalActions, certainty, uncertaintyReason, briefMarkdown. ` +
+      `lane must be Standard only for local passive text work. assertions may be fileExists, utf8Equals, or utf8Contains data objects; they are not commands. ` +
+      `Use certainty "uncertain" for code, tests, scripts, packages, configuration, external actions, or any path outside the assigned directory. ` +
+      `Output JSON only with no markdown fence. Do not implement anything.`,
+  };
+}
+
+export function passiveScheduledBuilderPrompt(root: string, taskNumber: number, outcome: string): { system: string; user: string } {
+  return {
+    system: `${COMMON}\n\nYour role: PASSIVE SCHEDULED BUILDER. You are inside a coordinator-created disposable proof worktree. Write only frozen passive .md/.txt artifacts and your report. You have no shell, Git, test, package, network, or integration authority.`,
+    user:
+      `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
+      `SCHEDULED OUTCOME: ${outcome}\n\n` +
+      `Read docs/ai-work/tasks/${pad(taskNumber)}-brief.md. Write only the exact passive artifact paths declared there and docs/ai-work/tasks/${pad(taskNumber)}-report.md. ` +
+      `Artifacts must remain bounded UTF-8 .md or .txt files. Do not create code, tests, scripts, commands, links, configuration, manifests, or executable content. ` +
+      `The report must describe the result and limitations, state Milestone movement: UNCLEAR, and end with Disposition: DONE or Disposition: STOPPED — [blocker]. ` +
+      `Do not run checks, stage, commit, integrate, edit the brief, or touch the shared log.`,
+  };
+}
+
 export function refinePrompt(root: string, taskNumber: number, message: string): { system: string; user: string } {
   return {
     system: `${COMMON}\n\nYour role: DEFINER, refining a drafted brief before approval. Nothing is approved or locked yet. The only file you may write is the brief itself.`,
