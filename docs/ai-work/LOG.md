@@ -21,3 +21,4 @@
 | 022 | 2026-07-20 | Standard | Applied | DONE | completed | Recorded active Contract v2.1 and accepted historical evidence by exact path so main is clean without deleting, hiding, or rewriting anything | NO |
 | 023 | 2026-07-20 | Standard | Applied | DONE | completed | Recorded active Contract v2.2 and all required mirrors by exact path without activating parallel mode or altering Task 016 or runtime code | NO |
 | 025 | 2026-07-20 | Standard | Applied | DONE | completed | Repaired the Contract v2.x regression fixture so the full core suite exercises the intended guard | NO |
+| 027 | 2026-07-20 | High-Stakes | Final | STOPPED — SUBSCRIPTION_TRANSPORT_INCOMPATIBLE | defer | Review VALID STOPPED: the standalone Messages API candidate cannot use the required existing Claude subscription transport; keep it disabled and unactivated | NO |
