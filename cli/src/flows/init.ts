@@ -29,17 +29,11 @@ export async function initFlow(root: string): Promise<void> {
       what: () => p.text({ message: "What do you want to build?", placeholder: "A simple app where I can save and search my recipes" }),
       who: () => p.text({ message: "Who will use it?", placeholder: "Just me, maybe my family later" }),
       milestone: () => p.text({ message: "What's the first thing you want to SEE working?", placeholder: "A page that lists three of my recipes" }),
-      timebox: () =>
-        p.text({
-          message: "Timebox before rethinking the approach (Enter for default)",
-          placeholder: "two Standard tasks without visible progress (default)",
-          defaultValue: "two Standard tasks without visible progress (default)",
-        }),
     },
     { onCancel: () => { p.cancel("Kickoff cancelled. Nothing was changed."); process.exit(1); } },
   );
 
-  const res = initProject(root, answers as never);
+  const res = initProject(root, answers);
   p.log.success(`Created:\n${res.created.map((c) => "  " + pc.dim(c)).join("\n")}`);
   if (res.gitReady) {
     p.log.success("Git initialized and the setup commit is saved.");

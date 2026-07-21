@@ -1,7 +1,6 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
   createOfflineDemoAdapter,
-  localDirectionCheck,
   previewSerialRoute,
   projectStatus,
   runSerialTask,
@@ -30,9 +29,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   ipcMain.handle("task:route", (_event, dir: string, outcome: string, adapterId?: string) =>
     sync("task:route", () => {
       const status = projectStatus(dir);
-      if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. A reviewed migration is required before starting another task.");
-      if (status.gate.tripped) throw new Error(`DIRECTION_GATE: ${status.gate.reason}`);
-      if (status.unfinished) throw new Error(`UNFINISHED_TASK_PRESENT: Task ${String(status.unfinished.taskNumber).padStart(3, "0")} has retained records and no closing log row.`);
+      if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. Migrate it safely before starting another task.");
       return previewSerialRoute(outcome, adapters(mock), adapterId);
     }));
 
@@ -58,7 +55,4 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       running.delete(dir);
     }
   });
-
-  ipcMain.handle("task:direction", (_event, dir: string, reason: string) =>
-    sync("task:direction", () => localDirectionCheck(dir, reason)));
 }

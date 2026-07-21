@@ -10,7 +10,7 @@ function scaffold(proj: string): void {
   execFileSync(process.execPath, [
     "--input-type=module",
     "-e",
-    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Offline path", what: "w", who: "me", milestone: "see it", timebox: "default" });`,
+    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Offline path", what: "w", who: "me", milestone: "see it" });`,
     proj,
   ]);
 }
@@ -43,7 +43,8 @@ test("a beginner completes the offline serial path through a verified honest res
   await expect(feed).toContainText("Result");
 
   await win.getByRole("button", { name: "Return to project" }).click();
-  await expect(win.getByText(/idle .* 0 stones .* gate quiet/)).toBeVisible();
+  await expect(win.getByText(/idle .* 0 stones/)).toBeVisible();
+  await expect(win.getByText(/gate quiet/i)).not.toBeVisible();
 
   expect(readdirSync(join(proj, "docs", "ai-work", "tasks")).sort()).toEqual(["001-brief.md", "001-report.md"]);
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");

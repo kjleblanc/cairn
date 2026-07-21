@@ -8,7 +8,6 @@ export interface ProjectFacts {
   what: string;
   who: string;
   milestone: string;
-  timebox: string;
   contractVersion: string;
 }
 
@@ -27,16 +26,11 @@ const LOG_HEADER =
   "| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |\n" +
   "|---|---|---|---|---|---|---|---|\n";
 
-const PILOT_HEADER =
-  "| Task | Lane | Time to visible result | Visible progress? | DONE/STOPPED | Rework needed later? | Notes |\n" +
-  "|---|---|---|---|---|---|---|\n";
-
 export const paths = {
   contract: (root: string) => join(root, "AGENTS.md"),
   aiWork: (root: string) => join(root, "docs", "ai-work"),
   project: (root: string) => join(root, "docs", "ai-work", "PROJECT.md"),
   log: (root: string) => join(root, "docs", "ai-work", "LOG.md"),
-  pilot: (root: string) => join(root, "docs", "ai-work", "PILOT.md"),
   tasks: (root: string) => join(root, "docs", "ai-work", "tasks"),
   brief: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-brief.md`),
   report: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-report.md`),
@@ -98,12 +92,11 @@ export function parseFacts(root: string): ProjectFacts {
     what: grab("WHAT WE ARE BUILDING"),
     who: grab("WHO WILL USE IT"),
     milestone: grab("CURRENT MILESTONE"),
-    timebox: grab("DIRECTION GATE TIMEBOX"),
     contractVersion: version ? version[1] : "",
   };
 }
 
-export function fillFacts(template: string, facts: { name: string; what: string; who: string; milestone: string; timebox: string }): string {
+export function fillFacts(template: string, facts: { name: string; what: string; who: string; milestone: string }): string {
   const put = (text: string, re: RegExp, value: string) =>
     text.replace(re, (line) => `${line.split(":")[0]}: ${value}`);
   let out = template;
@@ -111,7 +104,6 @@ export function fillFacts(template: string, facts: { name: string; what: string;
   out = put(out, /^WHAT WE ARE BUILDING:.*$/m, facts.what);
   out = put(out, /^WHO WILL USE IT:.*$/m, facts.who);
   out = put(out, /^CURRENT MILESTONE:.*$/m, facts.milestone);
-  out = put(out, /^DIRECTION GATE TIMEBOX:.*$/m, facts.timebox);
   return out;
 }
 
@@ -148,7 +140,7 @@ export function nextTaskNumber(root: string): number {
   return max + 1;
 }
 
-export function scaffoldProject(root: string, facts: { name: string; what: string; who: string; milestone: string; timebox: string }): string[] {
+export function scaffoldProject(root: string, facts: { name: string; what: string; who: string; milestone: string }): string[] {
   const created: string[] = [];
   const write = (path: string, content: string) => {
     mkdirSync(dirname(path), { recursive: true });
@@ -158,12 +150,12 @@ export function scaffoldProject(root: string, facts: { name: string; what: strin
   write(paths.contract(root), fillFacts(contractTemplate(), facts) + "\n");
   write(
     paths.project(root),
-    `# ${facts.name}\n\nGoal: ${facts.what}\n\nUsers: ${facts.who}\n\n` +
+      `# ${facts.name}\n\nGoal: ${facts.what}\n\nUsers: ${facts.who}\n\n` +
       `First visible milestone: ${facts.milestone}\n\n` +
-      `Out of scope for now: to be decided as tasks close.\n\nDirection Gate timebox: ${facts.timebox}\n`,
+      "Out of scope for now: to be decided as tasks close.\n\n" +
+      "Working rule: one serial task at a time; pause only at a concrete risk boundary.\n",
   );
   write(paths.log(root), LOG_HEADER);
-  write(paths.pilot(root), PILOT_HEADER);
   mkdirSync(paths.tasks(root), { recursive: true });
   return created;
 }

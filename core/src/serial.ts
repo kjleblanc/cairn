@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
-import { checkDirectionGate } from "./gates.js";
 import {
   routeTask,
   type AdapterTaskContract,
@@ -110,13 +109,6 @@ function assertGoverned(root: string): void {
   const gitDir = resolve(root, gitDirRaw);
   if (existsSync(join(gitDir, "cairn"))) {
     throw new Error("LEGACY_STATE_PRESENT: This project has legacy Cairn runtime state. It was preserved unchanged; migration needs a separate reviewed task.");
-  }
-  const gate = checkDirectionGate(parseLog(root));
-  if (gate.tripped) throw new Error(`DIRECTION_GATE: ${gate.reason}`);
-  const last = nextTaskNumber(root) - 1;
-  if (last > 0 && !parseLog(root).some((row) => row.task === pad(last)) &&
-      (existsSync(paths.brief(root, last)) || existsSync(paths.report(root, last)))) {
-    throw new Error(`UNFINISHED_TASK_PRESENT: Task ${pad(last)} has retained records and no closing log row.`);
   }
 }
 

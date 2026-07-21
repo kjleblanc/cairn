@@ -23,9 +23,7 @@ If it is empty:
 2. Create docs/ai-work/PROJECT.md with the goal, users, milestone, and current scope.
 3. Create docs/ai-work/LOG.md with the contract's empty log table and create the
    empty docs/ai-work/tasks folder.
-4. If an empty PILOT.md is created for older-tool compatibility, label it historical;
-   it must not gate work.
-5. Initialize Git and commit only these setup files by exact name. If Git or identity
+4. Initialize Git and commit only these setup files by exact name. If Git or identity
    is unavailable, leave the files uncommitted and explain the next step.
 
 Create nothing else. Do not install software, connect a provider, add a remote, or

@@ -4,7 +4,6 @@ import type { Preflight } from "../shared/ipc";
 import { cairn } from "./api";
 import { ErrorCard } from "./components/Ui";
 import { Dashboard } from "./screens/Dashboard";
-import { Direction } from "./screens/Direction";
 import { Picker } from "./screens/Picker";
 import { Settings } from "./screens/Settings";
 import { TaskRun } from "./screens/TaskRun";
@@ -16,7 +15,6 @@ type View =
   | { name: "picker"; startNew: boolean; note?: string }
   | { name: "dashboard"; dir: string; status: ProjectStatus }
   | { name: "task"; dir: string }
-  | { name: "direction"; dir: string; reason: string }
   | { name: "settings"; dir: string | null };
 
 export function App() {
@@ -66,12 +64,10 @@ export function App() {
         onSettings={() => setView({ name: "settings", dir: null })} />;
       case "dashboard": return <Dashboard dir={view.dir} status={view.status}
         onStartTask={() => setView({ name: "task", dir: view.dir })}
-        onDirection={(reason) => setView({ name: "direction", dir: view.dir, reason })}
         onSwitch={() => setView({ name: "picker", startNew: false })}
         onOpenProject={(dir) => void openProject(dir)}
         onSettings={() => setView({ name: "settings", dir: view.dir })} />;
       case "task": return <TaskRun dir={view.dir} demoAvailable={mock} onBack={() => void openProject(view.dir)} />;
-      case "direction": return <Direction dir={view.dir} reason={view.reason} onBack={() => void openProject(view.dir)} />;
       case "settings": return <Settings onBack={() => view.dir ? void openProject(view.dir) : setView({ name: "picker", startNew: false })} />;
     }
   })();

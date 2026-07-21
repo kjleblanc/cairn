@@ -4,8 +4,8 @@ import type { RecentProject } from "../../shared/ipc";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 import { cairn } from "../api";
 
-type Draft = { dir: string; name: string; what: string; who: string; milestone: string; timebox: string };
-const emptyDraft: Draft = { dir: "", name: "", what: "", who: "", milestone: "", timebox: "two Standard tasks without visible progress (default)" };
+type Draft = { dir: string; name: string; what: string; who: string; milestone: string };
+const emptyDraft: Draft = { dir: "", name: "", what: "", who: "", milestone: "" };
 
 /** A plain phrase for when a project was last opened; empty when the time is unknown. */
 function lastOpenedText(iso: string): string {
@@ -56,7 +56,7 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
     return (
       <div style={{ maxWidth: 560, margin: "24px auto" }}>
         <h1>A new project</h1>
-        <p className="muted">Five questions, then your project gets its rulebook.</p>
+        <p className="muted">Four questions, then your project gets its rulebook.</p>
         {error ? <ErrorCard message={error} /> : null}
         <Card>
           <p className="card-title">where it lives</p>
@@ -76,8 +76,6 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
           <input type="text" value={draft.who} onChange={set("who")} placeholder="Just me, maybe my family later" />
           <p style={{ marginTop: 10 }}>What's the first thing you want to SEE working?</p>
           <input type="text" value={draft.milestone} onChange={set("milestone")} placeholder="A page that lists three of my recipes" />
-          <p style={{ marginTop: 10 }}>Timebox before rethinking the approach</p>
-          <input type="text" value={draft.timebox} onChange={set("timebox")} />
         </Card>
         <div className="row">
           <Pill kind="primary" onClick={() => void create()} disabled={busy}>{busy ? "Setting up…" : "Create the project"}</Pill>
@@ -126,7 +124,7 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
       </div>
       <Card title="bring an existing project">
         <p className="small">A folder that already has a Cairn contract can be opened directly. For other existing work, follow Project Conversion in the guides.</p>
-        <p className="small muted">This reset does not transform legacy <span className="mono">.git/cairn</span> task state; it preserves that state and blocks new task mutation until a reviewed migration exists.</p>
+        <p className="small muted">This reset does not transform legacy <span className="mono">.git/cairn</span> task state; it preserves that state and blocks new task mutation until you migrate it safely.</p>
       </Card>
     </div>
   );

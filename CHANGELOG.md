@@ -4,6 +4,19 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Active runtime process-gate cleanup — Task 032 — 2026-07-21
+
+- Removed the automatic Direction Gate, project Direction timebox, and Direction
+  core, CLI, IPC, and Desktop surfaces from the active runtime.
+- New projects no longer create or commit `PILOT.md`. Existing pilot files remain
+  untouched historical evidence.
+- Historical STOPPED/NO rows and task records without an old closing log row remain
+  visible but no longer block the next serial task.
+- Kept preserved legacy `.git/cairn` state as the one migration-related mutation
+  block; Cairn still does not parse, rewrite, or delete those bytes.
+- Added core and Electron regression coverage for continuing safely past retained
+  historical evidence, while keeping the offline verified beginner flow green.
+
 ## Contract v3.0 — 2026-07-21
 
 - Replaced the v2.x governance system with one continuous serial task workflow.

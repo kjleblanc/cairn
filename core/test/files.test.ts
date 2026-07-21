@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,7 +14,6 @@ function freshProject(): string {
     what: "money tracker",
     who: "me",
     milestone: "see $100 total",
-    timebox: "default",
   });
   return dir;
 }
@@ -27,6 +26,8 @@ test("scaffold creates a recognizable Cairn project with filled facts", () => {
   assert.equal(facts.milestone, "see $100 total");
   assert.equal(facts.status, "ACTIVE");
   assert.match(facts.contractVersion, /^\d/);
+  assert.equal(existsSync(join(dir, "docs", "ai-work", "PILOT.md")), false);
+  assert.doesNotMatch(readFileSync(paths.project(dir), "utf8"), /Direction|timebox/i);
 });
 
 test("isCairnProject rejects an AGENTS.md that only mentions Cairn", () => {
@@ -86,8 +87,8 @@ test("next task number counts existing briefs and reports", () => {
 });
 
 test("fillFacts only touches the facts block labels", () => {
-  const template = "STATUS: ACTIVE\nPROJECT NAME:\nWHAT WE ARE BUILDING:\nWHO WILL USE IT:\nCURRENT MILESTONE:\nDIRECTION GATE TIMEBOX: default\nBody mentions PROJECT NAME: not a label? no — line-anchored.";
-  const out = fillFacts(template, { name: "N", what: "W", who: "U", milestone: "M", timebox: "T" });
+  const template = "STATUS: ACTIVE\nPROJECT NAME:\nWHAT WE ARE BUILDING:\nWHO WILL USE IT:\nCURRENT MILESTONE:\nBody mentions PROJECT NAME: not a label? no — line-anchored.";
+  const out = fillFacts(template, { name: "N", what: "W", who: "U", milestone: "M" });
   assert.match(out, /^PROJECT NAME: N$/m);
   assert.match(out, /^CURRENT MILESTONE: M$/m);
 });
@@ -95,7 +96,7 @@ test("fillFacts only touches the facts block labels", () => {
 test("scaffold refuses to overwrite an existing contract", () => {
   const dir = freshProject();
   assert.throws(() =>
-    scaffoldProject(dir, { name: "x", what: "x", who: "x", milestone: "x", timebox: "x" }),
+    scaffoldProject(dir, { name: "x", what: "x", who: "x", milestone: "x" }),
   );
   assert.equal(parseFacts(dir).name, "Cash $ App");
 });

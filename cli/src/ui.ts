@@ -24,8 +24,6 @@ export function stack(count: number): string {
 export const label = {
   done: pc.bgGreen(pc.black(" DONE ")),
   stopped: pc.bgYellow(pc.black(" STOPPED ")),
-  gate: pc.bgRed(pc.white(" DIRECTION GATE ")),
-  denied: pc.yellow("⛔ blocked"),
 };
 
 /**

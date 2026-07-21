@@ -9,7 +9,7 @@ function scaffold(project: string): void {
   const core = pathToFileURL(join(__dirname, "..", "node_modules", "@cairn", "core", "dist", "src", "index.js")).href;
   execFileSync(process.execPath, [
     "--input-type=module", "-e",
-    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Smoke", what: "w", who: "me", milestone: "see it", timebox: "default" });`,
+    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Smoke", what: "w", who: "me", milestone: "see it" });`,
     project,
   ]);
 }

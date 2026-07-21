@@ -5,15 +5,15 @@ import { Scene } from "../components/Scene";
 import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { pluck } from "../sound";
 
-export function Dashboard({ dir, status, onStartTask, onDirection, onSwitch, onOpenProject, onSettings }: {
+export function Dashboard({ dir, status, onStartTask, onSwitch, onOpenProject, onSettings }: {
   dir: string; status: ProjectStatus;
-  onStartTask: () => void; onDirection: (reason: string) => void; onSwitch: () => void;
+  onStartTask: () => void; onSwitch: () => void;
   onOpenProject: (dir: string) => void; onSettings: () => void;
 }) {
   useEffect(() => { /* Stones land only for DONE + milestone YES records. */ if (status.stones > 0) pluck(); }, [status.stones]);
-  const { facts, log, stones, gate, unfinished, legacyState } = status;
+  const { facts, log, stones, unfinished, legacyState } = status;
   const recent = log.slice(-6).reverse();
-  const canStart = !gate.tripped && !legacyState && !unfinished;
+  const canStart = !legacyState;
 
   return (
     <div>
@@ -22,20 +22,17 @@ export function Dashboard({ dir, status, onStartTask, onDirection, onSwitch, onO
         <Scene stones={stones} justAdded={false} />
       </div>
       <div className="row spread" style={{ marginBottom: 12 }}>
-        <span className="status-pill">▸ idle · {stones} {stones === 1 ? "stone" : "stones"} · gate {gate.tripped ? "tripped" : "quiet"}</span>
+        <span className="status-pill">▸ idle · {stones} {stones === 1 ? "stone" : "stones"}</span>
         {canStart ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
       </div>
 
       {legacyState ? (
-        <div className="gate-banner"><p><strong>Legacy task state is preserved.</strong> Cairn will not parse, migrate, or delete it. Starting a new task needs a separately reviewed migration.</p></div>
-      ) : null}
-      {gate.tripped ? (
-        <div className="gate-banner"><p><strong>Direction Gate.</strong> {gate.reason}</p><Pill onClick={() => onDirection(gate.reason)}>Review different directions</Pill></div>
+        <div className="warning-banner"><p><strong>Legacy task state is preserved.</strong> Cairn will not parse, migrate, or delete it. Migrate it safely before starting a new task.</p></div>
       ) : null}
       {unfinished ? (
         <Card title="retained task evidence">
-          <p>Task {String(unfinished.taskNumber).padStart(3, "0")} has records but no closing log row. The new serial path will not resume, rewrite, or hide it.</p>
-          <p className="small muted">Inspect the brief and report before deciding on a separate recovery task.</p>
+          <p>Task {String(unfinished.taskNumber).padStart(3, "0")} has records but no closing log row. Cairn keeps that evidence visible without blocking a new task.</p>
+          <p className="small muted">The new serial path will not resume, rewrite, or hide those records.</p>
         </Card>
       ) : null}
 

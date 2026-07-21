@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { appendLogRow } from "../src/files.js";
 import { createOfflineDemoAdapter, type TaskAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
 
@@ -29,13 +30,12 @@ function project(): string {
   writeFileSync(join(root, "AGENTS.md"), [
     "# Project Contract",
     "",
-    "Cairn Contract v2.3",
+    "Cairn Contract v3.0",
     "STATUS: ACTIVE",
     "PROJECT NAME: Serial fixture",
     "WHAT WE ARE BUILDING: a fixture",
     "WHO WILL USE IT: tests",
     "CURRENT MILESTONE: see a verified result",
-    "DIRECTION GATE TIMEBOX: two Standard tasks without visible progress (default)",
     "",
   ].join("\n"));
   writeFileSync(join(root, "docs", "ai-work", "PROJECT.md"), "# Serial fixture\n");
@@ -117,6 +117,30 @@ test("a second overlapping run is refused before it creates another task", async
   release();
   assert.equal((await first).status, "done");
   assert.deepEqual(requireTaskNames(root), ["001-brief.md", "001-report.md"]);
+});
+
+test("historical STOPPED rows and unmatched records never block the next serial task", async () => {
+  const root = project();
+  appendLogRow(root, {
+    task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
+    outcome: "STOPPED", decision: "stopped", summary: "first old blocker", moved: "NO",
+  });
+  appendLogRow(root, {
+    task: "002", date: "2026-07-21", lane: "Standard", mode: "Applied",
+    outcome: "STOPPED", decision: "stopped", summary: "second old blocker", moved: "NO",
+  });
+  writeFileSync(join(root, "docs", "ai-work", "tasks", "003-brief.md"), "# retained brief\n");
+  writeFileSync(join(root, "docs", "ai-work", "tasks", "003-report.md"), "# retained report\n\nDisposition: **DONE**\n");
+
+  const result = await runSerialTask(root, "Continue with one visible outcome", {
+    adapters: [createOfflineDemoAdapter()],
+  });
+
+  assert.equal(result.status, "done");
+  if (result.status === "done") assert.equal(result.taskNumber, 4);
+  assert.deepEqual(requireTaskNames(root), [
+    "003-brief.md", "003-report.md", "004-brief.md", "004-report.md",
+  ]);
 });
 
 test("adapter failure closes once as STOPPED without retry or raw error text", async () => {

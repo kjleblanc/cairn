@@ -11,7 +11,7 @@
   "scripts": {
     "sync-contract": "node scripts/sync-contract.mjs",
     "build": "node scripts/clean-dist.mjs && npm run sync-contract && tsc",
-    "test": "npm run build && node --test dist/test/gates.test.js dist/test/files.test.js dist/test/steps.test.js dist/test/routing.test.js dist/test/serial.test.js"
+    "test": "npm run build && node --test dist/test/files.test.js dist/test/steps.test.js dist/test/routing.test.js dist/test/serial.test.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

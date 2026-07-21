@@ -21,7 +21,7 @@ function scaffold(proj: string, name: string): void {
   execFileSync(process.execPath, [
     "--input-type=module",
     "-e",
-    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: process.argv[2], what: "w", who: "me", milestone: "see it", timebox: "default" });`,
+    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: process.argv[2], what: "w", who: "me", milestone: "see it" });`,
     proj,
     name,
   ]);

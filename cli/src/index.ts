@@ -20,7 +20,7 @@ async function main(): Promise<void> {
       console.log(banner());
       console.log(`${pc.bold("cairn init")}     create a Cairn project in an empty folder`);
       console.log(`${pc.bold("cairn task")}     route one task, run it serially, check it, and show the result`);
-      console.log(`${pc.bold("cairn status")}   show the milestone, honest records, and Direction Gate`);
+      console.log(`${pc.bold("cairn status")}   show the milestone and honest records`);
       console.log("");
       console.log(pc.dim("Offline demonstration: cairn task --mock \"Describe one visible outcome\""));
       console.log(pc.dim("Without --mock, Cairn stops honestly until a compatible model adapter is connected."));
