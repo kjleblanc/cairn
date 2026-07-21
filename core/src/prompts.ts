@@ -64,7 +64,7 @@ export function scheduledPlannerPrompt(root: string, taskNumber: number, outcome
       `Task number: ${taskNumber}. Inspect the project and classify this as Standard only when it is independently useful, local, reversible, dependency-free, and has no external action. ` +
       `Return JSON with exactly these fields: schemaVersion (1), taskNumber, outcome, independentlyUseful, lane, implementationPaths, testPaths, checks, dependencies, externalActions, certainty, uncertaintyReason, briefMarkdown. ` +
       `Paths are exact repository-relative files, never directories or wildcards. checks is an array of { executable, args } objects and may use only an installed local test command. ` +
-      `certainty is "certain" or "uncertain". Use uncertain when exact safe paths cannot be known. briefMarkdown is the complete Contract v2.2 task brief. ` +
+      `certainty is "certain" or "uncertain". Use uncertain when exact safe paths cannot be known. briefMarkdown is the complete Contract v2.3 task brief. ` +
       `Output JSON only. Do not use markdown fences and do not implement anything.`,
   };
 }

@@ -5,6 +5,26 @@ project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates
 [EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
 automatic.
 
+## Contract v2.3 — 2026-07-21
+
+- Added a narrow owner-managed provider account connection profile. The owner may
+  personally complete official installed provider linking without a qualified-human
+  verdict while every secret and raw account value remains outside AI-visible
+  surfaces.
+- Permitted one approved High-Stakes Final to run a contained disposable scheduler
+  proof with at most two Standard tasks and four fixed provider calls: one Planning
+  and one Building call per task, with no retry or continuation.
+- Required physical proof-root limits on every model read, exact passive-artifact
+  write limits, no model-authored execution or network/tool expansion, a finite cost
+  or quota cap, exact owner approval, and a fresh review that is not `FAIL` or
+  `VALID STOPPED` before activation.
+- Kept valuable repositories, permission or entitlement changes, billing, personal
+  or regulated data, production, deployment, public action, and other live-risk
+  classes behind the ordinary High-Stakes and qualified-human boundaries.
+- Paused product work for the amendment. The amendment itself does not link an
+  account, use a credential, call a provider, repair a candidate, or activate a
+  scheduler.
+
 ## Contract v2.2 — 2026-07-20
 
 - Ended Bootstrap Cairn's serial-only restriction. A bounded concurrent path may

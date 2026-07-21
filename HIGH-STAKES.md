@@ -1,6 +1,6 @@
 # High-Stakes — when autonomy must pause
 
-Cairn Contract v2.2 lets Tiny and Standard work move continuously. This guide covers
+Cairn Contract v2.3 lets Tiny and Standard work move continuously. This guide covers
 the smaller set of changes where a mistake could be costly, hard to reverse, or
 externally visible.
 
@@ -165,7 +165,8 @@ the test must not be made easier merely to pass. Every affected check is rerun.
 
 ## When a qualified human is mandatory
 
-A qualified human must review before live work involving:
+A qualified human must review before live work involving the following, except for
+the narrow owner-managed AI access profiles below:
 
 - application login, authorization, or permissions;
 - payments, billing, refunds, or money movement;
@@ -178,39 +179,42 @@ A qualified human must review before live work involving:
 Without that person, preparation may continue safely, but the live outcome is
 `STOPPED — EXPERT_NEEDED`.
 
-## Owner-managed local AI credentials
+## Owner-managed local AI access
 
-A provider credential can avoid expert review solely for provider authentication.
-The owner manages it through the provider's official installed local authentication
-or an operating-system credential store. This exception intentionally does not
-require a qualified-human review, synthetic credential canary, or separate process or
-operating-system isolation layer.
+A local provider credential or provider account connection can avoid expert review
+solely for provider authentication. The owner personally manages it through the
+provider's official installed authentication or an operating-system credential
+store. The AI may explain where the official control is, but it never operates or
+observes login, linking, refresh, recovery, or billing.
 
-The ordinary supported operation is one newly created disposable, tool-free provider
-call. The bounded concurrent Bootstrap path may instead use at most two separately
-bounded calls, exactly one for each admitted Standard task. Every model receives no
-tools, plugins, hooks, skills, MCP servers, arbitrary paths, commands, valuable
-repository, or user data. The AI never requests, inspects, prints, copies, stores, or
-exposes the credential value. It remains out of chat, prompts, model context and
-output, model-visible tool requests and results, command arguments, project files,
-Git, logs, evidence, renderer and browser surfaces, analytics, telemetry, and crash
-output.
+Every credential, token, cookie, and raw account value stays out of chat, prompts,
+model context and output, model-visible tool requests and results, commands, project
+files, Git, logs, evidence, renderer and browser surfaces, analytics, telemetry, and
+crash output. Immediately before execution, the owner approves the exact access use,
+provider, model, disposable target, finite call count, and total cost or quota cap.
+Retries are separate calls and are not authorized after that count is used.
 
-The AI does not perform login, credential creation, rotation, refresh, recovery, or
-billing changes. Immediately before execution, the owner separately approves the
-exact credential use and each exact provider network call. For a concurrent pair,
-the owner approves one fixed total cost cap; each brief names its provider, model,
-disposable input, one-call limit, and allocated maximum cost, and both allocations
-must fit within that cap. A retry is another call and is not authorized after a
-task's one-call allocation is used. Evidence is limited to non-secret status,
-validated output, model id, bounded cost, timing, disposition, and fixed redacted
-errors.
+Two profiles are available:
 
-This exception does not cover application-user authentication, permissions, billing,
-money movement, another secret class, valuable repositories, model tools, or
-multi-call agent sessions beyond the two separately bounded calls for concurrent
-Bootstrap. If official installed authentication cannot work without exposing the
-credential or starting a login or billing flow, stop.
+- **Tool-free call:** one disposable tool-free call, or at most two separately
+  bounded calls for the concurrent Bootstrap path, exactly one per Standard task.
+- **Contained scheduler:** one approved High-Stakes Final may run at most two
+  independent Standard tasks and four calls total — one Planning and one Building
+  call per task — in a new coordinator-owned disposable repository. Planning reads
+  are physically confined to that root. Building reads stay there and writes are
+  limited to frozen passive `.md` or `.txt` artifacts and the report. There is no
+  shell, model-authored execution, package, network tool, MCP, plugin, hook, skill,
+  arbitrary path, Git integration, retry, continuation, or cleanup authority.
+
+The contained scheduler Final must name every retained concern, prove root-scoped
+tools and actual engine selection, and receive a fresh review that is not `FAIL` or
+`VALID STOPPED` before the owner decides whether to activate it. The owner approves
+the complete finite call batch immediately before execution.
+
+This exception does not cover permission or entitlement changes, billing, money
+movement, another secret class, valuable repositories, personal or regulated data,
+production, deployment, or public action. Those still require the ordinary
+High-Stakes boundary and any qualified human named there.
 
 ## Evidence without theater
 

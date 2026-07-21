@@ -1,7 +1,7 @@
 # Project Contract
 
 > **What this file is.** This is the rulebook for AI work in this project — Cairn
-> Contract v2.2, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
+> Contract v2.3, from the Cairn framework (https://github.com/kjleblanc/cairn). It is
 > copied into the project during setup and saved as `AGENTS.md` in the project root.
 > The AI must read it at the start of every chat and follow it exactly. The owner is a
 > beginner: explain everything in plain language.
@@ -287,12 +287,13 @@ while Cairn cannot yet complete a reliable self-hosted task.
 Task 016 remains immutable historical evidence and is not activated by this contract
 amendment. A new High-Stakes Final task may name Task 016's exact implementation and
 retained review concerns, reuse or repair its code within a new pinned brief, and
-prove the v2.2 boundary. It must remain disabled until that Final is built, reviewed,
-accepted, and separately authorized for activation. Never rewrite or resume Task 016.
+prove the current contract boundary. It must remain disabled until that Final is
+built, reviewed, accepted, and separately authorized for activation. Never rewrite
+or resume Task 016.
 
 Bootstrap is temporary scaffolding, not a hidden lower safety standard. Contract v2.2
-ends its serial-only restriction; it does not claim that the current runtime already
-implements the bounded concurrent path.
+ended its serial-only restriction; this contract retains that bounded path without
+claiming that the current runtime already implements it.
 
 ## Repair and rerun
 
@@ -399,47 +400,79 @@ contract paused and preserve the state.
    branches, worktrees, agents, or documents unless a concrete risk or reviewer
    requires them.
 
-## Qualified humans and local AI credentials
+## Qualified humans and owner-managed AI access
 
 A qualified human is required before live work involving application login,
 authorization, permissions, payments, personal or regulated data, destructive
 migrations, production infrastructure or security controls, public legal
-commitments, or safety-critical behavior.
+commitments, or safety-critical behavior, except for the narrow provider-
+authentication profiles below.
 
-An owner-managed local AI credential avoids that requirement solely for provider
-authentication. It does not require qualified-human review, a synthetic-canary
-rehearsal, or a process or operating-system allow-list when all of these are true:
+An owner-managed local AI credential or provider account connection avoids that
+requirement solely for provider authentication. It does not require qualified-human
+review, a synthetic-canary rehearsal, or a process or operating-system allow-list
+when every common condition and one complete profile below are satisfied.
 
-1. The owner creates, installs, rotates, and revokes it through the provider's
-   official installed local authentication or an operating-system credential store.
-2. The ordinary supported operation is one newly created disposable, tool-free
-   provider call. The bounded concurrent Bootstrap path may instead use at most two
-   separately bounded provider calls, exactly one for each admitted Standard task.
-   Every model receives no tools, plugins, hooks, skills, MCP servers, arbitrary
-   paths, commands, or access to valuable project or user data.
-3. The credential value is never requested, inspected, printed, copied, stored, or
-   exposed by the AI. It never enters chat, prompts, model context, model output,
-   model-visible tool requests or results, command arguments, project files, Git,
-   logs, evidence, renderer or browser surfaces, analytics, telemetry, or crash
+### Common conditions
+
+1. The owner personally creates, installs, links, rotates, and revokes the access
+   through the provider's official installed authentication or an operating-system
+   credential store. The AI may explain where the official control is, but it does
+   not operate or observe the login, linking, refresh, recovery, or billing flow.
+2. The credential, token, cookie, and raw account value are never requested,
+   inspected, printed, copied, stored, or exposed by the AI. They never enter chat,
+   prompts, model context, model output, model-visible tool requests or results,
+   command arguments, project files, Git, logs, evidence, renderer or browser
+   surfaces, analytics, telemetry, or crash output.
+3. Immediately before execution, the owner separately approves the exact access use,
+   provider, model, disposable target, finite call count, and fixed total cost or
+   quota cap. A retry is another call and is not authorized after the approved count
+   is used.
+4. Evidence contains only non-secret status, validated model output, model id,
+   bounded cost or quota use, timing, disposition, and fixed redacted errors. It
+   never captures authentication material, headers, account data, or provider debug
    output.
-4. The AI does not perform login, credential creation, rotation, refresh, recovery,
-   or billing changes. If official installed authentication cannot complete without
-   exposing the value or starting one of those flows, stop.
-5. Immediately before execution, the owner separately approves the exact credential
-   use and each exact provider network call. For a concurrent pair, the owner also
-   approves one fixed total cost cap covering both calls; each brief names its
-   provider, model, disposable input, one-call limit, and allocated maximum cost, and
-   the two allocations must not exceed that total cap. A retry is another call and
-   is not authorized after either task's one-call allocation is used.
-6. Evidence contains only non-secret status, validated model output, model id, bounded
-   cost, timing, disposition, and fixed redacted errors. It never captures raw
-   authentication material, headers, account data, or provider debug output.
 
-This exception never covers application-user authentication, permissions, billing,
-money movement, another secret class, valuable repositories, model tools, or
-multi-call agent sessions beyond the two separately bounded calls for the concurrent
-Bootstrap path. Those remain subject to the ordinary High-Stakes and qualified-human
-boundaries above.
+### Tool-free call profile
+
+The ordinary supported operation is one newly created disposable, tool-free provider
+call. The bounded concurrent Bootstrap path may instead use at most two separately
+bounded provider calls, exactly one for each admitted Standard task. Every model
+receives no tools, plugins, hooks, skills, MCP servers, arbitrary paths, commands, or
+access to valuable project or user data.
+
+### Contained scheduler profile
+
+One approved High-Stakes Final may activate a previously accepted Experimental Draft
+for a disposable provider proof without a qualified-human verdict when all of these
+are true:
+
+1. The supported path creates a new coordinator-owned disposable repository and
+   never gives a model valuable repository or user data.
+2. At most two independent Standard tasks use at most four calls total: one Planning
+   and one Building call per task. Calls have no retry, continuation, delegation, or
+   task-to-task communication.
+3. Planning read tools are physically restricted to the disposable repository.
+   Building reads are restricted to that repository and writes are restricted to
+   frozen passive `.md` or `.txt` artifact paths plus the task report. Models receive
+   no shell, process, code execution, package, network-tool, MCP, plugin, hook, skill,
+   arbitrary-path, Git-integration, or cleanup authority.
+4. Declarative checking reads and compares bounded passive files only. No model-
+   authored command, source, test, package script, parser hook, module, or process is
+   executed.
+5. The Final names every retained review concern, proves root-scoped tool enforcement
+   and actual offline-versus-live engine selection, and receives a fresh review that
+   does not return `FAIL` or `VALID STOPPED` before the owner decides whether to
+   activate it.
+6. The owner approves the complete finite batch immediately before execution. The
+   brief lists each Planning and Building call, the provider and model, the
+   disposable inputs, and the shared cost or quota cap.
+
+This exception never covers application-user authentication other than the owner's
+official provider connection, permission or entitlement changes, billing changes,
+money movement, another secret class, valuable repositories, personal or regulated
+data, production, deployment, or public action. Those remain subject to the ordinary
+High-Stakes and qualified-human boundaries above.
 
 ## Task records
 

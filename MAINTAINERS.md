@@ -25,10 +25,10 @@ inside this directory unless the user explicitly expands scope.
 - `cli/` — cairn-cli (early alpha). The Markdown protocol stays canonical. The
   current CLI and Desktop runtime still implement the legacy v1.x gated sequence and
   must be described honestly as legacy until a separate bootstrap implementation
-  brings them into line with v2.2. Their generated contract asset is synced from
+  brings them into line with v2.3. Their generated contract asset is synced from
   `CONTRACT-TEMPLATE.md` at every build and is never edited by hand.
 
-The contract carries a version number (`Cairn Contract v2.2` in its header). Bump it
+The contract carries a version number (`Cairn Contract v2.3` in its header). Bump it
 whenever the contract's rules change meaningfully, in the template and the app's
 embedded copy together — and add a plain-language entry to `CHANGELOG.md` in the
 same session. Projects update through the prompts in EVERYDAY-WORKFLOW.md ("When

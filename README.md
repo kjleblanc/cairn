@@ -45,6 +45,22 @@ Plan a High-Stakes task: [the result you want]
 High-Stakes work keeps exact approval, safe rehearsal, mandatory fresh-context
 review, qualified-human boundaries, and separate authority for every live action.
 
+## What Cairn changed in v2.3
+
+Contract v2.3 permits an owner to personally link an official installed AI-provider
+account without a qualified-human verdict for one tightly contained scheduler proof.
+The AI never operates or observes login and never receives a credential, token,
+cookie, or raw account value.
+
+The contained profile stays High-Stakes and disposable. It allows at most two
+independent Standard tasks and four fixed provider calls — one Planning and one
+Building call per task — with no retry. Every model read must be physically confined
+to the new proof repository; writes are limited to frozen passive text artifacts and
+the task report; model-authored code and commands are never executed. A new Final
+must resolve or contain every retained finding and receive a fresh non-failing review
+before the owner can activate it. Valuable projects, permission changes, billing,
+production, and public actions are not covered by this exception.
+
 ## What Cairn changed in v2.2
 
 Contract v2.2 ends Bootstrap Cairn's serial-only restriction. An activated concurrent
@@ -97,7 +113,7 @@ High-Stakes work retains all of its gates.
 
 Task 016 remains disabled historical evidence. A new High-Stakes Final task may name
 its exact implementation and retained concerns, reuse or repair the code, and prove
-the v2.2 boundary before any separate activation decision.
+the current contract boundary before any separate activation decision.
 
 ## The safety boundary
 
@@ -163,10 +179,10 @@ Owner override: continue this approach after the Direction Gate.
 
 ## Current software status
 
-The written protocol and browser companion describe Contract v2.2. The current Cairn
+The written protocol and browser companion describe Contract v2.3. The current Cairn
 CLI and Desktop runtime still implement the older gated sequence and are **legacy
 until a separate bootstrap implementation updates them**. Do not treat their extra
-approval screens or Task 016's disabled parallel coordinator as the v2.2 workflow.
+approval screens or disabled scheduler candidates as the v2.3 workflow.
 
 The written commands can be used with any coding agent that can read and edit project
 files. Cairn's existing CLI and Desktop use Claude models; no provider credential
@@ -177,6 +193,6 @@ should ever be pasted into Cairn or chat.
 Share this folder or the repository link. Cairn is language-independent and licensed
 under the [MIT License](LICENSE).
 
-The project contract carries a version number (`Cairn Contract v2.2`).
+The project contract carries a version number (`Cairn Contract v2.3`).
 [CHANGELOG.md](CHANGELOG.md) records each version, and
 [Everyday Workflow](EVERYDAY-WORKFLOW.md) explains reviewed updates.

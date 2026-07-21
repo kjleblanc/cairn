@@ -79,7 +79,7 @@ word confuses you.
 | **Owner override** | Your explicit instruction to change a process-only next step. It cannot expand the task's bounded scope or waive protection, authority, secret, external-effect, rollback, or product-safety boundaries. |
 | **Contract amendment** | Your always-available way to pause product work, change the rules, inspect the complete rule diff, and reactivate only with a separate exact approval. |
 | **Secret** | Any password, key, token, or private detail. Ordinary secrets never go into a chat or an AI-accessible surface. |
-| **Owner-managed local AI credential** | A provider login the owner manages through the provider's official installed authentication or operating-system credential store. It may support one disposable tool-free call, or up to two separately bounded calls for the concurrent Bootstrap path, without expert, canary, or OS-isolation prerequisites. Its value never enters chat, commands, model-visible tools, output, logs, project files, or Git; the owner approves the exact credential use, each provider call, and the applicable fixed cost cap. |
+| **Owner-managed local AI access** | A provider credential or account connection the owner personally manages through official installed authentication or an operating-system credential store. It can support a disposable tool-free call profile or an approved contained scheduler profile without a qualified-human verdict solely for provider authentication. Secrets never enter AI-visible surfaces; the owner approves the exact access, provider, model, disposable target, finite call count, and cost or quota cap. |
 
 ## Ready?
 
