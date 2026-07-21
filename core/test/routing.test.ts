@@ -8,6 +8,7 @@ import {
 
 function adapter(id: string, connected: boolean, capabilities: string[], priority = 0): TaskAdapter {
   return {
+    kind: "offline-demo",
     descriptor: {
       id,
       label: id,
@@ -67,8 +68,9 @@ test("an override is accepted only for another connected compatible candidate", 
   );
 });
 
-test("the only built-in adapter is an explicit non-model offline demonstration", async () => {
+test("the explicit offline adapter remains an honest non-model demonstration", async () => {
   const demo = createOfflineDemoAdapter();
+  assert.equal(demo.kind, "offline-demo");
   assert.deepEqual(demo.descriptor, {
     id: "cairn-offline-demo",
     label: "Cairn offline demonstration",

@@ -25,3 +25,4 @@
 | 028 | 2026-07-21 | High-Stakes | Final | STOPPED — QUALIFIED_REVIEW_REQUIRED | revise | Review FAIL: model-authored checks run with ambient authority, ready work waits behind unfinished builders, temporary location does not prove disposability, and Planning failures show the wrong state | UNCLEAR |
 | 029 | 2026-07-21 | High-Stakes | Draft | DONE | accept | Review FAIL: owner accepted the disabled offline/mock Experimental Draft with the reported coordinator-state and future real-model containment concerns; no activation authorized | UNCLEAR |
 | 032 | 2026-07-21 | Standard | Applied | DONE | completed | Removed Direction, timebox, PILOT, and unmatched-record process gates from the active serial runtime while preserving legacy-state protection and historical evidence | NO |
+| 033 | 2026-07-21 | Standard | Applied | DONE | completed | Added one credential-opaque Codex Exec readiness adapter and stopped before every real model call. | NO |

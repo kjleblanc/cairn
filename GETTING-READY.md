@@ -23,9 +23,14 @@ git config --global user.email "you@example.com"
 folder and [Project Conversion](PROJECT-CONVERSION.md) when anything valuable already
 exists.
 
-**A coding agent for real implementation.** The written contract works with an agent
-that can read and edit the project folder. Cairn's current app and CLI have no
-connected model adapter in normal mode. They stop honestly at connection-required.
+**Codex Exec readiness for the next step.** Cairn's app and CLI now check whether the
+official `codex` CLI is installed and whether its login-status command succeeds.
+They discard all command output and keep only installed/connected booleans. The
+owner still installs and connects Codex personally through official controls.
+
+Even when Codex is connected, this build stops before starting the real
+`codex exec` process. It does not send the task, call a model, or implement the
+requested change yet.
 
 `CAIRN_MOCK=1` enables a deterministic offline lifecycle demonstration. It is not a
 model and does not implement the requested change.

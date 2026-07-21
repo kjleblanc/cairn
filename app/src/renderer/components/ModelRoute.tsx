@@ -15,6 +15,9 @@ export function ModelRoute({ route, reason }: { route: AdapterDescriptor; reason
         {route.id === "cairn-offline-demo" ? (
           <p className="demo-note">This is a deterministic adapter demonstration, not a local model and not implementation of your requested change.</p>
         ) : null}
+        {route.id === "codex-exec" ? (
+          <p className="demo-note">Cairn retained only installed/connected status. This build prepares the workspace-scoped call and stops before starting the real Codex Exec process.</p>
+        ) : null}
       </Card>
     </section>
   );

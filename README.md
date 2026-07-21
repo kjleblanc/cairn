@@ -26,6 +26,8 @@ route. Earlier experiments remain visible in Git, the changelog, and task histor
 - one task at a time;
 - deterministic routing among connected compatible adapters;
 - an honest connection-required result when none is connected;
+- one Codex Exec adapter that detects installed/connected readiness without reading
+  or displaying credentials or login output;
 - a compact route/run/check/result activity view;
 - protected Git state and exact task records; and
 - an explicit deterministic offline demonstration adapter.
@@ -39,8 +41,10 @@ Requested product change: not attempted
 Milestone movement: NO
 ```
 
-Normal mode currently has no connected model adapter. Connecting one is the next
-product step, not something Cairn pretends has already happened.
+Normal mode checks `codex --version` and `codex login status` with all process output
+discarded. If both succeed, Cairn recommends the single Codex Exec route. Starting
+it writes an honest STOPPED result with `REAL_MODEL_CALL_NOT_AUTHORIZED` before the
+real process starts, so this task does not send project data or call a model.
 
 ## Start here
 
@@ -98,6 +102,16 @@ node path\to\cairn\cli\dist\src\index.js task --mock "Describe one visible outco
 Success is a route labeled `Provider none` and `Model none`, four activity stages,
 one brief/report/log append, a verified lifecycle result, and no milestone stone.
 It is not proof of self-hosting or real model work.
+
+## Try Codex readiness without a model call
+
+Run ordinary `cairn task` or start a Desktop task without `CAIRN_MOCK`. Cairn will
+report one of three non-secret states: not installed, installed but not connected,
+or installed and connected. If connected, choose **Prepare Codex Exec run**.
+
+Success for this boundary-only build is a STOPPED report stating that the real
+`codex exec` process was not started and no model was called. Cairn never opens a
+login flow; install and connect Codex yourself through official Codex controls.
 
 ## History
 

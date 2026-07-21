@@ -1,9 +1,13 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
+  codexExecConnectionReason,
+  createCodexExecAdapter,
   createOfflineDemoAdapter,
+  detectCodexExecStatus,
   previewSerialRoute,
   projectStatus,
   runSerialTask,
+  type CodexExecStatus,
   type TaskAdapter,
 } from "@cairn/core";
 import type { Result, TaskActivityEvent } from "../shared/ipc.js";
@@ -15,30 +19,38 @@ function adapters(mock: boolean): TaskAdapter[] {
   return mock ? [createOfflineDemoAdapter()] : [];
 }
 
-function sync<T>(context: string, operation: () => T): Result<T> {
-  try { return { ok: true, value: operation() }; }
-  catch (error) {
-    logError(context, error);
-    return { ok: false, message: plainMessage(error) };
-  }
+async function detectedAdapters(mock: boolean, dir: string): Promise<{ adapters: TaskAdapter[]; status?: CodexExecStatus }> {
+  if (mock) return { adapters: adapters(true) };
+  const status = await detectCodexExecStatus(dir);
+  return { adapters: [createCodexExecAdapter(dir, status)], status };
 }
 
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const mock = process.env.CAIRN_MOCK === "1";
 
-  ipcMain.handle("task:route", (_event, dir: string, outcome: string, adapterId?: string) =>
-    sync("task:route", () => {
+  ipcMain.handle("task:route", async (_event, dir: string, outcome: string, adapterId?: string) => {
+    try {
       const status = projectStatus(dir);
       if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. Migrate it safely before starting another task.");
-      return previewSerialRoute(outcome, adapters(mock), adapterId);
-    }));
+      const detected = await detectedAdapters(mock, dir);
+      const route = previewSerialRoute(outcome, detected.adapters, adapterId);
+      const value = route.status === "connection-required" && detected.status
+        ? { ...route, reason: codexExecConnectionReason(detected.status) }
+        : route;
+      return { ok: true, value };
+    } catch (error) {
+      logError("task:route", error);
+      return { ok: false, message: plainMessage(error) };
+    }
+  });
 
   ipcMain.handle("task:run", async (_event, dir: string, outcome: string, sessionId: number, adapterId?: string) => {
     if (running.has(dir)) return { ok: false, message: "SERIAL_RUN_ACTIVE: One task is already running for this project." } satisfies Result<never>;
     running.add(dir);
     try {
+      const detected = await detectedAdapters(mock, dir);
       const value = await runSerialTask(dir, outcome, {
-        adapters: adapters(mock),
+        adapters: detected.adapters,
         adapterId,
         events: {
           onActivity: (activity) => {
@@ -47,7 +59,10 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           },
         },
       });
-      return { ok: true, value };
+      const safeValue = value.status === "connection-required" && detected.status
+        ? { ...value, route: { ...value.route, reason: codexExecConnectionReason(detected.status) } }
+        : value;
+      return { ok: true, value: safeValue };
     } catch (error) {
       logError("task:run", error);
       return { ok: false, message: plainMessage(error) };

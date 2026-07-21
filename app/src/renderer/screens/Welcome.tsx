@@ -16,10 +16,10 @@ export function Welcome({ preflight, hasRecent, onOpenFolder, onNew, onBrowseRec
           <li>Cairn recommends only a connected compatible route, runs one task, checks it, and records the real result.</li>
         </ol>
       </Card>
-      <Card title={preflight.mock ? "offline demonstration is available" : "model connection comes next"}>
+      <Card title={preflight.mock ? "offline demonstration is available" : "Codex readiness is checked per task"}>
         <p>{preflight.mock
           ? "This local session can demonstrate route → run → check → result without a model. It will clearly say that your requested product change was not attempted."
-          : "No model is connected by this foundation. You can manage projects and enter a task; Cairn will stop at the connection-required step without creating task records."}</p>
+          : "When you find a route, Cairn checks only whether the official Codex CLI is installed and connected. A connected route still stops before the real process or model call in this build."}</p>
       </Card>
       <div className="row">
         <Pill kind="primary" onClick={onNew}>Start a new project</Pill>

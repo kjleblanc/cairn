@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendLogRow } from "../src/files.js";
+import { createCodexExecAdapter } from "../src/codex.js";
 import { createOfflineDemoAdapter, type TaskAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
 
@@ -66,6 +67,30 @@ test("normal mode stops at connection-required without writing records", async (
   assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), before);
   assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), log);
   assert.deepEqual(requireTaskNames(root), []);
+});
+
+test("a connected Codex Exec route records STOPPED before any real model call", async () => {
+  const root = project();
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true })],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "REAL_MODEL_CALL_NOT_AUTHORIZED");
+  assert.deepEqual(requireTaskNames(root), ["001-brief.md", "001-report.md"]);
+  const brief = readFileSync(result.briefPath, "utf8");
+  const report = readFileSync(result.reportPath, "utf8");
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.match(brief, /Codex Exec real-call boundary/);
+  assert.match(brief, /Provider: OpenAI/);
+  assert.match(brief, /Model: Codex configured model/);
+  assert.match(report, /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  assert.match(report, /real `codex exec` process was not started/i);
+  assert.match(report, /no model was called/i);
+  assert.doesNotMatch(report, /auth method|account detail|token/i);
+  assert.match(log, /Codex Exec was installed and connected; Cairn stopped before the real process or model call/);
+  assert.equal(result.activities.filter((activity) => activity.stage === "Run" && activity.state === "working").length, 1);
+  assert.equal(result.activities.some((activity) => activity.stage === "Check"), false);
 });
 
 test("the offline demonstration writes only one brief, report, and log row", async () => {

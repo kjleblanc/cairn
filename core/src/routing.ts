@@ -39,14 +39,26 @@ export interface OfflineDemoResult {
   statement: "The offline route completed without attempting the requested product change.";
 }
 
+export interface CodexExecFakeProcessResult {
+  kind: "codex-exec-fake-process-result";
+  taskNumber: number;
+  requestedOutcomeSha256: string;
+  processCount: 1;
+  exitCode: number;
+  statement: "A fake process verified one Codex Exec request; no real process or model call ran.";
+}
+
+export type TaskAdapterResult = OfflineDemoResult | CodexExecFakeProcessResult;
+
 /**
  * The only execution seam in the serial foundation. An adapter receives a
  * bounded value object: never a root, path resolver, file handle, shell,
  * process, Git handle, network client, credential, tool, or delegation hook.
  */
 export interface TaskAdapter {
+  kind: "offline-demo" | "codex-exec";
   descriptor: AdapterDescriptor;
-  run(contract: AdapterTaskContract): Promise<OfflineDemoResult>;
+  run(contract: AdapterTaskContract): Promise<TaskAdapterResult>;
 }
 
 export interface RouteRequest {
@@ -111,6 +123,7 @@ export function routeTask(request: RouteRequest, adapters: readonly TaskAdapter[
 /** Explicit demo-only transport. It is deterministic and is not a local model. */
 export function createOfflineDemoAdapter(): TaskAdapter {
   return {
+    kind: "offline-demo",
     descriptor: {
       id: "cairn-offline-demo",
       label: "Cairn offline demonstration",

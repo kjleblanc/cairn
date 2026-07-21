@@ -10,8 +10,13 @@ The app retains first-run instructions, new/open/recent project handling, Projec
 Conversion guidance, a model-route card, compact activity, Git protection, and
 honest task history.
 
-Normal mode currently has no connected model. It stops at a connection-required
-screen and writes nothing. Provider setup is not hidden in this build.
+Normal mode checks only whether the official Codex CLI is installed and connected,
+discarding every byte of command output. A missing or disconnected CLI stops at the
+connection-required screen and writes nothing.
+
+When Codex is connected, the app recommends one Codex Exec route. **Prepare Codex
+Exec run** writes an honest STOPPED record and stops before the real process or
+model call. Provider setup is never hidden or performed by Cairn.
 
 ## Offline demonstration
 
@@ -46,5 +51,6 @@ npx --no-install playwright test
 
 The app has no active five-gate Standard workflow, provider SDK import, parallel
 task deck, bounded-run screen, scheduler, passive proof, model-effort control, or
-experimental activation path. Earlier implementations remain in Git history and
-task evidence.
+experimental activation path. It adds no provider fallback, retry, continuation,
+generic provider framework, or dependency. Earlier implementations remain in Git
+history and task evidence.

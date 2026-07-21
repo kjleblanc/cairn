@@ -14,8 +14,15 @@ cairn task
 cairn status
 ```
 
-Normal `cairn task` has no connected model adapter yet. It shows
-connection-required and writes no task records.
+Normal `cairn task` checks the official Codex CLI with `codex --version` and
+`codex login status`. All command output is discarded; Cairn retains only installed
+and connected booleans. If either check fails, it shows the exact non-secret
+readiness state and writes no task records.
+
+If both checks pass, the only normal model route is Codex Exec. Running it prepares
+one ephemeral workspace-scoped request and records STOPPED with
+`REAL_MODEL_CALL_NOT_AUTHORIZED` before starting the real process. No task data is
+sent and no model is called in this build.
 
 Use the explicit offline demonstration with:
 
@@ -40,4 +47,5 @@ npm test --workspace cli
 ```
 
 Builds clean `core/dist` and `cli/dist` first so deleted legacy modules cannot remain
-in generated output. No provider login or credential is used.
+in generated output. Tests inject fake readiness and execution processes; they do
+not inspect a real login, use a credential, or call a model.

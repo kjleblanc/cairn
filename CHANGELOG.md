@@ -4,6 +4,21 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Codex Exec readiness and real-call boundary — Task 033 — 2026-07-21
+
+- Added one Codex Exec adapter to the active serial route. Normal CLI and Desktop
+  runs now detect installed and connected status through output-discarding
+  `codex --version` and `codex login status` probes.
+- Added one fake-only process seam that verifies an ephemeral, exact-workspace
+  `codex exec` request with workspace-write sandboxing, on-request approvals, JSONL,
+  stdin prompt delivery, and multi-agent support disabled.
+- A production Codex route stops with `REAL_MODEL_CALL_NOT_AUTHORIZED` before the
+  execution process starts. No task data is sent, no model is called, and no raw
+  authentication output or credential value enters Cairn records or UI.
+- Added no dependency, provider fallback, retry, continuation, scheduler,
+  concurrency path, model picker, login flow, or generic provider framework. The
+  explicit offline demonstration remains available only through mock mode.
+
 ## Active runtime process-gate cleanup — Task 032 — 2026-07-21
 
 - Removed the automatic Direction Gate, project Direction timebox, and Direction

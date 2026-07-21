@@ -15,6 +15,8 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
   const [activities, setActivities] = useState<SerialActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const sessionId = useRef(Date.now()).current;
+  const codexRoute = route?.status === "ready" && route.recommended.id === "codex-exec";
+  const realCallStopped = result?.status === "stopped" && result.reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
 
   useEffect(() => cairn.onTaskActivity((event) => {
     if (event.dir === dir && event.sessionId === sessionId) {
@@ -36,6 +38,12 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
     setError(null); setActivities([]); setPhase("running");
     const response = await cairn.taskRun(dir, outcome.trim(), sessionId, route.recommended.id);
     if (!response.ok) { setError(response.message); setPhase("route"); return; }
+    if (response.value.status === "connection-required") {
+      setRoute(response.value.route);
+      setError("Codex Exec readiness changed. No task records or model call were created.");
+      setPhase("route");
+      return;
+    }
     setResult(response.value);
     setPhase("result");
   }
@@ -62,7 +70,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
           <div className="row" style={{ marginTop: 12 }}>
             <Pill kind="primary" onClick={() => void findRoute()}>Find a route</Pill>
           </div>
-          {!demoAvailable ? <p className="small muted" style={{ marginTop: 10 }}>No model is connected in this foundation. You can still see the honest connection-required step.</p> : null}
+          {!demoAvailable ? <p className="small muted" style={{ marginTop: 10 }}>Cairn checks whether the official Codex CLI is installed and connected. It never reads or displays credential values or login output.</p> : null}
         </Card>
       ) : null}
 
@@ -70,7 +78,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
         <Card>
           <h2>Connect a model to continue</h2>
           <p>{route.reason}</p>
-          <p className="small muted">Connecting a provider is deliberately outside this offline foundation. When adapters exist, you will also be able to choose another already connected compatible model here.</p>
+          <p className="small muted">Install or connect Codex yourself through official Codex controls. Cairn does not open login, read credential files, or choose another provider.</p>
           <div className="row" style={{ marginTop: 12 }}>
             <Pill onClick={tryAnother}>Edit the task</Pill>
             <Pill kind="quiet" onClick={onBack}>Return to project</Pill>
@@ -82,7 +90,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
         <>
           <ModelRoute route={route.recommended} reason={route.reason} />
           <div className="row">
-            <Pill kind="primary" onClick={() => void run()}>Run offline demonstration</Pill>
+            <Pill kind="primary" onClick={() => void run()}>{codexRoute ? "Prepare Codex Exec run" : "Run offline demonstration"}</Pill>
             <Pill kind="quiet" onClick={tryAnother}>Edit the task</Pill>
           </div>
         </>
@@ -90,7 +98,9 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
 
       {phase === "running" ? (
         <Card title="route → run → check → result">
-          <p>The deterministic adapter is exercising the same core serial coordinator used by the CLI.</p>
+          <p>{codexRoute
+            ? "Cairn is preparing one ephemeral workspace-scoped request and will stop before the real Codex Exec process starts."
+            : "The deterministic adapter is exercising the same core serial coordinator used by the CLI."}</p>
           <ActivityFeed activities={activities} />
         </Card>
       ) : null}
@@ -98,8 +108,14 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
       {phase === "result" && result && result.status !== "connection-required" ? (
         <>
           <Card title={result.status === "done" ? "verified" : "stopped safely"}>
-            <h2>{result.status === "done" ? "Verified offline result" : "Offline demonstration stopped"}</h2>
-            <p><strong>Routing demonstration: {result.status === "done" ? "verified" : "stopped"}</strong></p>
+            <h2>{result.status === "done"
+              ? "Verified offline result"
+              : realCallStopped
+                ? "Stopped before the real model call"
+                : "Adapter stopped safely"}</h2>
+            <p><strong>{realCallStopped
+              ? "Real Codex Exec process: not started"
+              : `Routing demonstration: ${result.status === "done" ? "verified" : "stopped"}`}</strong></p>
             <p><strong>Requested product change: not attempted</strong></p>
             <p><strong>Milestone movement: NO</strong></p>
             <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} wrote one brief, one report, and one append-only log row. No model was called.</p>

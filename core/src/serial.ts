@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { isCodexExecModelCallBoundaryError } from "./codex.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import {
   routeTask,
@@ -11,7 +12,8 @@ import {
   type TaskAdapter,
 } from "./routing.js";
 
-const SUPPORTED_OUTCOME = "Demonstrate serial routing and verify honest task records without implementing the requested product change.";
+const OFFLINE_SUPPORTED_OUTCOME = "Demonstrate serial routing and verify honest task records without implementing the requested product change.";
+const CODEX_SUPPORTED_OUTCOME = "Detect Codex Exec readiness, prepare one ephemeral workspace-scoped request, and stop before any real process or model call.";
 const RESULT_STATEMENT = "The offline route completed without attempting the requested product change.";
 const activeRoots = new Set<string>();
 
@@ -49,7 +51,8 @@ export type SerialStopReason =
   | "ADAPTER_FAILED"
   | "INVALID_ADAPTER_RESULT"
   | "PROTECTED_WORK_CHANGED"
-  | "RECORD_VERIFICATION_FAILED";
+  | "RECORD_VERIFICATION_FAILED"
+  | "REAL_MODEL_CALL_NOT_AUTHORIZED";
 
 interface GitSnapshot {
   head: string;
@@ -127,13 +130,24 @@ function escapeLine(text: string): string {
 
 function briefText(contract: AdapterTaskContract): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
-  return `# Task ${pad(contract.taskNumber)} — offline serial demonstration
+  const codex = contract.route.adapterId === "codex-exec";
+  const title = codex ? "Codex Exec real-call boundary" : "offline serial demonstration";
+  const lane = codex
+    ? "local preparation and credential-opaque readiness detection; no real model call is authorized"
+    : "local, deterministic, record-only demonstration";
+  const done = codex
+    ? "DONE is not available until a separately authorized real model call completes and is verified."
+    : "DONE means the offline route and its three records are verified. It does not mean the requested product change was implemented.";
+  const stopped = codex
+    ? "STOPPED means Cairn reached the real model-call boundary without starting Codex Exec."
+    : "STOPPED means the serial demonstration or its protection checks did not complete.";
+  return `# Task ${pad(contract.taskNumber)} — ${title}
 
 Requested outcome: ${escapeLine(contract.requestedOutcome)}
 
 Supported outcome: ${contract.supportedOutcome}
 
-Lane: **Standard** — local, deterministic, record-only demonstration.
+Lane: **Standard** — ${lane}.
 
 ## Route
 
@@ -160,13 +174,15 @@ ${contract.checks.map((check) => `- ${check}`).join("\n")}
 
 ${contract.stopConditions.map((condition) => `- ${condition}`).join("\n")}
 
-DONE means the offline route and its three records are verified. It does not mean the requested product change was implemented.
+${done}
 
-STOPPED means the serial demonstration or its protection checks did not complete.
+${stopped}
 `;
 }
 
-function reportText(taskNumber: number, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null, commitRequested: boolean): string {
+function reportText(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null, commitRequested: boolean): string {
+  const taskNumber = contract.taskNumber;
+  const codex = contract.route.adapterId === "codex-exec";
   if (disposition === "DONE") {
     return `# Task ${pad(taskNumber)} — offline serial demonstration report
 
@@ -194,7 +210,36 @@ Milestone movement: **NO**
 Disposition: **DONE**
 `;
   }
-  return `# Task ${pad(taskNumber)} — offline serial demonstration report
+  if (codex && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED") {
+    return `# Task ${pad(taskNumber)} — Codex Exec real-call boundary report
+
+## Result
+
+Codex Exec readiness: **installed and connected**
+
+Requested product change: **not attempted**
+
+Cairn prepared one ephemeral, workspace-scoped Codex Exec request and stopped with the fixed code \`REAL_MODEL_CALL_NOT_AUTHORIZED\` before starting the execution process. No task data was sent to OpenAI, no model was called, and no credential value or authentication method was read, retained, or displayed.
+
+## Verification
+
+- Installation and connection were represented only as booleans.
+- The real \`codex exec\` process was not started.
+- Cairn did not retry, resume, continue, schedule, delegate, or choose another provider.
+- Existing work was not cleaned, reset, stashed, moved, or overwritten by Cairn.
+
+## Limitation
+
+This task proved readiness detection and the call boundary only. It did not implement the requested outcome or authorize paid or data-bearing model work.
+
+Milestone movement: **NO**
+
+Disposition: **STOPPED**
+`;
+  }
+  const title = codex ? "Codex Exec adapter report" : "offline serial demonstration report";
+  const subject = codex ? "Codex Exec route" : "serial demonstration";
+  return `# Task ${pad(taskNumber)} — ${title}
 
 ## Result
 
@@ -202,7 +247,7 @@ Routing demonstration: **stopped**
 
 Requested product change: **not attempted**
 
-The serial demonstration stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter error text.
+The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter error text.
 
 ## Verification
 
@@ -224,17 +269,20 @@ function expectedLogLine(row: LogRow): string {
   return `| ${cleanCell(row.task)} | ${cleanCell(row.date)} | ${cleanCell(row.lane)} | ${cleanCell(row.mode)} | ${cleanCell(row.outcome)} | ${cleanCell(row.decision)} | ${cleanCell(row.summary)} | ${cleanCell(row.moved)} |\n`;
 }
 
-function rowFor(taskNumber: number, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null): LogRow {
+function rowFor(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null): LogRow {
+  const codexBoundary = contract.route.adapterId === "codex-exec" && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
   return {
-    task: pad(taskNumber),
+    task: pad(contract.taskNumber),
     date: new Date().toISOString().slice(0, 10),
     lane: "Standard",
     mode: "Applied",
     outcome: disposition,
     decision: disposition === "DONE" ? "completed" : "stopped",
-    summary: disposition === "DONE"
-      ? "Offline routing demonstration verified; requested product change not attempted."
-      : `Offline routing demonstration stopped safely (${reason}); requested product change not attempted.`,
+    summary: codexBoundary
+      ? "Codex Exec was installed and connected; Cairn stopped before the real process or model call."
+      : disposition === "DONE"
+        ? "Offline routing demonstration verified; requested product change not attempted."
+        : `Offline routing demonstration stopped safely (${reason}); requested product change not attempted.`,
     moved: "NO",
   };
 }
@@ -306,9 +354,9 @@ function writeClosedRecords(
   start: GitSnapshot,
   commitRequested: boolean,
 ): { reportText: string; row: LogRow; verified: boolean } {
-  const report = reportText(contract.taskNumber, disposition, reason, commitRequested);
+  const report = reportText(contract, disposition, reason, commitRequested);
   writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
-  const row = rowFor(contract.taskNumber, disposition, reason);
+  const row = rowFor(contract, disposition, reason);
   appendLogRow(root, row);
   const actualLog = readFileSync(paths.log(root), "utf8");
   const checks = {
@@ -336,8 +384,8 @@ function replaceDoneRecordsWithStopped(
   }
 
   const reason: SerialStopReason = "RECORD_VERIFICATION_FAILED";
-  const stoppedReport = reportText(contract.taskNumber, "STOPPED", reason, commitRequested);
-  const stoppedRow = rowFor(contract.taskNumber, "STOPPED", reason);
+  const stoppedReport = reportText(contract, "STOPPED", reason, commitRequested);
+  const stoppedRow = rowFor(contract, "STOPPED", reason);
   writeFileSync(reportPath, stoppedReport, "utf8");
   writeFileSync(paths.log(root), start.logText + expectedLogLine(stoppedRow), "utf8");
 
@@ -367,6 +415,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
   try {
     const chosen = options.adapters.find((item) => item.descriptor.id === route.recommended.id);
     if (!chosen) throw new Error("ROUTE_ADAPTER_MISSING");
+    const codex = chosen.kind === "codex-exec";
     const start = snapshot(projectRoot);
     const taskNumber = nextTaskNumber(projectRoot);
     mkdirSync(paths.tasks(projectRoot), { recursive: true });
@@ -381,7 +430,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       taskNumber,
       requestedOutcome: outcome.trim(),
       requestedOutcomeSha256: sha256(outcome.trim()),
-      supportedOutcome: SUPPORTED_OUTCOME,
+      supportedOutcome: codex ? CODEX_SUPPORTED_OUTCOME : OFFLINE_SUPPORTED_OUTCOME,
       lane: "Standard",
       route: {
         adapterId: route.recommended.id,
@@ -396,12 +445,20 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         dirty: start.status.length > 0,
         staged: start.staged.length > 0,
       },
-      checks: [
+      checks: codex ? [
+        "Confirm the adapter stops before starting a real Codex Exec process.",
+        "Confirm only the three owned records changed beyond the protected starting state.",
+        "Confirm one STOPPED disposition and one append-only log row.",
+      ] : [
         "Validate the adapter result against the exact fixed schema.",
         "Confirm only the three owned records changed beyond the protected starting state.",
         "Confirm one terminal disposition and one append-only log row.",
       ],
-      stopConditions: [
+      stopConditions: codex ? [
+        "A real Codex Exec process or model call would start without separate authorization.",
+        "Protected Git work changes unexpectedly.",
+        "Any task record cannot be verified exactly.",
+      ] : [
         "The adapter fails or returns an invalid value.",
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
@@ -410,24 +467,43 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     const contractMarkdown = briefText(contract);
     writeFileSync(paths.brief(projectRoot, taskNumber), contractMarkdown, { encoding: "utf8", flag: "wx" });
 
-    emit(activities, options.events, { stage: "Run", state: "working", detail: "Running the deterministic offline demonstration." });
+    emit(activities, options.events, {
+      stage: "Run",
+      state: "working",
+      detail: codex
+        ? "Preparing one ephemeral workspace-scoped Codex Exec request."
+        : "Running the deterministic offline demonstration.",
+    });
     let adapterValue: unknown;
     try {
       adapterValue = await chosen.run(freezeContract(contract));
-    } catch {
-      emit(activities, options.events, { stage: "Run", state: "stopped", detail: "The offline adapter stopped safely." });
-      const closed = writeClosedRecords(projectRoot, contract, "STOPPED", "ADAPTER_FAILED", start, Boolean(options.commitRecords));
-      emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — ADAPTER_FAILED" });
+    } catch (error) {
+      const reason: SerialStopReason = isCodexExecModelCallBoundaryError(error)
+        ? "REAL_MODEL_CALL_NOT_AUTHORIZED"
+        : "ADAPTER_FAILED";
+      emit(activities, options.events, {
+        stage: "Run",
+        state: "stopped",
+        detail: reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
+          ? "Stopped before starting the real Codex Exec process."
+          : "The adapter stopped safely.",
+      });
+      const closed = writeClosedRecords(projectRoot, contract, "STOPPED", reason, start, Boolean(options.commitRecords));
+      emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
       return {
-        status: "stopped", reason: "ADAPTER_FAILED", taskNumber, disposition: "STOPPED",
+        status: "stopped", reason, taskNumber, disposition: "STOPPED",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
         reportText: closed.reportText, row: closed.row, route, activities,
         commit: { status: "skipped", reason: "Stopped tasks are retained for inspection." },
       };
     }
-    emit(activities, options.events, { stage: "Run", state: "done", detail: "The offline adapter returned one result." });
+    emit(activities, options.events, {
+      stage: "Run",
+      state: "done",
+      detail: codex ? "The injected fake process returned one verification result." : "The offline adapter returned one result.",
+    });
     emit(activities, options.events, { stage: "Check", state: "working", detail: "Checking the result, records, and protected Git state." });
-    const resultValid = validateAdapterResult(adapterValue, contract);
+    const resultValid = chosen.kind === "offline-demo" && validateAdapterResult(adapterValue, contract);
     const protectedValid = verifyProtected(projectRoot, start, ownedSet);
     const stopReason: SerialStopReason | null = !resultValid
       ? "INVALID_ADAPTER_RESULT"

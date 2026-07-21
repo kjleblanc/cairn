@@ -9,9 +9,25 @@ test("the CLI accepts one offline demo switch and plain outcome text", () => {
 });
 
 test("normal CLI mode has no pretend connection", () => {
-  const route = previewSerialRoute("Create a welcome page", adaptersForMode(false));
+  const route = previewSerialRoute(
+    "Create a welcome page",
+    adaptersForMode(false, "C:\\fixture", { installed: true, connected: false }),
+  );
   assert.equal(route.status, "connection-required");
-  assert.match(routeSummaryLines(route).join("\n"), /No connected model/);
+  assert.match(routeSummaryLines(route).join("\n"), /No connected adapter/);
+  assert.match(routeSummaryLines(route).join("\n"), /reads no credential/i);
+});
+
+test("normal CLI mode offers only Codex Exec when readiness is connected", () => {
+  const route = previewSerialRoute(
+    "Create a welcome page",
+    adaptersForMode(false, "C:\\fixture", { installed: true, connected: true }),
+  );
+  assert.equal(route.status, "ready");
+  if (route.status !== "ready") return;
+  assert.deepEqual(route.candidates.map((candidate) => candidate.id), ["codex-exec"]);
+  assert.match(routeSummaryLines(route).join("\n"), /Codex Exec/);
+  assert.match(routeSummaryLines(route).join("\n"), /Provider: OpenAI/);
 });
 
 test("explicit mock mode names the adapter, provider, and model honestly", () => {
