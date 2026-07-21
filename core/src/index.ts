@@ -10,4 +10,4 @@ export * from "./concurrent-run.js";
 export * from "./concurrent-state.js";
 export * from "./concurrent-activation.js";
 export * from "./bounded-broker-protocol.js";
-export * from "./bounded-network-guard.js";
+export * from "./bounded-messages-fetch.js";

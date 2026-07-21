@@ -3,19 +3,24 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createFakeBoundedProvider } from "../src/bounded-provider.js";
 import {
   admitConcurrentFromManifestPath,
+  canonicalConcurrentManifest,
+  CONCURRENT_STATE_FILE,
   concurrentRunView,
   inspectConcurrentCleanup,
+  parseConcurrentManifest,
+  readConcurrentRunState,
   recoverConcurrentRun,
   runConcurrentFromManifestPath,
   validateConcurrentManifest,
   type ConcurrentManifest,
 } from "../src/concurrent-run.js";
+import { concurrentStateDigest } from "../src/concurrent-state.js";
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -90,7 +95,7 @@ function fixture(label: string): { root: string; manifest: ConcurrentManifest; m
       },
     ],
   };
-  writeFileSync(join(root, "run-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  writeFileSync(join(root, "run-manifest.json"), canonicalConcurrentManifest(manifest));
   git(root, ["add", "--", "run-manifest.json"]);
   git(root, ["commit", "-m", "Pin closed-batch manifest"]);
   return { root, manifest, manifestPath: "run-manifest.json" };
@@ -119,6 +124,14 @@ test("whole-batch validation refuses overlap and a third task before admission",
   console.log(`CAIRN_TASK_024_CLI_ROOT=${root}`);
 });
 
+test("manifest bytes reject duplicate keys and every noncanonical representation", () => {
+  const { root, manifest } = fixture("manifest-canonical");
+  const canonical = canonicalConcurrentManifest(manifest);
+  assert.equal(parseConcurrentManifest(canonical, root).tasks.length, 2);
+  assert.throws(() => parseConcurrentManifest(canonical.replace('"schemaVersion": 1', '"schemaVersion": 1,\n  "schemaVersion": 1'), root), /DUPLICATE_JSON_KEY/);
+  assert.throws(() => parseConcurrentManifest(canonical.replace("{\n", "{ "), root), /MALFORMED_MANIFEST/);
+});
+
 test("offline builders overlap and both integrate one at a time against latest main", async () => {
   const { root, manifestPath } = fixture("done-done");
   process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
@@ -135,6 +148,25 @@ test("offline builders overlap and both integrate one at a time against latest m
   assert.match(log, /\| 001 \|.*\| DONE \| completed \|/);
   assert.match(log, /\| 002 \|.*\| DONE \| completed \|/);
   assert.deepEqual(inspectConcurrentCleanup(root), { cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });
+});
+
+test("a fake parent credential canary never enters disposable files, evidence, or Git objects", async () => {
+  const { root, manifestPath } = fixture("credential-canary");
+  const canary = "TASK027_OFFLINE_CREDENTIAL_CANARY_9E71B2";
+  const previous = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = canary;
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  try {
+    const result = await runConcurrentFromManifestPath(root, manifestPath, { fakeProvider: createFakeBoundedProvider({ delayMs: 5 }) });
+    assert.equal(JSON.stringify(result).includes(canary), false);
+    const commits = git(root, ["rev-list", "--all"]).split(/\r?\n/).filter(Boolean);
+    const scan = spawnSync("git", ["grep", "-F", canary, ...commits], { cwd: root, encoding: "utf8" });
+    assert.equal(scan.status, 1, scan.stdout || scan.stderr);
+    assert.deepEqual(inspectConcurrentCleanup(root), { cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });
+  } finally {
+    if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previous;
+  }
 });
 
 for (const [label, stop1, stop2] of [
@@ -199,6 +231,69 @@ test("approval extra fields fail before state, branch, or worktree effects", () 
   assert.equal(existsSync(join(root, ".git", "cairn")), false);
 });
 
+test("approval duplicate keys fail before state, branch, or worktree effects", () => {
+  const { root, manifestPath } = fixture("approval-duplicate");
+  const path = join(root, "docs/ai-work/tasks/001-approval.json");
+  const raw = readFileSync(path, "utf8").replace('"schemaVersion": 1', '"schemaVersion": 1,\n  "schemaVersion": 1');
+  writeFileSync(path, raw);
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  assert.throws(() => admitConcurrentFromManifestPath(root, manifestPath), /FROZEN_GATE_FAILED/);
+  assert.equal(git(root, ["branch", "--list", "cairn/task-*"]), "");
+  assert.equal(existsSync(join(root, ".git", "cairn")), false);
+});
+
+test("schema-3 state rejects duplicate keys, unknown nested fields, and nonmonotonic journal entries", () => {
+  const { root, manifestPath } = fixture("state-strict");
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  const state = admitConcurrentFromManifestPath(root, manifestPath);
+  const statePath = join(resolve(root, git(root, ["rev-parse", "--git-common-dir"])), "cairn", CONCURRENT_STATE_FILE);
+  const original = readFileSync(statePath, "utf8");
+  writeFileSync(statePath, original.replace('"schemaVersion": 3', '"schemaVersion": 3,\n  "schemaVersion": 3'));
+  assert.throws(() => readConcurrentRunState(root), /CORRUPT_STATE/);
+  const unknown = JSON.parse(original) as Record<string, unknown>;
+  (unknown.tasks as Array<Record<string, unknown>>)[0].extra = true;
+  unknown.stateDigest = concurrentStateDigest(unknown);
+  writeFileSync(statePath, JSON.stringify(unknown, null, 2) + "\n");
+  assert.throws(() => readConcurrentRunState(root), /CORRUPT_STATE/);
+  const nonmonotonic = JSON.parse(original) as Record<string, unknown>;
+  const journal = nonmonotonic.journal as { completed: Array<Record<string, unknown>> };
+  journal.completed[1].sequence = journal.completed[0].sequence;
+  nonmonotonic.stateDigest = concurrentStateDigest(nonmonotonic);
+  writeFileSync(statePath, JSON.stringify(nonmonotonic, null, 2) + "\n");
+  assert.throws(() => readConcurrentRunState(root), /CORRUPT_STATE/);
+  const invalidPhase = JSON.parse(original) as Record<string, unknown>;
+  (invalidPhase.tasks as Array<Record<string, unknown>>)[0].phase = "anything";
+  invalidPhase.stateDigest = concurrentStateDigest(invalidPhase);
+  writeFileSync(statePath, JSON.stringify(invalidPhase, null, 2) + "\n");
+  assert.throws(() => readConcurrentRunState(root), /CORRUPT_STATE/);
+  const invalidManifest = JSON.parse(original) as Record<string, unknown>;
+  (((invalidManifest.manifest as Record<string, unknown>).tasks as Array<Record<string, unknown>>)[0].provider as Record<string, unknown>).model = "other-model";
+  invalidManifest.stateDigest = concurrentStateDigest(invalidManifest);
+  writeFileSync(statePath, JSON.stringify(invalidManifest, null, 2) + "\n");
+  assert.throws(() => readConcurrentRunState(root), /CORRUPT_STATE/);
+  const invalidOrder = JSON.parse(original) as Record<string, unknown>;
+  const ordered = (invalidOrder.journal as { completed: Array<Record<string, unknown>> }).completed;
+  ordered[1].name = "run-cleanup";
+  ordered[1].taskNumber = null;
+  invalidOrder.stateDigest = concurrentStateDigest(invalidOrder);
+  writeFileSync(statePath, JSON.stringify(invalidOrder, null, 2) + "\n");
+  assert.throws(() => readConcurrentRunState(root), /CORRUPT_STATE/);
+  writeFileSync(statePath, original);
+  recoverConcurrentRun(root, state.runId);
+});
+
+test("recovery rejects duplicate lock keys before trusting stale ownership", () => {
+  const { root, manifestPath } = fixture("lock-duplicate");
+  process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
+  const state = admitConcurrentFromManifestPath(root, manifestPath);
+  const cairnDir = join(resolve(root, git(root, ["rev-parse", "--git-common-dir"])), "cairn");
+  writeFileSync(join(cairnDir, `${CONCURRENT_STATE_FILE}.lock`), `{"pid":999999,"pid":${process.pid},"processStartIdentity":"x","runId":"${state.runId}","ownerToken":"${state.ownerToken}","createdAt":"now"}\n`);
+  assert.throws(() => recoverConcurrentRun(root, state.runId), /EXTERNAL_INTERFERENCE/);
+  writeFileSync(join(cairnDir, `${CONCURRENT_STATE_FILE}.lock`), JSON.stringify({ pid: 999999, processStartIdentity: "x",
+    runId: state.runId, ownerToken: state.ownerToken, createdAt: "now" }) + "\n");
+  recoverConcurrentRun(root, state.runId);
+});
+
 test("renderer-facing bounded status contains no repository, worktree, token, manifest, or authorization data", () => {
   const { root, manifestPath } = fixture("sanitized-view");
   process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
@@ -212,7 +307,7 @@ test("renderer-facing bounded status contains no repository, worktree, token, ma
   recoverConcurrentRun(root, state.runId);
 });
 
-for (const crashAt of ["after:task-worktree:1", "after:main-fast-forward:1"] as const) {
+for (const crashAt of ["after:task-worktree:1", "after:call-consume:1", "after:main-fast-forward:1"] as const) {
   test(`a separate process crash at ${crashAt} recovers without duplicate evidence or an extra call`, () => {
     const { root, manifestPath } = fixture(`process-${crashAt.replace(/:/g, "-")}`);
     const moduleUrl = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "index.js")).href;
@@ -220,11 +315,12 @@ for (const crashAt of ["after:task-worktree:1", "after:main-fast-forward:1"] as 
     const child = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
       encoding: "utf8",
       timeout: 120_000,
-      env: { ...process.env, CAIRN_BOUNDED_CONCURRENCY_REHEARSAL: "1", CAIRN_TASK_026_CRASH_AT: crashAt },
+      env: { ...process.env, CAIRN_BOUNDED_CONCURRENCY_REHEARSAL: "1", CAIRN_BOUNDED_CONCURRENCY_TEST_CRASH_AT: crashAt },
     });
     assert.equal(child.status, 86, child.stderr || child.stdout);
     const recovered = recoverConcurrentRun(root, `proof-process-${crashAt.replace(/[^a-z0-9-]/g, "-")}`);
     assert.equal(recovered.providerCalls <= 2, true);
+    if (crashAt === "after:call-consume:1") assert.equal(recovered.tasks[0].blocker, "CALL_OUTCOME_UNKNOWN");
     const log = readFileSync(join(root, "docs/ai-work/LOG.md"), "utf8");
     for (const task of ["001", "002"]) assert.equal((log.match(new RegExp(`\\| ${task} \\|`, "g")) ?? []).length, 1);
     assert.deepEqual(inspectConcurrentCleanup(root), { cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });

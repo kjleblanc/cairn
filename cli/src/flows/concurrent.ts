@@ -1,5 +1,4 @@
 import pc from "picocolors";
-import { readFileSync } from "node:fs";
 import {
   concurrentRunView,
   inspectConcurrentCleanup,
@@ -50,18 +49,15 @@ export async function concurrentFlow(root: string, args: string[]): Promise<void
     for (const task of manifest.tasks) {
       console.log(`  Task ${String(task.taskNumber).padStart(3, "0")} · write ${task.writablePaths.join(", ")} · test ${task.testPaths.join(", ")} · ${task.provider.model} · one call ≤ $${task.provider.maxCostUsd.toFixed(2)}`);
     }
-    let liveAuthorization: unknown;
+    let authorizationPath: string | undefined;
     if (manifest.mode === "live-proof") {
-      const authorizationPath = option(args, "--authorization");
-      if (!authorizationPath) throw new Error("LIVE_APPROVAL_REQUIRED: use --authorization <exact-new-authorization-file> after all four Task 026 approvals.");
-      const raw = readFileSync(authorizationPath, "utf8");
-      if (raw.length > 32_768) throw new Error("LIVE_APPROVAL_REQUIRED: authorization file is too large.");
-      try { liveAuthorization = JSON.parse(raw); } catch { throw new Error("LIVE_APPROVAL_REQUIRED: authorization file is not strict JSON."); }
-      console.log(pc.dim("Live disposable proof: exact approvals, isolated brokers, one call per task, no retry."));
+      authorizationPath = option(args, "--authorization");
+      if (!authorizationPath) throw new Error("LIVE_APPROVAL_REQUIRED: use --authorization <exact-repository-relative-canonical-file> after all four Task 027 approvals.");
+      console.log(pc.dim("Live disposable proof: canonical Task 027 approvals, isolated Messages brokers, one request per task, no retry."));
     } else {
       console.log(pc.dim("Offline fake provider only; no credential, network request, or activation."));
     }
-    const result = await runConcurrentFromManifestPath(root, manifestPath, { liveAuthorization });
+    const result = await runConcurrentFromManifestPath(root, manifestPath, { authorizationPath });
     console.log(concurrentResultLines(result).join("\n"));
     return;
   }

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { concurrentResultLines } from "../src/flows/concurrent.js";
 
 test("bounded result text shows each task, serial order, calls, cost, and cleanup", () => {
@@ -17,4 +20,11 @@ test("bounded result text shows each task, serial order, calls, cost, and cleanu
   assert.match(text, /Integration order: 001 → 002/);
   assert.match(text, /Provider calls: 2/);
   assert.match(text, /Cleanup: complete/);
+});
+
+test("the CLI passes only an exact authorization path to the strict core parser", () => {
+  const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "flows", "concurrent.ts"), "utf8");
+  assert.doesNotMatch(source, /JSON\.parse\(raw\)/);
+  assert.doesNotMatch(source, /readFileSync/);
+  assert.match(source, /authorizationPath/);
 });

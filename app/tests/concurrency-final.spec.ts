@@ -1,7 +1,7 @@
 import { _electron as electron, expect, test } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,9 +14,10 @@ function coreModule(): string {
   return pathToFileURL(join(__dirname, "..", "node_modules", "@cairn", "core", "dist", "src", "index.js")).href;
 }
 
-test("Desktop observes two bounded tasks read-only and points recovery to the CLI", async () => {
+test("Desktop observes two Task 027 bounded tasks read-only and points recovery to the CLI", async () => {
   test.setTimeout(180_000);
-  const retainedRoot = mkdtempSync(join(tmpdir(), "cairn-task-024-desktop-final-"));
+  const retainedPrefix = join(tmpdir(), "cairn-task-027-desktop-final-");
+  const retainedRoot = mkdtempSync(retainedPrefix);
   const project = join(retainedRoot, "project");
   const appData = join(retainedRoot, "appdata");
   mkdirSync(project);
@@ -38,8 +39,8 @@ test("Desktop observes two bounded tasks read-only and points recovery to the CL
     writeFileSync(join(project, `docs/ai-work/tasks/${n}-approval.json`), JSON.stringify({ schemaVersion: 1, taskNumber: task, briefPath, briefSha256: digest, approvedAt: "offline-rehearsal" }, null, 2) + "\n");
   }
   git(project, ["init", "-b", "main"]);
-  git(project, ["config", "user.name", "Cairn Task 024 Desktop"]);
-  git(project, ["config", "user.email", "cairn-task-024-desktop@example.invalid"]);
+  git(project, ["config", "user.name", "Cairn Task 027 Desktop"]);
+  git(project, ["config", "user.email", "cairn-task-027-desktop@example.invalid"]);
   git(project, ["add", "--", "AGENTS.md", "docs/ai-work/PROJECT.md", "docs/ai-work/LOG.md", "docs/ai-work/PILOT.md", "content/welcome.txt", "content/add-book.txt", "test/welcome.test.mjs", "test/add-book.test.mjs", "docs/ai-work/tasks/001-brief.md", "docs/ai-work/tasks/001-approval.json", "docs/ai-work/tasks/002-brief.md", "docs/ai-work/tasks/002-approval.json"]);
   git(project, ["commit", "-m", "Disposable Desktop Final fixture"]);
   const common = (task: 1 | 2) => {
@@ -58,25 +59,36 @@ test("Desktop observes two bounded tasks read-only and points recovery to the CL
       { ...common(2), outcome: "Add-book copy", usefulness: "Useful alone", implementationPaths: ["content/add-book.txt"], testPaths: ["test/add-book.test.mjs"], writablePaths: ["content/add-book.txt"], checks: [{ command: "node" as const, args: ["--test", "test/add-book.test.mjs"] }], provider: { provider: "anthropic" as const, model: "claude-haiku-4-5" as const, inputSha256: "2196cff705d1b7e4dff0507afc0ba808871e377aadf14da1e9a7631f2fb6bdd8", maxCalls: 1 as const, maxCostUsd: 0.25 as const } },
     ],
   };
-  writeFileSync(join(project, "run-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+  writeFileSync(join(project, "run-manifest.json"), core.canonicalConcurrentManifest(manifest));
   git(project, ["add", "--", "run-manifest.json"]);
   git(project, ["commit", "-m", "Pin closed-batch manifest"]);
   process.env.CAIRN_BOUNDED_CONCURRENCY_REHEARSAL = "1";
   const state = core.admitConcurrentFromManifestPath(project, "run-manifest.json");
 
-  const app = await electron.launch({ args: ["."], env: { ...process.env, APPDATA: appData, CAIRN_MOCK: "1", CAIRN_OPEN: project } });
-  const win = await app.firstWindow();
-  const deck = win.getByRole("region", { name: "Bounded Final tasks" });
-  await expect(deck).toBeVisible({ timeout: 30_000 });
-  await expect(deck.getByTestId("bounded-task-001")).toContainText("call unused");
-  await expect(deck.getByTestId("bounded-task-002")).toContainText("call unused");
-  await expect(deck).toContainText("cairn concurrent recover --run proof-desktop-final");
-  await expect(win.getByRole("button", { name: "Start a task" })).toHaveCount(0);
-  await expect(win.getByRole("button", { name: /Approve|Build|Retry|Integrate/ })).toHaveCount(0);
-  await app.close();
+  let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  try {
+    app = await electron.launch({ args: ["."], env: { ...process.env, APPDATA: appData, CAIRN_MOCK: "1", CAIRN_OPEN: project } });
+    const win = await app.firstWindow();
+    const deck = win.getByRole("region", { name: "Bounded Final tasks" });
+    await expect(deck).toBeVisible({ timeout: 30_000 });
+    await expect(deck.getByTestId("bounded-task-001")).toContainText("call unused");
+    await expect(deck.getByTestId("bounded-task-002")).toContainText("call unused");
+    await expect(deck).toContainText("cairn concurrent recover --run proof-desktop-final");
+    await expect(win.getByRole("button", { name: "Start a task" })).toHaveCount(0);
+    await expect(win.getByRole("button", { name: /Approve|Build|Retry|Integrate/ })).toHaveCount(0);
+    await app.close();
+    app = undefined;
 
-  const recovered = core.recoverConcurrentRun(project, state.runId);
-  expect(recovered.tasks.map((task: { disposition: string }) => task.disposition)).toEqual(["STOPPED", "STOPPED"]);
-  expect(core.inspectConcurrentCleanup(project)).toEqual({ cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });
-  console.log(`CAIRN_TASK_024_DESKTOP_ROOT=${retainedRoot}`);
+    const recovered = core.recoverConcurrentRun(project, state.runId);
+    expect(recovered.tasks.map((task: { disposition: string }) => task.disposition)).toEqual(["STOPPED", "STOPPED"]);
+    expect(core.inspectConcurrentCleanup(project)).toEqual({ cleanMain: true, worktreeCount: 1, taskBranches: [], statePresent: false, lockPresent: false });
+  } finally {
+    if (app) await app.close().catch(() => undefined);
+    try {
+      if (core.inspectConcurrentCleanup(project).statePresent) core.recoverConcurrentRun(project, state.runId);
+    } finally {
+      if (!retainedRoot.startsWith(retainedPrefix)) throw new Error("TEMP_CLEANUP_REFUSED");
+      rmSync(retainedRoot, { recursive: true, force: true });
+    }
+  }
 });
