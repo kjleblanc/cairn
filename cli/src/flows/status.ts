@@ -2,6 +2,7 @@ import pc from "picocolors";
 import { projectStatus } from "@cairn/core";
 import { banner, label, stack } from "../ui.js";
 import { concurrentStatusLines } from "./concurrent.js";
+import type { SchedulerSummary } from "@cairn/core";
 
 export function parallelStatusLines(status: ReturnType<typeof projectStatus>): string[] {
   if (!status.parallel) return [];
@@ -12,6 +13,21 @@ export function parallelStatusLines(status: ReturnType<typeof projectStatus>): s
       `${task.blocker ? ` · STOPPED: ${task.blocker}` : task.waitingReason ? ` · ${task.waitingReason}` : ""} · ${task.branch} · ${task.worktree}`,
     );
   }
+  return lines;
+}
+
+export function schedulerStatusLines(status: { scheduler?: SchedulerSummary | null }): string[] {
+  if (!status.scheduler) return [];
+  const lines = ["Two-task scheduler — one closed batch:"];
+  for (const task of status.scheduler.tasks) {
+    const detail = task.attention
+      ? ` — ${task.attention}`
+      : task.waitingReason
+        ? ` — ${task.waitingReason}`
+        : "";
+    lines.push(`  Task ${String(task.taskNumber).padStart(3, "0")} · ${task.phase}${detail}`);
+  }
+  lines.push(`  Sessions: ${status.scheduler.sessionCount} · maximum active engines: ${status.scheduler.maximumActiveEngines}`);
   return lines;
 }
 
@@ -35,6 +51,8 @@ export function statusFlow(root: string): void {
 
   const parallelLines = parallelStatusLines(s);
   if (parallelLines.length) console.log(`\n${parallelLines.join("\n")}`);
+  const schedulerLines = schedulerStatusLines(s);
+  if (schedulerLines.length) console.log(`\n${schedulerLines.join("\n")}`);
   const boundedLines = concurrentStatusLines(root);
   if (boundedLines.length) console.log(`\n${boundedLines.join("\n")}`);
 

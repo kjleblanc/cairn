@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CairnApi, EngineEvent, OwnerQuestionEvent } from "./shared/ipc.js";
+import type { CairnApi, EngineEvent, OwnerQuestionEvent, SchedulerStateEvent } from "./shared/ipc.js";
 
 const api: CairnApi = {
   preflight: () => ipcRenderer.invoke("preflight:check"),
@@ -17,6 +17,9 @@ const api: CairnApi = {
   taskReview: (dir, taskNumber, sessionId) => ipcRenderer.invoke("task:review", dir, taskNumber, sessionId),
   taskClose: (dir, taskNumber, input, sessionId) => ipcRenderer.invoke("task:close", dir, taskNumber, input, sessionId),
   taskDirection: (dir, reason) => ipcRenderer.invoke("task:direction", dir, reason),
+  schedulerStart: (dir, outcomes, sessionId) => ipcRenderer.invoke("scheduler:start", dir, outcomes, sessionId),
+  schedulerStatus: (dir) => ipcRenderer.invoke("scheduler:status", dir),
+  schedulerRecover: (dir) => ipcRenderer.invoke("scheduler:recover", dir),
   // The saved effort rides along with the model call, so the app's existing
   // boot-time taskSetModel(...) applies both saved choices with no extra boot
   // code. Guarded: if storage is unreachable, behaviour degrades to model-only,
@@ -33,6 +36,11 @@ const api: CairnApi = {
     const listener = (_e: unknown, ev: EngineEvent) => cb(ev);
     ipcRenderer.on("engine:event", listener as never);
     return () => ipcRenderer.removeListener("engine:event", listener as never);
+  },
+  onSchedulerState: (cb) => {
+    const listener = (_e: unknown, ev: SchedulerStateEvent) => cb(ev);
+    ipcRenderer.on("scheduler:state", listener as never);
+    return () => ipcRenderer.removeListener("scheduler:state", listener as never);
   },
   onOwnerQuestion: (cb) => {
     const listener = (_e: unknown, q: OwnerQuestionEvent) => cb(q);

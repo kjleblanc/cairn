@@ -53,6 +53,8 @@ export interface RunSpec {
   ownerMessage?: string;
   /** Frozen exact paths for a coordinated builder. Absent keeps the legacy path unchanged. */
   allowedPaths?: string[];
+  /** Task 028 changes tool authority only; the existing SDK transport stays unchanged. */
+  schedulerProfile?: "scheduler-planning" | "scheduler-building";
 }
 
 export interface Engine {
@@ -124,6 +126,48 @@ function norm(root: string, p: string): string {
   return relative(resolve(root), resolve(root, p)).replace(/\\/g, "/");
 }
 
+export type ToolDecision = { approved: true } | { approved: false; reason: string };
+
+function schedulerPlanningGitAllowed(command: string): boolean {
+  if (/[\r\n;&|`$<>*?]/.test(command)) return false;
+  const parts = command.trim().split(/\s+/);
+  if (parts[0] !== "git" || !["status", "log", "diff", "show", "branch"].includes(parts[1] ?? "")) return false;
+  const args = parts.slice(2);
+  if (args.some((arg) => ["--ext-diff", "--textconv", "--no-index", "--output", "-o"].includes(arg) || arg.startsWith("--output="))) return false;
+  if (parts[1] === "branch") return args.every((arg) => ["--list", "--show-current"].includes(arg));
+  return args.every((arg) => /^[A-Za-z0-9_./:@=+,-]+$/.test(arg));
+}
+
+/** Pure Task 028 tool policy, exported so offline tests can prove the real gate. */
+export function schedulerToolDecision(spec: RunSpec, request: unknown): ToolDecision {
+  if (!spec.schedulerProfile) return { approved: true };
+  const req = request as { tool_name?: string; name?: string; input?: Record<string, unknown> };
+  const tool = req.tool_name ?? req.name ?? "";
+  const input = req.input ?? {};
+  const deny = (reason: string): ToolDecision => ({ approved: false, reason });
+
+  if (spec.schedulerProfile === "scheduler-planning") {
+    if (/^(Read|Glob|Grep)$/i.test(tool) || /ask_owner$/i.test(tool)) return { approved: true };
+    if (/^Bash$/i.test(tool)) {
+      const command = String(input.command ?? "");
+      return schedulerPlanningGitAllowed(command)
+        ? { approved: true }
+        : deny("Planning may only run read-only git commands (status, log, diff, show, branch).");
+    }
+    return deny("Planning is read-only and cannot change product files or Git state.");
+  }
+
+  if (/^(Read|Glob|Grep)$/i.test(tool)) return { approved: true };
+  if (/^(Write|Edit)$/i.test(tool)) {
+    const target = norm(spec.root, String(input.file_path ?? input.path ?? ""));
+    const allowed = new Set((spec.allowedPaths ?? []).map((path) => path.replace(/\\/g, "/")));
+    return allowed.has(target)
+      ? { approved: true }
+      : deny(`The scheduled builder may write only its frozen exact paths; ${target || "that path"} is outside them.`);
+  }
+  return deny("The scheduled builder has no shell, notebook, web, MCP, owner-question, or Git integration capability.");
+}
+
 /**
  * Per-role tool policy, enforced through the Agent SDK's canUseTool callback.
  * This is where prose becomes physics:
@@ -148,6 +192,11 @@ function makeToolGate(spec: RunSpec, state: { reportUnlocked: boolean }, events:
       events.onDenied?.(tool, reason);
       return { approved: false as const, reason };
     };
+
+    if (spec.schedulerProfile) {
+      const decision = schedulerToolDecision(spec, request);
+      return decision.approved ? decision : deny(decision.reason);
+    }
 
     // Only the definer may ask the owner anything. The ask tool is mounted for
     // definer runs alone, but this stands even if that ever changes.
@@ -261,7 +310,11 @@ export class SdkEngine implements Engine {
         // Only sent when chosen — with no choice the SDK behaves exactly as today.
         ...(this.effort ? { effort: this.effort } : {}),
         systemPrompt: spec.system,
-        allowedTools: ["Read", "Glob", "Grep", "Write", "Edit", "Bash", ...(askServer ? [ASK_OWNER_TOOL] : [])],
+        allowedTools: spec.schedulerProfile === "scheduler-planning"
+          ? ["Read", "Glob", "Grep", "Bash", ...(askServer ? [ASK_OWNER_TOOL] : [])]
+          : spec.schedulerProfile === "scheduler-building"
+            ? ["Read", "Glob", "Grep", "Write", "Edit"]
+            : ["Read", "Glob", "Grep", "Write", "Edit", "Bash", ...(askServer ? [ASK_OWNER_TOOL] : [])],
         disallowedTools: ["WebFetch", "WebSearch"],
         ...(askServer ? { mcpServers: { cairn: askServer } } : {}),
         canUseTool: gate as never,
@@ -307,6 +360,51 @@ export class MockEngine implements Engine {
     };
     // Echo the active model (and effort, when chosen) so a selection is visible with no paid call.
     events.onText?.(`Using model: ${this.model}${this.effort ? ` · effort: ${this.effort}` : ""} (mock)`);
+    if (spec.schedulerProfile === "scheduler-planning" && spec.taskNumber) {
+      const id = pad(spec.taskNumber);
+      const outcome = spec.user.match(/SCHEDULED OUTCOME:\s*([\s\S]*?)\n\n/)?.[1]?.trim() || `Complete Task ${id}`;
+      const result = /\[mock overlap\]/i.test(outcome) ? "demo-shared.txt" : `demo-${id}.txt`;
+      const testFile = `demo-${id}.test.mjs`;
+      const uncertain = /\[mock uncertain\]/i.test(outcome);
+      return {
+        text: JSON.stringify({
+          schemaVersion: 1,
+          taskNumber: spec.taskNumber,
+          outcome,
+          independentlyUseful: "The result is visible and useful on its own.",
+          lane: "Standard",
+          implementationPaths: [result],
+          testPaths: [testFile],
+          checks: [{ executable: "node", args: ["--test", testFile] }],
+          dependencies: [],
+          externalActions: [],
+          certainty: uncertain ? "uncertain" : "certain",
+          uncertaintyReason: uncertain ? "The mock planner could not identify one certain safe path." : "",
+          briefMarkdown: `# Task ${id} — scheduled brief (mock)\n\nLane: **Standard**\n\nVisible outcome: ${outcome}\n\nImplementation paths: ${result}\nTest paths: ${testFile}\nChecks: node --test ${testFile}\n\nDONE when the result passes its exact check.\nSTOPPED if the bounded build cannot finish.\n`,
+        }),
+      };
+    }
+    if (spec.schedulerProfile === "scheduler-building" && spec.taskNumber) {
+      const id = pad(spec.taskNumber);
+      const reportRel = `docs/ai-work/tasks/${id}-report.md`;
+      const writable = spec.allowedPaths ?? [];
+      const implementation = writable.find((path) => path !== reportRel && !/\.test\.[cm]?[jt]s$/i.test(path));
+      const testFile = writable.find((path) => /\.test\.[cm]?[jt]s$/i.test(path));
+      if (implementation) {
+        mkdirSync(dirname(resolve(spec.root, implementation)), { recursive: true });
+        writeFileSync(resolve(spec.root, implementation), `hello from scheduled Task ${id}\n`);
+      }
+      if (testFile && implementation) {
+        mkdirSync(dirname(resolve(spec.root, testFile)), { recursive: true });
+        const expected = `hello from scheduled Task ${id}\n`;
+        writeFileSync(resolve(spec.root, testFile),
+          `import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";\nimport test from "node:test";\ntest("scheduled result", () => assert.equal(readFileSync(${JSON.stringify(implementation)}, "utf8").replace(/\\r\\n/g, "\\n"), ${JSON.stringify(expected)}));\n`);
+      }
+      mkdirSync(dirname(resolve(spec.root, reportRel)), { recursive: true });
+      writeFileSync(resolve(spec.root, reportRel),
+        `# Task ${id} — scheduled report (mock)\n\nResult: the exact scheduled output was written.\n\nMilestone movement: YES\n\nDisposition: DONE\n`);
+      return { text: say("Scheduled build complete (mock). Disposition: DONE.") };
+    }
     if (spec.role === "definer" && spec.taskNumber) {
       const briefPath = paths.brief(spec.root, spec.taskNumber);
       if (spec.intent === "refine") {

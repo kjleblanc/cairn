@@ -55,6 +55,31 @@ export function builderPrompt(root: string, taskNumber: number): { system: strin
   };
 }
 
+export function scheduledPlannerPrompt(root: string, taskNumber: number, outcome: string): { system: string; user: string } {
+  return {
+    system: `${COMMON}\n\nYour role: SCHEDULED PLANNER. Product and Git state are read-only. Return one strict JSON object and write nothing.`,
+    user:
+      `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
+      `SCHEDULED OUTCOME: ${outcome}\n\n` +
+      `Task number: ${taskNumber}. Inspect the project and classify this as Standard only when it is independently useful, local, reversible, dependency-free, and has no external action. ` +
+      `Return JSON with exactly these fields: schemaVersion (1), taskNumber, outcome, independentlyUseful, lane, implementationPaths, testPaths, checks, dependencies, externalActions, certainty, uncertaintyReason, briefMarkdown. ` +
+      `Paths are exact repository-relative files, never directories or wildcards. checks is an array of { executable, args } objects and may use only an installed local test command. ` +
+      `certainty is "certain" or "uncertain". Use uncertain when exact safe paths cannot be known. briefMarkdown is the complete Contract v2.2 task brief. ` +
+      `Output JSON only. Do not use markdown fences and do not implement anything.`,
+  };
+}
+
+export function scheduledBuilderPrompt(root: string, taskNumber: number): { system: string; user: string } {
+  return {
+    system: `${COMMON}\n\nYour role: SCHEDULED BUILDER. Build one Standard task continuously inside its isolated worktree. Your Write/Edit tools are limited to frozen exact paths. You have no shell or Git authority.`,
+    user:
+      `THE PROJECT CONTRACT:\n\n${projectContract(root)}\n\n---\n\n` +
+      `Read docs/ai-work/tasks/${pad(taskNumber)}-brief.md. Implement only its declared paths, inspect your work with read tools, and write docs/ai-work/tasks/${pad(taskNumber)}-report.md. ` +
+      `The report must state the result, files changed, limitations, how to try it, Milestone movement, and end with Disposition: DONE or Disposition: STOPPED — [blocker]. ` +
+      `Do not run checks, stage, commit, integrate, edit the brief, or touch the shared log; the scheduler owns those steps after your session.`,
+  };
+}
+
 export function refinePrompt(root: string, taskNumber: number, message: string): { system: string; user: string } {
   return {
     system: `${COMMON}\n\nYour role: DEFINER, refining a drafted brief before approval. Nothing is approved or locked yet. The only file you may write is the brief itself.`,

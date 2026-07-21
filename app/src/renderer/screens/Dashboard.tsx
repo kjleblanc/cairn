@@ -7,9 +7,9 @@ import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { BoundedTaskDeck } from "../components/TaskDeck";
 import { pluck } from "../sound";
 
-export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStartTask, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
-  dir: string; status: ProjectStatus; justAdded: boolean; mock: boolean; parallelDraft: boolean;
-  onStartTask: () => void; onResume: (task: UnfinishedTask) => void; onDirection: (reason: string) => void;
+export function Dashboard({ dir, status, justAdded, mock, parallelDraft, schedulerFinal, onStartTask, onStartScheduler, onResume, onDirection, onSwitch, onOpenProject, onSettings }: {
+  dir: string; status: ProjectStatus; justAdded: boolean; mock: boolean; parallelDraft: boolean; schedulerFinal: boolean;
+  onStartTask: () => void; onStartScheduler: () => void; onResume: (task: UnfinishedTask) => void; onDirection: (reason: string) => void;
   onSwitch: () => void; onOpenProject: (dir: string) => void; onSettings: () => void;
 }) {
   useEffect(() => { if (justAdded) pluck(); }, [justAdded]);
@@ -17,6 +17,8 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
   const recent = log.slice(-6).reverse();
   const unfinishedTasks = status.unfinishedTasks?.length ? status.unfinishedTasks : unfinished ? [unfinished] : [];
   const bounded = status.bounded ?? null;
+  const scheduled = status.scheduler ?? null;
+  const schedulerActive = Boolean(scheduled?.tasks.some((task) => task.phase !== "Done"));
 
   return (
     <div>
@@ -30,10 +32,20 @@ export function Dashboard({ dir, status, justAdded, mock, parallelDraft, onStart
 
       <div className="row spread" style={{ marginBottom: 12 }}>
         <span className="status-pill">▸ idle · {stones} {stones === 1 ? "stone" : "stones"} · gate {gate.tripped ? "tripped" : "quiet"}</span>
-        {!gate.tripped && !bounded ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
+        {!gate.tripped && !bounded && !schedulerActive ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
       </div>
 
       {bounded ? <BoundedTaskDeck state={bounded} /> : null}
+
+      {schedulerFinal && !gate.tripped && !bounded ? (
+        <div className="gate-banner scheduler-banner">
+          <div>
+            <p><strong>Two-task scheduler — Final candidate, still off by default.</strong></p>
+            <p className="small">Plan exact paths first, build disjoint Standard tasks in isolated worktrees, then check and integrate one at a time.</p>
+          </div>
+          <Pill onClick={onStartScheduler}>{scheduled ? "Open scheduler" : "Schedule one or two tasks"}</Pill>
+        </div>
+      ) : null}
 
       {parallelDraft ? (
         <div className="gate-banner">

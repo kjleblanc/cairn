@@ -11,3 +11,5 @@ export * from "./concurrent-state.js";
 export * from "./concurrent-activation.js";
 export * from "./bounded-broker-protocol.js";
 export * from "./bounded-messages-fetch.js";
+export * from "./scheduler.js";
+export * from "./scheduler-git.js";

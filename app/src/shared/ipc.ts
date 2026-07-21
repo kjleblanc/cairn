@@ -1,8 +1,14 @@
-import type { CloseInput, CoordinatorTaskView, Disposition, LogRow, ProjectStatus } from "@cairn/core";
+import type { CloseInput, CoordinatorTaskView, Disposition, LogRow, ProjectStatus, SchedulerSummary } from "@cairn/core";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
-export type Preflight = { claudeReady: boolean; reason: "no-sdk" | "no-login" | null; mock: boolean; parallelDraft: boolean };
+export type Preflight = {
+  claudeReady: boolean;
+  reason: "no-sdk" | "no-login" | null;
+  mock: boolean;
+  parallelDraft: boolean;
+  schedulerFinal: boolean;
+};
 export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number; lastOpened: string };
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string; timebox: string };
@@ -19,6 +25,7 @@ export type ReviewPayload = { text: string; finalVerdict: string; costUsd?: numb
 export type OwnerQuestionEvent = { id: number; question: string; asked: number; limit: number; sessionId: number; autoSkipMs?: number };
 export type RefinePayload = { briefText: string; briefChanged: boolean; reply: string; costUsd?: number };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
+export type SchedulerStateEvent = { dir: string; sessionId: number; summary: SchedulerSummary };
 
 export interface CairnApi {
   preflight(): Promise<Preflight>;
@@ -39,6 +46,9 @@ export interface CairnApi {
   taskReview(dir: string, taskNumber: number, sessionId: number): Promise<Result<ReviewPayload>>;
   taskClose(dir: string, taskNumber: number, input: CloseInput, sessionId: number): Promise<Result<LogRow>>;
   taskDirection(dir: string, reason: string): Promise<Result<{ text: string }>>;
+  schedulerStart(dir: string, outcomes: string[], sessionId: number): Promise<Result<SchedulerSummary>>;
+  schedulerStatus(dir: string): Promise<Result<SchedulerSummary | null>>;
+  schedulerRecover(dir: string): Promise<Result<SchedulerSummary | null>>;
   /** Choose the model for the next run; returns the resolved active model id. Blank = today's default. */
   taskSetModel(model: string): Promise<string>;
   /** Choose the effort for the next run; returns the active level, or "default" when none is chosen. */
@@ -46,6 +56,7 @@ export interface CairnApi {
   updateCheck(): Promise<UpdateInfo>;
   openExternal(url: string): Promise<void>;
   onEngineEvent(cb: (ev: EngineEvent) => void): () => void;
+  onSchedulerState(cb: (ev: SchedulerStateEvent) => void): () => void;
   /** Fires when the AI asks the owner a question during a define run. */
   onOwnerQuestion(cb: (q: OwnerQuestionEvent) => void): () => void;
 }

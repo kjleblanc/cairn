@@ -11,6 +11,7 @@ import { Dashboard } from "./screens/Dashboard";
 import { Wizard, type WizardStatus } from "./screens/Wizard";
 import { Direction } from "./screens/Direction";
 import { Settings } from "./screens/Settings";
+import { Scheduler } from "./screens/Scheduler";
 import {
   DEFAULT_OPENAI_PREVIEW_MODEL,
   PREVIEW_EFFORT_KEY,
@@ -24,6 +25,7 @@ type View =
   | { name: "picker"; startNew: boolean; note?: string }
   | { name: "dashboard"; dir: string; status: ProjectStatus; justAdded: boolean }
   | { name: "wizard"; sessionId: number }
+  | { name: "scheduler"; dir: string; status: ProjectStatus }
   | { name: "direction"; dir: string; reason: string }
   | { name: "settings"; dir: string | null };
 
@@ -45,6 +47,7 @@ export function App() {
   const [wstats, setWstats] = useState<Record<number, WizardStatus>>({});
   const [mock, setMock] = useState(false);
   const [parallelDraft, setParallelDraft] = useState(false);
+  const [schedulerFinal, setSchedulerFinal] = useState(false);
 
   const openProject = useCallback(async (dir: string, justAdded = false) => {
     const r = await cairn.projectOpen(dir);
@@ -56,6 +59,7 @@ export function App() {
     const pf = await cairn.preflight();
     setMock(pf.mock);
     setParallelDraft(pf.parallelDraft);
+    setSchedulerFinal(pf.schedulerFinal);
 
     // Restore one truthful engine setup before the dashboard can render. A
     // mock OpenAI preview may return only inside this renderer window; every
@@ -166,8 +170,9 @@ export function App() {
           onCreated={(dir, status) => setView({ name: "dashboard", dir, status, justAdded: false })}
           onSettings={() => setView({ name: "settings", dir: null })} />;
       case "dashboard":
-        return <Dashboard dir={view.dir} status={view.status} justAdded={view.justAdded} mock={mock} parallelDraft={parallelDraft}
+        return <Dashboard dir={view.dir} status={view.status} justAdded={view.justAdded} mock={mock} parallelDraft={parallelDraft} schedulerFinal={schedulerFinal}
           onStartTask={() => enterTask(view.dir, null)}
+          onStartScheduler={() => setView({ name: "scheduler", dir: view.dir, status: view.status })}
           onResume={(task) => enterTask(view.dir, task)}
           onDirection={(reason) => setView({ name: "direction", dir: view.dir, reason })}
           onSwitch={() => setView({ name: "picker", startNew: false })}
@@ -175,6 +180,8 @@ export function App() {
           onSettings={() => setView({ name: "settings", dir: view.dir })} />;
       case "wizard":
         return null; // the task walk renders below, so it can live behind other screens
+      case "scheduler":
+        return <Scheduler dir={view.dir} initial={view.status.scheduler ?? null} onBack={() => void openProject(view.dir)} />;
       case "direction":
         return <Direction dir={view.dir} reason={view.reason} onBack={() => void openProject(view.dir)} />;
       case "settings":

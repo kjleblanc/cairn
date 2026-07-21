@@ -32,6 +32,7 @@ import {
   type CoordinatorTaskView,
 } from "./coordinator.js";
 import { assertNoConcurrentRun, concurrentRunView, type ConcurrentRunView } from "./concurrent-run.js";
+import { hasActiveScheduledBatch, schedulerSummary, type SchedulerSummary } from "./scheduler.js";
 
 /**
  * The gated loop as resumable steps. Every skin (CLI, desktop) sequences these;
@@ -72,6 +73,7 @@ export interface ProjectStatus {
   unfinishedTasks?: UnfinishedTask[];
   parallel?: CoordinatorSummary;
   bounded?: ConcurrentRunView | null;
+  scheduler?: SchedulerSummary | null;
 }
 
 function coordinatedTaskRoot(root: string, taskNumber: number): string {
@@ -99,6 +101,9 @@ function assertGoverned(root: string): ProjectFacts {
     throw new Error(`The contract status is "${facts.status}" — it doesn't govern this project yet. Finish the conversion first.`);
   }
   assertNoConcurrentRun(root);
+  if (hasActiveScheduledBatch(root)) {
+    throw new Error("SCHEDULER_ACTIVE: This repository is owned by an unfinished two-task scheduler batch.");
+  }
   return facts;
 }
 
@@ -283,6 +288,7 @@ export function projectStatus(root: string): ProjectStatus {
   const gate = checkDirectionGate(log);
   const parallel = parallelDraftEnabled() && hasCoordinator(root) ? coordinatorSummary(root) : undefined;
   const bounded = concurrentRunView(root);
+  const scheduler = schedulerSummary(root);
   if (parallel) {
     const unfinishedTasks = parallel.tasks
       .filter((task) => task.phase !== "integrated")
@@ -304,7 +310,7 @@ export function projectStatus(root: string): ProjectStatus {
           blocker: task.blocker,
         };
       });
-    return { facts, log, stones, gate, unfinished: unfinishedTasks[0] ?? null, unfinishedTasks, parallel, bounded };
+    return { facts, log, stones, gate, unfinished: unfinishedTasks[0] ?? null, unfinishedTasks, parallel, bounded, scheduler };
   }
   const last = nextTaskNumber(root) - 1;
   let unfinished: UnfinishedTask | null = null;
@@ -322,7 +328,7 @@ export function projectStatus(root: string): ProjectStatus {
       reportText,
     };
   }
-  return { facts, log, stones, gate, unfinished, unfinishedTasks: unfinished ? [unfinished] : [], bounded };
+  return { facts, log, stones, gate, unfinished, unfinishedTasks: unfinished ? [unfinished] : [], bounded, scheduler };
 }
 
 export function initProject(root: string, facts: { name: string; what: string; who: string; milestone: string; timebox: string }): { created: string[]; gitReady: boolean } {

@@ -12,6 +12,7 @@ import {
   projectStatus, refineBrief, reviewTask, runDirectionCheck,
 } from "../src/steps.js";
 import { runSerialV2MockStandardTask, runSerialV2ProviderMockStandardTask } from "../src/serial-v2.js";
+import { startScheduledBatch } from "../src/scheduler.js";
 
 const engine = new MockEngine();
 
@@ -442,6 +443,31 @@ test("projectStatus reports stones, gate, and an unfinished task", async () => {
   const s2 = projectStatus(dir);
   assert.equal(s2.stones, 1);
   assert.equal(s2.unfinished, null);
+});
+
+test("projectStatus reports Task 028 state and ordinary serial work refuses its active batch", async () => {
+  const dir = freshProject();
+  execFileSync("git", ["init", "-b", "main"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Cairn Scheduler Steps"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "cairn-scheduler-steps@example.invalid"], { cwd: dir });
+  execFileSync("git", ["add", "--", "AGENTS.md", "docs/ai-work/PROJECT.md", "docs/ai-work/LOG.md", "docs/ai-work/PILOT.md"], { cwd: dir });
+  execFileSync("git", ["commit", "-m", "Synthetic scheduler steps project"], { cwd: dir });
+  const original = process.env.CAIRN_TWO_TASK_SCHEDULER_FINAL;
+  try {
+    process.env.CAIRN_TWO_TASK_SCHEDULER_FINAL = "1";
+    await assert.rejects(
+      () => startScheduledBatch(dir, ["Create one visible synthetic result"], () => engine, {
+        onTransition: (name) => { if (name === "batch-reserved") throw new Error("offline interruption"); },
+      }),
+      /offline interruption/,
+    );
+    const status = projectStatus(dir);
+    assert.equal(status.scheduler?.tasks[0].phase, "Planning");
+    await assert.rejects(() => defineTask(dir, "An ordinary task must wait", engine), /SCHEDULER_ACTIVE/);
+  } finally {
+    if (original === undefined) delete process.env.CAIRN_TWO_TASK_SCHEDULER_FINAL;
+    else process.env.CAIRN_TWO_TASK_SCHEDULER_FINAL = original;
+  }
 });
 
 test("defineTask carries the owner's answer through to the brief when a channel is wired", async () => {

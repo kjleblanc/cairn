@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   DEFAULT_MODEL, EFFORT_LEVELS, MockEngine, NO_ANSWER_FALLBACK, OWNER_QUESTION_LIMIT,
-  makeAskOwner, pickEngine, resolveEffort, resolveModel, type Role, type RunSpec,
+  makeAskOwner, pickEngine, resolveEffort, resolveModel, schedulerToolDecision, type Role, type RunSpec,
 } from "../src/agents.js";
 import { paths } from "../src/files.js";
 
@@ -27,6 +27,31 @@ function withEnv(name: string, value: string | undefined, body: () => void | Pro
     throw err;
   }
 }
+
+test("scheduled Planning is product-read-only", () => {
+  const spec: RunSpec = { role: "definer", root: process.cwd(), system: "", user: "", schedulerProfile: "scheduler-planning" };
+  assert.deepEqual(schedulerToolDecision(spec, { name: "Read", input: { file_path: "README.md" } }), { approved: true });
+  assert.deepEqual(schedulerToolDecision(spec, { name: "Bash", input: { command: "git status --short" } }), { approved: true });
+  assert.equal(schedulerToolDecision(spec, { name: "Write", input: { file_path: "README.md" } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "Bash", input: { command: "git worktree add elsewhere" } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "Bash", input: { command: "git status && echo escaped" } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "Bash", input: { command: "git branch -D main" } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "Bash", input: { command: "git diff --ext-diff" } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "ReadAndWrite", input: { file_path: "README.md" } }).approved, false);
+});
+
+test("scheduled Building has exact writes and no shell", () => {
+  const root = process.cwd();
+  const spec: RunSpec = {
+    role: "builder", root, system: "", user: "", schedulerProfile: "scheduler-building",
+    allowedPaths: ["safe/result.txt", "docs/ai-work/tasks/001-report.md"],
+  };
+  assert.deepEqual(schedulerToolDecision(spec, { name: "Edit", input: { file_path: resolve(root, "safe/result.txt") } }), { approved: true });
+  assert.equal(schedulerToolDecision(spec, { name: "Write", input: { file_path: resolve(root, "other.txt") } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "Bash", input: { command: "npm test" } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "NotebookEdit", input: { file_path: resolve(root, "safe/result.txt") } }).approved, false);
+  assert.equal(schedulerToolDecision(spec, { name: "WriteAndRun", input: { file_path: resolve(root, "safe/result.txt") } }).approved, false);
+});
 
 const withEnvModel = (value: string | undefined, body: () => void | Promise<void>) =>
   withEnv("CAIRN_MODEL", value, body);
