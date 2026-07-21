@@ -22,3 +22,4 @@
 | 023 | 2026-07-20 | Standard | Applied | DONE | completed | Recorded active Contract v2.2 and all required mirrors by exact path without activating parallel mode or altering Task 016 or runtime code | NO |
 | 025 | 2026-07-20 | Standard | Applied | DONE | completed | Repaired the Contract v2.x regression fixture so the full core suite exercises the intended guard | NO |
 | 027 | 2026-07-20 | High-Stakes | Final | STOPPED — SUBSCRIPTION_TRANSPORT_INCOMPATIBLE | defer | Review VALID STOPPED: the standalone Messages API candidate cannot use the required existing Claude subscription transport; keep it disabled and unactivated | NO |
+| 028 | 2026-07-21 | High-Stakes | Final | STOPPED — QUALIFIED_REVIEW_REQUIRED | revise | Review FAIL: model-authored checks run with ambient authority, ready work waits behind unfinished builders, temporary location does not prove disposability, and Planning failures show the wrong state | UNCLEAR |
