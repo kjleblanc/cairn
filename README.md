@@ -1,11 +1,42 @@
 # Cairn
 
-Build real software with an AI through **risk-based autonomy**: routine local work
-moves forward; real risk pauses for you.
+Cairn is for beginners who want AI-assisted software work to stay understandable,
+recoverable, and honest.
 
-Cairn is written for complete beginners. You describe the result you want. The
-project contract protects existing work, keeps external authority explicit, records
-what happened, and stops repeated patching when the approach is wrong.
+The active CLI and Desktop product now use one serial path:
+
+```text
+project → task entry → route → run → check → result
+```
+
+There is no active parallel queue, scheduler, bounded batch, five-gate Standard
+workflow, or experimental provider route. Earlier experiments remain in Git and in
+the append-only task history; they are evidence, not active product features.
+
+## What works now
+
+- first-run instructions;
+- creating, opening, remembering, and switching projects;
+- Project Conversion guidance for existing work;
+- one task entry at a time;
+- deterministic routing among connected compatible adapters;
+- a connection-required result when none is connected;
+- a compact route/run/check/result activity view;
+- protected Git state and exact task records; and
+- an explicit offline demonstration adapter.
+
+The offline adapter is not a local model. It proves the serial lifecycle without
+implementing the arbitrary product request. Its report says:
+
+```text
+Routing demonstration: verified
+Requested product change: not attempted
+Milestone movement: NO
+```
+
+Normal mode currently has no connected model adapter. It stops before writing task
+records and explains that a provider connection is a later separately reviewed
+feature.
 
 ## Start here
 
@@ -13,186 +44,71 @@ what happened, and stops repeated patching when the approach is wrong.
 - Existing project with files or history: [Project Conversion](PROJECT-CONVERSION.md)
 - Already using Cairn: [Everyday Workflow](EVERYDAY-WORKFLOW.md)
 - Risky or hard-to-reverse work: [High-Stakes](HIGH-STAKES.md)
-- Need the glossary and setup tools: [Getting Ready](GETTING-READY.md)
+- Setup terms and tools: [Getting Ready](GETTING-READY.md)
 
 The browser companion at [kjleblanc.github.io/cairn](https://kjleblanc.github.io/cairn/)
-walks through the same written framework. The Markdown files remain canonical.
+walks through the written framework. The Markdown files remain canonical.
 
-## The normal command
+## The project contract
 
-```text
-Work on: [the visible result you want]
-```
+`AGENTS.md` governs AI work inside each Cairn project. It uses risk-based autonomy:
+local reversible Tiny and Standard work proceeds, while costly, external,
+destructive, credentialed, or hard-to-reverse work pauses for exact approval.
 
-For Tiny or Standard work, the AI:
-
-1. reads the project and protects unfinished files;
-2. writes a short task brief as project memory;
-3. builds the result immediately;
-4. repairs ordinary mistakes and reruns checks in the same task;
-5. writes the report and work-log row; and
-6. tells you exactly how to try it.
-
-There is no separate brief approval, build chat, review chat, or decision gate for
-local reversible work.
-
-When the task is genuinely High-Stakes, the AI changes nothing and points you to:
-
-```text
-Plan a High-Stakes task: [the result you want]
-```
-
-High-Stakes work keeps exact approval, safe rehearsal, mandatory fresh-context
-review, qualified-human boundaries, and separate authority for every live action.
-
-## What Cairn changed in v2.3
-
-Contract v2.3 permits an owner to personally link an official installed AI-provider
-account without a qualified-human verdict for one tightly contained scheduler proof.
-The AI never operates or observes login and never receives a credential, token,
-cookie, or raw account value.
-
-The contained profile stays High-Stakes and disposable. It allows at most two
-independent Standard tasks and four fixed provider calls — one Planning and one
-Building call per task — with no retry. Every model read must be physically confined
-to the new proof repository; writes are limited to frozen passive text artifacts and
-the task report; model-authored code and commands are never executed. A new Final
-must resolve or contain every retained finding and receive a fresh non-failing review
-before the owner can activate it. Valuable projects, permission changes, billing,
-production, and public actions are not covered by this exception.
-
-## What Cairn changed in v2.2
-
-Contract v2.2 ends Bootstrap Cairn's serial-only restriction. An activated concurrent
-path may run at most two independent Standard tasks in isolated temporary worktrees
-when their declared paths do not overlap, they have no dependencies or task-level
-external actions, and completed work integrates into `main` one task at a time.
-
-That disposable concurrent path may make at most two separately bounded, tool-free
-provider calls through official installed authentication — one per task — after the
-owner approves both exact calls and one total cost cap. Task 016 remains historical
-evidence; only a new approved, reviewed, and accepted High-Stakes Final task may
-reuse or repair its implementation. The v2.2 amendment itself does not activate it.
-
-## What Cairn changed in v2.1
-
-Contract v2.1 makes the Direction Gate advisory. It still stops patching long enough
-to show the owner what failed and compare real alternatives, but the owner may
-explicitly continue the same approach after seeing that evidence.
-
-It also permits one disposable, tool-free AI-provider call through the provider's
-official installed authentication without requiring a qualified-human review,
-synthetic credential canary, or operating-system isolation layer. The credential
-value still never enters chat, commands, model-visible tools, output, logs, project
-files, or Git, and the owner still approves the exact credential use, provider call,
-and fixed cost cap separately.
-
-## Why Cairn changed in v2.0
-
-Earlier Cairn versions used the same multi-chat gated loop for nearly every feature.
-That protected boundaries, but it also let planning and review become the work. In
-Cairn's own development, repeated repair tasks and two Direction Gates failed to
-produce an activatable result.
-
-Contract v2.0 keeps the protections that stop real harm and removes gates from
-routine implementation. The guiding question is now: **is this action local and
-reversible, or does it cross a real risk boundary?**
-
-## Cairn's own bootstrap
-
-Cairn cannot require an unreliable Cairn runtime to repair itself. Maintainers use:
-
-```text
-Bootstrap Cairn: [the visible improvement]
-```
-
-Bootstrap work normally runs directly through the current coding agent. Contract
-v2.2 also permits an activated bounded path with at most two independent Standard
-tasks in isolated temporary worktrees and serial integration into `main`. Genuine
-High-Stakes work retains all of its gates.
-
-Task 016 remains disabled historical evidence. A new High-Stakes Final task may name
-its exact implementation and retained concerns, reuse or repair the code, and prove
-the current contract boundary before any separate activation decision.
-
-## The safety boundary
-
-Tiny and Standard autonomy includes scoped repository edits, already-installed local
-tools, proportionate tests, local previews, and safe exact-name Git commits.
-
-The AI still needs your exact approval for:
-
-- installing or updating software;
-- network access or external-service writes;
-- credentials or model cost;
-- deployment, publishing, or public messages;
-- destructive or irreversible actions;
-- production changes or valuable data; and
-- work requiring a qualified security, payments, infrastructure, legal, or safety
-  expert.
-
-Never paste a password, API key, token, bank detail, recovery code, or `.env` contents
-into chat.
-
-## The files that keep memory
+The product's short serial task contract is deliberately smaller than the maintainer
+contract. It records the requested and supported outcomes, route, owned paths,
+protected Git state, checks, and DONE/STOPPED meanings. It is project memory, not a
+legacy approval ceremony.
 
 Each project keeps:
 
 - `AGENTS.md` — the project contract;
-- `docs/ai-work/PROJECT.md` — the goal, users, milestone, and current boundaries;
-- `docs/ai-work/tasks/NNN-brief.md` — the task's recorded outcome and boundary;
+- `docs/ai-work/PROJECT.md` — goal, users, and milestone;
+- `docs/ai-work/tasks/NNN-brief.md` — the short task contract;
 - `docs/ai-work/tasks/NNN-report.md` — what actually happened; and
-- `docs/ai-work/LOG.md` — one row per completed or stopped task.
+- `docs/ai-work/LOG.md` — one append-only row per completed or stopped task.
 
-Routine briefs are not permission slips. They let another chat continue without
-guessing. Existing `PILOT.md` files may remain, but the pilot no longer gates work.
+A visible stone counts only a DONE record that also says milestone movement was YES.
+The offline lifecycle demonstration never creates a stone.
 
-## When the AI should stop
+## Safety boundary
 
-The AI stops when the project root or ownership is unclear, protected work changes,
-the task crosses into High-Stakes work, required authority or expertise is missing,
-a secret could leak, rollback is not credible, an external effect is unapproved, or
-the Direction Gate is waiting for the owner's direction.
+Cairn protects existing tracked, staged, and untracked work. It never cleans,
+resets, stashes, or broadly stages that work. Legacy `.git/cairn` state is detected
+read-only and blocks new mutation until a separately reviewed migration exists.
 
-An ordinary compile error, behavior mismatch, or broken fixture is normally repaired
-and rerun inside the same task.
+Never paste a password, API key, token, recovery code, bank detail, or `.env`
+contents into chat or Cairn.
 
-If you feel lost, type:
+Provider connection, credential use, model calls, cost, dependency changes,
+deployment, valuable-data migration, and public effects remain separate
+High-Stakes work.
 
-```text
-Stop. What just happened?
+## Trying the offline foundation
+
+With the repository's dependencies already installed:
+
+```powershell
+$env:CAIRN_MOCK = "1"
+npm.cmd --prefix app start
 ```
 
-If the same approach keeps failing, type:
+Or use the CLI from a Cairn project:
 
-```text
-Direction check: [what keeps going wrong]
+```powershell
+node path\to\cairn\cli\dist\src\index.js task --mock "Describe one visible outcome"
 ```
 
-The Direction Gate compares a smaller milestone, different architecture, experienced
-help, deferral, and the cost of continuing. It does not ban the current approach. To
-continue it after seeing that evidence, type:
+Success is a route card labeled `Provider none` and `Model none`, four activity
+stages, a verified result, exactly one brief/report/log append, and no milestone
+stone. It is not proof of self-hosting or real model work.
 
-```text
-Owner override: continue this approach after the Direction Gate.
-```
+## History and versioning
 
-## Current software status
+Contract v2.3 remains the current project-governance version. The scheduler,
+concurrency, provider, and experimental paths explored under earlier tasks remain
+recoverable in Git and documented in [CHANGELOG.md](CHANGELOG.md) and
+`docs/ai-work/tasks/`. The active runtime reset does not rewrite that history or
+activate any historical candidate.
 
-The written protocol and browser companion describe Contract v2.3. The current Cairn
-CLI and Desktop runtime still implement the older gated sequence and are **legacy
-until a separate bootstrap implementation updates them**. Do not treat their extra
-approval screens or disabled scheduler candidates as the v2.3 workflow.
-
-The written commands can be used with any coding agent that can read and edit project
-files. Cairn's existing CLI and Desktop use Claude models; no provider credential
-should ever be pasted into Cairn or chat.
-
-## Sharing and versioning
-
-Share this folder or the repository link. Cairn is language-independent and licensed
-under the [MIT License](LICENSE).
-
-The project contract carries a version number (`Cairn Contract v2.3`).
-[CHANGELOG.md](CHANGELOG.md) records each version, and
-[Everyday Workflow](EVERYDAY-WORKFLOW.md) explains reviewed updates.
+Cairn is licensed under the [MIT License](LICENSE).

@@ -1,87 +1,68 @@
 # Getting Ready — before your first project
 
-Ten minutes of setup, once. After this you will not need to install anything else to
-use the framework.
+Cairn's current foundation works locally and can demonstrate its complete serial
+lifecycle without an AI account.
 
 ## What you need
 
-**1. An AI coding agent.** This is an AI that can read and edit files in a folder on
-your computer — not just a chat window. Cairn is built for Claude Code — its app and
-CLI run Claude models — so install Claude Code if you can. The written commands also
-work in similar tools, such as Cursor.
-
-**2. Git.** Git is a save-history tool. It takes snapshots of your project so any
-mistake can be undone by going back to an earlier snapshot. It is free and safe to
-install.
-
-To check whether you already have it, open a **terminal** (see the glossary below) and
-type:
+**1. Git.** Git is the save-history tool Cairn uses to protect your work.
 
 ```text
 git --version
 ```
 
-If you see a version number, you have Git. If you see an error, download it from
-[git-scm.com](https://git-scm.com) and install it with the default options.
-
-Git snapshots are labeled with a name and email. Set yours once (they stay on your
-computer; nothing is sent anywhere):
+If that prints a version, Git is ready. If it does not, install Git from
+[git-scm.com](https://git-scm.com) yourself. Git commits also need a local name and
+email:
 
 ```text
 git config --global user.name "Your Name"
 git config --global user.email "you@example.com"
 ```
 
-Do this yourself rather than letting an AI do it — the framework forbids the AI from
-changing settings that affect your whole computer.
+These are computer-wide settings, so Cairn does not change them for you.
 
-**3. One folder per project.** Make an empty folder anywhere you like, named after
-your project. Everything the AI builds will live inside it.
+**2. One folder per project.** New-project setup needs an empty folder. If the
+folder already contains work, use [Project Conversion](PROJECT-CONVERSION.md).
+
+**3. A coding agent only when you want real implementation.** The written Cairn
+contract works with a coding agent that can read and edit a project folder. The
+current Cairn app and CLI do not connect one yet. They stop honestly at
+connection-required in normal mode.
+
+`CAIRN_MOCK=1` enables the deterministic offline demonstration. It is not a model,
+does not implement the requested change, and needs no login or secret.
 
 ## The one rule that protects you most
 
-**Never paste a password, bank detail, API key, token, private key, recovery code, or
-the contents of a `.env` file into any chat.** No legitimate step in this framework
-ever needs you to. If an AI asks for one, stop and refuse — the framework's rules say
-it must never ask.
+Never paste a password, bank detail, API key, token, private key, recovery code, or
+the contents of a `.env` file into chat or Cairn. Provider connection will be a
+separate reviewed feature; this foundation never asks for a credential.
 
 ## Words you'll see
 
-Plain one-line meanings for every term the framework uses. Skim now; return when a
-word confuses you.
-
-| Word | What it means |
+| Word | Plain meaning |
 |---|---|
-| **Terminal** | A window where you type commands instead of clicking. On Windows it is called PowerShell or Terminal; on Mac, Terminal. |
-| **Git** | The save-history tool. It snapshots your project so mistakes can be undone. |
-| **Repository (repo)** | A folder whose history Git is tracking. |
-| **Commit** | One saved snapshot in Git, with a note saying what changed. |
-| **Diff** | A before-and-after comparison showing exactly which lines changed. |
-| **Untracked / modified files** | Files Git has not snapshotted yet, or files changed since the last snapshot. They may be unsaved work — the framework protects them. |
-| **Dependency** | Someone else's code your project relies on. Installing one downloads outside code, so it always needs your approval. |
-| **Deploy** | Putting your project on the internet where other people can reach it. |
-| **Check / test** | A small program that verifies a piece of your project still works. |
-| **Milestone** | The next result you could actually see or try — "the page shows my list," not "the code is better." |
-| **Project contract** | The `AGENTS.md` rules file in your project that the AI must read and obey in every chat. |
-| **Task brief** | A short saved record of one task's outcome, boundary, protected work, and checks. For Tiny and Standard work it is project memory, not a separate approval gate. |
-| **Report** | The saved file the AI writes after building, saying what actually happened. |
-| **Applied** | A completed Tiny or Standard change that became local project behavior without a separate owner-decision gate because it was reversible and stayed inside the repository. |
-| **Draft / Final** | High-Stakes terms. A Draft is a candidate to judge; a Final is intended for activation after approval and review. Drafts never become real silently. |
-| **Experimental Draft** | A disabled, synthetic-only High-Stakes Draft used to learn from one supported user path before anyone claims it is safe for valuable work. |
-| **Supported user path** | The exact visible buttons or commands the owner will use to judge an Experimental Draft. Internal helpers and unsupported call sequences stay outside that promise unless they can break containment. |
-| **DONE / STOPPED** | DONE means the bounded outcome and its checks completed. STOPPED means they did not. Both are honest outcomes. |
-| **Lane** | The task's risk level: Tiny, Standard, or High-Stakes. Tiny and Standard proceed; High-Stakes pauses for approval and review. |
-| **Risk-based autonomy** | Cairn's default: local reversible work proceeds continuously, while costly, external, destructive, or hard-to-reverse work pauses for the owner. |
-| **Direction Gate** | A pause that shows what failed and compares real options. It advises the owner but does not ban another attempt on the same approach after an explicit owner decision. |
-| **Fresh-context review** | Asking a brand-new chat to check finished work. It is optional for routine work and mandatory for High-Stakes work. |
-| **Repair and rerun** | Fixing a correctable implementation or test-harness mistake inside the same bounded task, preserving important failed evidence, and rerunning affected checks. |
-| **Bootstrap Cairn** | The temporary workflow Cairn's maintainers use to improve Cairn directly until reliable self-hosting works. It normally runs serially, with one bounded exception for up to two independent Standard tasks in isolated temporary worktrees and serial integration into main. |
-| **Owner override** | Your explicit instruction to change a process-only next step. It cannot expand the task's bounded scope or waive protection, authority, secret, external-effect, rollback, or product-safety boundaries. |
-| **Contract amendment** | Your always-available way to pause product work, change the rules, inspect the complete rule diff, and reactivate only with a separate exact approval. |
-| **Secret** | Any password, key, token, or private detail. Ordinary secrets never go into a chat or an AI-accessible surface. |
-| **Owner-managed local AI access** | A provider credential or account connection the owner personally manages through official installed authentication or an operating-system credential store. It can support a disposable tool-free call profile or an approved contained scheduler profile without a qualified-human verdict solely for provider authentication. Secrets never enter AI-visible surfaces; the owner approves the exact access, provider, model, disposable target, finite call count, and cost or quota cap. |
+| **Terminal** | A window where you type commands. On Windows this is PowerShell or Terminal. |
+| **Git** | Save history for a project. |
+| **Repository** | A project folder whose history Git tracks. |
+| **Commit** | One named saved snapshot. |
+| **Diff** | The exact before-and-after file changes. |
+| **Tracked / staged / untracked** | Different kinds of current Git work. Cairn treats all of them as valuable. |
+| **Dependency** | Someone else's software used by the project. Adding or updating one needs explicit approval. |
+| **Deploy** | Put software somewhere other people can access it. |
+| **Milestone** | The next result you can personally see or try. |
+| **Task contract** | The short brief recording the requested outcome, supported outcome, route, owned records, checks, and stop conditions. |
+| **Adapter** | A narrow connector between Cairn's serial coordinator and an execution method. The current offline adapter is deterministic and is not a model. |
+| **Connected model** | A model route whose connection has been established outside the task. This foundation has none in normal mode. |
+| **DONE / STOPPED** | DONE means the bounded supported outcome passed its checks. STOPPED means it did not. |
+| **Milestone movement** | YES only when a finished task visibly advanced the project milestone. The offline demonstration records NO. |
+| **Direction Gate** | A pause after repeated non-progress that compares a smaller milestone, different architecture, experienced help, and deferral. |
+| **High-Stakes** | Work that is costly, external, destructive, credentialed, or hard to reverse and therefore needs a pinned plan and review. |
 
 ## Ready?
 
 - Empty folder → [Project Kickoff](PROJECT-KICKOFF.md)
-- Folder that already has files in it → [Project Conversion](PROJECT-CONVERSION.md)
+- Existing work → [Project Conversion](PROJECT-CONVERSION.md)
+- Offline Desktop demonstration → set `CAIRN_MOCK=1`, start the app, and follow
+  project → task → route → run → check → result.

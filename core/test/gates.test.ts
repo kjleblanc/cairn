@@ -1,28 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { assertApprovalValid, checkBashCommand, checkDirectionGate, recordApproval } from "../src/gates.js";
-import { LogRow } from "../src/files.js";
+import { checkBashCommand, checkDirectionGate } from "../src/gates.js";
+import type { LogRow } from "../src/files.js";
 
 const row = (task: string, outcome: string, moved: string): LogRow => ({
   task, date: "2026-07-17", lane: "Standard", mode: "Draft", outcome, decision: "accept", summary: "s", moved,
-});
-
-test("approval gate: build refused when the brief changes after approval", () => {
-  const dir = mkdtempSync(join(tmpdir(), "cairn-"));
-  const brief = join(dir, "001-brief.md");
-  writeFileSync(brief, "original brief");
-  const approval = recordApproval(1, brief);
-  assertApprovalValid(approval); // unchanged -> fine
-  writeFileSync(brief, "silently widened scope");
-  assert.throws(() => assertApprovalValid(approval), /GATE: the brief changed/);
-});
-
-test("approval gate: refuses a missing brief", () => {
-  const dir = mkdtempSync(join(tmpdir(), "cairn-"));
-  assert.throws(() => recordApproval(1, join(dir, "nope.md")), /not found/);
 });
 
 test("direction gate: trips on two consecutive STOPPED", () => {

@@ -1,35 +1,50 @@
 # Cairn Desktop
 
-The Cairn workflow as a desktop app: define → approve → build → verify → decide,
-with the safety rules enforced by code. One project, one window, one safe step at a time.
+Cairn Desktop gives a beginner one understandable path:
 
-## Install
-
-Download the latest release for your computer from
-https://github.com/kjleblanc/cairn/releases — the `.exe` Setup on Windows,
-the `.dmg` on Mac.
-
-**The honest part about the warnings.** Cairn Desktop is not yet code-signed
-(signing certificates cost real money; it's planned). Your computer will warn you
-once:
-
-- **Windows** shows "Windows protected your PC". Click **More info**, then
-  **Run anyway**.
-- **Mac** says the app "can't be opened because it is from an unidentified
-  developer". Right-click the app, choose **Open**, then **Open** again.
-
-The app also needs [Claude Code](https://claude.com/claude-code) signed in once —
-the first-run screen walks you through it.
-
-## Develop
-
-```sh
-npm run build -w @cairn/core   # repo root, once
-cd app && npm install
-npm start                      # dev window
-npm run test:smoke             # offline mock loop, end to end
-npm run make                   # local installer for this OS
+```text
+choose a project → enter a task → see the recommended route → run → check → result
 ```
 
-`CAIRN_MOCK=1 npm start` runs the whole app against the offline demo engine —
-no AI calls, no sign-in needed.
+The app retains first-run instructions, new/open/recent project handling, Project
+Conversion guidance, a model-route card, compact activity, Git protection, and
+honest task history.
+
+Normal mode currently has no connected model. It stops at a connection-required
+screen and writes nothing. Provider setup is not hidden in this build.
+
+## Offline demonstration
+
+With repository dependencies already installed:
+
+```powershell
+$env:CAIRN_MOCK = "1"
+npm.cmd --prefix app start
+```
+
+The demo route is labeled:
+
+```text
+Cairn offline demonstration
+Provider: none
+Model: none
+```
+
+It proves route → run → check → result and record protection. It does not implement
+the arbitrary product request, call a model, use a credential, or add a milestone
+stone.
+
+## Local verification
+
+```text
+npm run build --workspace core
+npm.cmd --prefix app run typecheck
+npm.cmd --prefix app run build:vite
+cd app
+npx --no-install playwright test
+```
+
+The app has no active five-gate Standard workflow, provider SDK import, parallel
+task deck, bounded-run screen, scheduler, passive proof, model-effort control, or
+experimental activation path. Earlier implementations remain in Git history and
+task evidence.

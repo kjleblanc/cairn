@@ -5,6 +5,25 @@ project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates
 [EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
 automatic.
 
+## Active runtime reset — Task 031 — 2026-07-21
+
+- Replaced the legacy define → approve → build → review → decide product workflow
+  with one serial project → task → route → run → check → result path.
+- Kept first-run guidance, project create/open/recent handling, Project Conversion
+  guidance, the useful route and activity UI, Git protection, and honest task
+  records.
+- Removed concurrency, bounded-run, scheduler, passive-proof, experimental provider,
+  model-effort, retry, and continuation paths from active core, CLI, Desktop, and
+  clean generated output. Their Git history and task evidence remain unchanged.
+- Added one deterministic offline adapter seam, explicitly labeled provider `none`
+  and model `none`. It proves lifecycle wiring but reports that the requested
+  product change was not attempted and milestone movement was `NO`.
+- Normal mode now stops at connection-required without writing records. This reset
+  connects no provider, uses no credential, makes no model call, adds no dependency,
+  deploys nothing, and does not claim Cairn's self-hosting milestone.
+- Contract v2.3 remains unchanged. Historical contract permissions do not reactivate
+  removed runtime experiments.
+
 ## Contract v2.3 — 2026-07-21
 
 - Added a narrow owner-managed provider account connection profile. The owner may

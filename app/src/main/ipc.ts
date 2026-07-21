@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, shell } from "electron";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { initProject, isCairnProject, projectStatus, schedulerFinalEnabled } from "@cairn/core";
+import { initProject, isCairnProject, projectStatus } from "@cairn/core";
 import type { InitInput, Preflight, ProjectList, RecentProject, Result, UpdateInfo } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
@@ -16,19 +16,8 @@ function toResult<T>(context: string, fn: () => T): Result<T> {
 }
 
 async function preflight(): Promise<Preflight> {
-  const parallelDraft = process.env.CAIRN_PARALLEL_DRAFT === "1";
-  const schedulerFinal = schedulerFinalEnabled();
-  if (process.env.CAIRN_MOCK === "1") return { claudeReady: true, reason: null, mock: true, parallelDraft, schedulerFinal };
-  try {
-    await import("@anthropic-ai/claude-agent-sdk");
-  } catch (err) {
-    logError("preflight", err);
-    return { claudeReady: false, reason: "no-sdk", mock: false, parallelDraft, schedulerFinal };
-  }
-  // Import success proves only that the already-installed legacy provider
-  // software is present. Cairn does not inspect provider-owned account files and
-  // does not treat their existence as connection evidence.
-  return { claudeReady: true, reason: null, mock: false, parallelDraft, schedulerFinal };
+  const mock = process.env.CAIRN_MOCK === "1";
+  return { mock, mode: mock ? "offline-demo" : "connection-required" };
 }
 
 export function registerProjectIpc(): void {
@@ -101,7 +90,7 @@ export function registerProjectIpc(): void {
   });
 
   ipcMain.handle("app:openExternal", async (_e, url: string) => {
-    if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/|claude\.com\/)/.test(url)) return;
+    if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/)/.test(url)) return;
     await shell.openExternal(url);
   });
 }

@@ -1,74 +1,30 @@
 import pc from "picocolors";
 import { projectStatus } from "@cairn/core";
 import { banner, label, stack } from "../ui.js";
-import { concurrentStatusLines } from "./concurrent.js";
-import type { SchedulerSummary } from "@cairn/core";
-
-export function parallelStatusLines(status: ReturnType<typeof projectStatus>): string[] {
-  if (!status.parallel) return [];
-  const lines = [`${status.parallel.label} — coordinator-owned tasks:`];
-  for (const task of status.parallel.tasks.filter((item) => item.phase !== "integrated")) {
-    lines.push(
-      `  Task ${String(task.taskNumber).padStart(3, "0")} · ${task.phase}` +
-      `${task.blocker ? ` · STOPPED: ${task.blocker}` : task.waitingReason ? ` · ${task.waitingReason}` : ""} · ${task.branch} · ${task.worktree}`,
-    );
-  }
-  return lines;
-}
-
-export function schedulerStatusLines(status: { scheduler?: SchedulerSummary | null }): string[] {
-  if (!status.scheduler) return [];
-  const lines = ["Two-task scheduler — one closed batch:"];
-  for (const task of status.scheduler.tasks) {
-    const detail = task.attention
-      ? ` — ${task.attention}`
-      : task.waitingReason
-        ? ` — ${task.waitingReason}`
-        : "";
-    lines.push(`  Task ${String(task.taskNumber).padStart(3, "0")} · ${task.phase}${detail}`);
-  }
-  lines.push(`  Sessions: ${status.scheduler.sessionCount} · maximum active engines: ${status.scheduler.maximumActiveEngines}`);
-  return lines;
-}
 
 export function statusFlow(root: string): void {
   console.log(banner());
-  let s;
-  try {
-    s = projectStatus(root);
-  } catch {
-    console.log(pc.yellow("No Cairn contract in this folder. Run `cairn init` (empty folder) or see PROJECT-CONVERSION.md."));
+  let status;
+  try { status = projectStatus(root); }
+  catch {
+    console.log(pc.yellow("No Cairn contract in this folder. Run `cairn init` in an empty folder or see Project Conversion."));
     process.exitCode = 1;
     return;
   }
-  const stopped = s.log.filter((r) => /STOP/i.test(r.outcome)).length;
-
-  console.log(`${pc.bold(s.facts.name || "Unnamed project")}  ${pc.dim(`(Contract v${s.facts.contractVersion || "?"}, ${s.facts.status || "?"})`)}`);
-  console.log(`Milestone: ${s.facts.milestone || pc.dim("not set")}`);
-  console.log("");
-  if (s.stones > 0) console.log(stack(s.stones) + "\n");
-  console.log(`Tasks closed: ${s.log.length}   ${pc.green(`DONE: ${s.stones}`)}   ${pc.yellow(`STOPPED: ${stopped}`)}`);
-
-  const parallelLines = parallelStatusLines(s);
-  if (parallelLines.length) console.log(`\n${parallelLines.join("\n")}`);
-  const schedulerLines = schedulerStatusLines(s);
-  if (schedulerLines.length) console.log(`\n${schedulerLines.join("\n")}`);
-  const boundedLines = concurrentStatusLines(root);
-  if (boundedLines.length) console.log(`\n${boundedLines.join("\n")}`);
-
-  const recent = s.log.slice(-5).reverse();
+  const stopped = status.log.filter((row) => /STOP/i.test(row.outcome)).length;
+  console.log(`${pc.bold(status.facts.name || "Unnamed project")}  ${pc.dim(`(Contract v${status.facts.contractVersion || "?"}, ${status.facts.status || "?"})`)}`);
+  console.log(`Milestone: ${status.facts.milestone || pc.dim("not set")}`);
+  if (status.stones > 0) console.log(`\n${stack(status.stones)}`);
+  console.log(`\nRecords closed: ${status.log.length}   ${pc.green(`milestone stones: ${status.stones}`)}   ${pc.yellow(`STOPPED: ${stopped}`)}`);
+  if (status.legacyState) console.log(`\n${pc.yellow("Legacy runtime state is preserved. New task mutation is blocked until a reviewed migration exists.")}`);
+  const recent = status.log.slice(-5).reverse();
   if (recent.length) {
-    console.log("\nRecent work:");
-    for (const r of recent) {
-      const mark = /DONE/i.test(r.outcome) ? pc.green("●") : pc.yellow("◐");
-      console.log(`  ${mark} #${r.task} ${r.summary || r.decision} ${pc.dim(`(${r.outcome}, ${r.date})`)}`);
+    console.log("\nRecent records:");
+    for (const row of recent) {
+      const mark = /^DONE$/i.test(row.outcome) ? pc.green("●") : pc.yellow("◐");
+      console.log(`  ${mark} #${row.task} ${row.summary || row.decision} ${pc.dim(`(${row.outcome}, moved ${row.moved})`)}`);
     }
-  } else {
-    console.log(pc.dim("\nNo tasks closed yet — run `cairn task` to place the first stone."));
-  }
-
-  if (s.unfinished) {
-    console.log(`\n${pc.yellow("◌")} Task ${s.unfinished.taskNumber} has a brief but no logged decision — run \`cairn task\` to continue it.`);
-  }
-  if (s.gate.tripped) console.log(`\n${label.gate} ${s.gate.reason}\nRun \`cairn task\` — it will hold the line and walk you through the options.`);
+  } else console.log(pc.dim("\nNo task records yet — run `cairn task`."));
+  if (status.unfinished) console.log(`\n${pc.yellow("○")} Task ${String(status.unfinished.taskNumber).padStart(3, "0")} has retained records and no closing log row.`);
+  if (status.gate.tripped) console.log(`\n${label.gate} ${status.gate.reason}`);
 }

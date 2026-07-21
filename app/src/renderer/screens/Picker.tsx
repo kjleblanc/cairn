@@ -124,6 +124,10 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
         <Pill kind="primary" onClick={() => setCreating(true)}>Start a new project</Pill>
         <Pill onClick={onOpenFolder}>Open a project folder</Pill>
       </div>
+      <Card title="bring an existing project">
+        <p className="small">A folder that already has a Cairn contract can be opened directly. For other existing work, follow Project Conversion in the guides.</p>
+        <p className="small muted">This reset does not transform legacy <span className="mono">.git/cairn</span> task state; it preserves that state and blocks new task mutation until a reviewed migration exists.</p>
+      </Card>
     </div>
   );
 }

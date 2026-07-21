@@ -7,7 +7,7 @@ export function banner(): string {
     "",
     `      ${pc.green("●")}`,
     `     ${pc.dim("●●")}      ${pc.bold("C A I R N")}`,
-    `    ${pc.dim("●●●")}     ${pc.dim("build with AI, one safe step at a time")}`,
+    `    ${pc.dim("●●●")}     ${pc.dim("one project, one task, one honest result")}`,
     `   ${pc.dim("●●●●")}`,
     "",
   ].join("\n");

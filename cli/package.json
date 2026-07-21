@@ -1,21 +1,15 @@
 {
   "name": "cairn-cli",
   "version": "0.1.0",
-  "description": "Cairn — the gated AI coding workflow for people who don't code, as a CLI",
+  "description": "Cairn — one serial task route for people who do not code",
   "license": "MIT",
   "type": "module",
-  "bin": {
-    "cairn": "dist/src/index.js"
-  },
-  "files": [
-    "dist/src"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
+  "bin": { "cairn": "dist/src/index.js" },
+  "files": ["dist/src"],
+  "engines": { "node": ">=18" },
   "scripts": {
-    "build": "tsc",
-    "test": "npm run build && node --test dist/test/ui.test.js dist/test/model.test.js dist/test/effort.test.js dist/test/coordinator.test.js dist/test/concurrent.test.js dist/test/scheduler.test.js",
+    "build": "node scripts/clean-dist.mjs && tsc",
+    "test": "npm run build && node --test dist/test/ui.test.js dist/test/task.test.js",
     "start": "npm run build && node dist/src/index.js"
   },
   "dependencies": {

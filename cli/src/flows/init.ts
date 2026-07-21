@@ -49,5 +49,5 @@ export async function initFlow(root: string): Promise<void> {
     );
   }
 
-  p.outro(`Your project has its rulebook. Next: ${pc.bold("cairn task")} — make the first task a small Draft you can see.`);
+  p.outro(`Your project has its rulebook. Next: ${pc.bold("cairn task")} — enter one visible outcome.`);
 }

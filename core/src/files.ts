@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, appendFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,16 +40,10 @@ export const paths = {
   tasks: (root: string) => join(root, "docs", "ai-work", "tasks"),
   brief: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-brief.md`),
   report: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-report.md`),
-  approval: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-approval.json`),
-  decision: (root: string, n: number) => join(paths.tasks(root), `${pad(n)}-decision.json`),
 };
 
 export function pad(n: number): string {
   return String(n).padStart(3, "0");
-}
-
-export function sha256File(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 let contractOverride: string | null = null;

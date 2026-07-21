@@ -2,7 +2,7 @@
   "name": "cairn-desktop",
   "productName": "Cairn",
   "version": "0.1.0",
-  "description": "Build software with AI, one safe step at a time — the Cairn workflow as a desktop app",
+  "description": "Route one project task at a time and keep an honest local record",
   "author": "Ken LeBlanc",
   "license": "MIT",
   "private": true,
@@ -19,7 +19,6 @@
     "test:smoke": "npm run build:vite && playwright test"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
     "@cairn/core": "file:../core",
     "electron-squirrel-startup": "^1.0.1"
   },
