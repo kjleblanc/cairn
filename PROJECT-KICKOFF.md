@@ -1,130 +1,47 @@
-# Project Kickoff — brand-new project
+# Project Kickoff — empty folder
 
-Use this guide when your project folder is empty. If the folder already contains code,
-documents, or anything you might need, stop and use
-[Project Conversion](PROJECT-CONVERSION.md) instead — it protects what exists.
+Use this only when the project folder is empty. If it contains anything you may need,
+use [Project Conversion](PROJECT-CONVERSION.md).
 
-Before starting, finish [Getting Ready](GETTING-READY.md): you need an AI coding
-agent, Git, and an empty project folder.
-
-Setup takes three steps and about fifteen minutes. Because the rules come pre-written
-in this framework, the AI only fills in blanks — it does not invent your rulebook.
-
-> **The fast path:** in Chrome or Edge, [the Cairn app](https://kjleblanc.github.io/cairn/)
-> can do Steps 1 and most of Step 2 for you — answer the five questions in the app,
-> connect your empty folder, and it creates every workflow file itself. Then you only
-> paste the short verification message shown below. The steps here are the manual
-> path, which works everywhere.
-
-## Step 1 — copy in the contract
-
-Copy the file `CONTRACT-TEMPLATE.md` from this framework folder into your empty
-project folder (drag it over, download it from the app, or copy and paste in your
-file explorer). This file becomes your project's rulebook.
-
-Then answer these five questions in plain language — you will paste them in Step 2:
+Copy `CONTRACT-TEMPLATE.md` into the empty folder, then open that folder in your
+coding agent and paste:
 
 ```text
-PROJECT NAME:
-WHAT I WANT TO BUILD:
-WHO WILL USE IT:
-FIRST VISIBLE MILESTONE:
-DIRECTION GATE TIMEBOX:
-```
+Set up Cairn in this empty folder. I am a beginner; explain the result plainly.
 
-The **first visible milestone** is the first thing you could actually see or try —
-"a page that shows my recipe list," not "set up the database." If you have no timebox
-in mind, write "default" (two attempts without visible progress).
-
-## Step 2 — run the setup
-
-Open your project folder in your AI coding agent and paste this, with your five
-answers filled in. This is the longest prompt in the whole framework, and you use it
-once.
-
-```text
-Set up the AI coding workflow in this folder. I am a complete beginner; explain
-everything in plain language.
-
-My answers:
 PROJECT NAME: [NAME]
 WHAT I WANT TO BUILD: [DESCRIPTION]
 WHO WILL USE IT: [USERS]
 FIRST VISIBLE MILESTONE: [MILESTONE]
-DIRECTION GATE TIMEBOX: [TIMEBOX OR "default"]
 
-First inspect the folder. If it contains anything besides CONTRACT-TEMPLATE.md, stop
-without writing and tell me to use the Project Conversion guide.
+First inspect the folder. If it contains anything besides CONTRACT-TEMPLATE.md,
+stop without writing and tell me to use Project Conversion.
 
-If the folder is clean:
-1. Rename CONTRACT-TEMPLATE.md to AGENTS.md and fill in its Project facts section
-   with my answers, keeping STATUS: ACTIVE.
-2. Create docs/ai-work/PROJECT.md holding the goal, users, first milestone, what is
-   out of scope for now, and the Direction Gate timebox.
-3. Create docs/ai-work/LOG.md and docs/ai-work/PILOT.md, each containing only its
-   empty table as defined in the contract.
-4. Create the empty folder docs/ai-work/tasks/.
-5. Initialize Git in this folder and make one setup commit of exactly these files,
-   staged by name. If Git is missing or has no name and email configured, create the
-   files anyway, skip the commit, and tell me plainly what to do.
+If it is empty:
+1. Rename CONTRACT-TEMPLATE.md to AGENTS.md, keep STATUS: ACTIVE, and fill in my
+   project facts.
+2. Create docs/ai-work/PROJECT.md with the goal, users, milestone, and current scope.
+3. Create docs/ai-work/LOG.md with the contract's empty log table and create the
+   empty docs/ai-work/tasks folder.
+4. If an empty PILOT.md is created for older-tool compatibility, label it historical;
+   it must not gate work.
+5. Initialize Git and commit only these setup files by exact name. If Git or identity
+   is unavailable, leave the files uncommitted and explain the next step.
 
-Create nothing else. Do not install anything, connect to any service, add a remote,
-change settings outside this folder, or write any product code.
+Create nothing else. Do not install software, connect a provider, add a remote, or
+write product code.
 
-Finish by showing me: every file you created, the filled-in Project facts, the Git
-status, and a one-paragraph summary of what the contract makes you do from now on.
-Then tell me my next step is "Work on: [my first milestone]". Explain that Tiny and
-Standard work will proceed continuously, while High-Stakes work will stop for a
-separate plan and approval.
+Finish by showing the files, project facts, and Git status. Then tell me to use:
+"Work on: [my first visible milestone]".
 ```
 
-### If the app set up your folder for you
-
-When Cairn's automatic setup created the files, use this shorter message instead of
-the one above:
+Check that the facts are right and no unexpected files appeared. Then start one small
+visible task:
 
 ```text
-The Cairn app has already created this project's workflow files: AGENTS.md (the
-project contract, with my Project facts filled in), docs/ai-work/PROJECT.md,
-docs/ai-work/LOG.md, docs/ai-work/PILOT.md, and the empty folder
-docs/ai-work/tasks/.
-
-Read AGENTS.md and confirm it is a complete Cairn contract with STATUS: ACTIVE and
-my facts filled in. Confirm the folder contains nothing else unexpected.
-
-Then initialize Git in this folder and make one setup commit of exactly those
-files, staged by name. If Git is missing or has no name and email configured, skip
-the commit and tell me plainly what to do.
-
-Do not install anything, connect to any service, add a remote, or write any
-product code. Finish with a one-paragraph summary of what the contract makes you
-do from now on, and tell me my next step is "Work on: [my first milestone]".
-Explain that Tiny and Standard work proceeds without a separate approval gate,
-while High-Stakes work stops for a plan and approval.
+Work on: [the smallest useful version of the milestone].
 ```
 
-## Step 3 — check the setup
-
-You do not need to judge any code — just confirm these plain facts:
-
-- `AGENTS.md` exists and its Project facts match your five answers;
-- `docs/ai-work/` contains `PROJECT.md`, `LOG.md`, `PILOT.md`, and an empty `tasks/`
-  folder;
-- the log and pilot tables are empty — no invented results;
-- nothing else was created, installed, or connected;
-- the AI's summary says routine local work proceeds and genuine High-Stakes work
-  waits for your approval.
-
-If something is off, say so in plain language ("The milestone is wrong — it should
-be…") and let the AI correct it before you continue.
-
-## Your first task
-
-Open [Everyday Workflow](EVERYDAY-WORKFLOW.md) and type your first command:
-
-```text
-Work on: [the smallest version of your first milestone].
-```
-
-Start with something visible that you can actually try. Avoid invisible groundwork.
-If two attempts produce nothing useful, the Direction Gate exists for exactly that.
+The task proceeds continuously. The agent pauses only immediately before a concrete
+risky action such as an install, credential use, paid call, destructive change,
+external write, or deployment.

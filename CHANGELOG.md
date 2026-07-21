@@ -1,9 +1,30 @@
 # Cairn changelog
 
-The contract version lives in the header of `CONTRACT-TEMPLATE.md` and in every
-project's `AGENTS.md`. To bring a project up to date, follow "When Cairn updates" in
-[EVERYDAY-WORKFLOW.md](EVERYDAY-WORKFLOW.md) — updates are approved by you, never
-automatic.
+The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.md`.
+Contract changes are explicit local work; they are never downloaded or activated
+silently.
+
+## Contract v3.0 — 2026-07-21
+
+- Replaced the v2.x governance system with one continuous serial task workflow.
+- Removed mandatory planning chats, pinned-brief approval, fresh-context review,
+  reviewer verdicts, owner-decision receipts, activation ceremonies, Direction
+  Gates, Experimental Drafts, Bootstrap mode, scheduler/provider profiles, parallel
+  lanes, and phase handoffs from the active contract and public guides.
+- Kept short task briefs, honest reports and log rows, repair-and-rerun, exact-path
+  Git commits, and preservation of tracked, staged, modified, and untracked work.
+- Replaced task-wide High-Stakes ceremony with approval immediately before a real
+  risky action: installs, credentials, paid or data-bearing calls, valuable-data
+  changes, external writes, publication, deployment, or production effects.
+- Kept qualified-human boundaries for permissions, payments, personal or regulated
+  data, destructive migrations, production security, legal commitments, and
+  safety-critical behavior.
+- Made reviews optional advice. A review may propose follow-up work but cannot
+  automatically reopen a completed task or force an accept/revise loop.
+- Simplified project setup, conversion, provider guidance, contract updates, and the
+  self-contained browser companion to match the active serial product.
+- Preserved all v1/v2 task records, log rows, changelog entries, and Git history as
+  evidence. Their old commands no longer govern new work.
 
 ## Active runtime reset — Task 031 — 2026-07-21
 
@@ -21,7 +42,8 @@ automatic.
 - Normal mode now stops at connection-required without writing records. This reset
   connects no provider, uses no credential, makes no model call, adds no dependency,
   deploys nothing, and does not claim Cairn's self-hosting milestone.
-- Contract v2.3 remains unchanged. Historical contract permissions do not reactivate
+- Contract v2.3 remained the governing version when Task 031 was built. Contract
+  v3.0 now supersedes its process gates; historical permissions do not reactivate
   removed runtime experiments.
 
 ## Contract v2.3 — 2026-07-21

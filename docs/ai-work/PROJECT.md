@@ -13,4 +13,5 @@ Out of scope for now: accounts, servers, analytics, or paid infrastructure of an
 kind; external dependencies in the public artifacts (the app stays one self-contained
 file).
 
-Direction Gate timebox: two Standard tasks without visible progress (default)
+Working rule: one serial task at a time. Reviews are optional evidence, and real risk
+pauses only at the concrete action boundary.
