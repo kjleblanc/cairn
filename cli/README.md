@@ -23,8 +23,9 @@ If both checks pass, the only normal model route is Codex Exec. Before it starts
 CLI shows OpenAI, pinned model `gpt-5.6-sol`, the exact project, workspace data scope,
 and the one-process quota. A default-no confirmation authorizes exactly one
 ephemeral workspace-scoped process. Cairn retains only bounded JSONL terminal and
-numeric usage evidence, verifies the model-authored task records and Git result,
-and never retries or continues the run.
+numeric usage evidence, verifies the model-authored task records, and creates the
+exact-path commit itself for a clean-start DONE result. It never retries or continues
+the run.
 
 Use the explicit offline demonstration with:
 

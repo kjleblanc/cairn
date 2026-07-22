@@ -100,6 +100,7 @@ test("a connected Codex Exec route records STOPPED before any real model call", 
 
 test("one authorized fake Codex process completes one verified serial task", async () => {
   const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
   let calls = 0;
   const fake: CodexExecProcess = {
     kind: "fake",
@@ -122,8 +123,8 @@ test("one authorized fake Codex process completes one verified serial task", asy
         task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
         outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
       });
-      git(root, ["add", "--", "visible.txt", "docs/ai-work/tasks/001-brief.md", "docs/ai-work/tasks/001-report.md", "docs/ai-work/LOG.md"]);
-      git(root, ["commit", "-q", "-m", "Task 001: add visible result"]);
+      assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+      assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
       return {
         exitCode: 0,
         terminalEvent: "turn.completed",
@@ -149,10 +150,84 @@ test("one authorized fake Codex process completes one verified serial task", asy
   assert.equal(result.disposition, "DONE");
   assert.equal(result.route.recommended.model, CODEX_EXEC_MODEL);
   assert.equal(result.commit.status, "created");
+  assert.notEqual(result.commit.hash, beforeHead);
   assert.equal(readFileSync(join(root, "visible.txt"), "utf8"), "model-authored result\n");
   assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+  assert.deepEqual(git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(), [
+    "docs/ai-work/LOG.md",
+    "docs/ai-work/tasks/001-brief.md",
+    "docs/ai-work/tasks/001-report.md",
+    "visible.txt",
+  ]);
   assert.match(result.reportText, /Disposition: \*\*DONE\*\*/);
   assert.match(result.activities.at(-1)?.detail ?? "", /real Codex Exec task completed/i);
+});
+
+test("a dirty-start Codex result preserves owner work and remains uncommitted", async () => {
+  const root = project();
+  writeFileSync(join(root, "protected.txt"), "tracked\n");
+  git(root, ["add", "--", "protected.txt"]);
+  git(root, ["commit", "-q", "-m", "protected fixture"]);
+  writeFileSync(join(root, "protected.txt"), "owner edit\n");
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const beforeProtected = readFileSync(join(root, "protected.txt"), "utf8");
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
+        "# Task 001 report", "", "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
+      ].join("\n"));
+      appendLogRow(root, {
+        task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
+        outcome: "DONE", decision: "completed", summary: "Added a visible result.", moved: "YES",
+      });
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0 };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), fake)],
+  });
+
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.commit.status, "skipped");
+  assert.match(result.commit.reason, /protected starting work/i);
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(readFileSync(join(root, "protected.txt"), "utf8"), beforeProtected);
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
+  assert.equal(existsSync(join(root, "visible.txt")), true);
+});
+
+test("an unrelated task-record path prevents Cairn from committing model work", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
+        "# Task 001 report", "", "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
+      ].join("\n"));
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "999-report.md"), "unrelated task record\n");
+      appendLogRow(root, {
+        task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
+        outcome: "DONE", decision: "completed", summary: "Added a visible result.", moved: "YES",
+      });
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0 };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), fake)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "MODEL_RESULT_NOT_VERIFIED");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "999-report.md")), true);
+  assert.match(readFileSync(result.reportPath, "utf8"), /MODEL_RESULT_NOT_VERIFIED/);
 });
 
 test("the offline demonstration writes only one brief, report, and log row", async () => {

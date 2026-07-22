@@ -4,6 +4,22 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Cairn-owned verified Codex commit — Task 037 — 2026-07-22
+
+- Stopped asking non-interactive Codex to write protected `.git` metadata. Codex now
+  owns workspace edits, checks, its matching report, and its append-only log row;
+  Cairn owns the post-verification local commit.
+- For a clean-start DONE result, Cairn derives the changed and untracked paths,
+  rejects unsafe or unrelated task-record paths, stages every exact name after `--`,
+  verifies exact index isolation, and creates one local commit. It never uses broad
+  staging.
+- Preserved dirty-start work byte-for-byte and kept dirty-start model results
+  uncommitted when exact attribution is unavailable.
+- Corrected Desktop STOPPED wording so it says verification failed and retained
+  evidence needs inspection; successful DONE wording remains unchanged.
+- Added no dependency, retry, continuation, scheduler, concurrency path, provider
+  fallback, generic provider framework, or real model call during the repair.
+
 ## One confirmed real Codex Exec call — Task 034 — 2026-07-21
 
 - Enabled one real, ephemeral, workspace-scoped Codex Exec process only after the

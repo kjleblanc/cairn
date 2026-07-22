@@ -74,6 +74,16 @@ function git(root: string, args: string[]): string {
   }).trimEnd();
 }
 
+function gitZ(root: string, args: string[]): string[] {
+  const output = execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  return output.split("\0").filter(Boolean);
+}
+
 function lines(text: string): string[] {
   return text ? text.split(/\r?\n/).filter(Boolean) : [];
 }
@@ -164,7 +174,7 @@ function briefText(contract: AdapterTaskContract): string {
     ? "one explicitly confirmed OpenAI Codex Exec call; the model may make in-scope local workspace changes"
     : "local, deterministic, record-only demonstration";
   const done = codex
-    ? "DONE means the one Codex Exec process completed, the requested outcome and checks are reported, the append-only log row matches, protected starting work remains intact, and Git isolation is verified."
+    ? "DONE means the one Codex Exec process completed, the requested outcome and checks are reported, the append-only log row matches, protected starting work remains intact, and Cairn verified Git isolation and created the exact-path commit when the task started clean."
     : "DONE means the offline route and its three records are verified. It does not mean the requested product change was implemented.";
   const stopped = codex
     ? "STOPPED means the call was not authorized, the model reported a stop, process evidence failed, protected work changed, or the result records could not be verified."
@@ -420,20 +430,67 @@ function isAncestor(root: string, ancestor: string, descendant: string): boolean
   }
 }
 
-function verifyModelGitResult(root: string, start: GitSnapshot, disposition: "DONE" | "STOPPED"): RecordCommit | null {
+function changedTaskPaths(root: string, contract: AdapterTaskContract): string[] | null {
+  const values = new Set([
+    ...gitZ(root, ["diff", "--name-only", "-z", "--"]),
+    ...gitZ(root, ["ls-files", "--others", "--exclude-standard", "-z", "--"]),
+  ].map((path) => path.replace(/\\/g, "/")));
+  const owned = new Set(contract.ownedRecords);
+  for (const path of values) {
+    const absolute = resolve(root, path);
+    const relativePath = relative(root, absolute).replace(/\\/g, "/");
+    if (!path || isAbsolute(path) || relativePath.startsWith("../") || isAbsolute(relativePath)) return null;
+    if (path.split("/").includes(".git")) return null;
+    if (path.startsWith("docs/ai-work/tasks/") && !owned.has(path)) return null;
+  }
+  if (!contract.ownedRecords.every((path) => values.has(path))) return null;
+  return [...values].sort();
+}
+
+function unstageExactPaths(root: string, pathsToUnstage: readonly string[]): void {
+  try {
+    git(root, ["restore", "--staged", "--", ...pathsToUnstage]);
+  } catch {
+    // Retain the staged evidence if Git cannot safely restore the index.
+  }
+}
+
+function verifyModelGitResult(
+  root: string,
+  start: GitSnapshot,
+  contract: AdapterTaskContract,
+  disposition: "DONE" | "STOPPED",
+): RecordCommit | null {
   if (!verifyProtectedStartingPaths(root, start)) return null;
   const head = git(root, ["rev-parse", "HEAD"]);
+  if (head !== start.head) return null;
   if (disposition === "STOPPED") {
     return { status: "skipped", reason: "The model reported STOPPED; retained workspace evidence was not committed by Cairn." };
   }
   if (start.status.length > 0) {
-    if (head !== start.head) return null;
     return { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
   }
-  if (!isAncestor(root, start.head, head)) return null;
-  if (Number(git(root, ["rev-list", "--count", `${start.head}..${head}`])) !== 1) return null;
+  const taskPaths = changedTaskPaths(root, contract);
+  if (!taskPaths || taskPaths.length === 0) return null;
+  try {
+    git(root, ["add", "--", ...taskPaths]);
+    const staged = gitZ(root, ["diff", "--cached", "--name-only", "-z", "--"]).sort();
+    if (!sameLines(staged, taskPaths) ||
+        gitZ(root, ["diff", "--name-only", "-z", "--"]).length > 0 ||
+        gitZ(root, ["ls-files", "--others", "--exclude-standard", "-z", "--"]).length > 0) {
+      unstageExactPaths(root, taskPaths);
+      return null;
+    }
+    git(root, ["commit", "-m", `Task ${pad(contract.taskNumber)}: complete verified Codex Exec task`]);
+  } catch {
+    if (git(root, ["rev-parse", "HEAD"]) === start.head) unstageExactPaths(root, taskPaths);
+    return null;
+  }
+  const committedHead = git(root, ["rev-parse", "HEAD"]);
+  if (!isAncestor(root, start.head, committedHead)) return null;
+  if (Number(git(root, ["rev-list", "--count", `${start.head}..${committedHead}`])) !== 1) return null;
   if (lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"])).length > 0) return null;
-  return { status: "created", reason: "The model created one isolated local task commit.", hash: head };
+  return { status: "created", reason: "Cairn created one isolated exact-path local task commit.", hash: committedHead };
 }
 
 function freezeContract(contract: AdapterTaskContract): AdapterTaskContract {
@@ -514,6 +571,7 @@ function replaceDoneRecordsWithStopped(
   start: GitSnapshot,
   commitRequested: boolean,
   done: { reportText: string; row: LogRow },
+  reason: SerialStopReason = "RECORD_VERIFICATION_FAILED",
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   const reportPath = paths.report(root, contract.taskNumber);
   const currentReport = readFileSync(reportPath, "utf8");
@@ -522,7 +580,6 @@ function replaceDoneRecordsWithStopped(
     return null;
   }
 
-  const reason: SerialStopReason = "RECORD_VERIFICATION_FAILED";
   const stoppedReport = reportText(contract, "STOPPED", reason, commitRequested);
   const stoppedRow = rowFor(contract, "STOPPED", reason);
   writeFileSync(reportPath, stoppedReport, "utf8");
@@ -587,7 +644,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       checks: codex ? [
         "Confirm exactly one Codex Exec process returns a completed JSONL terminal event.",
         "Confirm the model-authored report has one terminal disposition and the append-only log has one matching row.",
-        "Confirm protected starting work is byte-identical and any clean-start DONE result has one isolated local commit.",
+        "Confirm protected starting work is byte-identical and Cairn creates one exact-path local commit for a clean-start DONE result.",
       ] : [
         "Validate the adapter result against the exact fixed schema.",
         "Confirm only the three owned records changed beyond the protected starting state.",
@@ -650,10 +707,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       const codexResult = validateCodexResult(adapterValue, contract) ? adapterValue : null;
       const resultValid = codexResult !== null;
       const processCompleted = codexResult?.exitCode === 0 && codexResult.terminalEvent === "turn.completed";
-      const modelRecords = resultValid ? readModelRecords(projectRoot, contract, start) : null;
+      const modelRecords = readModelRecords(projectRoot, contract, start);
       const protectedValid = verifyProtectedStartingPaths(projectRoot, start);
-      const modelCommit = modelRecords && protectedValid
-        ? verifyModelGitResult(projectRoot, start, modelRecords.disposition)
+      const modelCommit = resultValid && processCompleted && modelRecords && protectedValid
+        ? verifyModelGitResult(projectRoot, start, contract, modelRecords.disposition)
         : null;
       const stopReason: SerialStopReason | null = !resultValid
         ? "INVALID_ADAPTER_RESULT"
@@ -670,15 +727,26 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
                   : null;
       if (stopReason) {
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReason}.` });
-        const safety = modelRecords?.disposition === "STOPPED" ? modelRecords : writeSafetyRecordsWhenUnclaimed(
-          projectRoot,
-          contract,
-          stopReason,
-          start,
-          Boolean(options.commitRecords),
-        );
+        const safety = modelRecords?.disposition === "STOPPED"
+          ? modelRecords
+          : modelRecords?.disposition === "DONE"
+            ? replaceDoneRecordsWithStopped(
+              projectRoot,
+              contract,
+              start,
+              Boolean(options.commitRecords),
+              modelRecords,
+              stopReason,
+            )
+            : writeSafetyRecordsWhenUnclaimed(
+              projectRoot,
+              contract,
+              stopReason,
+              start,
+              Boolean(options.commitRecords),
+            );
         if (!safety) throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED â€” ${stopReason}` });
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReason}` });
         return {
           status: "stopped", reason: stopReason, taskNumber, disposition: "STOPPED",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -687,8 +755,8 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         };
       }
       if (!modelRecords || !modelCommit) throw new Error("MODEL_RESULT_NOT_VERIFIED");
-      emit(activities, options.events, { stage: "Check", state: "done", detail: "The model result, task records, protected work, and Git isolation were verified." });
-      emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE â€” one real Codex Exec task completed and was verified." });
+      emit(activities, options.events, { stage: "Check", state: "done", detail: "The model result, task records, protected work, and Cairn-owned Git result were verified." });
+      emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE — one real Codex Exec task completed and was verified." });
       return {
         status: "done", taskNumber, disposition: "DONE",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),

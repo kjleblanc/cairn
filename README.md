@@ -116,9 +116,10 @@ one-call confirmation, and choose **Start one real Codex Exec call**.
 The call sends the task instructions and lets Codex read files inside the selected
 project as needed. It consumes the connected account's pricing, credits, or quota.
 Cairn runs one pinned, ephemeral process, retains no raw process output, verifies the
-model-authored report/log/commit, and does not retry, resume, continue, schedule, or
-start another provider. Cairn never opens a login flow; install and connect Codex
-yourself through official Codex controls.
+model-authored report and log, and creates the exact-path commit itself when the task
+started from a clean tree. It does not retry, resume, continue, schedule, or start
+another provider. Cairn never opens a login flow; install and connect Codex yourself
+through official Codex controls.
 
 ## History
 

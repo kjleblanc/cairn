@@ -177,6 +177,8 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.equal(requests[0].command, process.platform === "win32" ? "codex.exe" : "codex");
   assert.equal(requests[0].cwd, workspace);
   assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
+  assert.match(requests[0].stdin, /Do not run git add, git commit, or otherwise modify \.git/);
+  assert.match(requests[0].stdin, /Cairn owns the exact-path local commit/);
   assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);
   assert.deepEqual(result, {
     kind: "codex-exec-result",

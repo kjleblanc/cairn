@@ -145,7 +145,11 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
                 : `Routing demonstration: ${result.status === "done" ? "verified" : "stopped"}`}</strong></p>
             <p><strong>Requested product change: {codexRoute ? result.status === "done" ? "completed and verified" : "not verified" : "not attempted"}</strong></p>
             <p><strong>Milestone movement: {result.row.moved}</strong></p>
-            <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {codexRoute ? "Cairn verified the model-authored task records and Git result." : "No model was called."}</p>
+            <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {codexRoute
+              ? result.status === "done"
+                ? "Cairn verified the model-authored task records and Git result."
+                : "Cairn could not verify the model-authored records or Git result. Retained evidence needs inspection before another task."
+              : "No model was called."}</p>
             <p className="small mono">{result.reportPath}</p>
           </Card>
           <ActivityFeed activities={activities} />

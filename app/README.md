@@ -22,8 +22,10 @@ by Cairn.
 
 The confirmed path starts one ephemeral process, reduces JSONL to terminal and
 numeric usage evidence, and verifies the model-authored report, append-only log row,
-protected starting work, and isolated commit. It adds no fallback, retry,
-continuation, scheduler, concurrency, provider framework, or dependency.
+and protected starting work. Codex leaves changes unstaged; for a clean-start DONE,
+Cairn stages the exact verified paths and creates the isolated commit itself. It adds
+no fallback, retry, continuation, scheduler, concurrency, provider framework, or
+dependency.
 
 ## Offline demonstration
 

@@ -24,7 +24,6 @@ function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "s
   const dispatcherSource = `
 const fs = require("node:fs");
 const path = require("node:path");
-const child = require("node:child_process");
 const args = process.argv.slice(2);
 if (args.includes("--version")) process.exit(0);
 if (args[0] === "login" && args[1] === "status") process.exit(${connected ? 0 : 1});
@@ -47,8 +46,6 @@ process.stdin.on("end", () => {
   fs.writeFileSync(report, "# Task " + number + " report\\n\\n## Result\\n\\nAdded the requested visible result and verified it.\\n\\nMilestone movement: **YES**\\n\\nDisposition: **DONE**\\n");
   const log = path.join(root, "docs", "ai-work", "LOG.md");
   fs.appendFileSync(log, "| " + number + " | 2026-07-21 | Standard | Applied | DONE | completed | Added and verified the visible result. | YES |\\n");
-  child.execFileSync("git", ["add", "--", "visible.txt", "docs/ai-work/tasks/" + brief, "docs/ai-work/tasks/" + number + "-report.md", "docs/ai-work/LOG.md"], { cwd: root });
-  child.execFileSync("git", ["commit", "-q", "-m", "Task " + number + ": add visible result"], { cwd: root });
   process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "fake" }) + "\\n");
   process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
 });
@@ -147,6 +144,8 @@ test("connected Codex requires confirmation then completes one fake-process real
   await start.click();
   await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
   await expect(win.getByText("Requested product change: completed and verified")).toBeVisible();
+  await expect(win.getByText("Cairn verified the model-authored task records and Git result.")).toBeVisible();
+  await expect(win.getByText("DONE — one real Codex Exec task completed and was verified.")).toBeVisible();
   expect(existsSync(fakeCodex.marker)).toBe(true);
   expect(readFileSync(join(proj, "visible.txt"), "utf8")).toBe("model-authored result\n");
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
@@ -168,6 +167,9 @@ test("malformed Codex JSONL fails closed without exposing raw process output", a
   await win.getByLabel("I confirm this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
+  await expect(win.getByText(/Cairn could not verify the model-authored records or Git result/)).toBeVisible();
+  await expect(win.getByText(/Retained evidence needs inspection before another task/)).toBeVisible();
+  await expect(win.getByText("Cairn verified the model-authored task records and Git result.")).toHaveCount(0);
   expect(existsSync(fakeCodex.marker)).toBe(true);
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("ADAPTER_FAILED");
