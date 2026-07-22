@@ -30,3 +30,4 @@
 | 035 | 2026-07-22 | Standard | Applied | STOPPED — README_REPLACEMENT_NOT_AUTHORIZED | stopped | Preserved Cairn's existing README and closed the stale routing-test brief without product or model work. | NO |
 | 036 | 2026-07-22 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (RECORD_VERIFICATION_FAILED); requested change was not verified. | NO |
 | 037 | 2026-07-22 | Standard | Applied | DONE | completed | Moved clean-start Git commit authority from non-interactive Codex to Cairn's exact-path verifier and corrected stopped-result wording. | NO |
+| 038 | 2026-07-22 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (RECORD_VERIFICATION_FAILED); requested change was not verified. | NO |
