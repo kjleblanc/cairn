@@ -87,6 +87,11 @@ test("the active renderer and IPC expose the serial route instead of legacy work
   expect(ipc).not.toMatch(/taskDefine|taskApprove|taskBuild|taskReview|taskClose|schedulerStart|taskDirection|timebox/);
 });
 
+test("the production main bundle includes the Squirrel startup dependency", () => {
+  const mainBundle = readFileSync(join(__dirname, "..", ".vite", "build", "main.js"), "utf8");
+  expect(mainBundle).not.toMatch(/require\(["']electron-squirrel-startup["']\)/);
+});
+
 test("normal mode shows connection-required and creates no task records", async () => {
   const proj = mkdtempSync(join(tmpdir(), "cairn-routing-"));
   scaffold(proj);

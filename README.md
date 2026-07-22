@@ -49,6 +49,29 @@ must then confirm OpenAI, model `gpt-5.6-sol`, the exact project path, the discl
 workspace data scope, and a quota of one ephemeral process with no retry or
 continuation. Only that confirmation authorizes the process.
 
+## Launch or install Cairn Desktop
+
+From this repository's root, launch the development build with:
+
+```powershell
+npm.cmd --prefix app start
+```
+
+To create a double-clickable Windows installer from the dependencies already
+installed in this repository, run:
+
+```powershell
+npm.cmd --prefix app run make
+```
+
+The installer is written beneath `app/out/make/squirrel.windows/x64/`. Local builds
+are not digitally signed, so Windows may show an unknown-publisher or SmartScreen
+warning. Installing or distributing a build is a separate owner decision.
+
+The verified repaired Task 045 artifact is under
+`app/out/repaired/make/squirrel.windows/x64/`. Do not run the superseded raw
+executable under `app/out/Cairn-win32-x64/`.
+
 ## Start here
 
 - [Getting Ready](GETTING-READY.md)

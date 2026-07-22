@@ -4,6 +4,20 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Local Windows installer — Task 045 — 2026-07-22
+
+- Built the existing Electron Forge Squirrel target into a double-clickable local
+  Windows installer and verified the repaired packaged executable with a bounded
+  mock startup without running the installer.
+- Bundled the required `electron-squirrel-startup` runtime into the production main
+  process after the first packaged executable exposed the missing external module.
+- Added a production-bundle assertion that prevents the unresolved runtime import
+  from returning.
+- Documented the one-line development launch and installer-build commands plus the
+  unsigned-build warning.
+- Added no dependency, signing credential, external upload, publication, provider
+  call, or application behavior change.
+
 ## Nested Codex tool isolation — Task 044 — 2026-07-22
 
 - Kept temporary parent-session `.codex/tmp/arg0` command shims out of the one

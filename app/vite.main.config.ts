@@ -1,4 +1,11 @@
+import { builtinModules } from "node:module";
 import { defineConfig } from "vite";
+
+const mainProcessExternals = [
+  "electron",
+  ...builtinModules,
+  ...builtinModules.map((name) => `node:${name}`),
+];
 
 export default defineConfig({
   build: {
@@ -6,9 +13,9 @@ export default defineConfig({
     emptyOutDir: false,
     lib: { entry: "src/main/main.ts", formats: ["cjs"], fileName: () => "main.js" },
     rollupOptions: {
-      // Rollup 4 keeps dynamic import() live in CJS output, so core's
-      // `await import("@anthropic-ai/claude-agent-sdk")` still loads the ESM SDK.
-      external: ["electron", "electron-squirrel-startup", "@anthropic-ai/claude-agent-sdk", /^node:/],
+      // Match Forge's Vite main-process base: bundle application dependencies but
+      // leave Electron and every Node built-in for the Electron runtime.
+      external: mainProcessExternals,
     },
   },
 });
