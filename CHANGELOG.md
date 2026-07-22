@@ -4,6 +4,19 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Honest already-satisfied Codex tasks — Task 039 — 2026-07-22
+
+- Told the one confirmed Codex process that Cairn's displayed call disclosure was
+  already approved for that exact request, without granting any wider authority.
+- Required an already-satisfied outcome to be verified and closed with an honest
+  report and log row instead of inventing a source change or leaving no records;
+  those no-op results use milestone movement NO.
+- Replaced the generic record-verification code with `MODEL_RECORDS_MISSING` when a
+  completed process returns without the required model report and log row.
+- Added fake-only coverage for both an honestly closed no-op DONE result and a
+  missing-record STOPPED result. No real model call, retry, fallback, continuation,
+  scheduler, concurrency path, provider framework, or dependency was added.
+
 ## Cairn-owned verified Codex commit — Task 037 — 2026-07-22
 
 - Stopped asking non-interactive Codex to write protected `.git` metadata. Codex now

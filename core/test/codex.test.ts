@@ -177,6 +177,10 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.equal(requests[0].command, process.platform === "win32" ? "codex.exe" : "codex");
   assert.equal(requests[0].cwd, workspace);
   assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
+  assert.match(requests[0].stdin, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
+  assert.match(requests[0].stdin, /grants no authority beyond this one call and in-scope local reversible work/i);
+  assert.match(requests[0].stdin, /If the requested outcome is already satisfied, do not invent a product change/);
+  assert.match(requests[0].stdin, /still write the report and log row, use milestone movement NO/);
   assert.match(requests[0].stdin, /Do not run git add, git commit, or otherwise modify \.git/);
   assert.match(requests[0].stdin, /Cairn owns the exact-path local commit/);
   assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);

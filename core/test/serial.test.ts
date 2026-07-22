@@ -163,6 +163,67 @@ test("one authorized fake Codex process completes one verified serial task", asy
   assert.match(result.activities.at(-1)?.detail ?? "", /real Codex Exec task completed/i);
 });
 
+test("an already-satisfied fake Codex task closes honestly without a product edit", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
+        "# Task 001 report", "", "The requested behavior was already present and its focused checks passed.", "",
+        "Milestone movement: **NO**", "", "Disposition: **DONE**", "",
+      ].join("\n"));
+      appendLogRow(root, {
+        task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
+        outcome: "DONE", decision: "completed", summary: "Verified the already-satisfied behavior without inventing a change.", moved: "NO",
+      });
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0 };
+    },
+  };
+  const outcome = "Keep the existing verified behavior";
+  const result = await runSerialTask(root, outcome, {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, outcome), fake)],
+  });
+
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.row.moved, "NO");
+  assert.equal(result.commit.status, "created");
+  assert.notEqual(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.deepEqual(git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(), [
+    "docs/ai-work/LOG.md",
+    "docs/ai-work/tasks/001-brief.md",
+    "docs/ai-work/tasks/001-report.md",
+  ]);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("a completed Codex process with no model records stops with a precise reason", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  let calls = 0;
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      calls += 1;
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0 };
+    },
+  };
+  const outcome = "Verify one existing behavior";
+  const result = await runSerialTask(root, outcome, {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, outcome), fake)],
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "MODEL_RECORDS_MISSING");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
+  assert.match(readFileSync(result.reportPath, "utf8"), /MODEL_RECORDS_MISSING/);
+  assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — MODEL_RECORDS_MISSING/);
+});
+
 test("a dirty-start Codex result preserves owner work and remains uncommitted", async () => {
   const root = project();
   writeFileSync(join(root, "protected.txt"), "tracked\n");

@@ -53,6 +53,7 @@ export type SerialStopReason =
   | "INVALID_ADAPTER_RESULT"
   | "PROTECTED_WORK_CHANGED"
   | "RECORD_VERIFICATION_FAILED"
+  | "MODEL_RECORDS_MISSING"
   | "REAL_MODEL_CALL_NOT_AUTHORIZED"
   | "MODEL_REPORTED_STOPPED"
   | "MODEL_RESULT_NOT_VERIFIED";
@@ -716,10 +717,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         ? "INVALID_ADAPTER_RESULT"
         : !processCompleted
           ? "ADAPTER_FAILED"
-          : !modelRecords
-            ? "RECORD_VERIFICATION_FAILED"
-            : !protectedValid
-              ? "PROTECTED_WORK_CHANGED"
+          : !protectedValid
+            ? "PROTECTED_WORK_CHANGED"
+            : !modelRecords
+              ? "MODEL_RECORDS_MISSING"
               : !modelCommit
                 ? "MODEL_RESULT_NOT_VERIFIED"
                 : modelRecords.disposition === "STOPPED"

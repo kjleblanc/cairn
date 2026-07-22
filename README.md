@@ -121,6 +121,11 @@ started from a clean tree. It does not retry, resume, continue, schedule, or sta
 another provider. Cairn never opens a login flow; install and connect Codex yourself
 through official Codex controls.
 
+If the requested behavior is already present, Codex must not invent a change. It
+still checks the behavior and writes an honest report and log row with milestone
+movement NO. If a completed process writes no model records, Cairn stops with the
+specific safe code `MODEL_RECORDS_MISSING` and does not claim success.
+
 ## History
 
 Contract v3.0 replaced the old governance machinery with one serial task and
