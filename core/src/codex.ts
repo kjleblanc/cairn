@@ -33,6 +33,10 @@ export interface CodexExecProcessResult {
   cachedInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
+  agentMessageCount: number;
+  commandExecutionCount: number;
+  fileChangeCount: number;
+  failedToolItemCount: number;
 }
 
 export interface CodexExecProcess {
@@ -175,6 +179,20 @@ function terminalEvidence(line: string): Partial<CodexExecProcessResult> | null 
   const record = value as Record<string, unknown>;
   if (record.type === "turn.failed") return { terminalEvent: "turn.failed" };
   if (record.type === "error") return { terminalEvent: "error" };
+  if (record.type === "item.completed") {
+    if (!record.item || typeof record.item !== "object" || Array.isArray(record.item)) return null;
+    const item = record.item as Record<string, unknown>;
+    const command = item.type === "command_execution";
+    const fileChange = item.type === "file_change";
+    const failed = (command || fileChange) &&
+      (item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0));
+    return {
+      agentMessageCount: item.type === "agent_message" ? 1 : 0,
+      commandExecutionCount: command ? 1 : 0,
+      fileChangeCount: fileChange ? 1 : 0,
+      failedToolItemCount: failed ? 1 : 0,
+    };
+  }
   if (record.type !== "turn.completed") return null;
   const usage = record.usage && typeof record.usage === "object" && !Array.isArray(record.usage)
     ? record.usage as Record<string, unknown>
@@ -218,11 +236,29 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
           cachedInputTokens: 0,
           outputTokens: 0,
           reasoningOutputTokens: 0,
+          agentMessageCount: 0,
+          commandExecutionCount: 0,
+          fileChangeCount: 0,
+          failedToolItemCount: 0,
         };
         const applyEvidence = (evidence: Partial<CodexExecProcessResult> | null): void => {
           if (!evidence) return;
           if (result.terminalEvent === "error" || result.terminalEvent === "turn.failed") return;
-          result = { ...result, ...evidence };
+          const {
+            agentMessageCount = 0,
+            commandExecutionCount = 0,
+            fileChangeCount = 0,
+            failedToolItemCount = 0,
+            ...terminal
+          } = evidence;
+          result = {
+            ...result,
+            ...terminal,
+            agentMessageCount: result.agentMessageCount + agentMessageCount,
+            commandExecutionCount: result.commandExecutionCount + commandExecutionCount,
+            fileChangeCount: result.fileChangeCount + fileChangeCount,
+            failedToolItemCount: result.failedToolItemCount + failedToolItemCount,
+          };
         };
         const fail = (): void => {
           if (settled) return;
@@ -372,6 +408,10 @@ export function createCodexExecAdapter(
         cachedInputTokens: result.cachedInputTokens,
         outputTokens: result.outputTokens,
         reasoningOutputTokens: result.reasoningOutputTokens,
+        agentMessageCount: result.agentMessageCount,
+        commandExecutionCount: result.commandExecutionCount,
+        fileChangeCount: result.fileChangeCount,
+        failedToolItemCount: result.failedToolItemCount,
         statement: "One Codex Exec process returned bounded completion evidence.",
       };
     },

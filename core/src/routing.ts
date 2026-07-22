@@ -50,6 +50,10 @@ export interface CodexExecResult {
   cachedInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
+  agentMessageCount: number;
+  commandExecutionCount: number;
+  fileChangeCount: number;
+  failedToolItemCount: number;
   statement: "One Codex Exec process returned bounded completion evidence.";
 }
 

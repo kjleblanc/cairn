@@ -17,7 +17,7 @@ function scaffold(proj: string): void {
   execFileSync("git", ["config", "user.email", "cairn-test@example.invalid"], { cwd: proj });
 }
 
-function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
+function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-records" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
   const bin = mkdtempSync(join(tmpdir(), "cairn-fake-codex-"));
   const marker = join(bin, "real-exec-started.txt");
   const dispatcher = join(bin, "fake-codex.cjs");
@@ -33,6 +33,15 @@ process.stdin.on("end", () => {
   fs.writeFileSync(process.env.CAIRN_FAKE_CODEX_MARKER, "started\\n");
   if (${JSON.stringify(behavior)} === "invalid-jsonl") {
     process.stdout.write("secret-looking malformed provider output\\n");
+    return;
+  }
+  if (${JSON.stringify(behavior)} === "missing-records") {
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "sk-secret-event-payload" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "completed", exit_code: 0 } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "failed", exit_code: 1 } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "file_change", path: "sk-secret-event-payload", status: "completed" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "file_change", path: "sk-secret-event-payload", status: "failed" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, cached_input_tokens: 4, output_tokens: 6, reasoning_output_tokens: 2 } }) + "\\n");
     return;
   }
   const root = process.cwd();
@@ -174,6 +183,30 @@ test("malformed Codex JSONL fails closed without exposing raw process output", a
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("ADAPTER_FAILED");
   expect(report).not.toContain("secret-looking malformed provider output");
+  expect(existsSync(join(proj, "visible.txt"))).toBe(false);
+  await app.close();
+});
+
+test("missing model records show only bounded numeric Codex event evidence", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-missing-records-"));
+  scaffold(proj);
+  const fakeCodex = fakeCodexEnvironment(proj, true, "missing-records");
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await win.getByPlaceholder("Describe one visible outcome").fill("Add one bounded diagnostic");
+  await win.getByRole("button", { name: "Find a route" }).click();
+  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+  await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
+  await expect(win.getByText(/Stopped safely: MODEL_RECORDS_MISSING/)).toBeVisible();
+  await expect(win.getByText(/Bounded Codex events: 1 agent messages; 2 command executions; 2 file changes; 2 failed command\/file-change items/)).toBeVisible();
+  expect(await win.locator("body").innerText()).not.toContain("sk-secret-event-payload");
+  const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
+  expect(report).toContain("MODEL_RECORDS_MISSING");
+  expect(report).toContain("Bounded Codex events: 1 agent messages; 2 command executions; 2 file changes; 2 failed command/file-change items.");
+  expect(report).not.toContain("sk-secret-event-payload");
   expect(existsSync(join(proj, "visible.txt"))).toBe(false);
   await app.close();
 });

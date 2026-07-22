@@ -4,6 +4,20 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Credential-opaque Codex event diagnostics — Task 042 — 2026-07-22
+
+- Reduced completed Codex JSONL item events to four non-negative integers: agent
+  messages, command executions, file changes, and failed command/file-change items.
+- Added those bounded counts to the activity feed and safety report when a process
+  result is available, including `MODEL_RECORDS_MISSING` stops.
+- Continued discarding item text, reasoning, commands, paths, stdout, stderr, thread
+  IDs, account details, authentication data, and credentials.
+- Added real-parser, exact-schema, safety-report, and Electron fake-process coverage
+  with secret-looking payloads that must never surface.
+- Kept the documented `workspace-write` plus `on-request` Auto policy. Added no
+  dependency, retry, continuation, scheduler, concurrency path, provider fallback,
+  generic tracing framework, broader sandbox, or real model call.
+
 ## Honest already-satisfied Codex tasks — Task 039 — 2026-07-22
 
 - Told the one confirmed Codex process that Cairn's displayed call disclosure was

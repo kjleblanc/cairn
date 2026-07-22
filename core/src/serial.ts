@@ -219,7 +219,17 @@ ${stopped}
 `;
 }
 
-function reportText(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null, commitRequested: boolean): string {
+function boundedEventSummary(result: CodexExecResult): string {
+  return `Bounded Codex events: ${result.agentMessageCount} agent messages; ${result.commandExecutionCount} command executions; ${result.fileChangeCount} file changes; ${result.failedToolItemCount} failed command/file-change items.`;
+}
+
+function reportText(
+  contract: AdapterTaskContract,
+  disposition: "DONE" | "STOPPED",
+  reason: SerialStopReason | null,
+  commitRequested: boolean,
+  processEvidence?: CodexExecResult,
+): string {
   const taskNumber = contract.taskNumber;
   const codex = contract.route.adapterId === "codex-exec";
   if (disposition === "DONE") {
@@ -278,6 +288,9 @@ Disposition: **STOPPED**
   }
   const title = codex ? "Codex Exec adapter report" : "offline serial demonstration report";
   const subject = codex ? "Codex Exec route" : "serial demonstration";
+  const boundedEvidence = codex && processEvidence
+    ? `\n## Bounded process evidence\n\n${boundedEventSummary(processEvidence)} Cairn did not retain item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
+    : "";
   return `# Task ${pad(taskNumber)} — ${title}
 
 ## Result
@@ -285,6 +298,7 @@ Disposition: **STOPPED**
 Routing demonstration: **stopped**
 
 Requested product change: **${codex ? "not verified" : "not attempted"}**
+${boundedEvidence}
 
 The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}
 
@@ -358,7 +372,8 @@ function validateCodexResult(value: unknown, contract: AdapterTaskContract): val
     if (prototype !== Object.prototype && prototype !== null) return false;
     const keys = Reflect.ownKeys(value);
     const expected = [
-      "cachedInputTokens", "exitCode", "inputTokens", "kind", "outputTokens",
+      "agentMessageCount", "cachedInputTokens", "commandExecutionCount", "exitCode",
+      "failedToolItemCount", "fileChangeCount", "inputTokens", "kind", "outputTokens",
       "processCount", "reasoningOutputTokens", "requestedOutcomeSha256", "statement",
       "taskNumber", "terminalEvent",
     ].sort();
@@ -370,6 +385,7 @@ function validateCodexResult(value: unknown, contract: AdapterTaskContract): val
     }
     const terminalEvents = new Set(["turn.completed", "turn.failed", "error", "missing"]);
     const counts = ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens"];
+    const eventCounts = ["agentMessageCount", "commandExecutionCount", "fileChangeCount", "failedToolItemCount"];
     return descriptors.kind.value === "codex-exec-result" &&
       descriptors.taskNumber.value === contract.taskNumber &&
       descriptors.requestedOutcomeSha256.value === contract.requestedOutcomeSha256 &&
@@ -377,6 +393,7 @@ function validateCodexResult(value: unknown, contract: AdapterTaskContract): val
       Number.isInteger(descriptors.exitCode.value) &&
       terminalEvents.has(descriptors.terminalEvent.value) &&
       counts.every((key) => Number.isFinite(descriptors[key].value) && descriptors[key].value >= 0) &&
+      eventCounts.every((key) => Number.isInteger(descriptors[key].value) && descriptors[key].value >= 0) &&
       descriptors.statement.value === "One Codex Exec process returned bounded completion evidence.";
   } catch {
     return false;
@@ -538,8 +555,9 @@ function writeClosedRecords(
   reason: SerialStopReason | null,
   start: GitSnapshot,
   commitRequested: boolean,
+  processEvidence?: CodexExecResult,
 ): { reportText: string; row: LogRow; verified: boolean } {
-  const report = reportText(contract, disposition, reason, commitRequested);
+  const report = reportText(contract, disposition, reason, commitRequested, processEvidence);
   writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
   const row = rowFor(contract, disposition, reason);
   appendLogRow(root, row);
@@ -560,10 +578,11 @@ function writeSafetyRecordsWhenUnclaimed(
   reason: SerialStopReason,
   start: GitSnapshot,
   commitRequested: boolean,
+  processEvidence?: CodexExecResult,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   if (existsSync(paths.report(root, contract.taskNumber))) return null;
   if (readFileSync(paths.log(root), "utf8") !== start.logText) return null;
-  return writeClosedRecords(root, contract, "STOPPED", reason, start, commitRequested);
+  return writeClosedRecords(root, contract, "STOPPED", reason, start, commitRequested, processEvidence);
 }
 
 function replaceDoneRecordsWithStopped(
@@ -573,6 +592,7 @@ function replaceDoneRecordsWithStopped(
   commitRequested: boolean,
   done: { reportText: string; row: LogRow },
   reason: SerialStopReason = "RECORD_VERIFICATION_FAILED",
+  processEvidence?: CodexExecResult,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   const reportPath = paths.report(root, contract.taskNumber);
   const currentReport = readFileSync(reportPath, "utf8");
@@ -581,7 +601,7 @@ function replaceDoneRecordsWithStopped(
     return null;
   }
 
-  const stoppedReport = reportText(contract, "STOPPED", reason, commitRequested);
+  const stoppedReport = reportText(contract, "STOPPED", reason, commitRequested, processEvidence);
   const stoppedRow = rowFor(contract, "STOPPED", reason);
   writeFileSync(reportPath, stoppedReport, "utf8");
   writeFileSync(paths.log(root), start.logText + expectedLogLine(stoppedRow), "utf8");
@@ -707,6 +727,9 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     if (codex) {
       const codexResult = validateCodexResult(adapterValue, contract) ? adapterValue : null;
       const resultValid = codexResult !== null;
+      if (codexResult) {
+        emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEventSummary(codexResult) });
+      }
       const processCompleted = codexResult?.exitCode === 0 && codexResult.terminalEvent === "turn.completed";
       const modelRecords = readModelRecords(projectRoot, contract, start);
       const protectedValid = verifyProtectedStartingPaths(projectRoot, start);
@@ -738,6 +761,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
               Boolean(options.commitRecords),
               modelRecords,
               stopReason,
+              codexResult ?? undefined,
             )
             : writeSafetyRecordsWhenUnclaimed(
               projectRoot,
@@ -745,6 +769,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
               stopReason,
               start,
               Boolean(options.commitRecords),
+              codexResult ?? undefined,
             );
         if (!safety) throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReason}` });

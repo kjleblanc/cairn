@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import {
   authorizeCodexExec,
   CODEX_EXEC_DATA_SCOPE,
@@ -10,6 +10,7 @@ import {
   CODEX_EXEC_QUOTA,
   CodexExecModelCallBoundaryError,
   createCodexExecAdapter,
+  createSystemCodexExecProcess,
   detectCodexExecStatus,
   type CodexExecProcess,
   type CodexExecRequest,
@@ -87,6 +88,53 @@ test("Codex readiness keeps only installed and connected booleans", async () => 
   assert.doesNotMatch(JSON.stringify(status), new RegExp(SECRET_SENTINEL));
 });
 
+test("the system process reduces JSONL items to numeric evidence without retaining payload text", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-jsonl-workspace-"));
+  const commandRoot = mkdtempSync(join(tmpdir(), "cairn-codex-jsonl-command-"));
+  const dispatcher = join(commandRoot, "dispatcher.cjs");
+  const jsonl = [
+    { type: "thread.started", thread_id: SECRET_SENTINEL },
+    { type: "item.completed", item: { id: "a", type: "agent_message", text: SECRET_SENTINEL } },
+    { type: "item.completed", item: { id: "b", type: "command_execution", command: SECRET_SENTINEL, status: "completed", exit_code: 0 } },
+    { type: "item.completed", item: { id: "c", type: "command_execution", command: SECRET_SENTINEL, status: "failed", exit_code: 1 } },
+    { type: "item.completed", item: { id: "d", type: "file_change", path: SECRET_SENTINEL, status: "completed" } },
+    { type: "item.completed", item: { id: "e", type: "file_change", path: SECRET_SENTINEL, status: "failed" } },
+    { type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 3, reasoning_output_tokens: 1 } },
+  ].map((value) => JSON.stringify(value)).join("\n") + "\n";
+  writeFileSync(dispatcher, `process.stderr.write(${JSON.stringify(SECRET_SENTINEL)});\nprocess.stdout.write(${JSON.stringify(jsonl)});\n`, "utf8");
+  const command = join(commandRoot, process.platform === "win32" ? "codex.cmd" : "codex");
+  writeFileSync(command, process.platform === "win32"
+    ? `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`
+    : `#!/usr/bin/env node\nrequire(${JSON.stringify(dispatcher)});\n`, "utf8");
+  if (process.platform !== "win32") chmodSync(command, 0o755);
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const previous = process.env[pathKey] ?? "";
+  process.env[pathKey] = `${commandRoot}${delimiter}${previous}`;
+  try {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"],
+      cwd: workspace,
+      stdin: "bounded fake request",
+    });
+    assert.deepEqual(result, {
+      exitCode: 0,
+      terminalEvent: "turn.completed",
+      inputTokens: 10,
+      cachedInputTokens: 2,
+      outputTokens: 3,
+      reasoningOutputTokens: 1,
+      agentMessageCount: 1,
+      commandExecutionCount: 2,
+      fileChangeCount: 2,
+      failedToolItemCount: 2,
+    });
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET_SENTINEL));
+  } finally {
+    process.env[pathKey] = previous;
+  }
+});
+
 test("the production adapter stops before starting a real Codex Exec process", async () => {
   const adapter = createCodexExecAdapter(resolve("codex-production-fixture"), { installed: true, connected: true });
   assert.equal(adapter.kind, "codex-exec");
@@ -140,6 +188,10 @@ test("one authorized fake verifies the real-call request without a model", async
         cachedInputTokens: 20,
         outputTokens: 30,
         reasoningOutputTokens: 10,
+        agentMessageCount: 2,
+        commandExecutionCount: 3,
+        fileChangeCount: 4,
+        failedToolItemCount: 1,
       };
     },
   };
@@ -195,6 +247,10 @@ test("one authorized fake verifies the real-call request without a model", async
     cachedInputTokens: 20,
     outputTokens: 30,
     reasoningOutputTokens: 10,
+    agentMessageCount: 2,
+    commandExecutionCount: 3,
+    fileChangeCount: 4,
+    failedToolItemCount: 1,
     statement: "One Codex Exec process returned bounded completion evidence.",
   });
 });

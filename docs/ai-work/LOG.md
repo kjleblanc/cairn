@@ -34,3 +34,4 @@
 | 039 | 2026-07-22 | Standard | Applied | DONE | completed | Required already-satisfied Codex tasks to close honestly and made missing model records a precise safe stop. | NO |
 | 040 | 2026-07-22 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (RECORD_VERIFICATION_FAILED); requested change was not verified. | NO |
 | 041 | 2026-07-22 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (MODEL_RECORDS_MISSING); requested change was not verified. | NO |
+| 042 | 2026-07-22 | Standard | Applied | DONE | completed | Added credential-opaque numeric Codex JSONL item diagnostics for missing-record stops. | NO |

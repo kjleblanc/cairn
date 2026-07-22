@@ -126,6 +126,11 @@ still checks the behavior and writes an honest report and log row with milestone
 movement NO. If a completed process writes no model records, Cairn stops with the
 specific safe code `MODEL_RECORDS_MISSING` and does not claim success.
 
+For that stop, Cairn also shows bounded counts for completed agent-message,
+command-execution, file-change, and failed command/file-change JSONL items. It does
+not retain the item text, reasoning, commands, paths, stdout, stderr, thread IDs,
+account details, authentication data, or credentials.
+
 ## History
 
 Contract v3.0 replaced the old governance machinery with one serial task and
