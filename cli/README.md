@@ -1,4 +1,6 @@
-# cairn-cli (early alpha)
+# cairn-cli
+
+Version 0.0.1, shared with the contract.
 
 The CLI exposes one serial lifecycle:
 
@@ -36,10 +38,6 @@ cairn task --mock "Describe one visible outcome"
 The offline adapter is deterministic and is not a model. It writes one short brief,
 one report, and one append-only log row. The report states that the requested
 product change was not attempted and milestone movement was NO.
-
-There are no active define/approve/build/review/decide commands, model-effort flags,
-concurrent commands, scheduler commands, retries, continuation paths, provider
-fallbacks, or generic provider framework.
 
 ## Development
 

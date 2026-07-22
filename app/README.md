@@ -1,40 +1,41 @@
 # Cairn Desktop
 
+Version 0.0.1, shared with the contract; `app/package.json` is the source.
+
 Cairn Desktop gives a beginner one understandable path:
 
 ```text
 choose a project → enter a task → see the recommended route → run → check → result
 ```
 
-The app retains first-run instructions, new/open/recent project handling, Project
-Conversion guidance, a model-route card, compact activity, Git protection, and
-honest task history.
+## What the app does
 
-Normal mode checks only whether the official Codex CLI is installed and connected,
-discarding every byte of command output. A missing or disconnected CLI stops at the
-connection-required screen and writes nothing.
+- first-run instructions, new/open/recent project handling, and Project
+  Conversion guidance;
+- a model-route card, compact activity view, Git protection, and honest task
+  history;
+- readiness checks: whether the official Codex CLI is installed and connected,
+  discarding every byte of command output and keeping only two booleans;
+- one confirmed real Codex Exec call: the app shows OpenAI, pinned model
+  `gpt-5.6-sol`, the exact project path, workspace data scope, and the
+  one-process quota, and keeps **Start one real Codex Exec call** disabled
+  until the owner checks that one-task confirmation;
+- one ephemeral process per confirmed call, reduced to terminal and numeric
+  usage evidence, with bounded numeric JSONL item counts shown when a stop
+  needs diagnosis;
+- record verification and, for a clean-start DONE, an exact-path commit staged
+  and created by Cairn itself; and
+- a child environment that keeps normal host and sandbox tools while excluding
+  temporary parent-session command shims; file edits use Codex's built-in
+  `apply_patch` tool.
 
-When Codex is connected, the app recommends one Codex Exec route. It then displays
-OpenAI, pinned model `gpt-5.6-sol`, the exact project path, workspace data scope, and
-the one-process quota. **Start one real Codex Exec call** remains disabled until the
-owner checks that one-task confirmation. Provider setup is never hidden or performed
-by Cairn.
+## What the app never does
 
-The confirmed path starts one ephemeral process, reduces JSONL to terminal and
-numeric usage evidence, and verifies the model-authored report, append-only log row,
-and protected starting work. Codex leaves changes unstaged; for a clean-start DONE,
-Cairn stages the exact verified paths and creates the isolated commit itself. It adds
-no fallback, retry, continuation, scheduler, concurrency, provider framework, or
-dependency.
-
-The child environment keeps normal host and sandbox tools but excludes temporary
-parent-session `.codex/tmp/arg0` command shims. File-edit instructions name Codex's
-built-in `apply_patch` tool instead of an inherited executable.
-
-When model records are missing, Desktop may show numeric counts for completed Codex
-agent-message, command-execution, file-change, and failed command/file-change JSONL
-items. It never shows or retains those items' text, commands, paths, stdout, stderr,
-thread IDs, account details, authentication data, or credentials.
+- open, perform, or inspect a provider login, or display or retain
+  credentials, login output, raw model output, commands, paths, stdout,
+  stderr, thread IDs, or account details;
+- retry, resume, continue, schedule, or start another provider; and
+- clean, reset, stash, overwrite, or broadly stage the owner's work.
 
 ## Offline demonstration
 
@@ -53,9 +54,18 @@ Provider: none
 Model: none
 ```
 
-It proves route → run → check → result and record protection. It does not implement
-the arbitrary product request, call a model, use a credential, or add a milestone
-stone.
+It proves route → run → check → result and record protection. It does not
+implement the arbitrary product request, call a model, use a credential, or
+add a milestone stone.
+
+## Windows installer
+
+```powershell
+npm.cmd --prefix app run make
+```
+
+The installer is written beneath `app/out/`. Local builds are not digitally
+signed, so Windows may show an unknown-publisher or SmartScreen warning.
 
 ## Local verification
 
@@ -66,9 +76,3 @@ npm.cmd --prefix app run build:vite
 cd app
 npx --no-install playwright test
 ```
-
-The app has no active five-gate Standard workflow, provider SDK import, parallel
-task deck, bounded-run screen, scheduler, passive proof, model-effort control, or
-experimental activation path. It adds no provider fallback, retry, continuation,
-generic provider framework, or dependency. Earlier implementations remain in Git
-history and task evidence.
