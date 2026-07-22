@@ -27,3 +27,4 @@
 | 032 | 2026-07-21 | Standard | Applied | DONE | completed | Removed Direction, timebox, PILOT, and unmatched-record process gates from the active serial runtime while preserving legacy-state protection and historical evidence | NO |
 | 033 | 2026-07-21 | Standard | Applied | DONE | completed | Added one credential-opaque Codex Exec readiness adapter and stopped before every real model call. | NO |
 | 034 | 2026-07-21 | Standard | Applied | DONE | completed | Enabled one explicitly confirmed, fake-verified Codex Exec task with exact disclosure and result verification; no live model call ran. | NO |
+| 035 | 2026-07-22 | Standard | Applied | STOPPED — README_REPLACEMENT_NOT_AUTHORIZED | stopped | Preserved Cairn's existing README and closed the stale routing-test brief without product or model work. | NO |
