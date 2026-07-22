@@ -36,7 +36,7 @@ function project(): string {
   writeFileSync(join(root, "AGENTS.md"), [
     "# Project Contract",
     "",
-    "Cairn Contract v3.0",
+    "Cairn Contract v0.0.1",
     "STATUS: ACTIVE",
     "PROJECT NAME: Serial fixture",
     "WHAT WE ARE BUILDING: a fixture",
