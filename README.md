@@ -1,53 +1,61 @@
 # Cairn
 
-Cairn helps beginners keep AI-assisted software work understandable, recoverable,
-and honest.
+Cairn helps beginners build real software with AI while keeping the work
+understandable, recoverable, and honest.
 
-The active product and Contract v3.0 share one path:
+**Version 0.0.1** — the app and the contract share this version.
+
+One path:
 
 ```text
 project -> task -> route -> run -> check -> result
 ```
 
-Local reversible work proceeds continuously. Cairn pauses only immediately before a
-real risk: a credential, paid call, destructive change, external write, deployment,
-production effect, or valuable-data exposure.
-
-There is no active five-gate workflow, mandatory fresh review, reviewer verdict,
-owner-decision receipt, Direction Gate, Experimental Draft, Bootstrap mode,
-scheduler, parallel queue, bounded batch, passive proof, or experimental provider
-route. Earlier experiments remain visible in Git, the changelog, and task history.
+Local reversible work proceeds continuously. Cairn pauses only immediately
+before a real risk: a credential, paid call, destructive change, external
+write, deployment, production effect, or valuable-data exposure.
 
 ## What works now
 
-- first-run instructions;
 - creating, opening, remembering, and switching projects;
-- preservation-first Project Conversion guidance;
-- one task at a time;
-- deterministic routing among connected compatible adapters;
-- an honest connection-required result when none is connected;
-- one Codex Exec adapter that detects installed/connected readiness without reading
-  or displaying credentials or login output;
-- one explicitly confirmed real Codex Exec call pinned to `gpt-5.6-sol`, with the
-  exact project, data scope, and one-call quota shown before it starts;
+- preservation-first conversion of existing work;
+- one task at a time with an honest DONE or STOPPED result;
+- deterministic routing to one connected adapter, and an honest
+  connection-required result when none is connected;
+- one Codex Exec adapter that detects installed/connected readiness without
+  reading or displaying credentials or login output;
+- one explicitly confirmed real Codex Exec call, with the provider, pinned
+  model, exact project path, data scope, and one-call quota shown before it
+  starts;
 - a compact route/run/check/result activity view;
 - protected Git state and exact task records; and
-- an explicit deterministic offline demonstration adapter.
+- an explicit deterministic offline demonstration adapter that proves the
+  lifecycle without calling a model.
 
-The offline adapter is not a model. It proves the lifecycle without implementing the
-requested product change. Its result says:
+## What you need
+
+**Git.** Git is the save-history tool Cairn uses to protect your work.
 
 ```text
-Routing demonstration: verified
-Requested product change: not attempted
-Milestone movement: NO
+git --version
 ```
 
-Normal mode checks `codex --version` and `codex login status` with all process output
-discarded. If both succeed, Cairn recommends the single Codex Exec route. The owner
-must then confirm OpenAI, model `gpt-5.6-sol`, the exact project path, the disclosed
-workspace data scope, and a quota of one ephemeral process with no retry or
-continuation. Only that confirmation authorizes the process.
+Commits also need a local name and email. These are computer-wide settings, so
+Cairn does not change them for you:
+
+```text
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+**One folder per project.** Use [Project Kickoff](PROJECT-KICKOFF.md) for an
+empty folder and [Project Conversion](PROJECT-CONVERSION.md) when anything
+valuable already exists.
+
+**The most important rule.** Never paste a password, bank detail, API key,
+token, private key, recovery code, or `.env` contents into chat or Cairn. You
+connect providers through their official controls; the AI never sees the
+credential.
 
 ## Launch or install Cairn Desktop
 
@@ -57,32 +65,26 @@ From this repository's root, launch the development build with:
 npm.cmd --prefix app start
 ```
 
-To create a double-clickable Windows installer from the dependencies already
-installed in this repository, run:
+To build a double-clickable Windows installer:
 
 ```powershell
 npm.cmd --prefix app run make
 ```
 
-The installer is written beneath `app/out/make/squirrel.windows/x64/`. Local builds
-are not digitally signed, so Windows may show an unknown-publisher or SmartScreen
-warning. Installing or distributing a build is a separate owner decision.
-
-The verified repaired Task 045 artifact is under
-`app/out/repaired/make/squirrel.windows/x64/`. Do not run the superseded raw
-executable under `app/out/Cairn-win32-x64/`.
+The installer is written beneath `app/out/`. Local builds are not digitally
+signed, so Windows may show an unknown-publisher or SmartScreen warning.
+Installing or distributing a build is a separate owner decision.
 
 ## Start here
 
-- [Getting Ready](GETTING-READY.md)
 - [Project Kickoff](PROJECT-KICKOFF.md) for an empty folder
 - [Project Conversion](PROJECT-CONVERSION.md) for existing work
-- [Everyday Workflow](EVERYDAY-WORKFLOW.md)
-- [High-Stakes](HIGH-STAKES.md) for concrete just-in-time risk boundaries
+- [Everyday Workflow](EVERYDAY-WORKFLOW.md) for daily use, risk approvals,
+  provider access, and expert boundaries
 
 The self-contained browser companion at
-[kjleblanc.github.io/cairn](https://kjleblanc.github.io/cairn/) provides the same
-contract and links. The Markdown files remain canonical.
+[kjleblanc.github.io/cairn](https://kjleblanc.github.io/cairn/) provides the
+same contract and links. The Markdown files remain canonical.
 
 ## Project memory
 
@@ -90,27 +92,23 @@ Each Cairn project keeps:
 
 - `AGENTS.md` — the small project contract;
 - `docs/ai-work/PROJECT.md` — goal, users, milestone, and current scope;
-- `docs/ai-work/tasks/NNN-brief.md` — the boundary for one task;
-- `docs/ai-work/tasks/NNN-report.md` — what actually happened; and
+- `docs/ai-work/tasks/NNN-brief.md` and `NNN-report.md` — the boundary and
+  honest result of one task; and
 - `docs/ai-work/LOG.md` — an append-only one-line history.
 
-These files are memory, not approval gates. Optional reviews can suggest follow-up
-work but cannot automatically reopen a completed task.
+These files are memory. Reviews are optional advice and never reopen a
+completed task.
 
 ## Safety boundary
 
 Cairn protects tracked, staged, modified, and untracked work. It never cleans,
-resets, stashes, overwrites, or broadly stages that work merely because it is messy.
+resets, stashes, overwrites, or broadly stages that work merely because it is
+messy. Immediately before an install, credential use, paid or data-bearing
+model call, destructive action, external write, publication, deployment, or
+production change, Cairn shows the exact action and recovery plan and waits
+for that action's approval.
 
-Never paste a password, API key, token, recovery code, bank detail, or `.env`
-contents into chat or Cairn. The owner connects providers through official controls;
-the AI never sees the credential.
-
-Immediately before an install, credential use, paid or data-bearing model call,
-destructive action, external write, publication, deployment, or production change,
-Cairn shows the exact action and recovery plan and waits for that action's approval.
-
-## Try the offline foundation
+## Try it offline
 
 With the repository's dependencies already installed:
 
@@ -119,50 +117,48 @@ $env:CAIRN_MOCK = "1"
 npm.cmd --prefix app start
 ```
 
-Or use the CLI from a Cairn project:
+Or from the CLI inside a Cairn project:
 
 ```powershell
 node path\to\cairn\cli\dist\src\index.js task --mock "Describe one visible outcome"
 ```
 
-Success is a route labeled `Provider none` and `Model none`, four activity stages,
-one brief/report/log append, a verified lifecycle result, and no milestone stone.
-It is not proof of self-hosting or real model work.
+The offline adapter is not a model. It proves route → run → check → result and
+honest record-keeping; its result plainly states that the requested product
+change was not attempted.
 
 ## Try one real Codex Exec task
 
-Run ordinary `cairn task` or start a Desktop task without `CAIRN_MOCK`. Cairn will
-report one of three non-secret states: not installed, installed but not connected,
-or installed and connected. If connected, review the real-call disclosure, check the
-one-call confirmation, and choose **Start one real Codex Exec call**.
+Run `cairn task` (or start a Desktop task) without `CAIRN_MOCK`. Cairn reports
+one of three non-secret states: not installed, installed but not connected, or
+installed and connected. If connected, review the disclosure — provider,
+pinned model, exact project path, data scope, one-process quota — check the
+confirmation, and choose **Start one real Codex Exec call**. The call consumes
+the connected account's pricing, credits, or quota; Cairn runs one ephemeral
+process, never retries, and never opens a login flow. You install and connect
+Codex yourself through official Codex controls.
 
-The call sends the task instructions and lets Codex read files inside the selected
-project as needed. It consumes the connected account's pricing, credits, or quota.
-Cairn runs one pinned, ephemeral process, retains no raw process output, verifies the
-model-authored report and log, and creates the exact-path commit itself when the task
-started from a clean tree. It does not retry, resume, continue, schedule, or start
-another provider. Cairn never opens a login flow; install and connect Codex yourself
-through official Codex controls.
+## Glossary
 
-Before that child starts, Cairn removes only temporary parent Codex tool-shim paths
-under `.codex/tmp/arg0` from its copied environment. Normal host tools and Codex's
-sandbox tools remain available, and the task uses Codex's built-in `apply_patch`
-tool for file edits.
-
-If the requested behavior is already present, Codex must not invent a change. It
-still checks the behavior and writes an honest report and log row with milestone
-movement NO. If a completed process writes no model records, Cairn stops with the
-specific safe code `MODEL_RECORDS_MISSING` and does not claim success.
-
-For that stop, Cairn also shows bounded counts for completed agent-message,
-command-execution, file-change, and failed command/file-change JSONL items. It does
-not retain the item text, reasoning, commands, paths, stdout, stderr, thread IDs,
-account details, authentication data, or credentials.
+| Word | Meaning |
+|---|---|
+| Git | Save history for a project. |
+| Repository | A project folder tracked by Git. |
+| Commit | One named saved snapshot. |
+| Diff | The exact before-and-after file changes. |
+| Tracked / staged / untracked | Kinds of current Git work. Cairn protects all of them. |
+| Dependency | Someone else's software used by the project. Installing or updating it needs approval. |
+| Route | The execution path Cairn picks for a task — which adapter and model, or the offline demonstration. |
+| Milestone | The next result you can personally see or try. |
+| Task brief | A short boundary for one outcome. |
+| Report | The honest account of what actually happened. |
+| DONE / STOPPED | Whether the requested outcome holds and its checks completed. |
 
 ## History
 
-Contract v3.0 replaced the old governance machinery with one serial task and
-just-in-time approval at concrete risk. Contract v2.x, scheduler, concurrency,
-provider, and review-loop experiments remain recoverable historical evidence.
+Cairn 0.0.1 is a formal reset. The full pre-reset history — contracts v1.0
+through v3.0 and task records 000–047 — is preserved in
+[docs/legacy/](docs/legacy/README.md) and at git tag `legacy-v3.0`. See
+[CHANGELOG.md](CHANGELOG.md).
 
 Cairn is licensed under the [MIT License](LICENSE).
