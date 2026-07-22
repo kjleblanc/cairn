@@ -7,7 +7,7 @@ history.
 Copy `CONTRACT-TEMPLATE.md` into the project folder without renaming it, then paste:
 
 ```text
-Convert this existing project to Cairn Contract v3.0. I am a beginner; explain the
+Convert this existing project to Cairn Contract v0.0.1. I am a beginner; explain the
 result plainly.
 
 Work read-only first. Identify the real project root, existing AI/contributor rules,
@@ -23,7 +23,7 @@ When the boundary is clear, continue in this same task:
    facts inferred from the project, asking me only for facts that cannot be known.
 2. Preserve any stronger existing safety rule and explain which rule file governs.
 3. Create only missing docs/ai-work/PROJECT.md, LOG.md, and tasks/ paths. Do not
-   overwrite existing records. An existing PILOT.md is historical and never a gate.
+   overwrite existing records.
 4. Write one conversion report listing what was added and what stayed untouched.
 5. Run safe local checks, inspect the exact diff, and commit only the named conversion
    files when Git isolation is clear. Do not push.
@@ -33,10 +33,9 @@ work during conversion. Finish with DONE or STOPPED, the final Git status, and t
 next command: "Work on: [a small visible result]".
 ```
 
-There is no candidate mode, mandatory fresh review, verdict, activation phrase, or
-owner-decision receipt. The conversion request authorizes only the named local setup
-files. Any install, destructive action, credential, external write, or deployment
-still needs exact approval at that real boundary.
+The conversion request authorizes only the named local setup files. Any install,
+destructive action, credential, external write, or deployment still needs exact
+approval at that real boundary.
 
 After conversion, read [Everyday Workflow](EVERYDAY-WORKFLOW.md) and start one small
 visible task.

@@ -21,8 +21,8 @@ If it is empty:
 1. Rename CONTRACT-TEMPLATE.md to AGENTS.md, keep STATUS: ACTIVE, and fill in my
    project facts.
 2. Create docs/ai-work/PROJECT.md with the goal, users, milestone, and current scope.
-3. Create docs/ai-work/LOG.md with the contract's empty log table and create the
-   empty docs/ai-work/tasks folder.
+3. Create docs/ai-work/LOG.md containing only the log table header defined in
+   the contract, and create the empty docs/ai-work/tasks folder.
 4. Initialize Git and commit only these setup files by exact name. If Git or identity
    is unavailable, leave the files uncommitted and explain the next step.
 
@@ -40,6 +40,5 @@ visible task:
 Work on: [the smallest useful version of the milestone].
 ```
 
-The task proceeds continuously. The agent pauses only immediately before a concrete
-risky action such as an install, credential use, paid call, destructive change,
-external write, or deployment.
+The task proceeds continuously and pauses only immediately before a concrete
+risky action; see [Everyday Workflow](EVERYDAY-WORKFLOW.md).
