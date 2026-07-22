@@ -27,6 +27,10 @@ Cairn stages the exact verified paths and creates the isolated commit itself. It
 no fallback, retry, continuation, scheduler, concurrency, provider framework, or
 dependency.
 
+The child environment keeps normal host and sandbox tools but excludes temporary
+parent-session `.codex/tmp/arg0` command shims. File-edit instructions name Codex's
+built-in `apply_patch` tool instead of an inherited executable.
+
 When model records are missing, Desktop may show numeric counts for completed Codex
 agent-message, command-execution, file-change, and failed command/file-change JSONL
 items. It never shows or retains those items' text, commands, paths, stdout, stderr,

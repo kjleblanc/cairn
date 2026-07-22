@@ -36,3 +36,4 @@
 | 041 | 2026-07-22 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (MODEL_RECORDS_MISSING); requested change was not verified. | NO |
 | 042 | 2026-07-22 | Standard | Applied | DONE | completed | Added credential-opaque numeric Codex JSONL item diagnostics for missing-record stops. | NO |
 | 043 | 2026-07-22 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (MODEL_RECORDS_MISSING); requested change was not verified. | NO |
+| 044 | 2026-07-22 | Standard | Applied | DONE | completed | Isolated the one Codex Exec child from temporary parent tool shims while retaining normal and sandbox tools. | NO |

@@ -121,6 +121,11 @@ started from a clean tree. It does not retry, resume, continue, schedule, or sta
 another provider. Cairn never opens a login flow; install and connect Codex yourself
 through official Codex controls.
 
+Before that child starts, Cairn removes only temporary parent Codex tool-shim paths
+under `.codex/tmp/arg0` from its copied environment. Normal host tools and Codex's
+sandbox tools remain available, and the task uses Codex's built-in `apply_patch`
+tool for file edits.
+
 If the requested behavior is already present, Codex must not invent a change. It
 still checks the behavior and writes an honest report and log row with milestone
 movement NO. If a completed process writes no model records, Cairn stops with the

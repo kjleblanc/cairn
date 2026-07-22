@@ -130,6 +130,20 @@ function shimArgs(command: string, args: readonly string[], cwd: string): string
   return ["/d", "/s", "/c", command, ...safeArgs];
 }
 
+function codexExecEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  const pathEntry = Object.entries(environment).find(([key]) => key.toLowerCase() === "path");
+  if (!pathEntry) return environment;
+  const [pathKey, pathValue = ""] = pathEntry;
+  environment[pathKey] = pathValue.split(delimiter).filter((rawEntry) => {
+    const directory = rawEntry.trim().replace(/^"(.*)"$/, "$1");
+    if (!directory || !isAbsolute(directory)) return true;
+    const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return !normalized.endsWith("/.codex/tmp/arg0") && !normalized.includes("/.codex/tmp/arg0/");
+  }).join(delimiter);
+  return environment;
+}
+
 export function createSystemCodexStatusProbe(): CodexStatusProbe {
   return {
     run(args, cwd) {
@@ -224,6 +238,7 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
         const args = shim ? shimArgs(codexCommand, request.args, request.cwd) : [...request.args];
         const child = spawn(command, args, {
           cwd: request.cwd,
+          env: codexExecEnvironment(),
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
         });
@@ -330,6 +345,7 @@ function taskPrompt(contract: AdapterTaskContract): string {
     `Requested outcome SHA-256: ${contract.requestedOutcomeSha256}`,
     "Cairn already created this task's brief. Do not create another brief or start another task.",
     "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
+    "Use Codex's built-in apply_patch tool for file edits. Do not invoke an apply_patch command inherited from PATH.",
     "Implement the requested outcome, run proportionate checks, write the matching report, and append exactly one matching log row.",
     "If the requested outcome is already satisfied, do not invent a product change. Verify the existing behavior, still write the report and log row, use milestone movement NO, and choose the honest terminal disposition.",
     "Do not run git add, git commit, or otherwise modify .git. Leave every task change unstaged; after verification, Cairn owns the exact-path local commit.",

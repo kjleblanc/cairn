@@ -4,6 +4,19 @@ The contract version lives in `CONTRACT-TEMPLATE.md` and each project's `AGENTS.
 Contract changes are explicit local work; they are never downloaded or activated
 silently.
 
+## Nested Codex tool isolation — Task 044 — 2026-07-22
+
+- Kept temporary parent-session `.codex/tmp/arg0` command shims out of the one
+  confirmed Codex Exec child's `PATH` while retaining the resolved Codex command,
+  normal host tools, and `.codex/.sandbox-bin` entries.
+- Directed the model to use Codex's built-in `apply_patch` tool instead of invoking
+  an inherited `apply_patch` command from `PATH`.
+- Added fake-process coverage that fails unless the temporary entry is absent and
+  ordinary command and sandbox paths remain available.
+- Added no dependency, provider fallback, retry, continuation, scheduler,
+  concurrency path, generic provider framework, broader sandbox, or real model
+  call.
+
 ## Credential-opaque Codex event diagnostics — Task 042 — 2026-07-22
 
 - Reduced completed Codex JSONL item events to four non-negative integers: agent

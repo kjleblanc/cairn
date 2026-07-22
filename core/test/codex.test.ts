@@ -91,6 +91,8 @@ test("Codex readiness keeps only installed and connected booleans", async () => 
 test("the system process reduces JSONL items to numeric evidence without retaining payload text", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-jsonl-workspace-"));
   const commandRoot = mkdtempSync(join(tmpdir(), "cairn-codex-jsonl-command-"));
+  const parentToolShim = join(tmpdir(), "cairn-parent", ".codex", "tmp", "arg0", "parent-tool");
+  const sandboxTools = join(tmpdir(), "cairn-parent", ".codex", ".sandbox-bin");
   const dispatcher = join(commandRoot, "dispatcher.cjs");
   const jsonl = [
     { type: "thread.started", thread_id: SECRET_SENTINEL },
@@ -101,7 +103,17 @@ test("the system process reduces JSONL items to numeric evidence without retaini
     { type: "item.completed", item: { id: "e", type: "file_change", path: SECRET_SENTINEL, status: "failed" } },
     { type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 2, output_tokens: 3, reasoning_output_tokens: 1 } },
   ].map((value) => JSON.stringify(value)).join("\n") + "\n";
-  writeFileSync(dispatcher, `process.stderr.write(${JSON.stringify(SECRET_SENTINEL)});\nprocess.stdout.write(${JSON.stringify(jsonl)});\n`, "utf8");
+  writeFileSync(dispatcher, [
+    `const { delimiter } = require("node:path");`,
+    `const childPath = Object.entries(process.env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";`,
+    `const childEntries = childPath.split(delimiter);`,
+    `if (childEntries.includes(${JSON.stringify(parentToolShim)})) process.exit(86);`,
+    `if (!childEntries.includes(${JSON.stringify(commandRoot)})) process.exit(87);`,
+    `if (!childEntries.includes(${JSON.stringify(sandboxTools)})) process.exit(88);`,
+    `process.stderr.write(${JSON.stringify(SECRET_SENTINEL)});`,
+    `process.stdout.write(${JSON.stringify(jsonl)});`,
+    "",
+  ].join("\n"), "utf8");
   const command = join(commandRoot, process.platform === "win32" ? "codex.cmd" : "codex");
   writeFileSync(command, process.platform === "win32"
     ? `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`
@@ -109,7 +121,7 @@ test("the system process reduces JSONL items to numeric evidence without retaini
   if (process.platform !== "win32") chmodSync(command, 0o755);
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   const previous = process.env[pathKey] ?? "";
-  process.env[pathKey] = `${commandRoot}${delimiter}${previous}`;
+  process.env[pathKey] = [commandRoot, parentToolShim, sandboxTools, previous].join(delimiter);
   try {
     const result = await createSystemCodexExecProcess().run({
       command: process.platform === "win32" ? "codex.exe" : "codex",
@@ -231,6 +243,8 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
   assert.match(requests[0].stdin, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
   assert.match(requests[0].stdin, /grants no authority beyond this one call and in-scope local reversible work/i);
+  assert.match(requests[0].stdin, /Use Codex's built-in apply_patch tool for file edits/);
+  assert.match(requests[0].stdin, /Do not invoke an apply_patch command inherited from PATH/);
   assert.match(requests[0].stdin, /If the requested outcome is already satisfied, do not invent a product change/);
   assert.match(requests[0].stdin, /still write the report and log row, use milestone movement NO/);
   assert.match(requests[0].stdin, /Do not run git add, git commit, or otherwise modify \.git/);
