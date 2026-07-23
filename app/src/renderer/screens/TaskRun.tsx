@@ -16,9 +16,14 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
   const [activities, setActivities] = useState<SerialActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const sessionId = useRef(Date.now()).current;
   const codexRoute = route?.status === "ready" && route.recommended.id === "codex-exec";
   const realCallStopped = result?.status === "stopped" && result.reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
+
+  useEffect(() => {
+    void cairn.updateCheck().then((update) => setCurrentVersion(update.current));
+  }, []);
 
   useEffect(() => cairn.onTaskActivity((event) => {
     if (event.dir === dir && event.sessionId === sessionId) {
@@ -60,7 +65,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvail
     <div className="task-run">
       <div className="row spread task-heading">
         <div>
-          <p className="eyebrow">one serial task</p>
+          <p className="eyebrow">one serial task{currentVersion ? ` · Cairn v${currentVersion}` : ""}</p>
           <h1>What should change?</h1>
         </div>
         <Pill kind="quiet" onClick={onBack}>← Project home</Pill>

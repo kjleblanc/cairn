@@ -9,3 +9,4 @@
 | 008 | 2026-07-23 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (MODEL_RECORDS_MISSING); requested change was not verified. | NO |
 | 009 | 2026-07-23 | Standard | Applied | DONE | completed | Guarded the offline adapter's honest-labeling statement with a real-adapter test; completes the Task 008 offline-honesty goal | NO |
 | 007 | 2026-07-23 | Standard | Applied | DONE | completed | A confirmed exact-path commit is never relabeled STOPPED by a phantom stat-dirty file; added .gitattributes (0.0.4) | NO |
+| 010 | 2026-07-23 | Standard | Applied | DONE | completed | Showed the running Cairn version on task entry so stale builds are obvious | YES |
