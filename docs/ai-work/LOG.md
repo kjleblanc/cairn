@@ -7,3 +7,4 @@
 | 005 | 2026-07-23 | Standard | Applied | DONE | completed | Stopped runs now keep raw local debug evidence with precise process-failure codes (0.0.3); oversized output no longer kills a run | NO |
 | 006 | 2026-07-23 | Standard | Applied | DONE | completed | Added a pre-build core test that catches drift in both canonical contract mirrors after line-ending normalization | YES |
 | 008 | 2026-07-23 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (MODEL_RECORDS_MISSING); requested change was not verified. | NO |
+| 009 | 2026-07-23 | Standard | Applied | DONE | completed | Guarded the offline adapter's honest-labeling statement with a real-adapter test; completes the Task 008 offline-honesty goal | NO |

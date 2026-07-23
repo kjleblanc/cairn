@@ -345,6 +345,21 @@ test("an unrelated task-record path prevents Cairn from committing model work", 
   assert.match(readFileSync(result.reportPath, "utf8"), /MODEL_RESULT_NOT_VERIFIED/);
 });
 
+test("the real offline demonstration adapter never claims it attempted the product change", async () => {
+  // Guards the honest-labeling promise at its source: every fixture in the
+  // suite hardcodes this sentence, but nothing asserts the real adapter still
+  // returns it. A drift to a claim of completed work must fail here.
+  const adapter = createOfflineDemoAdapter();
+  const result = await adapter.run({
+    taskNumber: 7,
+    requestedOutcomeSha256: "a".repeat(64),
+  } as unknown as Parameters<TaskAdapter["run"]>[0]);
+  assert.equal(result.kind, "offline-demo-result");
+  const statement = (result as { statement: string }).statement;
+  assert.equal(statement, "The offline route completed without attempting the requested product change.");
+  assert.doesNotMatch(statement, /\bimplemented\b|completed the requested product change|attempted the requested/i);
+});
+
 test("the offline demonstration writes only one brief, report, and log row", async () => {
   const root = project();
   const result = await runSerialTask(root, "Create a welcome page", {
