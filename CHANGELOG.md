@@ -4,6 +4,23 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.0.2 — Codex Exec can actually write — 2026-07-22
+
+- Applied Task 002's proven invocation: the non-interactive call now uses
+  approval policy `never` (an `on-request` policy had every write rejected
+  because exec mode has no user to ask), configures the elevated Windows
+  sandbox explicitly so `workspace-write` is not silently read-only, and
+  upgrades the helperless PATH launcher stub to Codex's versioned install,
+  whose directory joins the child PATH so sandbox helpers can launch.
+- Sealed the core and app test fakes so they can never resolve a real Codex
+  install: fake installs carry their own sandbox helper marker and tests run
+  against an empty LOCALAPPDATA. Before the seal, the new resolution let
+  unmodified app tests start real Codex processes during one development
+  test run; the seal makes that structurally impossible.
+- Added no dependency, retry, fallback, scheduler, login flow, or sandbox
+  widening. The one-call owner confirmation and credential-opaque readiness
+  probes are unchanged.
+
 ## 0.0.1 — formal reset — 2026-07-22
 
 - Gave the app and the contract one shared version number and restarted the

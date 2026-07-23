@@ -67,12 +67,18 @@ process.stdin.on("end", () => {
     writeFileSync(executable, `#!${process.execPath}\n${dispatcherSource}`);
     chmodSync(executable, 0o755);
   }
+  // The fake install carries its own sandbox helper so command resolution
+  // accepts it as-is, and LOCALAPPDATA points at an empty root so no test can
+  // ever escape to a real versioned Codex install and start a real paid call.
+  writeFileSync(join(bin, "codex-windows-sandbox-setup.exe"), "");
+  const emptyLocalAppData = mkdtempSync(join(tmpdir(), "cairn-fake-localappdata-"));
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   return {
     marker,
     env: {
       [pathKey]: `${bin}${delimiter}${process.env[pathKey] ?? ""}`,
       CAIRN_FAKE_CODEX_MARKER: marker,
+      LOCALAPPDATA: emptyLocalAppData,
     },
   };
 }

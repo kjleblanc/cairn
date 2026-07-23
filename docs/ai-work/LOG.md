@@ -2,3 +2,4 @@
 |---|---|---|---|---|---|---|---|
 | 001 | 2026-07-22 | Standard | Applied | DONE | completed | Formal reset: Cairn 0.0.1 with a fresh contract and docs; pre-reset history archived under docs/legacy | NO |
 | 002 | 2026-07-22 | Standard | Applied | DONE | completed | Diagnosed the Codex Exec write-failure live: approval policy, ignored Windows sandbox config, and a helperless launcher stub; proved the working invocation | NO |
+| 003 | 2026-07-23 | Standard | Applied | DONE | completed | Wired the proven Codex invocation into Cairn (0.0.2); a real confirmed call completed a verified task with Cairn's exact-path commit in a disposable project | NO |

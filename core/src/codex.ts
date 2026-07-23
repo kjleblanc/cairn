@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, relative, resolve } from "node:path";
+import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
+import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
 import type {
   AdapterTaskContract,
   CodexExecResult,
@@ -98,8 +98,59 @@ function insideWorkspace(workspaceRoot: string, candidate: string): boolean {
   return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
-/** Resolves only the Codex CLI from absolute PATH entries outside the workspace. */
+const WINDOWS_SANDBOX_SETUP_HELPER = "codex-windows-sandbox-setup.exe";
+
+function hasWindowsSandboxHelper(directory: string): boolean {
+  return existsSync(resolve(directory, WINDOWS_SANDBOX_SETUP_HELPER));
+}
+
+/**
+ * Codex's self-updated Windows install keeps its elevated-sandbox helpers
+ * beside the binary under %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\; the PATH
+ * launcher stub ships without them, so its elevated-sandbox writes always
+ * fail with "program not found" (Task 002).
+ */
+function windowsVersionedCodexCommand(workspaceRoot: string): string | null {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData || !isAbsolute(localAppData)) return null;
+  const base = resolve(localAppData, "OpenAI", "Codex", "bin");
+  let entries: string[];
+  try {
+    entries = readdirSync(base);
+  } catch {
+    return null;
+  }
+  let best: { command: string; modified: number } | null = null;
+  for (const entry of entries) {
+    const directory = resolve(base, entry);
+    try {
+      if (!statSync(directory).isDirectory() || !hasWindowsSandboxHelper(directory)) continue;
+      for (const extension of [".exe", ".cmd", ".bat"]) {
+        const candidate = resolve(directory, `codex${extension}`);
+        if (insideWorkspace(workspaceRoot, candidate) || !existsSync(candidate)) continue;
+        const stats = statSync(candidate);
+        if (!stats.isFile()) continue;
+        if (/\.(?:cmd|bat)$/i.test(candidate) && /[%!^&|<>()]/.test(candidate)) continue;
+        if (!best || stats.mtimeMs > best.modified) best = { command: candidate, modified: stats.mtimeMs };
+        break;
+      }
+    } catch {
+      // Ignore unreadable entries and continue to the next candidate.
+    }
+  }
+  return best ? best.command : null;
+}
+
 function resolveCodexCommand(workspaceRoot: string): string | null {
+  const fromPath = resolvePathCodexCommand(workspaceRoot);
+  if (!fromPath || process.platform !== "win32" || hasWindowsSandboxHelper(dirname(fromPath))) {
+    return fromPath;
+  }
+  return windowsVersionedCodexCommand(workspaceRoot) ?? fromPath;
+}
+
+/** Resolves only the Codex CLI from absolute PATH entries outside the workspace. */
+function resolvePathCodexCommand(workspaceRoot: string): string | null {
   const pathEntry = Object.entries(process.env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";
   const extensions = process.platform === "win32" ? [".exe", ".cmd", ".bat"] : [""];
   for (const rawEntry of pathEntry.split(delimiter)) {
@@ -130,17 +181,19 @@ function shimArgs(command: string, args: readonly string[], cwd: string): string
   return ["/d", "/s", "/c", command, ...safeArgs];
 }
 
-function codexExecEnvironment(): NodeJS.ProcessEnv {
+function codexExecEnvironment(commandDirectory: string): NodeJS.ProcessEnv {
   const environment = { ...process.env };
   const pathEntry = Object.entries(environment).find(([key]) => key.toLowerCase() === "path");
-  if (!pathEntry) return environment;
-  const [pathKey, pathValue = ""] = pathEntry;
-  environment[pathKey] = pathValue.split(delimiter).filter((rawEntry) => {
+  const [pathKey, pathValue = ""] = pathEntry ?? ["PATH", ""];
+  const retained = pathValue.split(delimiter).filter((rawEntry) => {
     const directory = rawEntry.trim().replace(/^"(.*)"$/, "$1");
     if (!directory || !isAbsolute(directory)) return true;
     const normalized = directory.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
     return !normalized.endsWith("/.codex/tmp/arg0") && !normalized.includes("/.codex/tmp/arg0/");
   }).join(delimiter);
+  // The launched binary's own directory leads the child PATH so Codex's
+  // bare-name sandbox helper spawns (codex-windows-sandbox-setup.exe) resolve.
+  environment[pathKey] = retained ? `${commandDirectory}${delimiter}${retained}` : commandDirectory;
   return environment;
 }
 
@@ -238,7 +291,7 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
         const args = shim ? shimArgs(codexCommand, request.args, request.cwd) : [...request.args];
         const child = spawn(command, args, {
           cwd: request.cwd,
-          env: codexExecEnvironment(),
+          env: codexExecEnvironment(dirname(codexCommand)),
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
         });
@@ -337,16 +390,22 @@ export function codexExecConnectionReason(status: CodexExecStatus): string {
 }
 
 function taskPrompt(contract: AdapterTaskContract): string {
+  const padded = String(contract.taskNumber).padStart(3, "0");
   return [
     "Complete exactly one Cairn task in this workspace.",
     "Read and follow AGENTS.md and the existing task brief before editing.",
-    `Task number: ${String(contract.taskNumber).padStart(3, "0")}`,
+    `Task number: ${padded}`,
     `Requested visible outcome: ${contract.requestedOutcome}`,
     `Requested outcome SHA-256: ${contract.requestedOutcomeSha256}`,
     "Cairn already created this task's brief. Do not create another brief or start another task.",
     "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
     "Use Codex's built-in apply_patch tool for file edits. Do not invoke an apply_patch command inherited from PATH.",
-    "Implement the requested outcome, run proportionate checks, write the matching report, and append exactly one matching log row.",
+    "Implement the requested outcome and run proportionate checks.",
+    // Task 003: a perfect product change still failed verification when the
+    // record shape stayed implicit, so the prompt states the exact format
+    // Cairn's verifier requires.
+    `Write docs/ai-work/tasks/${padded}-report.md. It must begin with "# Task ${padded}", contain exactly one line starting "Milestone movement: " with value YES, NO, or UNCLEAR, and exactly one line starting "Disposition: " with value DONE or "STOPPED — [reason]".`,
+    `Append exactly one row to docs/ai-work/LOG.md shaped exactly like: | ${padded} | <date> | Standard | Applied | DONE | completed | <one-line summary> | <YES/NO/UNCLEAR> | — use outcome DONE with decision completed, or outcome STOPPED with decision stopped, and the last column must equal the report's milestone movement value.`,
     "If the requested outcome is already satisfied, do not invent a product change. Verify the existing behavior, still write the report and log row, use milestone movement NO, and choose the honest terminal disposition.",
     "Do not run git add, git commit, or otherwise modify .git. Leave every task change unstaged; after verification, Cairn owns the exact-path local commit.",
     "Do not install or update dependencies, use external services, publish, deploy, or cross another concrete risk boundary.",
@@ -357,9 +416,17 @@ function taskPrompt(contract: AdapterTaskContract): string {
 
 export function prepareCodexExecRequest(workspaceRoot: string, contract: AdapterTaskContract): CodexExecRequest {
   const cwd = resolve(workspaceRoot);
+  // Task 002: non-interactive exec has no user to answer an approval request,
+  // so the policy must be "never"; and without the elevated Windows sandbox,
+  // workspace-write silently downgrades to read-only. The explicit config
+  // value keeps that enablement while --ignore-user-config still isolates the
+  // run from everything else in the owner's config.
+  const windowsSandboxConfig = process.platform === "win32"
+    ? ["-c", 'windows.sandbox="elevated"']
+    : [];
   const args = Object.freeze([
     "--ask-for-approval",
-    "on-request",
+    "never",
     "exec",
     "--ephemeral",
     "--model",
@@ -368,6 +435,7 @@ export function prepareCodexExecRequest(workspaceRoot: string, contract: Adapter
     cwd,
     "--sandbox",
     "workspace-write",
+    ...windowsSandboxConfig,
     "--disable",
     "multi_agent",
     "--ignore-user-config",

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import {
@@ -119,9 +119,16 @@ test("the system process reduces JSONL items to numeric evidence without retaini
     ? `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`
     : `#!/usr/bin/env node\nrequire(${JSON.stringify(dispatcher)});\n`, "utf8");
   if (process.platform !== "win32") chmodSync(command, 0o755);
+  // The fake install carries its own sandbox helper so resolution accepts it
+  // as-is, and LOCALAPPDATA points at an empty root so no test can ever
+  // escape to a real versioned Codex install.
+  writeFileSync(join(commandRoot, "codex-windows-sandbox-setup.exe"), "", "utf8");
+  const emptyLocalAppData = mkdtempSync(join(tmpdir(), "cairn-codex-jsonl-localappdata-"));
   const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   const previous = process.env[pathKey] ?? "";
+  const previousLocalAppData = process.env.LOCALAPPDATA;
   process.env[pathKey] = [commandRoot, parentToolShim, sandboxTools, previous].join(delimiter);
+  process.env.LOCALAPPDATA = emptyLocalAppData;
   try {
     const result = await createSystemCodexExecProcess().run({
       command: process.platform === "win32" ? "codex.exe" : "codex",
@@ -144,8 +151,60 @@ test("the system process reduces JSONL items to numeric evidence without retaini
     assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET_SENTINEL));
   } finally {
     process.env[pathKey] = previous;
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
   }
 });
+
+test(
+  "a helperless PATH stub is upgraded to the versioned Codex install, whose directory joins the child PATH",
+  { skip: process.platform !== "win32" },
+  async () => {
+    // Task 002: the PATH-resolved codex.exe is a launcher stub without
+    // codex-windows-sandbox-setup.exe, so elevated-sandbox writes always fail.
+    // The real helpers live in %LOCALAPPDATA%\OpenAI\Codex\bin\<hash>\.
+    const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-versioned-workspace-"));
+    const stubRoot = mkdtempSync(join(tmpdir(), "cairn-codex-stub-"));
+    const fakeLocalAppData = mkdtempSync(join(tmpdir(), "cairn-codex-localappdata-"));
+    const versionedDir = join(fakeLocalAppData, "OpenAI", "Codex", "bin", "0abc123hash");
+    mkdirSync(versionedDir, { recursive: true });
+    // The stub must never run; exiting 99 with no JSONL makes that visible.
+    writeFileSync(join(stubRoot, "codex.cmd"), "@exit /b 99\r\n", "utf8");
+    const jsonl = JSON.stringify({
+      type: "turn.completed",
+      usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 },
+    }) + "\n";
+    const dispatcher = join(versionedDir, "dispatcher.cjs");
+    writeFileSync(dispatcher, [
+      `const { delimiter } = require("node:path");`,
+      `const childPath = Object.entries(process.env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";`,
+      `if (!childPath.split(delimiter).includes(${JSON.stringify(versionedDir)})) process.exit(90);`,
+      `process.stdout.write(${JSON.stringify(jsonl)});`,
+      "",
+    ].join("\n"), "utf8");
+    writeFileSync(join(versionedDir, "codex.cmd"), `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`, "utf8");
+    writeFileSync(join(versionedDir, "codex-windows-sandbox-setup.exe"), "", "utf8");
+    const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+    const previousPath = process.env[pathKey] ?? "";
+    const previousLocalAppData = process.env.LOCALAPPDATA;
+    process.env[pathKey] = stubRoot;
+    process.env.LOCALAPPDATA = fakeLocalAppData;
+    try {
+      const result = await createSystemCodexExecProcess().run({
+        command: "codex.exe",
+        args: ["exec", "-"],
+        cwd: workspace,
+        stdin: "bounded fake request",
+      });
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.terminalEvent, "turn.completed");
+    } finally {
+      process.env[pathKey] = previousPath;
+      if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = previousLocalAppData;
+    }
+  },
+);
 
 test("the production adapter stops before starting a real Codex Exec process", async () => {
   const adapter = createCodexExecAdapter(resolve("codex-production-fixture"), { installed: true, connected: true });
@@ -221,9 +280,16 @@ test("one authorized fake verifies the real-call request without a model", async
   const result = await adapter.run(contract());
 
   assert.equal(requests.length, 1);
+  // Task 002 proved non-interactive exec needs "never" (on-request writes are
+  // rejected with no user to ask) and that Windows workspace-write is silently
+  // read-only unless the elevated sandbox is configured despite
+  // --ignore-user-config.
+  const windowsSandboxConfig = process.platform === "win32"
+    ? ["-c", 'windows.sandbox="elevated"']
+    : [];
   assert.deepEqual(requests[0].args, [
     "--ask-for-approval",
-    "on-request",
+    "never",
     "exec",
     "--ephemeral",
     "--model",
@@ -232,6 +298,7 @@ test("one authorized fake verifies the real-call request without a model", async
     workspace,
     "--sandbox",
     "workspace-write",
+    ...windowsSandboxConfig,
     "--disable",
     "multi_agent",
     "--ignore-user-config",
@@ -243,6 +310,15 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
   assert.match(requests[0].stdin, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
   assert.match(requests[0].stdin, /grants no authority beyond this one call and in-scope local reversible work/i);
+  // The Task 003 smoke call proved a model can complete the product change
+  // perfectly and still fail record verification when the prompt leaves the
+  // record shape implicit; the prompt must state the exact verified format.
+  assert.match(requests[0].stdin, /begin with "# Task 033"/);
+  assert.match(requests[0].stdin, /exactly one line starting "Milestone movement: " with value YES, NO, or UNCLEAR/);
+  assert.match(requests[0].stdin, /exactly one line starting "Disposition: " with value DONE or "STOPPED — \[reason\]"/);
+  assert.match(requests[0].stdin, /\| 033 \| <date> \| Standard \| Applied \| DONE \| completed \| <one-line summary> \| <YES\/NO\/UNCLEAR> \|/);
+  assert.match(requests[0].stdin, /outcome STOPPED with decision stopped/);
+  assert.match(requests[0].stdin, /last column must equal the report's milestone movement value/);
   assert.match(requests[0].stdin, /Use Codex's built-in apply_patch tool for file edits/);
   assert.match(requests[0].stdin, /Do not invoke an apply_patch command inherited from PATH/);
   assert.match(requests[0].stdin, /If the requested outcome is already satisfied, do not invent a product change/);
