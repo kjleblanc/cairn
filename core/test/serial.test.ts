@@ -250,6 +250,73 @@ test("a confirmed exact-path commit stays DONE despite a phantom stat-dirty file
   assert.match(result.reportText, /Disposition: \*\*DONE\*\*/);
 });
 
+test("a phantom stat-dirty start still creates the exact-path task commit", async () => {
+  // Task 010 finished DONE but skipped its commit: the start snapshot counted
+  // a stat-only CRLF rewrite (identical content under autocrlf) as protected
+  // dirty work, and the uncommitted result then poisoned the rerun (Task 011,
+  // PROTECTED_WORK_CHANGED). A start dirty only by phantom, content-clean
+  // differences must commit like a clean start.
+  const root = project();
+  git(root, ["config", "core.autocrlf", "true"]);
+  writeFileSync(join(root, "phantom.txt"), "line one\nline two\n");
+  git(root, ["add", "phantom.txt"]);
+  git(root, ["commit", "-q", "-m", "add phantom"]);
+  // Content-identical CRLF rewrite BEFORE the task starts: stat-dirty to
+  // `git status --porcelain`, clean to a content diff.
+  writeFileSync(join(root, "phantom.txt"), "line one\r\nline two\r\n");
+  assert.notEqual(
+    git(root, ["status", "--porcelain=v1", "--untracked-files=all"]),
+    "",
+    "the start must look stat-dirty to a plain status check",
+  );
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
+        "# Task 001 report", "", "## Result", "",
+        "Added the requested visible result and verified it.", "",
+        "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
+      ].join("\n"));
+      appendLogRow(root, {
+        task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
+        outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
+      });
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(
+      root, { installed: true, connected: true },
+      authorizeCodexExec(root, "Add one visible result"), fake,
+    )],
+  });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.disposition, "DONE");
+  assert.equal(result.commit.status, "created");
+  assert.notEqual(result.commit.hash, beforeHead);
+  // The commit captured exactly the task work; the phantom file stayed out.
+  assert.deepEqual(git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(), [
+    "docs/ai-work/LOG.md",
+    "docs/ai-work/tasks/001-brief.md",
+    "docs/ai-work/tasks/001-report.md",
+    "visible.txt",
+  ]);
+  // Git may keep showing the phantom stat entry until the file is touched;
+  // what matters is that nothing else is left behind and the content view is
+  // clean, so the next run starts clean instead of poisoned (Task 011).
+  const leftover = git(root, ["status", "--porcelain=v1", "--untracked-files=all"])
+    .split(/\r?\n/).filter(Boolean).filter((entry) => entry !== " M phantom.txt");
+  assert.deepEqual(leftover, []);
+  assert.equal(git(root, ["diff", "--name-only"]), "");
+});
+
 test("an already-satisfied fake Codex task closes honestly without a product edit", async () => {
   const root = project();
   const beforeHead = git(root, ["rev-parse", "HEAD"]);

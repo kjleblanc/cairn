@@ -114,10 +114,26 @@ function protectedPathSnapshot(root: string, status: readonly string[]): Readonl
   return values;
 }
 
+/**
+ * `git status --porcelain` counts a file as modified on stat or line-ending
+ * differences alone — identical content, e.g. a CRLF working copy over an LF
+ * index under autocrlf — and `git update-index --refresh` does not clear that
+ * state. Counting such phantom dirt as a dirty start made a DONE task skip its
+ * own commit and poisoned the rerun (Tasks 010/011). A worktree-only
+ * modification entry is kept only when a content diff confirms it; every other
+ * entry (staged, untracked, renamed, deleted) already reflects real work.
+ */
+function statusLines(root: string): string[] {
+  const raw = lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]));
+  if (!raw.some((entry) => entry.startsWith(" M"))) return raw;
+  const contentDirty = new Set(gitZ(root, ["diff", "--name-only", "-z", "--"]).map((path) => path.replace(/\\/g, "/")));
+  return raw.filter((entry) => !entry.startsWith(" M") || contentDirty.has(statusPath(entry)));
+}
+
 function snapshot(root: string): GitSnapshot {
   const top = resolve(git(root, ["rev-parse", "--show-toplevel"]));
   if (top.toLowerCase() !== resolve(root).toLowerCase()) throw new Error("PROJECT_ROOT_MISMATCH");
-  const status = lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]));
+  const status = statusLines(root);
   return {
     head: git(root, ["rev-parse", "HEAD"]),
     status,
@@ -534,7 +550,9 @@ function freezeContract(contract: AdapterTaskContract): AdapterTaskContract {
 }
 
 function verifyProtected(root: string, start: GitSnapshot, owned: ReadonlySet<string>): boolean {
-  const current = lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]));
+  // The same phantom filter as the start snapshot, or a stat-only difference
+  // present since the start would read as a protected-work change.
+  const current = statusLines(root);
   const currentOther = statusWithoutOwned(current, owned);
   const startOther = statusWithoutOwned(start.status, owned);
   const head = git(root, ["rev-parse", "HEAD"]);

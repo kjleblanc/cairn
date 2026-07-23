@@ -4,6 +4,20 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.0.5 — a phantom-dirty start no longer skips a task's commit — 2026-07-23
+
+- Fixed the start-side twin of the 0.0.4 fix: `git status` can report a file
+  as modified on stat or line-ending differences alone (identical content,
+  e.g. a CRLF working copy over an LF index), and `git update-index
+  --refresh` does not clear that state. Counting the phantom as a dirty start
+  made a verified DONE task skip its own exact-path commit (Task 010), and
+  the uncommitted work then stopped the rerun with PROTECTED_WORK_CHANGED
+  (Task 011). A worktree-modification entry now counts toward the starting
+  state only when a content diff confirms it; staged, untracked, renamed,
+  and deleted entries still count as real work, so a genuine dirty start
+  still skips the commit and still protects owner work byte for byte.
+- Added no dependency, retry, fallback, or scheduler.
+
 ## 0.0.4 — a successful commit is never relabeled STOPPED — 2026-07-23
 
 - Fixed a torn result: when Cairn committed verified model work, a

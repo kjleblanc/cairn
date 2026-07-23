@@ -12,3 +12,4 @@
 | 010 | 2026-07-23 | Standard | Applied | DONE | completed | Showed the running Cairn version on task entry so stale builds are obvious | YES |
 | 011 | 2026-07-23 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (PROTECTED_WORK_CHANGED); a rerun of the Task 010 feature was poisoned by the prior uncommitted run | NO |
 | 013 | 2026-07-23 | Standard | Applied | DONE | completed | Committed the conductor route spec: thinking-partner v0 in the app, core kept as the safety envelope, phased route to the vision | NO |
+| 012 | 2026-07-23 | Standard | Applied | DONE | completed | A phantom stat-dirty start no longer skips the exact-path commit; real dirt is confirmed by content diff (0.0.5) | NO |
