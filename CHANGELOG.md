@@ -4,6 +4,21 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.0.4 — a successful commit is never relabeled STOPPED — 2026-07-23
+
+- Fixed a torn result: when Cairn committed verified model work, a
+  post-commit whole-tree cleanliness check could still fail on a file that
+  was dirty by stat alone (identical content, e.g. a CRLF working copy over
+  an LF index), overwriting the just-committed DONE records with STOPPED.
+  This mislabeled the first real milestone (Task 006), whose commit was
+  correct. A confirmed exact-path commit — proven by pre-commit staging
+  checks plus post-commit ancestry and single-commit count — is now reported
+  DONE and never re-evaluated against whole-tree state.
+- Added `.gitattributes` normalizing text line endings so tracked files stop
+  producing phantom stat-only modifications on Windows checkouts.
+- Added no dependency, retry, fallback, or scheduler. Genuine unexpected
+  changes are still caught before the commit is made.
+
 ## 0.0.3 — stopped runs keep their evidence — 2026-07-23
 
 - A real Codex Exec run now streams its full JSONL output and stderr to a

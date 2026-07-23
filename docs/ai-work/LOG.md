@@ -8,3 +8,4 @@
 | 006 | 2026-07-23 | Standard | Applied | DONE | completed | Added a pre-build core test that catches drift in both canonical contract mirrors after line-ending normalization | YES |
 | 008 | 2026-07-23 | Standard | Applied | STOPPED | stopped | Codex Exec stopped safely (MODEL_RECORDS_MISSING); requested change was not verified. | NO |
 | 009 | 2026-07-23 | Standard | Applied | DONE | completed | Guarded the offline adapter's honest-labeling statement with a real-adapter test; completes the Task 008 offline-honesty goal | NO |
+| 010 | 2026-07-23 | Standard | Applied | DONE | completed | A confirmed exact-path commit is never relabeled STOPPED by a phantom stat-dirty file; added .gitattributes (0.0.4) | NO |

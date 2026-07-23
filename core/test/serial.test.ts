@@ -194,6 +194,62 @@ test("one authorized fake Codex process completes one verified serial task", asy
   assert.match(result.activities.at(-1)?.detail ?? "", /real Codex Exec task completed/i);
 });
 
+test("a confirmed exact-path commit stays DONE despite a phantom stat-dirty file", async () => {
+  // Task 006 (the milestone) committed correctly but was torn to STOPPED:
+  // a post-commit `git status --porcelain` saw core/test/files.test.ts as
+  // stat-dirty (CRLF working copy, LF index, identical content under
+  // autocrlf) — clean to a content diff, dirty to a stat check — and the run
+  // rewrote its own committed DONE records to STOPPED (MODEL_RESULT_NOT_VERIFIED).
+  const root = project();
+  git(root, ["config", "core.autocrlf", "true"]);
+  writeFileSync(join(root, "phantom.txt"), "line one\nline two\n");
+  git(root, ["add", "phantom.txt"]);
+  git(root, ["commit", "-q", "-m", "add phantom"]);
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
+        "# Task 001 report", "", "## Result", "",
+        "Added the requested visible result and verified it.", "",
+        "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
+      ].join("\n"));
+      appendLogRow(root, {
+        task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
+        outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
+      });
+      // Content-identical CRLF rewrite of an unrelated tracked file: invisible
+      // to a content diff, but stat-dirty to `git status --porcelain`.
+      writeFileSync(join(root, "phantom.txt"), "line one\r\nline two\r\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(
+      root, { installed: true, connected: true },
+      authorizeCodexExec(root, "Add one visible result"), fake,
+    )],
+  });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.disposition, "DONE");
+  assert.equal(result.commit.status, "created");
+  assert.notEqual(result.commit.hash, beforeHead);
+  // The commit captured exactly the task work; the phantom file was not committed.
+  assert.deepEqual(git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(), [
+    "docs/ai-work/LOG.md",
+    "docs/ai-work/tasks/001-brief.md",
+    "docs/ai-work/tasks/001-report.md",
+    "visible.txt",
+  ]);
+  assert.match(result.reportText, /Disposition: \*\*DONE\*\*/);
+});
+
 test("an already-satisfied fake Codex task closes honestly without a product edit", async () => {
   const root = project();
   const beforeHead = git(root, ["rev-parse", "HEAD"]);

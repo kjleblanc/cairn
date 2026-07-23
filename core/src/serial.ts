@@ -514,7 +514,13 @@ function verifyModelGitResult(
   const committedHead = git(root, ["rev-parse", "HEAD"]);
   if (!isAncestor(root, start.head, committedHead)) return null;
   if (Number(git(root, ["rev-list", "--count", `${start.head}..${committedHead}`])) !== 1) return null;
-  if (lines(git(root, ["status", "--porcelain=v1", "--untracked-files=all"])).length > 0) return null;
+  // The commit's correctness is fully established before and by the commit:
+  // the pre-commit checks proved exactly the derived task paths were staged
+  // with nothing else changed or untracked, and the ancestry and single-commit
+  // count confirm one isolated commit. A post-commit whole-tree cleanliness
+  // check is not re-run here: it can report a file as dirty on a stat
+  // difference alone (identical content, e.g. a CRLF working copy over an LF
+  // index) and would tear a correct DONE commit into STOPPED (Task 006).
   return { status: "created", reason: "Cairn created one isolated exact-path local task commit.", hash: committedHead };
 }
 

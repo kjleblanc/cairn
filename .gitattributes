@@ -1,0 +1,9 @@
+# Normalize line endings so tracked text files never show phantom
+# stat-only modifications on Windows checkouts (core.autocrlf). This keeps
+# `git status` honest for Cairn's own commit verification.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.nupkg binary
+*.exe binary
