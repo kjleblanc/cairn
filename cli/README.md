@@ -1,6 +1,8 @@
 # cairn-cli
 
-Version 0.0.1, shared with the contract.
+A maintainer and development front end over the same core the desktop app
+uses; the desktop app is the surface for beginners. The app, CLI, and contract
+share one version number; the newest entry in `../CHANGELOG.md` states it.
 
 The CLI exposes one serial lifecycle:
 

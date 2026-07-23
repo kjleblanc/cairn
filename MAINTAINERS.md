@@ -13,16 +13,20 @@ The active product path is:
 
 `project -> task -> route -> run -> check -> result`
 
+The owner-approved direction — a conductor-led Cairn — lives in
+`docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md`.
+
 ## Versioning
 
-The app and the contract share one version number (currently 0.0.1), declared
-in:
+The app and the contract share one version number, declared in:
 
 - `CONTRACT-TEMPLATE.md` — the "Cairn Contract vX.Y.Z" line;
 - `app/package.json`, `core/package.json`, `cli/package.json`.
 
 Bump the patch number for fixes and doc corrections, the minor number for new
-capability. Bump every declaration together and add a changelog entry.
+capability. Bump every declaration together and add a changelog entry. No
+other prose file repeats the version number: prose copies went stale once
+already, so guides point at the changelog instead.
 Pre-reset "Contract vN.N" numbers are a retired scheme; see
 `docs/legacy/README.md`.
 

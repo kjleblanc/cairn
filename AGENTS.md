@@ -11,9 +11,9 @@ Filled in during setup. Change the milestone when useful work lands.
 ```text
 STATUS: ACTIVE
 PROJECT NAME: Cairn
-WHAT WE ARE BUILDING: a protocol, web app, and CLI that let people with zero coding experience build real software safely with AI
+WHAT WE ARE BUILDING: Cairn, an AI conductor with a desktop app, portable contract, and swappable worker adapters, so people with zero coding experience can build real software safely
 WHO WILL USE IT: complete beginners — and Cairn's own maintainers, starting now
-CURRENT MILESTONE: a real-model cairn task completes an improvement to Cairn itself, end to end
+CURRENT MILESTONE: Cairn's conductor, reading the real project records, turns a vague request into a well-scoped task that dispatches and completes DONE
 ```
 
 `ACTIVE` means work may proceed. `PAUSED` means the owner has explicitly frozen

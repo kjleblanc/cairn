@@ -1,6 +1,7 @@
 # Cairn Desktop
 
-Version 0.0.1, shared with the contract; `app/package.json` is the source.
+The app and the contract share one version number, declared in
+`app/package.json`; the newest entry in `../CHANGELOG.md` states it.
 
 Cairn Desktop gives a beginner one understandable path:
 

@@ -14,3 +14,4 @@
 | 013 | 2026-07-23 | Standard | Applied | DONE | completed | Committed the conductor route spec: thinking-partner v0 in the app, core kept as the safety envelope, phased route to the vision | NO |
 | 012 | 2026-07-23 | Standard | Applied | DONE | completed | A phantom stat-dirty start no longer skips the exact-path commit; real dirt is confirmed by content diff (0.0.5) | NO |
 | 014 | 2026-07-23 | Standard | Applied | DONE | completed | A fresh checkout passes npm test (build now precedes the mirror test) and a new ci workflow runs the suites on every push | NO |
+| 015 | 2026-07-23 | Standard | Applied | DONE | completed | Docs tell the truth: stale version prose removed for good, achieved milestone recorded, conductor destination and new milestone named | NO |

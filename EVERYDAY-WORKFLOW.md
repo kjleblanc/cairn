@@ -1,6 +1,6 @@
 # Everyday Workflow — one task at a time
 
-Cairn 0.0.1 has one normal path. Tell the coding agent the visible result you
+Cairn has one normal path. Tell the coding agent the visible result you
 want:
 
 ```text

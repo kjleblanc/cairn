@@ -3,7 +3,8 @@
 Cairn helps beginners build real software with AI while keeping the work
 understandable, recoverable, and honest.
 
-**Version 0.0.1** — the app and the contract share this version.
+The app and the contract share one version number; the newest entry in
+[CHANGELOG.md](CHANGELOG.md) states it.
 
 One path:
 
@@ -31,6 +32,18 @@ write, deployment, production effect, or valuable-data exposure.
 - protected Git state and exact task records; and
 - an explicit deterministic offline demonstration adapter that proves the
   lifecycle without calling a model.
+
+## Where Cairn is heading
+
+Today Cairn runs one carefully protected task at a time, and the owner writes
+each task request themselves. The destination is a conductor: a model of your
+choosing that lives in the app, reads the project's records, and thinks
+through your request with you — asking the question you didn't know to ask,
+flagging the risk you couldn't see — then sends the coding work to connected
+worker AIs and reports back honestly. The deterministic safety layer described
+above stays underneath: the conductor decides what to try; the safety envelope
+decides what counts as done. The owner-approved route lives in
+[the conductor route spec](docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md).
 
 ## What you need
 

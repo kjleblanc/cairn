@@ -7,8 +7,8 @@ history.
 Copy `CONTRACT-TEMPLATE.md` into the project folder without renaming it, then paste:
 
 ```text
-Convert this existing project to Cairn Contract v0.0.1. I am a beginner; explain the
-result plainly.
+Convert this existing project to the Cairn Contract in CONTRACT-TEMPLATE.md. I am a
+beginner; explain the result plainly.
 
 Work read-only first. Identify the real project root, existing AI/contributor rules,
 build and test commands, Git branch, complete tracked/staged/modified/untracked
