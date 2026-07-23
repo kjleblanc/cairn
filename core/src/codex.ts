@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { accessSync, constants, existsSync, readdirSync, statSync } from "node:fs";
+import { accessSync, appendFileSync, constants, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
 import type {
   AdapterTaskContract,
@@ -91,6 +92,47 @@ export class CodexExecModelCallBoundaryError extends Error {
 
 export function isCodexExecModelCallBoundaryError(value: unknown): value is CodexExecModelCallBoundaryError {
   return value instanceof CodexExecModelCallBoundaryError;
+}
+
+export type CodexExecProcessFailureCode = "CODEX_EXEC_SPAWN_FAILED" | "CODEX_EXEC_STDIN_FAILED";
+
+/**
+ * Task 004 stopped with one opaque rejection and no retained cause. Process
+ * failures now carry a precise code and the local debug evidence path.
+ */
+export class CodexExecProcessError extends Error {
+  constructor(
+    readonly code: CodexExecProcessFailureCode,
+    readonly debugPath: string | null,
+  ) {
+    super(`${code}: the Codex Exec process did not return a result.`);
+    this.name = "CodexExecProcessError";
+  }
+}
+
+export function isCodexExecProcessError(value: unknown): value is CodexExecProcessError {
+  return value instanceof CodexExecProcessError;
+}
+
+/** Local diagnostic copies live outside every project, so Git never sees them. */
+function codexDebugDirectory(): string | null {
+  const localAppData = process.env.LOCALAPPDATA;
+  const base = localAppData && isAbsolute(localAppData)
+    ? resolve(localAppData, "Cairn", "debug")
+    : resolve(tmpdir(), "cairn-debug");
+  try {
+    mkdirSync(base, { recursive: true });
+    return base;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort redaction of credential-shaped tokens before anything reaches disk. */
+function redactTokens(text: string): string {
+  return text
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}/g, "sk-[redacted]")
+    .replace(/(\bBearer\s+)[A-Za-z0-9._-]+/gi, "$1[redacted]");
 }
 
 function insideWorkspace(workspaceRoot: string, candidate: string): boolean {
@@ -281,7 +323,7 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
       return new Promise((resolveRun, rejectRun) => {
         const codexCommand = resolveCodexCommand(request.cwd);
         if (!codexCommand) {
-          rejectRun(new Error("CODEX_EXEC_PROCESS_FAILED"));
+          rejectRun(new CodexExecProcessError("CODEX_EXEC_SPAWN_FAILED", null));
           return;
         }
         // Match the readiness probe on Windows so both the official standalone
@@ -295,8 +337,21 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
         });
+        const debugDirectory = codexDebugDirectory();
+        const debugStamp = `codex-${new Date().toISOString().replace(/[:.]/g, "-")}-${child.pid ?? "0"}`;
+        const debugPath = debugDirectory ? resolve(debugDirectory, `${debugStamp}.jsonl`) : null;
+        const debugStderrPath = debugDirectory ? resolve(debugDirectory, `${debugStamp}.stderr.log`) : null;
+        const debugWrite = (file: string | null, text: string): void => {
+          if (!file) return;
+          try {
+            appendFileSync(file, redactTokens(text), "utf8");
+          } catch {
+            // Local diagnostics must never break the run.
+          }
+        };
         let settled = false;
         let stdout = "";
+        let skippingOversizedLine = false;
         let result: CodexExecProcessResult = {
           exitCode: -1,
           terminalEvent: "missing",
@@ -328,38 +383,49 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
             failedToolItemCount: result.failedToolItemCount + failedToolItemCount,
           };
         };
-        const fail = (): void => {
+        const fail = (code: CodexExecProcessFailureCode): void => {
           if (settled) return;
           settled = true;
-          rejectRun(new Error("CODEX_EXEC_PROCESS_FAILED"));
+          rejectRun(new CodexExecProcessError(code, debugPath));
         };
-        child.once("error", fail);
+        child.once("error", () => fail("CODEX_EXEC_SPAWN_FAILED"));
         child.stdout.on("data", (chunk: Buffer) => {
-          stdout += chunk.toString("utf8");
-          if (stdout.length > 1_048_576) {
-            child.kill();
-            fail();
-            return;
-          }
+          const text = chunk.toString("utf8");
+          debugWrite(debugPath, text);
+          stdout += text;
           const parts = stdout.split(/\r?\n/);
           stdout = parts.pop() ?? "";
           for (const line of parts) {
+            if (skippingOversizedLine) {
+              // The head of this line was dropped below; skip its tail too.
+              skippingOversizedLine = false;
+              continue;
+            }
             if (!line.trim()) continue;
             applyEvidence(terminalEvidence(line));
           }
+          if (stdout.length > 1_048_576) {
+            // An oversized line already streamed to the debug file in full;
+            // drop it from the parse buffer instead of killing the run
+            // (the Task 004 lesson).
+            skippingOversizedLine = true;
+            stdout = "";
+          }
         });
-        // Read and discard stderr so the child cannot block, while keeping provider,
+        // Stream stderr to the owner's local debug copy while keeping provider,
         // account, and credential-adjacent diagnostics out of Cairn results and logs.
-        child.stderr.resume();
+        child.stderr.on("data", (chunk: Buffer) => {
+          debugWrite(debugStderrPath, chunk.toString("utf8"));
+        });
         child.once("close", (code) => {
           if (settled) return;
-          if (stdout.trim()) {
+          if (stdout.trim() && !skippingOversizedLine) {
             applyEvidence(terminalEvidence(stdout));
           }
           settled = true;
           resolveRun({ ...result, exitCode: typeof code === "number" ? code : -1 });
         });
-        child.stdin.on("error", fail);
+        child.stdin.on("error", () => fail("CODEX_EXEC_STDIN_FAILED"));
         child.stdin.end(request.stdin, "utf8");
       });
     },

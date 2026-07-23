@@ -1,7 +1,7 @@
 {
   "name": "cairn-desktop",
   "productName": "Cairn",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Route one project task at a time and keep an honest local record",
   "author": "Ken LeBlanc",
   "license": "MIT",

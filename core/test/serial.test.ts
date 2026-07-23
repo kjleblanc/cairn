@@ -16,6 +16,7 @@ import { appendLogRow } from "../src/files.js";
 import {
   authorizeCodexExec,
   CODEX_EXEC_MODEL,
+  CodexExecProcessError,
   createCodexExecAdapter,
   type CodexExecProcess,
 } from "../src/codex.js";
@@ -96,6 +97,32 @@ test("a connected Codex Exec route records STOPPED before any real model call", 
   assert.match(log, /Codex Exec was installed and connected; Cairn stopped before the real process or model call/);
   assert.equal(result.activities.filter((activity) => activity.stage === "Run" && activity.state === "working").length, 1);
   assert.equal(result.activities.some((activity) => activity.stage === "Check"), false);
+});
+
+test("a process failure names its code and debug path in the stop record", async () => {
+  // Task 004 stopped with a bare ADAPTER_FAILED and no retained cause; the
+  // stop record must now carry the precise process code and the local debug
+  // evidence path.
+  const root = project();
+  const failing: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      throw new CodexExecProcessError("CODEX_EXEC_STDIN_FAILED", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-run.jsonl");
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Improve Cairn safely"), failing)],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "ADAPTER_FAILED");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /CODEX_EXEC_STDIN_FAILED/);
+  assert.match(report, /codex-run\.jsonl/);
+  assert.ok(
+    result.activities.some((activity) => activity.detail.includes("CODEX_EXEC_STDIN_FAILED")),
+    "the stop activity names the precise process failure code",
+  );
 });
 
 test("one authorized fake Codex process completes one verified serial task", async () => {

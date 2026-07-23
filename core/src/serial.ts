@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { isCodexExecModelCallBoundaryError } from "./codex.js";
+import { isCodexExecModelCallBoundaryError, isCodexExecProcessError } from "./codex.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import {
   routeTask,
@@ -223,12 +223,18 @@ function boundedEventSummary(result: CodexExecResult): string {
   return `Bounded Codex events: ${result.agentMessageCount} agent messages; ${result.commandExecutionCount} command executions; ${result.fileChangeCount} file changes; ${result.failedToolItemCount} failed command/file-change items.`;
 }
 
+interface ProcessFailureNote {
+  code: string;
+  debugPath: string | null;
+}
+
 function reportText(
   contract: AdapterTaskContract,
   disposition: "DONE" | "STOPPED",
   reason: SerialStopReason | null,
   commitRequested: boolean,
   processEvidence?: CodexExecResult,
+  processFailure?: ProcessFailureNote,
 ): string {
   const taskNumber = contract.taskNumber;
   const codex = contract.route.adapterId === "codex-exec";
@@ -301,6 +307,7 @@ Requested product change: **${codex ? "not verified" : "not attempted"}**
 ${boundedEvidence}
 
 The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}
+${processFailure ? `\nProcess failure: \`${processFailure.code}\`. Raw run evidence stays on the owner's own disk at: ${processFailure.debugPath ?? "unavailable (the local debug directory could not be created)"}. It is never committed to the repository.\n` : ""}
 
 ## Verification
 
@@ -556,8 +563,9 @@ function writeClosedRecords(
   start: GitSnapshot,
   commitRequested: boolean,
   processEvidence?: CodexExecResult,
+  processFailure?: ProcessFailureNote,
 ): { reportText: string; row: LogRow; verified: boolean } {
-  const report = reportText(contract, disposition, reason, commitRequested, processEvidence);
+  const report = reportText(contract, disposition, reason, commitRequested, processEvidence, processFailure);
   writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
   const row = rowFor(contract, disposition, reason);
   appendLogRow(root, row);
@@ -579,10 +587,11 @@ function writeSafetyRecordsWhenUnclaimed(
   start: GitSnapshot,
   commitRequested: boolean,
   processEvidence?: CodexExecResult,
+  processFailure?: ProcessFailureNote,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   if (existsSync(paths.report(root, contract.taskNumber))) return null;
   if (readFileSync(paths.log(root), "utf8") !== start.logText) return null;
-  return writeClosedRecords(root, contract, "STOPPED", reason, start, commitRequested, processEvidence);
+  return writeClosedRecords(root, contract, "STOPPED", reason, start, commitRequested, processEvidence, processFailure);
 }
 
 function replaceDoneRecordsWithStopped(
@@ -699,14 +708,19 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       const reason: SerialStopReason = isCodexExecModelCallBoundaryError(error)
         ? "REAL_MODEL_CALL_NOT_AUTHORIZED"
         : "ADAPTER_FAILED";
+      const processFailure: ProcessFailureNote | undefined = isCodexExecProcessError(error)
+        ? { code: error.code, debugPath: error.debugPath }
+        : undefined;
       emit(activities, options.events, {
         stage: "Run",
         state: "stopped",
         detail: reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
           ? "Stopped before starting the real Codex Exec process."
-          : "The adapter stopped safely.",
+          : processFailure
+            ? `The adapter stopped safely (${processFailure.code}).${processFailure.debugPath ? ` Raw run evidence: ${processFailure.debugPath}` : ""}`
+            : "The adapter stopped safely.",
       });
-      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, reason, start, Boolean(options.commitRecords));
+      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, reason, start, Boolean(options.commitRecords), undefined, processFailure);
       if (!closed?.verified) {
         throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
       }

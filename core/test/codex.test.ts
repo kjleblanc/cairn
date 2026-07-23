@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
   CODEX_EXEC_MODEL,
   CODEX_EXEC_QUOTA,
   CodexExecModelCallBoundaryError,
+  CodexExecProcessError,
   createCodexExecAdapter,
   createSystemCodexExecProcess,
   detectCodexExecStatus,
@@ -205,6 +206,115 @@ test(
     }
   },
 );
+
+function fakeInstall(jsonlBody: string, stderrText: string): { bin: string; localAppData: string } {
+  // Shared scaffold: a hermetic fake codex install (own helper marker, empty
+  // LOCALAPPDATA target for debug files) whose dispatcher emits the given
+  // stdout body and stderr text after stdin closes.
+  const bin = mkdtempSync(join(tmpdir(), "cairn-codex-debug-bin-"));
+  const localAppData = mkdtempSync(join(tmpdir(), "cairn-codex-debug-lad-"));
+  const dispatcher = join(bin, "dispatcher.cjs");
+  writeFileSync(dispatcher, [
+    `process.stdin.resume();`,
+    `process.stdin.on("end", () => {`,
+    `  if (${JSON.stringify(stderrText)}) process.stderr.write(${JSON.stringify(stderrText)});`,
+    `  require("node:fs").createReadStream(${JSON.stringify(join(bin, "stdout.payload"))}).pipe(process.stdout);`,
+    `});`,
+    "",
+  ].join("\n"), "utf8");
+  writeFileSync(join(bin, "stdout.payload"), jsonlBody, "utf8");
+  const command = join(bin, process.platform === "win32" ? "codex.cmd" : "codex");
+  writeFileSync(command, process.platform === "win32"
+    ? `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`
+    : `#!/usr/bin/env node\nrequire(${JSON.stringify(dispatcher)});\n`, "utf8");
+  if (process.platform !== "win32") chmodSync(command, 0o755);
+  writeFileSync(join(bin, "codex-windows-sandbox-setup.exe"), "", "utf8");
+  return { bin, localAppData };
+}
+
+function withFakeEnvironment<T>(bin: string, localAppData: string, run: () => Promise<T>): Promise<T> {
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const previousPath = process.env[pathKey] ?? "";
+  const previousLocalAppData = process.env.LOCALAPPDATA;
+  process.env[pathKey] = bin;
+  process.env.LOCALAPPDATA = localAppData;
+  return run().finally(() => {
+    process.env[pathKey] = previousPath;
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
+  });
+}
+
+function debugFiles(localAppData: string): string[] {
+  const dir = join(localAppData, "Cairn", "debug");
+  try {
+    return readdirSync(dir).map((name) => join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
+const TURN_COMPLETED = JSON.stringify({
+  type: "turn.completed",
+  usage: { input_tokens: 5, cached_input_tokens: 1, output_tokens: 2, reasoning_output_tokens: 0 },
+}) + "\n";
+
+test("an oversized output line is skipped without killing the run", async () => {
+  // Task 004 stopped ADAPTER_FAILED with no cause retained; the old guard
+  // killed the child when any single JSONL line passed 1 MiB.
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-overflow-ws-"));
+  const giant = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "x".repeat(2 * 1024 * 1024) } }) + "\n";
+  const { bin, localAppData } = fakeInstall(giant + TURN_COMPLETED, "");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"],
+      cwd: workspace,
+      stdin: "bounded fake request",
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.terminalEvent, "turn.completed");
+    assert.equal(result.agentMessageCount, 0);
+  });
+});
+
+test("raw stdout and stderr stream to local debug files with tokens redacted", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-debugfiles-ws-"));
+  const { bin, localAppData } = fakeInstall(TURN_COMPLETED, `provider stderr with ${SECRET_SENTINEL} inside\n`);
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"],
+      cwd: workspace,
+      stdin: "bounded fake request",
+    });
+    assert.equal(result.terminalEvent, "turn.completed");
+    const files = debugFiles(localAppData);
+    assert.ok(files.length >= 2, `expected debug stdout+stderr files, saw ${files.length}`);
+    const contents = files.map((file) => readFileSync(file, "utf8")).join("\n---\n");
+    assert.match(contents, /turn\.completed/);
+    assert.match(contents, /provider stderr with sk-\[redacted\] inside/);
+    assert.doesNotMatch(contents, new RegExp(SECRET_SENTINEL));
+  });
+});
+
+test("an unresolvable codex command rejects with a precise spawn code", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-spawnfail-ws-"));
+  const emptyBin = mkdtempSync(join(tmpdir(), "cairn-codex-spawnfail-bin-"));
+  const emptyLocalAppData = mkdtempSync(join(tmpdir(), "cairn-codex-spawnfail-lad-"));
+  await withFakeEnvironment(emptyBin, emptyLocalAppData, async () => {
+    await assert.rejects(
+      () => createSystemCodexExecProcess().run({
+        command: process.platform === "win32" ? "codex.exe" : "codex",
+        args: ["exec", "-"],
+        cwd: workspace,
+        stdin: "bounded fake request",
+      }),
+      (error: unknown) => error instanceof CodexExecProcessError &&
+        error.code === "CODEX_EXEC_SPAWN_FAILED" && error.debugPath === null,
+    );
+  });
+});
 
 test("the production adapter stops before starting a real Codex Exec process", async () => {
   const adapter = createCodexExecAdapter(resolve("codex-production-fixture"), { installed: true, connected: true });

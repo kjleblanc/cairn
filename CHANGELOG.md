@@ -4,6 +4,22 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.0.3 — stopped runs keep their evidence — 2026-07-23
+
+- A real Codex Exec run now streams its full JSONL output and stderr to a
+  local debug file under `%LOCALAPPDATA%\Cairn\debug\` (system temp
+  fallback), with credential-shaped tokens redacted. The files live outside
+  every project, are never committed, and belong to the owner's own disk.
+- Process failures carry precise codes instead of one opaque rejection:
+  spawn and stdin failures are named, and a stopped task's activity and
+  safety report include the code and the debug file path.
+- An oversized output line no longer kills the run: it streams to the debug
+  file in full and is skipped for parsing, and the task continues to its
+  honest terminal event. The first milestone attempt (Task 004) stopped with
+  an undiagnosable bare ADAPTER_FAILED; this release makes that class of
+  stop diagnosable from its own evidence.
+- Added no dependency, retry, fallback, scheduler, or sandbox change.
+
 ## 0.0.2 — Codex Exec can actually write — 2026-07-22
 
 - Applied Task 002's proven invocation: the non-interactive call now uses

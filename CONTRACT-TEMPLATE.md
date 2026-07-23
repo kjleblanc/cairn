@@ -1,6 +1,6 @@
 # Project Contract
 
-> **What this is.** Cairn Contract v0.0.2 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.0.3 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
