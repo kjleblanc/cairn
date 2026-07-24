@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/main/conductor/constitution.ts", "src/main/conductor/taskblock.ts", "src/main/conductor/context.ts", "src/main/conductor/client.ts", "src/main/conductor/store.ts", "src/shared/ipc.ts", "tests-unit/**/*.ts"]
+  "include": ["src/main/conductor/constitution.ts", "src/main/conductor/taskblock.ts", "src/main/conductor/context.ts", "src/main/conductor/client.ts", "src/main/conductor/store.ts", "src/shared/ipc.ts", "src/renderer/bodies.ts", "tests-unit/**/*.ts"]
 }

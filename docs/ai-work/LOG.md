@@ -29,3 +29,4 @@
 | 027 | 2026-07-23 | Standard | Applied | DONE | completed | The connected conductor: contract amendment, version 0.1.0, chat becomes home | NO |
 | 028 | 2026-07-23 | Standard | Applied | DONE | completed | The disclosure names the git summary, .cairn moves to .git/info/exclude so chat never dirties the tree, oversized chats fail plainly (0.1.1) | NO |
 | 029 | 2026-07-24 | Standard | Applied | DONE | completed | Left the first traveler's note: the founding state, both visions, six predictions, and words for the minds who come next | NO |
+| 030 | 2026-07-24 | Standard | Applied | DONE | completed | One-paste connect: curated brain picker with an honestly labeled starting recommendation and an in-app key walkthrough (0.1.2) | NO |

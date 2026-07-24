@@ -70,6 +70,16 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 .welcome-steps { margin: 0; padding-left: 22px; }
 .welcome-steps li { margin: 8px 0; }
+.brain-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+.brain-item {
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start; width: 100%;
+  border: 1px solid var(--line); background: var(--card-solid); border-radius: var(--r-sm);
+  padding: 10px 14px; font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+}
+.brain-item:hover { border-color: var(--green); }
+.brain-item-head { display: flex; align-items: center; gap: 10px; }
+.brain-item-tag { background: var(--green-soft); color: var(--green-deep); border-radius: 999px; padding: 1px 10px; font-size: .74rem; font-weight: 700; }
+.brain-item-note { color: var(--green-deep); }
 .serial-map { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; margin-bottom: 10px; }
 .serial-map span { background: var(--card-solid); border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px; text-align: center; font-size: .8rem; font-weight: 600; }
 .task-heading { align-items: flex-start; margin-bottom: 14px; }

@@ -4,6 +4,28 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.1.2 — connecting is one paste — 2026-07-24
+
+- Added a one-paste default to the connect card: paste an OpenRouter key and
+  connect — the provider base URL and model are already set to Cairn's
+  curated starting pick, so the base URL and model fields no longer show
+  until asked for. The consent checkbox and its text, and the gating that
+  requires a checked box, a non-empty key, and a non-empty model before
+  Connect enables, are unchanged.
+- Added a small curated picker behind "Choose a different brain": three
+  models (`app/src/renderer/bodies.ts`) — Kimi K2 (the starting
+  recommendation, labeled honestly as not yet evaluated), DeepSeek V3.1, and
+  GPT-5 Mini — each with a plain-language blurb naming a rough cost feel.
+  "Custom…" reveals the free-text base URL and model fields exactly as
+  before (also where a local Ollama URL will go later).
+- Added an in-app key walkthrough behind "Where do I get a key?": four
+  plain-language steps (create an account, add a few dollars of credit,
+  create a key on the Keys page, paste it here) ending with an honest cost
+  note, plus a button that opens openrouter.ai/keys directly. The main-
+  process `openExternal` allowlist gained the `https://openrouter.ai/`
+  prefix so that button can open.
+- Added no dependency.
+
 ## 0.1.1 — the disclosure tells the whole truth — 2026-07-23
 
 - Fixed an under-disclosure: the conductor's briefing has always sent a git

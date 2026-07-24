@@ -103,7 +103,9 @@ export function registerProjectIpc(): void {
   });
 
   ipcMain.handle("app:openExternal", async (_e, url: string) => {
-    if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/)/.test(url)) return;
+    // Task 030 added the openrouter.ai prefix so the connect card's "Where
+    // do I get a key?" walkthrough can open the Keys page directly.
+    if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/|openrouter\.ai\/)/.test(url)) return;
     await shell.openExternal(url);
   });
 }

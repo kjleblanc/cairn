@@ -38,9 +38,15 @@ function conductorFile(): string {
 
 // A governed project boots straight into chat (0.1.0), so the connect card
 // is already the first thing on screen — no navigation click needed first.
+// Task 030 made the default view one paste (key only, curated model
+// preselected); the fixture's local URL isn't a curated brain, so every
+// test reaches the free-text fields through "Choose a different brain" →
+// "Custom…", same path an owner takes for a local Ollama URL.
 async function connectToFixture(win: Page, fixtureUrl: string, model: string, apiKey = "sk-test-key"): Promise<void> {
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
+  await win.getByRole("button", { name: "Choose a different brain" }).click();
+  await win.getByRole("button", { name: "Custom…" }).click();
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
   await win.getByPlaceholder("e.g. moonshotai/kimi-k2").fill(model);
   await win.getByPlaceholder("Stored encrypted; shown never again").fill(apiKey);
@@ -104,6 +110,35 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
 
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
+
+  // One-paste default: no base URL or model input, and the recommended
+  // brain is already named on screen — nothing to choose before pasting a key.
+  await expect(card.locator('input[type="text"]')).toHaveCount(0);
+  await expect(card).toContainText("Kimi K2");
+
+  // The picker lists all three curated brains plus "Custom…".
+  await win.getByRole("button", { name: "Choose a different brain" }).click();
+  const picker = win.locator(".card", { hasText: "choose a different brain" });
+  await expect(picker).toBeVisible();
+  await expect(picker).toContainText("Kimi K2");
+  await expect(picker).toContainText("DeepSeek V3.1");
+  await expect(picker).toContainText("GPT-5 Mini");
+  await expect(picker.getByRole("button", { name: "Custom…" })).toBeVisible();
+  await picker.getByRole("button", { name: "Back" }).click();
+
+  // "Where do I get a key?" opens an in-card walkthrough, not a browser guess.
+  await win.getByRole("button", { name: "Where do I get a key?" }).click();
+  const guide = win.locator(".card", { hasText: "where do I get a key?" });
+  await expect(guide).toBeVisible();
+  await expect(guide).toContainText("Create a free account at openrouter.ai.");
+  await expect(guide).toContainText("Add a few dollars of credit");
+  await expect(guide.getByRole("button", { name: "Open openrouter.ai/keys" })).toBeVisible();
+  await guide.getByRole("button", { name: "Back" }).click();
+
+  // "Custom…" reveals the advanced fields — the only way to reach the
+  // fixture's local URL, since it isn't one of the curated brains.
+  await win.getByRole("button", { name: "Choose a different brain" }).click();
+  await win.getByRole("button", { name: "Custom…" }).click();
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
   await win.getByPlaceholder("e.g. moonshotai/kimi-k2").fill("fixture-model");
   await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-test-key");
