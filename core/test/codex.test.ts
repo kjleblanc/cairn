@@ -13,6 +13,7 @@ import {
   createCodexExecAdapter,
   createSystemCodexExecProcess,
   detectCodexExecStatus,
+  isCodexExecTimeoutError,
   type CodexExecProcess,
   type CodexExecRequest,
   type CodexStatusProbe,
@@ -452,5 +453,64 @@ test("one authorized fake verifies the real-call request without a model", async
     fileChangeCount: 4,
     failedToolItemCount: 1,
     statement: "One Codex Exec process returned bounded completion evidence.",
+  });
+});
+
+function wedgedInstall(mode: "silent" | "chatter"): { bin: string; localAppData: string } {
+  // A hermetic fake codex whose child either goes silent forever or chatters
+  // forever — used to prove the watchdog kills the tree and rejects precisely.
+  const bin = mkdtempSync(join(tmpdir(), "cairn-codex-wedged-bin-"));
+  const localAppData = mkdtempSync(join(tmpdir(), "cairn-codex-wedged-lad-"));
+  const dispatcher = join(bin, "dispatcher.cjs");
+  writeFileSync(dispatcher, mode === "silent"
+    ? `process.stdin.resume();\nsetInterval(() => {}, 1000);\n`
+    : [
+      `process.stdin.resume();`,
+      `setInterval(() => {`,
+      `  process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "still going" } }) + "\\n");`,
+      `}, 50);`,
+      "",
+    ].join("\n"), "utf8");
+  const command = join(bin, process.platform === "win32" ? "codex.cmd" : "codex");
+  writeFileSync(command, process.platform === "win32"
+    ? `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`
+    : `#!/usr/bin/env node\nrequire(${JSON.stringify(dispatcher)});\n`, "utf8");
+  if (process.platform !== "win32") chmodSync(command, 0o755);
+  writeFileSync(join(bin, "codex-windows-sandbox-setup.exe"), "", "utf8");
+  return { bin, localAppData };
+}
+
+test("a silent codex child is killed by the inactivity timer with a precise rejection", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-silent-ws-"));
+  const { bin, localAppData } = wedgedInstall("silent");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const started = Date.now();
+    await assert.rejects(
+      () => createSystemCodexExecProcess({ inactivityMs: 400, absoluteMs: 60_000 }).run({
+        command: process.platform === "win32" ? "codex.exe" : "codex",
+        args: ["exec", "-"],
+        cwd: workspace,
+        stdin: "bounded fake request",
+      }),
+      (error: unknown) => isCodexExecTimeoutError(error) &&
+        error.code === "CODEX_EXEC_TIMED_OUT" && error.timeoutKind === "inactivity",
+    );
+    assert.ok(Date.now() - started < 30_000, "the run must settle promptly after the kill, not hang");
+  });
+});
+
+test("a chattering codex child is killed by the absolute cap", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-chatter-ws-"));
+  const { bin, localAppData } = wedgedInstall("chatter");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    await assert.rejects(
+      () => createSystemCodexExecProcess({ inactivityMs: 60_000, absoluteMs: 500 }).run({
+        command: process.platform === "win32" ? "codex.exe" : "codex",
+        args: ["exec", "-"],
+        cwd: workspace,
+        stdin: "bounded fake request",
+      }),
+      (error: unknown) => isCodexExecTimeoutError(error) && error.timeoutKind === "absolute",
+    );
   });
 });

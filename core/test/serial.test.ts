@@ -17,6 +17,7 @@ import {
   authorizeCodexExec,
   CODEX_EXEC_MODEL,
   CodexExecProcessError,
+  CodexExecTimeoutError,
   createCodexExecAdapter,
   type CodexExecProcess,
 } from "../src/codex.js";
@@ -123,6 +124,26 @@ test("a process failure names its code and debug path in the stop record", async
     result.activities.some((activity) => activity.detail.includes("CODEX_EXEC_STDIN_FAILED")),
     "the stop activity names the precise process failure code",
   );
+});
+
+test("a timed-out worker closes as ADAPTER_TIMED_OUT with the paid-call truth", async () => {
+  const root = project();
+  const wedged: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      throw new CodexExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-wedged.jsonl");
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Improve Cairn safely"), wedged)],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "ADAPTER_TIMED_OUT");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /CODEX_EXEC_TIMED_OUT/);
+  assert.match(report, /codex-wedged\.jsonl/);
+  assert.match(report, /already spent/);
 });
 
 test("one authorized fake Codex process completes one verified serial task", async () => {

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, appendFileSync, constants, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
@@ -112,6 +112,57 @@ export class CodexExecProcessError extends Error {
 
 export function isCodexExecProcessError(value: unknown): value is CodexExecProcessError {
   return value instanceof CodexExecProcessError;
+}
+
+export type CodexExecTimeoutKind = "inactivity" | "absolute";
+
+/** A wedged CLI used to hold a task open forever (Phase 2). The watchdog
+ * kills the whole process tree and rejects with the timer that fired. */
+export class CodexExecTimeoutError extends Error {
+  readonly code = "CODEX_EXEC_TIMED_OUT";
+
+  constructor(
+    readonly timeoutKind: CodexExecTimeoutKind,
+    readonly debugPath: string | null,
+  ) {
+    super(`CODEX_EXEC_TIMED_OUT: the Codex Exec process was stopped by the ${timeoutKind} watchdog.`);
+    this.name = "CodexExecTimeoutError";
+  }
+}
+
+export function isCodexExecTimeoutError(value: unknown): value is CodexExecTimeoutError {
+  return value instanceof CodexExecTimeoutError;
+}
+
+export const CODEX_EXEC_INACTIVITY_MS = 600_000;
+export const CODEX_EXEC_ABSOLUTE_MS = 3_600_000;
+
+export interface CodexExecProcessOptions {
+  inactivityMs?: number;
+  absoluteMs?: number;
+}
+
+/** On Windows the child is a cmd.exe shim chain; killing only the shim
+ * orphans the real codex process, so the whole tree goes. */
+function killCodexProcessTree(child: ChildProcess): void {
+  if (child.pid === undefined) return;
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+    const taskkill = resolve(systemRoot, "System32", "taskkill.exe");
+    try {
+      const killer = spawn(existsSync(taskkill) ? taskkill : "taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      killer.once("error", () => { try { child.kill(); } catch { /* already gone */ } });
+      killer.unref();
+    } catch {
+      try { child.kill(); } catch { /* already gone */ }
+    }
+  } else {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 /** Local diagnostic copies live outside every project, so Git never sees them. */
@@ -316,7 +367,7 @@ function terminalEvidence(line: string): Partial<CodexExecProcessResult> | null 
 }
 
 /** Starts one process and retains only terminal JSONL state plus numeric usage. */
-export function createSystemCodexExecProcess(): CodexExecProcess {
+export function createSystemCodexExecProcess(options?: CodexExecProcessOptions): CodexExecProcess {
   return {
     kind: "system",
     run(request) {
@@ -350,6 +401,37 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
           }
         };
         let settled = false;
+        const inactivityMs = options?.inactivityMs ?? CODEX_EXEC_INACTIVITY_MS;
+        const absoluteMs = options?.absoluteMs ?? CODEX_EXEC_ABSOLUTE_MS;
+        let timedOut: CodexExecTimeoutKind | null = null;
+        let forceSettle: NodeJS.Timeout | undefined;
+        const fireTimeout = (kind: CodexExecTimeoutKind): void => {
+          if (settled || timedOut) return;
+          timedOut = kind;
+          killCodexProcessTree(child);
+          // If even the tree kill cannot make the child close, settle anyway.
+          forceSettle = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            // A surviving grandchild holding these pipes open must never keep
+            // the event loop (and this run) alive after the watchdog fired.
+            child.stdout.destroy();
+            child.stderr.destroy();
+            try { child.stdin.destroy(); } catch { /* already closed */ }
+            rejectRun(new CodexExecTimeoutError(kind, debugPath));
+          }, 5_000);
+        };
+        const absoluteTimer = setTimeout(() => fireTimeout("absolute"), absoluteMs);
+        let inactivityTimer = setTimeout(() => fireTimeout("inactivity"), inactivityMs);
+        const sawActivity = (): void => {
+          clearTimeout(inactivityTimer);
+          if (!timedOut) inactivityTimer = setTimeout(() => fireTimeout("inactivity"), inactivityMs);
+        };
+        const clearWatchdog = (): void => {
+          clearTimeout(absoluteTimer);
+          clearTimeout(inactivityTimer);
+          if (forceSettle) clearTimeout(forceSettle);
+        };
         let stdout = "";
         let skippingOversizedLine = false;
         let result: CodexExecProcessResult = {
@@ -384,12 +466,16 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
           };
         };
         const fail = (code: CodexExecProcessFailureCode): void => {
-          if (settled) return;
+          // Killing the tree can EPIPE the pending stdin write; that race must
+          // not overwrite the honest timeout rejection with a process-failure one.
+          if (settled || timedOut) return;
+          clearWatchdog();
           settled = true;
           rejectRun(new CodexExecProcessError(code, debugPath));
         };
         child.once("error", () => fail("CODEX_EXEC_SPAWN_FAILED"));
         child.stdout.on("data", (chunk: Buffer) => {
+          sawActivity();
           const text = chunk.toString("utf8");
           debugWrite(debugPath, text);
           stdout += text;
@@ -415,9 +501,17 @@ export function createSystemCodexExecProcess(): CodexExecProcess {
         // Stream stderr to the owner's local debug copy while keeping provider,
         // account, and credential-adjacent diagnostics out of Cairn results and logs.
         child.stderr.on("data", (chunk: Buffer) => {
+          sawActivity();
           debugWrite(debugStderrPath, chunk.toString("utf8"));
         });
         child.once("close", (code) => {
+          clearWatchdog();
+          if (timedOut) {
+            if (settled) return;
+            settled = true;
+            rejectRun(new CodexExecTimeoutError(timedOut, debugPath));
+            return;
+          }
           if (settled) return;
           if (stdout.trim() && !skippingOversizedLine) {
             applyEvidence(terminalEvidence(stdout));

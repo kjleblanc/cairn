@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { isCodexExecModelCallBoundaryError, isCodexExecProcessError } from "./codex.js";
+import { isCodexExecModelCallBoundaryError, isCodexExecProcessError, isCodexExecTimeoutError } from "./codex.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import {
   routeTask,
@@ -56,7 +56,8 @@ export type SerialStopReason =
   | "MODEL_RECORDS_MISSING"
   | "REAL_MODEL_CALL_NOT_AUTHORIZED"
   | "MODEL_REPORTED_STOPPED"
-  | "MODEL_RESULT_NOT_VERIFIED";
+  | "MODEL_RESULT_NOT_VERIFIED"
+  | "ADAPTER_TIMED_OUT";
 
 interface GitSnapshot {
   head: string;
@@ -313,6 +314,8 @@ Disposition: **STOPPED**
   const boundedEvidence = codex && processEvidence
     ? `\n## Bounded process evidence\n\n${boundedEventSummary(processEvidence)} Cairn did not retain item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
     : "";
+  // Task 2 extends paidStarted to cancellation.
+  const paidStarted = codex && reason === "ADAPTER_TIMED_OUT";
   return `# Task ${pad(taskNumber)} — ${title}
 
 ## Result
@@ -322,7 +325,7 @@ Routing demonstration: **stopped**
 Requested product change: **${codex ? "not verified" : "not attempted"}**
 ${boundedEvidence}
 
-The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}
+The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}${paidStarted ? " The worker process had already started before Cairn stopped it; any cost for that call is already spent." : ""}
 ${processFailure ? `\nProcess failure: \`${processFailure.code}\`. Raw run evidence stays on the owner's own disk at: ${processFailure.debugPath ?? "unavailable (the local debug directory could not be created)"}. It is never committed to the repository.\n` : ""}
 
 ## Verification
@@ -731,10 +734,14 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     } catch (error) {
       const reason: SerialStopReason = isCodexExecModelCallBoundaryError(error)
         ? "REAL_MODEL_CALL_NOT_AUTHORIZED"
-        : "ADAPTER_FAILED";
+        : isCodexExecTimeoutError(error)
+          ? "ADAPTER_TIMED_OUT"
+          : "ADAPTER_FAILED";
       const processFailure: ProcessFailureNote | undefined = isCodexExecProcessError(error)
         ? { code: error.code, debugPath: error.debugPath }
-        : undefined;
+        : isCodexExecTimeoutError(error)
+          ? { code: error.code, debugPath: error.debugPath }
+          : undefined;
       emit(activities, options.events, {
         stage: "Run",
         state: "stopped",

@@ -32,3 +32,4 @@
 | 030 | 2026-07-24 | Standard | Applied | DONE | completed | One-paste connect: curated brain picker with an honestly labeled starting recommendation and an in-app key walkthrough (0.1.2) | NO |
 | 031 | 2026-07-24 | Standard | Applied | DONE | completed | Committed the Phase 2 core-surgery design spec: debts first, Cairn-authored records via a claims fence, one universal worker-result contract | NO |
 | 032 | 2026-07-24 | Standard | Applied | DONE | completed | Committed the Phase 2 implementation plan: eleven test-first tasks, adversarially verified against spec and code before landing | NO |
+| 033 | 2026-07-24 | Standard | Applied | DONE | completed | Watchdog timers and process-tree kill stop a wedged Codex child honestly as ADAPTER_TIMED_OUT, naming the already-spent cost | NO |
