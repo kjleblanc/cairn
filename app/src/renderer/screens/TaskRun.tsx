@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CodexExecDisclosure, RouteResult, SerialActivity, SerialRunResult } from "@cairn/core";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
@@ -21,19 +21,38 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
   const [error, setError] = useState<string | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
-  const sessionId = useRef(Date.now()).current;
   const codexRoute = route?.status === "ready" && route.recommended.id === "codex-exec";
+  const resultCodex = result && result.status !== "connection-required" && result.route.recommended.id === "codex-exec";
+  const codexish = codexRoute || Boolean(resultCodex);
   const realCallStopped = result?.status === "stopped" && result.reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
 
   useEffect(() => {
     void cairn.updateCheck().then((update) => setCurrentVersion(update.current));
   }, []);
 
-  useEffect(() => cairn.onTaskActivity((event) => {
-    if (event.dir === dir && event.sessionId === sessionId) {
-      setActivities((current) => [...current, event.activity]);
+  const refresh = useCallback(async () => {
+    const session = await cairn.taskCurrent(dir);
+    if (!session) return;
+    setOutcome(session.outcome);
+    setActivities(session.activities);
+    if (session.phase === "running") setPhase("running");
+    else if (session.result && session.result.status !== "connection-required") {
+      setResult(session.result);
+      setPhase("result");
+    } else if (session.error) {
+      // A run that ended in a thrown error (e.g. RECORD_VERIFICATION_FAILED)
+      // must surface on reattach, not vanish into a blank entry form.
+      setError(session.error);
     }
-  }), [dir, sessionId]);
+  }, [dir]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => cairn.onTaskActivity((event) => {
+    if (event.dir !== dir) return;
+    setActivities((current) => [...current, event.activity]);
+    if (event.activity.stage === "Result") void refresh();
+  }), [dir, refresh]);
 
   async function findRoute() {
     if (outcome.trim().length < 5) { setError("Describe one visible outcome in a sentence."); return; }
@@ -49,7 +68,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
     if (!route || route.status !== "ready") return;
     if (codexRoute && !realCallConfirmed) { setError("Confirm the displayed real-call boundary before starting Codex Exec."); return; }
     setError(null); setActivities([]); setPhase("running");
-    const response = await cairn.taskRun(dir, outcome.trim(), sessionId, route.recommended.id, codexRoute && realCallConfirmed, disclosure ?? undefined);
+    const response = await cairn.taskRun(dir, outcome.trim(), route.recommended.id, codexRoute && realCallConfirmed, disclosure ?? undefined);
     if (!response.ok) { setError(response.message); setPhase("route"); return; }
     if (response.value.status === "connection-required") {
       setRoute(response.value.route);
@@ -62,6 +81,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
   }
 
   function tryAnother() {
+    void cairn.taskAcknowledge(dir);
     setPhase("entry"); setOutcome(""); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false);
   }
 
@@ -132,7 +152,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
 
       {phase === "running" ? (
         <Card title="route → run → check → result">
-          <p>{codexRoute
+          <p>{codexish
             ? "Cairn is running one confirmed ephemeral workspace-scoped Codex Exec request. There is no retry, continuation, or parallel run."
             : "The deterministic adapter is exercising the same core serial coordinator used by the CLI."}</p>
           <ActivityFeed activities={activities} />
@@ -146,18 +166,18 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
         <>
           <Card title={result.status === "done" ? "verified" : "stopped safely"}>
             <h2>{result.status === "done"
-              ? codexRoute ? "Verified real Codex Exec result" : "Verified offline result"
+              ? codexish ? "Verified real Codex Exec result" : "Verified offline result"
               : realCallStopped
                 ? "Stopped before the real model call"
                 : "Adapter stopped safely"}</h2>
             <p><strong>{realCallStopped
               ? "Real Codex Exec process: not started"
-              : codexRoute
+              : codexish
                 ? `Codex Exec task: ${result.status === "done" ? "verified" : "stopped"}`
                 : `Routing demonstration: ${result.status === "done" ? "verified" : "stopped"}`}</strong></p>
-            <p><strong>Requested product change: {codexRoute ? result.status === "done" ? "completed and verified" : "not verified" : "not attempted"}</strong></p>
+            <p><strong>Requested product change: {codexish ? result.status === "done" ? "completed and verified" : "not verified" : "not attempted"}</strong></p>
             <p><strong>Milestone movement: {result.row.moved}</strong></p>
-            <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {codexRoute
+            <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {codexish
               ? result.status === "done"
                 ? "Cairn verified the model-authored task records and Git result."
                 : "Cairn could not verify the model-authored records or Git result. Retained evidence needs inspection before another task."
@@ -166,7 +186,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
           </Card>
           <ActivityFeed activities={activities} />
           <div className="row" style={{ marginTop: 12 }}>
-            <Pill kind="primary" onClick={onBack}>Return to project</Pill>
+            <Pill kind="primary" onClick={() => { void cairn.taskAcknowledge(dir); onBack(); }}>Return to project</Pill>
             <Pill onClick={tryAnother}>Try another task</Pill>
           </div>
         </>

@@ -38,3 +38,4 @@
 | 036 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: the stale-lock heal re-verifies before unlinking so it cannot delete a fresh live lock | NO |
 | 037 | 2026-07-24 | Standard | Applied | DONE | completed | The owner can stop a running task from the desktop app, and quitting while one runs asks first | NO |
 | 038 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: a second quit during the stop-and-quit grace can no longer skip the honest STOPPED records | NO |
+| 039 | 2026-07-24 | Standard | Applied | DONE | completed | The main process now owns live run state; navigating away or reloading mid-run reattaches to the running worker and its result instead of orphaning it | NO |

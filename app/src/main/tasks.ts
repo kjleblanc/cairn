@@ -13,12 +13,13 @@ import {
   type CodexExecDisclosure,
   type TaskAdapter,
 } from "@cairn/core";
-import type { Result, TaskActivityEvent } from "../shared/ipc.js";
+import type { Result, RunSessionSnapshot, TaskActivityEvent } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
 
 const running = new Set<string>();
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
+const sessions = new Map<string, RunSessionSnapshot>();
 
 /** True while a serial task is running for `dir`. Lets other main-side
  * gates (the conductor's send gate) share this one running-set instead of
@@ -86,7 +87,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     }
   });
 
-  ipcMain.handle("task:run", async (_event, dir: string, outcome: string, sessionId: number, adapterId?: string, realCallConfirmed?: boolean, disclosure?: CodexExecDisclosure) => {
+  ipcMain.handle("task:run", async (_event, dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: CodexExecDisclosure) => {
     if (running.has(dir)) return { ok: false, message: "SERIAL_RUN_ACTIVE: One task is already running for this project." } satisfies Result<never>;
     if (!mock && (realCallConfirmed !== true || !sameDisclosure(disclosure, codexExecDisclosure(dir, outcome)))) {
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
@@ -94,6 +95,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     const controller = new AbortController();
     running.add(dir);
     controllers.set(dir, controller);
+    sessions.set(dir, { dir, outcome, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
     const run = (async () => {
       try {
         const detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);
@@ -103,7 +105,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           signal: controller.signal,
           events: {
             onActivity: (activity) => {
-              const payload: TaskActivityEvent = { dir, sessionId, activity };
+              sessions.get(dir)?.activities.push(activity);
+              const payload: TaskActivityEvent = { dir, activity };
               win()?.webContents.send("task:activity", payload);
             },
           },
@@ -111,9 +114,13 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         const safeValue = value.status === "connection-required" && detected.status
           ? { ...value, route: { ...value.route, reason: codexExecConnectionReason(detected.status) } }
           : value;
+        const session = sessions.get(dir);
+        if (session) { session.phase = "closed"; session.result = safeValue; }
         return { ok: true, value: safeValue };
       } catch (error) {
         logError("task:run", error);
+        const session = sessions.get(dir);
+        if (session) { session.phase = "closed"; session.error = plainMessage(error); }
         return { ok: false, message: plainMessage(error) };
       } finally {
         running.delete(dir);
@@ -129,6 +136,14 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     const controller = controllers.get(dir);
     if (!controller) return { ok: false, message: "No task is running for this project." };
     controller.abort();
+    return { ok: true, value: null };
+  });
+
+  ipcMain.handle("task:current", (_event, dir: string): RunSessionSnapshot | null => sessions.get(dir) ?? null);
+
+  ipcMain.handle("task:acknowledge", (_event, dir: string): Result<null> => {
+    const session = sessions.get(dir);
+    if (session && session.phase === "closed") sessions.delete(dir);
     return { ok: true, value: null };
   });
 }

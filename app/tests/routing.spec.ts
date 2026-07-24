@@ -150,7 +150,6 @@ test("connected Codex requires confirmation then completes one fake-process real
   const denied = await win.evaluate(async ({ project }) => window.cairn.taskRun(
     project,
     "Improve Cairn safely",
-    123,
     "codex-exec",
     false,
   ), { project: proj });
@@ -161,7 +160,6 @@ test("connected Codex requires confirmation then completes one fake-process real
     return window.cairn.taskRun(
       project,
       "A changed task instruction",
-      124,
       "codex-exec",
       true,
       preview.value.disclosure,
@@ -280,5 +278,53 @@ test("the owner can stop a running worker and gets honest CANCELLED_BY_OWNER rec
   expect(report).toContain("CANCELLED_BY_OWNER");
   expect(report).toContain("already spent");
   expect(existsSync(join(proj, "visible.txt"))).toBe(false);
+  await app.close();
+});
+
+test("navigating away and back reattaches to the running worker and its finished result", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-reattach-"));
+  scaffold(proj);
+  const fakeCodex = fakeCodexEnvironment(proj, true, "slow");
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
+  await win.getByRole("button", { name: "Find a route" }).click();
+  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+  await expect(win.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 15_000 });
+  // Walk away mid-run and come back: the screen must reattach, not orphan.
+  await win.getByRole("button", { name: "← Project home" }).click();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await expect(win.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 10_000 });
+  await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
+  expect(readFileSync(join(proj, "visible.txt"), "utf8")).toBe("model-authored result\n");
+  await app.close();
+});
+
+test("a window reload mid-run reattaches instead of losing the result", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-reload-"));
+  scaffold(proj);
+  const fakeCodex = fakeCodexEnvironment(proj, true, "slow");
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
+  await win.getByRole("button", { name: "Find a route" }).click();
+  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+  await expect(win.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 15_000 });
+  await win.reload();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  await win.getByRole("button", { name: "← Project home" }).click();
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
   await app.close();
 });

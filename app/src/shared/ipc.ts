@@ -6,8 +6,17 @@ export type RecentProject = { dir: string; ok: boolean; name: string; milestone:
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
-export type TaskActivityEvent = { dir: string; sessionId: number; activity: SerialActivity };
+export type TaskActivityEvent = { dir: string; activity: SerialActivity };
 export type TaskRoutePreview = { route: RouteResult; disclosure?: CodexExecDisclosure };
+export type RunSessionSnapshot = {
+  dir: string;
+  outcome: string;
+  startedAt: string;
+  activities: SerialActivity[];
+  phase: "running" | "closed";
+  result: SerialRunResult | null;
+  error: string | null;
+};
 export type ConductorConversationSummary = { id: string; startedTs: string; preview: string };
 
 export interface ConductorStatus {
@@ -57,8 +66,10 @@ export interface CairnApi {
   projectStatus(dir: string): Promise<Result<ProjectStatus>>;
   projectForget(dir: string): Promise<Result<null>>;
   taskRoute(dir: string, outcome: string, adapterId?: string): Promise<Result<TaskRoutePreview>>;
-  taskRun(dir: string, outcome: string, sessionId: number, adapterId?: string, realCallConfirmed?: boolean, disclosure?: CodexExecDisclosure): Promise<Result<SerialRunResult>>;
+  taskRun(dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: CodexExecDisclosure): Promise<Result<SerialRunResult>>;
   taskCancel(dir: string): Promise<Result<null>>;
+  taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
+  taskAcknowledge(dir: string): Promise<Result<null>>;
   updateCheck(): Promise<UpdateInfo>;
   openExternal(url: string): Promise<void>;
   onTaskActivity(cb: (event: TaskActivityEvent) => void): () => void;
