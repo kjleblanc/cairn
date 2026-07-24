@@ -267,6 +267,11 @@ test("the owner can stop a running worker and gets honest CANCELLED_BY_OWNER rec
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   const stop = win.getByRole("button", { name: "Stop this task" });
   await expect(stop).toBeVisible({ timeout: 15_000 });
+  // Only a started process incurs cost. Wait until the real exec has actually
+  // begun (its marker is written on stdin end) so the cancel lands on a running
+  // process and the report honestly names the already-spent cost — a pre-spawn
+  // cancel, which spends nothing, would correctly omit that sentence (FIX 5a).
+  await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 15_000 }).toBe(true);
   await stop.click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");

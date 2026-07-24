@@ -7,9 +7,14 @@ work; they are never downloaded or activated silently.
 ## 0.2.0 — the envelope holds the pen — 2026-07-24
 
 - Added a watchdog and an honest stop path: a wedged worker (default 600 000 ms
-  inactivity, 3 600 000 ms absolute) is killed tree-and-all on both Windows and
-  POSIX and closes as `ADAPTER_TIMED_OUT`, naming the cost already spent
-  instead of hanging forever. The owner can also stop a running worker
+  inactivity, 3 600 000 ms absolute) is killed as a whole process tree — on
+  Windows through an absolute-path `taskkill /PID <pid> /T /F`, on POSIX by a
+  `SIGKILL` to the child's own process group (the child is spawned detached to
+  lead that group) — and closes as `ADAPTER_TIMED_OUT`, naming the cost already
+  spent instead of hanging forever. If the kill cannot be confirmed (the child
+  never closes), the run lock is deliberately left in place rather than handing
+  the next task a workspace a live orphan may still be writing. The owner can
+  also stop a running worker
   directly — a "Stop this task" control reaches the same adapter seam and
   closes as `CANCELLED_BY_OWNER`, again naming the already-spent cost and
   writing no product change. Quitting the app while a task is running now
@@ -18,8 +23,10 @@ work; they are never downloaded or activated silently.
 - Added a cross-process run lock (`cairn-run.lock` in the Git common
   directory, never the project worktree and never `.git/cairn`) so "one task
   at a time" holds even across separate app or CLI processes; a stale lock
-  from a crashed process is re-verified before being cleared so it can never
-  delete a fresh, live lock.
+  from a crashed process is re-verified immediately before being cleared, which
+  defeats every realistic race — a microsecond residual window remains (Node has
+  no atomic compare-and-delete) and is contained downstream by the envelope's
+  protected-work and exact-path staging checks.
 - Added run-reattach: the main process now owns live run state, so navigating
   away from a running task and back, or reloading the window mid-run, no
   longer orphans the worker — the screen reattaches to the same run, names

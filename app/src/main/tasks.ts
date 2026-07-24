@@ -1,7 +1,6 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
   authorizeCodexExec,
-  codexExecDisclosure,
   codexExecConnectionReason,
   createCodexExecAdapter,
   createOfflineDemoAdapter,
@@ -93,16 +92,40 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
 
   ipcMain.handle("task:run", async (_event, dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: WorkerDisclosure) => {
     if (running.has(dir)) return { ok: false, message: "SERIAL_RUN_ACTIVE: One task is already running for this project." } satisfies Result<never>;
-    if (!mock && (realCallConfirmed !== true || !sameDisclosure(disclosure, codexExecDisclosure(dir, outcome)))) {
-      return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
-    }
+    // Register the live session BEFORE the (single) detection so a reattach can
+    // always find the run, then detect once and reuse those adapters for both
+    // the disclosure gate and the run — a second detection would delay this
+    // registration and let a fast reattach miss the running session.
     const controller = new AbortController();
     running.add(dir);
     controllers.set(dir, controller);
     sessions.set(dir, { dir, outcome, worker: realCallConfirmed === true, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
+    const cleanup = (): void => { running.delete(dir); controllers.delete(dir); sessions.delete(dir); };
+    // The run-time disclosure gate follows the ROUTED adapter's own seam, not a
+    // codex-pinned check: resolve the route exactly as task:route does and take
+    // the expected disclosure from that adapter. A real worker adapter (codex)
+    // exposes disclosure() and must be confirmed with a byte-matching disclosure;
+    // a demo (no-disclosure) adapter returns undefined and needs no confirmation.
+    let detected: Awaited<ReturnType<typeof detectedAdapters>>;
+    let expected: WorkerDisclosure | undefined;
+    try {
+      detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);
+      const preview = previewSerialRoute(outcome, detected.adapters, adapterId);
+      const routed = preview.status === "ready"
+        ? detected.adapters.find((adapter) => adapter.descriptor.id === preview.recommended.id)
+        : undefined;
+      expected = routed?.disclosure?.(outcome);
+    } catch (error) {
+      cleanup();
+      logError("task:run", error);
+      return { ok: false, message: plainMessage(error) } satisfies Result<never>;
+    }
+    if (expected && (realCallConfirmed !== true || !sameDisclosure(disclosure, expected))) {
+      cleanup();
+      return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
+    }
     const run = (async () => {
       try {
-        const detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);
         const value = await runSerialTask(dir, outcome, {
           adapters: detected.adapters,
           adapterId,

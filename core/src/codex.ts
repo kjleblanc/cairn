@@ -127,8 +127,9 @@ export class CodexExecTimeoutError extends WorkerProcessError {
   constructor(
     readonly timeoutKind: CodexExecTimeoutKind,
     debugPath: string | null,
+    killConfirmed: boolean,
   ) {
-    super("timeout", "CODEX_EXEC_TIMED_OUT", debugPath);
+    super("timeout", "CODEX_EXEC_TIMED_OUT", debugPath, killConfirmed);
     this.name = "CodexExecTimeoutError";
   }
 }
@@ -140,8 +141,8 @@ export function isCodexExecTimeoutError(value: unknown): value is CodexExecTimeo
 /** The owner pressed stop. The tree is killed the same way as a timeout. The
  * codex specialization of `WorkerProcessError` (failure "cancelled"). */
 export class CodexExecCancelledError extends WorkerProcessError {
-  constructor(debugPath: string | null) {
-    super("cancelled", "CODEX_EXEC_CANCELLED", debugPath);
+  constructor(debugPath: string | null, killConfirmed: boolean) {
+    super("cancelled", "CODEX_EXEC_CANCELLED", debugPath, killConfirmed);
     this.name = "CodexExecCancelledError";
   }
 }
@@ -173,10 +174,18 @@ function killCodexProcessTree(child: ChildProcess): void {
       try { child.kill(); } catch { /* already gone */ }
     }
   } else {
+    // The child leads its own process group (spawned detached on POSIX), so a
+    // negative PID SIGKILLs the whole group — the codex process and every
+    // descendant it started. If the group send fails (e.g. the leader already
+    // exited), fall back to a direct SIGKILL of the child.
     try {
-      child.kill("SIGKILL");
+      process.kill(-child.pid, "SIGKILL");
     } catch {
-      // Already gone.
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
     }
   }
 }
@@ -393,7 +402,9 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
     run(request, signal) {
       return new Promise((resolveRun, rejectRun) => {
         if (signal?.aborted) {
-          rejectRun(new CodexExecCancelledError(null));
+          // Pre-spawn cancel: nothing ever started, so the kill is confirmed
+          // by construction — there is no child to orphan.
+          rejectRun(new CodexExecCancelledError(null, true));
           return;
         }
         const codexCommand = resolveCodexCommand(request.cwd);
@@ -411,6 +422,11 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           env: codexExecEnvironment(dirname(codexCommand)),
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
+          // POSIX only: lead a new process group so killCodexProcessTree can
+          // SIGKILL the whole group (a bare SIGKILL to the child leaves its
+          // grandchildren running). The win32 spawn options are unchanged —
+          // there the taskkill /T tree kill already reaches the shim's children.
+          ...(process.platform === "win32" ? {} : { detached: true }),
         });
         const debugDirectory = codexDebugDirectory();
         const debugStamp = `codex-${new Date().toISOString().replace(/[:.]/g, "-")}-${child.pid ?? "0"}`;
@@ -450,7 +466,9 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           if (settled || timedOut || cancelled) return;
           timedOut = kind;
           killCodexProcessTree(child);
-          forceSettle = armForceSettle(() => rejectRun(new CodexExecTimeoutError(kind, debugPath)));
+          // Force-settle: the kill fired but the child never closed, so a live
+          // orphan may still be writing — the kill is NOT confirmed.
+          forceSettle = armForceSettle(() => rejectRun(new CodexExecTimeoutError(kind, debugPath, false)));
         };
         // The owner pressed stop. Killed the same way as a timeout, with the
         // same EPIPE-race ordering: `cancelled` flips before the kill so a
@@ -459,7 +477,9 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           if (settled || cancelled || timedOut) return;
           cancelled = true;
           killCodexProcessTree(child);
-          forceSettle = armForceSettle(() => rejectRun(new CodexExecCancelledError(debugPath)));
+          // Force-settle: the kill fired but the child never closed, so a live
+          // orphan may still be writing — the kill is NOT confirmed.
+          forceSettle = armForceSettle(() => rejectRun(new CodexExecCancelledError(debugPath, false)));
         };
         signal?.addEventListener("abort", onAbort, { once: true });
         const absoluteTimer = setTimeout(() => fireTimeout("absolute"), absoluteMs);
@@ -576,13 +596,15 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           if (cancelled) {
             if (settled) return;
             settled = true;
-            rejectRun(new CodexExecCancelledError(debugPath));
+            // The child closed after the kill: the kill is confirmed.
+            rejectRun(new CodexExecCancelledError(debugPath, true));
             return;
           }
           if (timedOut) {
             if (settled) return;
             settled = true;
-            rejectRun(new CodexExecTimeoutError(timedOut, debugPath));
+            // The child closed after the kill: the kill is confirmed.
+            rejectRun(new CodexExecTimeoutError(timedOut, debugPath, true));
             return;
           }
           if (settled) return;

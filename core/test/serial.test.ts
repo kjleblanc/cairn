@@ -8,10 +8,11 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { appendLogRow } from "../src/files.js";
 import {
   authorizeCodexExec,
@@ -24,6 +25,7 @@ import {
 } from "../src/codex.js";
 import { createOfflineDemoAdapter, type TaskAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
+import { projectStatus } from "../src/steps.js";
 
 const LOG_HEADER =
   "| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |\n" +
@@ -31,6 +33,11 @@ const LOG_HEADER =
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trimEnd();
+}
+
+function lockPath(root: string): string {
+  const common = git(root, ["rev-parse", "--git-common-dir"]);
+  return join(resolve(root, common), "cairn-run.lock");
 }
 
 function project(): string {
@@ -141,7 +148,8 @@ test("a timed-out worker closes as ADAPTER_TIMED_OUT with the paid-call truth", 
   const wedged: CodexExecProcess = {
     kind: "fake",
     async run() {
-      throw new CodexExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-wedged.jsonl");
+      // A confirmed kill (the child closed): the run lock releases as today.
+      throw new CodexExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-wedged.jsonl", true);
     },
   };
   const result = await runSerialTask(root, "Improve Cairn safely", {
@@ -165,7 +173,9 @@ test("an owner abort closes as CANCELLED_BY_OWNER with evidence retained", async
       writeFileSync(join(root, "partial.txt"), "the worker had already begun\n");
       controller.abort();
       assert.equal(signal?.aborted, true, "the abort signal must reach the process seam");
-      throw new CodexExecCancelledError(null);
+      // A started, then confirmed-killed process: a non-null debug path marks
+      // that the process actually ran, so the "already spent" sentence stays.
+      throw new CodexExecCancelledError("C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-cancel.jsonl", true);
     },
   };
   const result = await runSerialTask(root, "Improve Cairn safely", {
@@ -177,6 +187,83 @@ test("an owner abort closes as CANCELLED_BY_OWNER with evidence retained", async
   assert.equal(result.reason, "CANCELLED_BY_OWNER");
   assert.equal(existsSync(join(root, "partial.txt")), true, "workspace evidence is retained, never cleaned");
   assert.match(readFileSync(result.reportPath, "utf8"), /already spent/);
+});
+
+test("a pre-spawn owner cancel spent nothing, so the report omits the already-spent sentence (FIX 5a)", async () => {
+  const root = project();
+  const controller = new AbortController();
+  const preSpawnCancel: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // Nothing started: no workspace file, and a null debug path — the same
+      // shape createSystemCodexExecProcess produces when the signal is already
+      // aborted before spawn. The kill is confirmed (there is no child).
+      throw new CodexExecCancelledError(null, true);
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Improve Cairn safely"), preSpawnCancel)],
+    signal: controller.signal,
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "CANCELLED_BY_OWNER");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.doesNotMatch(report, /already spent/, "a pre-spawn cancel never started a paid process");
+  // A confirmed kill releases the lock as normal: a second run must proceed.
+  assert.equal(existsSync(lockPath(root)), false, "a confirmed-kill stop releases the run lock");
+});
+
+test("an unconfirmed-kill timeout keeps the run lock so the next task is refused (FIX 2)", async () => {
+  const root = project();
+  const unconfirmed: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The watchdog fired and the kill was issued, but the child never closed:
+      // killConfirmed=false. A live orphan may still be writing the workspace.
+      throw new CodexExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-orphan.jsonl", false);
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Improve Cairn safely"), unconfirmed)],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "ADAPTER_TIMED_OUT");
+  // The run lock is deliberately left in place.
+  assert.equal(existsSync(lockPath(root)), true, "an unconfirmed kill keeps the run lock");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /could not be confirmed dead/);
+  assert.match(report, /run lock was deliberately left in place/);
+  assert.match(
+    result.activities.map((activity) => activity.detail).join("\n"),
+    /could not be confirmed dead; the run lock was left in place/,
+  );
+  // A second run is refused: this app process still holds the live lock.
+  await assert.rejects(
+    () => runSerialTask(root, "A follow-up outcome", { adapters: [createOfflineDemoAdapter()] }),
+    /SERIAL_RUN_ACTIVE/,
+  );
+});
+
+test("a confirmed-kill timeout releases the run lock as before (FIX 2)", async () => {
+  const root = project();
+  const confirmed: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The child closed after the kill: killConfirmed=true, nothing orphaned.
+      throw new CodexExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-clean.jsonl", true);
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Improve Cairn safely"), confirmed)],
+  });
+  assert.equal(result.status, "stopped");
+  assert.equal(existsSync(lockPath(root)), false, "a confirmed kill releases the run lock");
+  assert.doesNotMatch(readFileSync(result.reportPath, "utf8"), /could not be confirmed dead/);
+  // With the lock released, a fresh run proceeds normally.
+  const next = await runSerialTask(root, "A follow-up outcome", { adapters: [createOfflineDemoAdapter()] });
+  assert.equal(next.status, "done");
 });
 
 test("one authorized fake Codex process completes one verified serial task", async () => {
@@ -929,6 +1016,88 @@ test("PHASE 4 READINESS: a synthetic third adapter reaches verified DONE with no
     "docs/ai-work/tasks/001-report.md",
     "visible.txt",
   ]);
+});
+
+test("a worker that edits its own brief cannot forge a DONE record (FIX 1)", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const tampering: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The worker does product work AND rewrites its own (untracked) task
+      // brief, then claims a flawless DONE with a milestone move. The brief is
+      // not a protected path, so without FIX 1 this forges a standing DONE row.
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-brief.md"), "# forged brief\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), tampering)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "RECORD_VERIFICATION_FAILED");
+  // No forged DONE anywhere: HEAD unmoved, no stone gained, one STOPPED row.
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(projectStatus(root).stones, 0);
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal(log.match(/\| 001 \|/g)?.length, 1, "exactly one row for the task");
+  assert.match(log, /\| 001 \|.*\| STOPPED \|/);
+  assert.doesNotMatch(log, /\| 001 \|.*\| DONE \|/);
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Disposition: \*\*STOPPED\*\*/);
+  assert.doesNotMatch(report, /Disposition: \*\*DONE\*\*/);
+  // The tampered brief is retained as evidence, never reverted by Cairn.
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "tasks", "001-brief.md"), "utf8"), "# forged brief\n");
+});
+
+test("a worker that deletes its own brief closes honestly with no unhandled ENOENT (FIX 1)", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const deleting: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      rmSync(join(root, "docs", "ai-work", "tasks", "001-brief.md"));
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  // A missing brief must produce an honest STOPPED close, never an unhandled ENOENT.
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), deleting)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "RECORD_VERIFICATION_FAILED");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(projectStatus(root).stones, 0);
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal(log.match(/\| 001 \|/g)?.length, 1, "exactly one row for the task");
+  assert.match(log, /\| 001 \|.*\| STOPPED \|/);
+  assert.doesNotMatch(log, /\| 001 \|.*\| DONE \|/);
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Disposition: \*\*STOPPED\*\*/);
 });
 
 function requireTaskNames(root: string): string[] {

@@ -264,6 +264,7 @@ function reportText(
   commitRequested: boolean,
   processEvidence?: Record<string, number>,
   processFailure?: ProcessFailureNote,
+  orphanRisk = false,
 ): string {
   const taskNumber = contract.taskNumber;
   const codex = !demo;
@@ -326,7 +327,14 @@ Disposition: **STOPPED**
   const boundedEvidence = codex && processEvidence
     ? `\n## Bounded process evidence\n\n${boundedEvidenceSummary(processEvidence)} Cairn retained only the worker's final message (for claims verification) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
     : "";
-  const paidStarted = codex && (reason === "ADAPTER_TIMED_OUT" || reason === "CANCELLED_BY_OWNER");
+  // A timeout always spent a started process; a cancel spent one only when it
+  // actually started — a pre-spawn cancel carries a null debugPath and spent
+  // nothing, so it earns no "already spent" sentence.
+  const paidStarted = codex && (reason === "ADAPTER_TIMED_OUT" ||
+    (reason === "CANCELLED_BY_OWNER" && processFailure?.debugPath != null));
+  const orphanSentence = orphanRisk
+    ? " The worker process could not be confirmed dead; the run lock was deliberately left in place — close the orphaned process (check your system's process list), then the next task will report the lock holder until this app restarts."
+    : "";
   return `# Task ${pad(taskNumber)} — ${title}
 
 ## Result
@@ -336,7 +344,7 @@ Routing demonstration: **stopped**
 Requested product change: **${codex ? "not verified" : "not attempted"}**
 ${boundedEvidence}
 
-The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}${paidStarted ? " The worker process had already started before Cairn stopped it; any cost for that call is already spent." : ""}
+The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}${paidStarted ? " The worker process had already started before Cairn stopped it; any cost for that call is already spent." : ""}${orphanSentence}
 ${processFailure ? `\nProcess failure: \`${processFailure.code}\`. Raw run evidence stays on the owner's own disk at: ${processFailure.debugPath ?? "unavailable (the local debug directory could not be created)"}. It is never committed to the repository.\n` : ""}
 
 ## Verification
@@ -505,10 +513,22 @@ function cairnWorkerRecords(
     moved: claims?.milestone ?? "NO",
   };
   appendLogRow(root, row);
-  const actualLog = readFileSync(paths.log(root), "utf8");
+  const briefPath = paths.brief(root, contract.taskNumber);
+  const reportPath = paths.report(root, contract.taskNumber);
+  const logPath = paths.log(root);
+  const actualLog = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+  // Every read is existsSync-guarded so a worker that deleted a record can only
+  // make the corresponding check false — never throw a raw ENOENT after the
+  // log row was already appended (that was how a failed byte-back left a
+  // standing forged record behind). The brief is Cairn's start-of-task text; on
+  // a DONE it is committed, so its byte-match is verified here. On a STOPPED the
+  // brief is retained evidence, not committed — its integrity is not part of
+  // what makes the honest STOPPED records themselves verified, and the DONE path
+  // already checks the brief before any DONE record is authored (see below).
   const checks = {
-    brief: readFileSync(paths.brief(root, contract.taskNumber), "utf8") === briefText(contract, false),
-    report: readFileSync(paths.report(root, contract.taskNumber), "utf8") === report,
+    brief: disposition === "STOPPED" ||
+      (existsSync(briefPath) && readFileSync(briefPath, "utf8") === briefText(contract, false)),
+    report: existsSync(reportPath) && readFileSync(reportPath, "utf8") === report,
     log: actualLog === start.logText + expectedLogLine(row),
     row: parseLog(root).filter((item) => item.task === pad(contract.taskNumber)).length === 1,
   };
@@ -643,8 +663,9 @@ function writeClosedRecords(
   commitRequested: boolean,
   processEvidence?: Record<string, number>,
   processFailure?: ProcessFailureNote,
+  orphanRisk = false,
 ): { reportText: string; row: LogRow; verified: boolean } {
-  const report = reportText(contract, demo, disposition, reason, commitRequested, processEvidence, processFailure);
+  const report = reportText(contract, demo, disposition, reason, commitRequested, processEvidence, processFailure, orphanRisk);
   writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
   const row = rowFor(contract, demo, disposition, reason);
   appendLogRow(root, row);
@@ -668,10 +689,11 @@ function writeSafetyRecordsWhenUnclaimed(
   commitRequested: boolean,
   processEvidence?: Record<string, number>,
   processFailure?: ProcessFailureNote,
+  orphanRisk = false,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   if (existsSync(paths.report(root, contract.taskNumber))) return null;
   if (readFileSync(paths.log(root), "utf8") !== start.logText) return null;
-  return writeClosedRecords(root, contract, demo, "STOPPED", reason, start, commitRequested, processEvidence, processFailure);
+  return writeClosedRecords(root, contract, demo, "STOPPED", reason, start, commitRequested, processEvidence, processFailure, orphanRisk);
 }
 
 function replaceDoneRecordsWithStopped(
@@ -726,6 +748,13 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     activeRoots.delete(projectRoot);
     throw error;
   }
+  // Set true only when a timeout/cancel kill could not be confirmed: a live
+  // orphan may still be writing this workspace, so the run lock is deliberately
+  // NOT released (see the finally). Fail-closed: the lock holder is this app
+  // process (alive), so the next run is refused SERIAL_RUN_ACTIVE rather than
+  // self-healed. The residual risk is bounded — a stale-lock heal only applies
+  // once this app restarts (its pid then reads as dead) — and documented.
+  let unconfirmedKill = false;
   try {
     const chosen = options.adapters.find((item) => item.descriptor.id === route.recommended.id);
     if (!chosen) throw new Error("ROUTE_ADAPTER_MISSING");
@@ -809,16 +838,25 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       const processFailure: ProcessFailureNote | undefined = error instanceof WorkerProcessError
         ? { code: error.code, debugPath: error.debugPath }
         : undefined;
+      // An unconfirmed kill (the child never closed after a timeout/cancel kill)
+      // means a live orphan may still be writing. Keep the run lock (see finally)
+      // and say so plainly in both the activity and the STOPPED report.
+      const orphanRisk = error instanceof WorkerProcessError &&
+        (error.failure === "timeout" || error.failure === "cancelled") &&
+        error.killConfirmed === false;
+      if (orphanRisk) unconfirmedKill = true;
       emit(activities, options.events, {
         stage: "Run",
         state: "stopped",
         detail: reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
           ? `Stopped before starting the real ${contract.route.adapterLabel} process.`
-          : processFailure
-            ? `The adapter stopped safely (${processFailure.code}).${processFailure.debugPath ? ` Raw run evidence: ${processFailure.debugPath}` : ""}`
-            : "The adapter stopped safely.",
+          : orphanRisk
+            ? `The worker process could not be confirmed dead; the run lock was left in place. Close the orphaned process, then restart the app before the next task.`
+            : processFailure
+              ? `The adapter stopped safely (${processFailure.code}).${processFailure.debugPath ? ` Raw run evidence: ${processFailure.debugPath}` : ""}`
+              : "The adapter stopped safely.",
       });
-      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, demo, reason, start, Boolean(options.commitRecords), undefined, processFailure);
+      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, demo, reason, start, Boolean(options.commitRecords), undefined, processFailure, orphanRisk);
       if (!closed?.verified) {
         throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
       }
@@ -873,6 +911,27 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         };
       };
 
+      // A DONE write whose byte-back verification fails must never leave a
+      // forged DONE report/log row standing. Rewrite the just-written DONE
+      // records to honest STOPPED records in place — replaceDoneRecordsWithStopped
+      // only proceeds when the on-disk records are byte-for-byte the DONE ones —
+      // and close RECORD_VERIFICATION_FAILED. Only an unrewritable failure throws.
+      const closeRecordRewrite = (done: { reportText: string; row: LogRow }): SerialRunResult => {
+        const stopped = replaceDoneRecordsWithStopped(
+          projectRoot, contract, demo, start, Boolean(options.commitRecords), done,
+          "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined,
+        );
+        if (!stopped?.verified) throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });
+        return {
+          status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",
+          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+          reportText: stopped.reportText, row: stopped.row, route, activities,
+          commit: { status: "skipped", reason: "Record verification failed." },
+        };
+      };
+
       if (stopReason) return closeStopped(stopReason);
 
       // DONE path — the claims say DONE, the process completed, and protected
@@ -880,12 +939,25 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       // A worker that committed on its own (head moved) is not verifiable.
       if (git(projectRoot, ["rev-parse", "HEAD"]) !== start.head) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
 
+      // The task brief is written untracked at task start, so it is NOT in the
+      // protected-path snapshot: a worker that edits or deletes its own brief
+      // passes every protected-work and exact-path check. Verify it is still the
+      // byte-exact text Cairn wrote (contractMarkdown) BEFORE authoring any DONE
+      // record; a tampered or missing brief closes as an honest STOPPED instead,
+      // so no forged DONE report, log row, or stone can be produced. The stop
+      // close writes fresh honest STOPPED records (none exist yet) and does not
+      // re-verify the tampered brief (it is retained evidence, never committed).
+      const startBriefPath = paths.brief(projectRoot, taskNumber);
+      if (!existsSync(startBriefPath) || readFileSync(startBriefPath, "utf8") !== contractMarkdown) {
+        return closeStopped("RECORD_VERIFICATION_FAILED");
+      }
+
       if (start.status.length > 0) {
         // A protected dirty start forbids an isolated commit: the records are
         // written but the product changes stay uncommitted for the owner.
         const commit: RecordCommit = { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
         const records = cairnWorkerRecords(projectRoot, contract, start, "DONE", null, claims, protectedValid, commit, workerResult?.evidence ?? null);
-        if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored records could not be verified.");
+        if (!records.verified) return closeRecordRewrite(records);
         emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
         emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
         return {
@@ -903,7 +975,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         { status: "created", reason: "One exact-path commit contains the product changes and these records." },
         workerResult?.evidence ?? null,
       );
-      if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored records could not be verified.");
+      if (!records.verified) return closeRecordRewrite(records);
       const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
       const commit = commitExactPaths(projectRoot, start, expectedCommitSet, taskNumber);
       if (!commit) {
@@ -982,7 +1054,13 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       reportText: closed.reportText, row: closed.row, route, activities, commit,
     };
   } finally {
-    lock.release();
+    // The in-process guard always clears. The cross-process file lock is
+    // released only when no unconfirmed-kill stop occurred: if a live orphan may
+    // still be writing this workspace, the lock stays so the next task is
+    // refused (this app's pid still holds it) instead of starting against a
+    // workspace a rogue process is mutating. Restarting the app lets the normal
+    // stale-lock heal apply once this pid reads as dead.
+    if (!unconfirmedKill) lock.release();
     activeRoots.delete(projectRoot);
   }
 }

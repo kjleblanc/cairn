@@ -69,13 +69,19 @@ export type WorkerFailureKind = "process" | "timeout" | "cancelled";
  * The worker process did not return a verified result. `failure` tells the
  * envelope how to close: `timeout` → ADAPTER_TIMED_OUT, `cancelled` →
  * CANCELLED_BY_OWNER, `process` → ADAPTER_FAILED. `code` and `debugPath` are
- * the adapter's own precise diagnostics.
+ * the adapter's own precise diagnostics. `killConfirmed` is false only when a
+ * timeout/cancel kill was issued but the child never closed (a live orphan may
+ * still be writing the workspace); it is true for every path where nothing can
+ * still be running — a confirmed close, a spawn/stdin process failure, or a
+ * pre-spawn cancel. The envelope uses it to decide whether releasing the run
+ * lock is safe.
  */
 export class WorkerProcessError extends Error {
   constructor(
     readonly failure: WorkerFailureKind,
     readonly code: string,
     readonly debugPath: string | null,
+    readonly killConfirmed: boolean = true,
   ) {
     super(`${code}: the worker process did not return a verified result.`);
   }

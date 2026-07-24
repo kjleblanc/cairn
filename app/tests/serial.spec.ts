@@ -64,3 +64,19 @@ test("a beginner completes the offline serial path through a verified honest res
   ].sort());
   await app.close();
 });
+
+test("FIX 4: the demo lane runs through task:run with no disclosure because its routed adapter exposes none", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-serial-demo-gate-"));
+  scaffold(proj);
+  const app = await electron.launch({ args: ["."], env: { ...process.env, CAIRN_MOCK: "1", CAIRN_OPEN: proj } });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  // The routed adapter (offline demo) has no disclosure() seam, so the run-time
+  // gate takes no `expected` disclosure and needs no confirmation: task:run
+  // succeeds with neither realCallConfirmed nor a disclosure argument.
+  const done = await win.evaluate(async ({ project }) =>
+    window.cairn.taskRun(project, "Create a welcome page"), { project: proj });
+  expect(done.ok).toBe(true);
+  if (done.ok) expect(done.value.status).toBe("done");
+  await app.close();
+});
