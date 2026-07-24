@@ -63,3 +63,23 @@ test("owner messages exist for the failure statuses", () => {
     assert.doesNotMatch(ownerMessageFor(status), /\d{3}/);
   }
 });
+
+test("http errors release the response body to avoid socket pool exhaustion", async () => {
+  let canceled = false;
+  const fake: typeof fetch = async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        canceled = true;
+      },
+    });
+    return new Response(stream, { status: 401 });
+  };
+  await assert.rejects(
+    async () => { for await (const _ of streamChat(SLOT, [], fake)) void _; },
+    (error: unknown) => {
+      assert.ok(error instanceof ConductorHttpError);
+      return true;
+    },
+  );
+  assert.ok(canceled, "response body must be canceled");
+});

@@ -73,6 +73,11 @@ export async function* streamChat(
     signal,
   });
   if (!response.ok || !response.body) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      /* releasing the body must not mask the real error */
+    }
     throw new ConductorHttpError(response.status, ownerMessageFor(response.status));
   }
   const reader = response.body.getReader();
