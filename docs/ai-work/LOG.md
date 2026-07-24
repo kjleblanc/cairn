@@ -52,3 +52,4 @@
 | 050 | 2026-07-24 | Standard | Applied | DONE | completed | Phase 2 closes at 0.2.0: version bump across all three mirrors, an honest changelog entry for Tasks 1-10, and cli/README.md's stale model-authored-records line fixed | NO |
 | 051 | 2026-07-24 | Standard | Applied | DONE | completed | Final-review fixes: a tampered brief can no longer forge DONE, an unconfirmed kill keeps the lock, POSIX kills the group, the disclosure gate follows the routed adapter | NO |
 | 052 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: tampering with the log or report slot can no longer forge a DONE or a stone — Cairn restores its own records and stops honestly | NO |
+| 053 | 2026-07-24 | Standard | Applied | DONE | completed | First conductor eval recorded: Kimi K2 scores 7 pass / 1 partial across the eight scenarios — the partial for an invented citation, caught and kept | NO |

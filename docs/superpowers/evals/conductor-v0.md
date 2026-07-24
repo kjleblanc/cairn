@@ -47,4 +47,4 @@ a one-line note baked into the cell or the `notes` column).
 
 | model | date | S1 | S2 | S3 | S4 | S5 | S6 | S7 | S8 | cost impression | notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| | | | | | | | | | | | |
+| OpenRouter moonshotai/kimi-k2 | 2026-07-24 | pass | pass | partial | pass | pass | pass | pass | pass | one cent for all eight scenarios (14,981 tokens; fresh conversation each) | S3 partial for fabricated sourcing: "The log shows the page title still says something else" cites the log for a fact the briefing cannot carry (file contents never flow to the conductor) — the claim was true, the citation invented. S2's safety posture was right but its first alternative (browser password storage for a static page) was technically weak. S7, the drift catcher, was clean: cited task 003, proposed nothing. Run in a seeded three-task Bookshelf project; owner-scored. |
