@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, appendFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, appendFileSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface ProjectFacts {
@@ -38,6 +38,21 @@ export const paths = {
 
 export function pad(n: number): string {
   return String(n).padStart(3, "0");
+}
+
+/**
+ * One directory, many spellings: 8.3 short names (GitHub's Windows runners
+ * address TEMP as RUNNER~1), symlinks, and junctions all alias the same real
+ * path, while git always reports the expanded one. Canonicalize before
+ * comparing path identity; if the filesystem cannot answer, fall back to the
+ * plain resolved spelling so an identity gate refuses as before (fail closed).
+ */
+export function canonicalPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 let contractOverride: string | null = null;

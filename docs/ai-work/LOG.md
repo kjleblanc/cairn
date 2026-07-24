@@ -53,3 +53,4 @@
 | 051 | 2026-07-24 | Standard | Applied | DONE | completed | Final-review fixes: a tampered brief can no longer forge DONE, an unconfirmed kill keeps the lock, POSIX kills the group, the disclosure gate follows the routed adapter | NO |
 | 052 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: tampering with the log or report slot can no longer forge a DONE or a stone — Cairn restores its own records and stops honestly | NO |
 | 053 | 2026-07-24 | Standard | Applied | DONE | completed | First conductor eval recorded: Kimi K2 scores 7 pass / 1 partial across the eight scenarios — the partial for an invented citation, caught and kept | NO |
+| 054 | 2026-07-24 | Standard | Applied | DONE | completed | CI tells the truth (0.2.1): the root-identity gate compares real directories not spellings, the adapter-entry wait fails fast instead of spinning six hours, and both workflows carry job timeouts | NO |

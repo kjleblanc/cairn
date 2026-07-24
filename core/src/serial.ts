@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
 import { composeWorkerReport, composeWorkerRowSummary, type ComposedRecordInput } from "./records.js";
-import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
+import { appendLogRow, canonicalPath, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
 import {
   routeTask,
@@ -136,8 +136,17 @@ function statusLines(root: string): string[] {
 }
 
 function snapshot(root: string): GitSnapshot {
-  const top = resolve(git(root, ["rev-parse", "--show-toplevel"]));
-  if (top.toLowerCase() !== resolve(root).toLowerCase()) throw new Error("PROJECT_ROOT_MISMATCH");
+  const topRaw = git(root, ["rev-parse", "--show-toplevel"]);
+  const top = canonicalPath(topRaw);
+  const rootCanonical = canonicalPath(root);
+  if (top.toLowerCase() !== rootCanonical.toLowerCase()) {
+    // Name every spelling: when canonicalization falls back (a transient
+    // realpath failure), the canonical spelling equals the resolved one and
+    // this message is the evidence that says so.
+    throw new Error(
+      `PROJECT_ROOT_MISMATCH: git's toplevel "${topRaw}" (canonical "${top}") does not match the project root "${root}" (canonical "${rootCanonical}").`,
+    );
+  }
   const status = statusLines(root);
   return {
     head: git(root, ["rev-parse", "HEAD"]),

@@ -4,9 +4,16 @@ on:
   pull_request:
 permissions:
   contents: read
+# A newer push supersedes a stalled or stale run instead of queuing behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: windows-latest
+    # A wedged suite must die in minutes — never GitHub's six-hour default
+    # kill, which every pre-054 ci run burned while the suite hung (Task 054).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

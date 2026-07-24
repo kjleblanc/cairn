@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { aliasedSpelling } from "./alias-spelling.js";
 import { delimiter, join, resolve } from "node:path";
 import {
   authorizeCodexExec,
@@ -46,6 +47,32 @@ test("system readiness ignores a workspace-local Codex command", async () => {
   process.env[pathKey] = root;
   try {
     assert.deepEqual(await detectCodexExecStatus(root), { installed: false, connected: false });
+  } finally {
+    if (previous === undefined) delete process.env[pathKey];
+    else process.env[pathKey] = previous;
+  }
+});
+
+// Task 054: the workspace-containment check must recognize the workspace by
+// its real directory, not its spelling — a project opened through an 8.3
+// short name or symlink must not let a repo-planted codex pose as installed.
+test("system readiness ignores a workspace-local Codex command under an aliased root spelling (FIX / Task 054)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-codex-shadow-alias-"));
+  const alias = aliasedSpelling(root);
+  if (!alias) {
+    t.skip("this filesystem offers no aliased spelling of the fixture root");
+    return;
+  }
+  const command = join(root, process.platform === "win32" ? "codex.cmd" : "codex");
+  writeFileSync(command, process.platform === "win32" ? "@exit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
+  if (process.platform !== "win32") chmodSync(command, 0o755);
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const previous = process.env[pathKey];
+  // PATH carries the planted command under the long spelling; the project is
+  // opened through the alias.
+  process.env[pathKey] = root;
+  try {
+    assert.deepEqual(await detectCodexExecStatus(alias), { installed: false, connected: false });
   } finally {
     if (previous === undefined) delete process.env[pathKey];
     else process.env[pathKey] = previous;

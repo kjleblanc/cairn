@@ -4,6 +4,25 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.2.1 — CI tells the truth — 2026-07-24
+
+- Fixed the root-identity gate so it compares real directories, not
+  spellings: `snapshot()` and the Codex workspace-containment check now
+  canonicalize both sides (8.3 short names, symlinks, junctions) before
+  comparing, with a fail-closed fallback when the filesystem cannot answer.
+  GitHub's Windows runners address the temp directory through an 8.3 short
+  name, so every serial test that reached the gate failed
+  `PROJECT_ROOT_MISMATCH` on CI while passing locally; the same fix covers
+  a project opened through any aliased spelling. A firing gate now names
+  all four compared spellings instead of a bare code.
+- Killed the CI hang: the overlapping-run test's adapter-entry wait spun
+  immediates forever when the watched run threw before reaching its
+  adapter, holding the test process open until GitHub's six-hour job kill
+  (all three `ci` runs to date died that way). The wait now fails fast when
+  the run settles early, and both workflows carry job timeouts (`ci` 20
+  minutes with a supersede-on-push concurrency group; `release` 45 minutes
+  per matrix leg) so no future wedge can burn hours again.
+
 ## 0.2.0 — the envelope holds the pen — 2026-07-24
 
 - Added a watchdog and an honest stop path: a wedged worker (default 600 000 ms

@@ -10,6 +10,9 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # Same bound as ci.yml: a wedged suite or make step must die in minutes,
+    # not burn six hours per matrix leg (Task 054).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, appendFileSync, constants, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
+import { canonicalPath } from "./files.js";
 import {
   WorkerBoundaryError,
   WorkerProcessError,
@@ -212,7 +213,10 @@ function redactTokens(text: string): string {
 }
 
 function insideWorkspace(workspaceRoot: string, candidate: string): boolean {
-  const path = relative(resolve(workspaceRoot), resolve(candidate));
+  // Compare real directories, not spellings: a workspace opened through an
+  // 8.3 short name or symlink must still contain its own planted binaries
+  // (Task 054, same class as the serial root-identity gate).
+  const path = relative(canonicalPath(workspaceRoot), canonicalPath(candidate));
   return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 

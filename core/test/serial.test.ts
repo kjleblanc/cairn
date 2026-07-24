@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { aliasedSpelling } from "./alias-spelling.js";
 import { appendLogRow } from "../src/files.js";
 import {
   authorizeCodexExec,
@@ -779,6 +780,26 @@ test("the offline demonstration writes only one brief, report, and log row", asy
   );
 });
 
+// Task 054: the adapter-entry wait must fail fast when the watched run settles
+// before its adapter is ever entered. The old bare spin-wait had no escape: on
+// CI a pre-adapter throw abandoned it mid-spin, and the immortal immediate
+// chain held the test process open until GitHub's six-hour job kill.
+async function untilAdapterEntry(run: Promise<unknown>, entered: () => boolean): Promise<void> {
+  let settled = false;
+  let failure: unknown;
+  void run.then(
+    () => { settled = true; },
+    (error) => {
+      settled = true;
+      failure = error ?? new Error("the run rejected before its adapter was entered");
+    },
+  );
+  while (!entered()) {
+    if (settled) throw failure ?? new Error("the run settled before its adapter was entered");
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 test("a second overlapping run is refused before it creates another task", async () => {
   const root = project();
   let release: (() => void) | undefined;
@@ -790,14 +811,23 @@ test("a second overlapping run is refused before it creates another task", async
     },
   };
   const first = runSerialTask(root, "First outcome", { adapters: [delayed] });
-  while (!release) await new Promise((resolve) => setImmediate(resolve));
+  await untilAdapterEntry(first, () => release !== undefined);
   await assert.rejects(
     () => runSerialTask(root, "Second outcome", { adapters: [createOfflineDemoAdapter()] }),
     /SERIAL_RUN_ACTIVE/,
   );
+  assert.ok(release, "the adapter-entry wait resolved, so release is set");
   release();
   assert.equal((await first).status, "done");
   assert.deepEqual(requireTaskNames(root), ["001-brief.md", "001-report.md"]);
+});
+
+test("the adapter-entry wait fails fast when the run never reaches its adapter (FIX / Task 054)", { timeout: 10_000 }, async () => {
+  const ungoverned = mkdtempSync(join(tmpdir(), "cairn-serial-ungoverned-"));
+  const first = runSerialTask(ungoverned, "Never dispatched", {
+    adapters: [createOfflineDemoAdapter()],
+  });
+  await assert.rejects(untilAdapterEntry(first, () => false), /No Cairn contract here/);
 });
 
 test("historical STOPPED rows and unmatched records never block the next serial task", async () => {
@@ -1260,3 +1290,21 @@ function requireTaskNames(root: string): string[] {
   const dir = join(root, "docs", "ai-work", "tasks");
   return existsSync(dir) ? readdirSync(dir).sort() : [];
 }
+
+// Task 054: GitHub's Windows runners hand the suite an 8.3 short-name temp
+// path (RUNNER~1); git reports the expanded long path, so the root-identity
+// gate must treat both spellings as the same real directory.
+test("an aliased spelling of the project root still completes a serial task (FIX / Task 054)", async (t) => {
+  const root = project();
+  const alias = aliasedSpelling(root);
+  if (!alias) {
+    t.skip("this filesystem offers no aliased spelling of the fixture root");
+    return;
+  }
+  assert.notEqual(alias.toLowerCase(), resolve(root).toLowerCase());
+  const result = await runSerialTask(alias, "One aliased outcome", {
+    adapters: [createOfflineDemoAdapter()],
+  });
+  assert.equal(result.status, "done");
+  assert.deepEqual(requireTaskNames(root), ["001-brief.md", "001-report.md"]);
+});
