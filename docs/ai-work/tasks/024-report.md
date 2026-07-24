@@ -160,6 +160,62 @@ scrolling on the app's default 1100x760 window. Re-ran `typecheck`,
 before staging, and that no scratch files (`scratch-smoke-chat*.mjs`,
 `scratch-fake-server.mjs`) were left in `app/`.
 
+## Review fixes
+
+Code review returned two Important findings and two Minors; all four fixed
+in this same task, no new repo task number, per the coordinator's
+direction. Files touched: `app/src/renderer/screens/Chat.tsx`,
+`app/src/renderer/App.tsx`, `app/src/renderer/app.css`,
+`app/src/renderer/components/ConnectCard.tsx`.
+
+- **Deltas were not conversation-scoped** (`Chat.tsx` only filtered incoming
+  deltas by `dir`). Added `conversationIdRef` (a ref mirror of
+  `conversationId` for synchronous reads inside the delta subscription) and
+  `inFlightRef: { id: string | null } | null` tracking the send currently
+  in flight — its `id` starts at whatever conversation it targeted
+  (possibly `null` for a brand-new conversation) and is locked in the first
+  time it's learned, from whichever arrives first: the `conductor:send`
+  response or a delta that races ahead of it. The delta handler now ignores
+  any event matching neither the displayed conversation nor the in-flight
+  one, and never calls `setConversationId` from such an event.
+  `newConversation()` is now `async` and, while `streaming`, `await`s
+  `cairn.conductorStop(dir)` before clearing state, so main's per-dir lock
+  is actually released before the screen looks empty. `send()`'s
+  post-response id adoption is guarded the same way, so a stale response
+  can't leak in either.
+
+- **`.chat-screen`'s fixed full-bleed layer painted over `App.tsx`'s
+  `ErrorCard`.** Kept `.chat-screen` fixed (preserves the spec's full-bleed
+  layout) and instead gave the top-level error deterministic stacking: a
+  new `.app-error-overlay` wrapper around `ErrorCard` in `App.tsx`, styled
+  `position: fixed; z-index: 1000` in `app.css`. A positive z-index always
+  paints after a fixed element left at z-index auto (what `.chat-screen`
+  has), regardless of DOM order — no other screen's layout changed.
+
+- **`ConnectCard.tsx`: key clear now runs in `finally`**, so the "cleared
+  either way" promise holds even if the `conductorConnect` invoke itself
+  rejects, not just when it resolves.
+
+- **`ConnectCard.tsx`: Connect now also requires `model.trim()`** (button
+  `disabled` expression and the `connect()` guard clause both updated) — an
+  empty model no longer connects and defers the failure to the first send.
+
+Verified with throwaway scratch Playwright scripts (not committed): a
+message-content-distinguishing fake SSE server proved that clicking "New
+conversation" mid-stream clears the screen immediately and that the
+abandoned stream's reply (tagged distinctly from a fresh reply) never
+appears, even after waiting out its full duration; a fresh send in the new
+conversation succeeded immediately with no "already answering" refusal,
+confirming `stop()` was awaited for real. A second script deleted the open
+project's folder, clicked "← Project home" from the chat screen, and
+confirmed (via `document.elementFromPoint` at the overlay's own center,
+plus a screenshot) that the error text is the topmost element on screen
+while `view` stays `"chat"`. A third confirmed Connect stays disabled with
+an empty model field and enables once one is typed.
+
+Re-ran `npm run typecheck`, `npm run test:unit` (37/37), `npm run
+build:vite`, and `npm run test:smoke` (13/13) after the fixes — all green.
+
 Milestone movement: NO
 
 Disposition: DONE

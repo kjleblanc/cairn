@@ -34,6 +34,13 @@ p:last-child { margin-bottom: 0; }
 .badge-done { background: var(--green-soft); color: var(--green-deep); }
 .badge-stopped { background: var(--amber-soft); color: var(--amber-deep); }
 .error-card { background: var(--stop-soft); border-radius: var(--r-sm); padding: 12px 16px; color: var(--stop); margin: 0 0 12px; }
+/* App-level errors must stay visible even when the current screen (the chat
+ * screen) is a `position: fixed` full-bleed layer that would otherwise paint
+ * over normal in-flow content regardless of DOM order. Explicit fixed
+ * positioning plus a z-index above any screen's own stacking wins
+ * deterministically, without touching those screens' own layouts. */
+.app-error-overlay { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 1000; width: min(700px, calc(100% - 32px)); }
+.app-error-overlay .error-card { margin: 0; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
 .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .spread { justify-content: space-between; }
 

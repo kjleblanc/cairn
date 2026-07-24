@@ -42,14 +42,19 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   }, [baseUrl, model]);
 
   async function connect() {
-    if (!card || !checked || connecting) return;
+    if (!card || !checked || !model.trim() || !apiKey.trim() || connecting) return;
     setConnecting(true);
     setError(null);
-    const response = await cairn.conductorConnect({ card, apiKey, consentConfirmed: true });
-    setApiKey(""); // the key field is cleared after a connect attempt either way
-    setConnecting(false);
-    if (!response.ok) { setError(response.message); return; }
-    onConnected();
+    try {
+      const response = await cairn.conductorConnect({ card, apiKey, consentConfirmed: true });
+      if (!response.ok) { setError(response.message); return; }
+      onConnected();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApiKey(""); // the key field is cleared after a connect attempt either way, even a rejected invoke
+      setConnecting(false);
+    }
   }
 
   return (
@@ -82,7 +87,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
       </label>
 
       <div className="row" style={{ marginTop: 14 }}>
-        <Pill kind="primary" disabled={!card || !checked || !apiKey.trim() || connecting} onClick={() => void connect()}>
+        <Pill kind="primary" disabled={!card || !checked || !model.trim() || !apiKey.trim() || connecting} onClick={() => void connect()}>
           {connecting ? "Connecting…" : "Connect"}
         </Pill>
       </div>

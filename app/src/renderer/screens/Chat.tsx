@@ -8,6 +8,13 @@ import { Md } from "../components/Md";
 import { Scene } from "../components/Scene";
 import { Pill } from "../components/Ui";
 
+/** Tracks one in-flight `send()`. `id` starts out as whatever conversation
+ * it was sent against (possibly null, for a brand-new conversation whose id
+ * isn't known yet) and is locked in the first time it's learned — from
+ * whichever arrives first, the `conductor:send` response or a race-ahead
+ * delta. Once locked, it never changes for this send. */
+type InFlight = { id: string | null };
+
 /** Layout A: the hillside is the room. The scene fills the window; the
  * conversation floats over it on solid (never translucent) cards.
  *
@@ -30,6 +37,18 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
   const [error, setError] = useState<string | null>(null);
   const streamingRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
+  // Mirrors `conversationId` for synchronous reads inside the delta handler
+  // (a `useEffect` closure over React state can be stale between renders).
+  const conversationIdRef = useRef<string | null>(null);
+  // The conversation the currently in-flight send belongs to, or null when
+  // nothing is in flight. Deltas that match neither this nor the displayed
+  // conversation are from an abandoned stream and are ignored outright.
+  const inFlightRef = useRef<InFlight | null>(null);
+
+  const setConvId = useCallback((id: string | null) => {
+    conversationIdRef.current = id;
+    setConversationId(id);
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     setStatus(await cairn.conductorStatus());
@@ -46,14 +65,26 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
     void cairn.conductorConversations(dir).then((list) => {
       const newest = list.at(-1);
       if (!newest) return;
-      setConversationId(newest.id);
+      setConvId(newest.id);
       void cairn.conductorTurns(dir, newest.id).then(setTurns);
     });
-  }, [status?.connected, dir]);
+  }, [status?.connected, dir, setConvId]);
 
   useEffect(() => cairn.onConductorDelta((event: ConductorDelta) => {
     if (event.dir !== dir) return;
-    setConversationId(event.conversationId);
+
+    const inFlight = inFlightRef.current;
+    const matchesCurrent = conversationIdRef.current !== null && event.conversationId === conversationIdRef.current;
+    const matchesInFlightKnown = inFlight !== null && inFlight.id !== null && event.conversationId === inFlight.id;
+    const matchesInFlightUnknown = inFlight !== null && inFlight.id === null;
+    if (!matchesCurrent && !matchesInFlightKnown && !matchesInFlightUnknown) return; // an abandoned stream — ignore, never adopt its id
+
+    if (matchesInFlightUnknown && inFlight) {
+      // The first event for a brand-new conversation just revealed its real id.
+      inFlight.id = event.conversationId;
+      setConvId(event.conversationId);
+    }
+
     if (event.kind === "delta") {
       streamingRef.current += event.text ?? "";
       setStreamingText(streamingRef.current);
@@ -63,6 +94,7 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
       streamingRef.current = "";
       setStreamingText("");
       setStreaming(false);
+      inFlightRef.current = null;
       if (event.turn) setTurns((t) => [...t, event.turn as ConductorTurn]);
       return;
     }
@@ -70,6 +102,7 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
     // partial reply already captured is echoed as a stopped-early bubble —
     // matching what main persisted on abort — so nothing visible vanishes.
     setStreaming(false);
+    inFlightRef.current = null;
     const partial = streamingRef.current;
     streamingRef.current = "";
     setStreamingText("");
@@ -77,7 +110,7 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
       setTurns((t) => [...t, { role: "cairn", text: `${partial}\n\n(stopped early)`, ts: new Date().toISOString() }]);
     }
     setError(event.message ?? "Cairn had a problem answering.");
-  }), [dir]);
+  }), [dir, setConvId]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
 
@@ -91,9 +124,19 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
     setStreaming(true);
     streamingRef.current = "";
     setStreamingText("");
-    const response = await cairn.conductorSend({ dir, conversationId, text: trimmed });
-    if (!response.ok) { setStreaming(false); setError(response.message); return; }
-    setConversationId(response.value.conversationId);
+
+    const startingId = conversationIdRef.current;
+    const inFlight: InFlight = { id: startingId };
+    inFlightRef.current = inFlight;
+
+    const response = await cairn.conductorSend({ dir, conversationId: startingId, text: trimmed });
+    if (inFlightRef.current !== inFlight) return; // superseded by "New conversation" or another send meanwhile
+    if (!response.ok) { inFlightRef.current = null; setStreaming(false); setError(response.message); return; }
+    if (inFlight.id === null) {
+      // The response resolved before any delta raced ahead of it — adopt now.
+      inFlight.id = response.value.conversationId;
+      setConvId(response.value.conversationId);
+    }
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -103,10 +146,18 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
     }
   }
 
-  function newConversation() {
-    setConversationId(null);
+  async function newConversation() {
+    if (streaming) {
+      // Stop the abandoned stream before clearing state, so it can't keep
+      // running against a conversation the screen no longer shows.
+      await cairn.conductorStop(dir);
+    }
+    inFlightRef.current = null;
+    setConvId(null);
     setTurns([]);
+    streamingRef.current = "";
     setStreamingText("");
+    setStreaming(false);
     setError(null);
   }
 
@@ -121,7 +172,7 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
           {status?.connected ? (
             <BodyPill status={status} lastReply={lastReply}
               onModelSaved={(model) => setStatus((s) => (s ? { ...s, model } : s))}
-              onDisconnected={() => { newConversation(); void refreshStatus(); }} />
+              onDisconnected={() => { void newConversation(); void refreshStatus(); }} />
           ) : null}
         </div>
 
@@ -158,7 +209,7 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
               <Pill kind="primary" onClick={() => void send(composer)} disabled={streaming || !composer.trim()}>Send</Pill>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <Pill kind="quiet" onClick={newConversation}>New conversation</Pill>
+              <Pill kind="quiet" onClick={() => void newConversation()}>New conversation</Pill>
             </div>
           </>
         ) : null}

@@ -81,5 +81,10 @@ export function App() {
     }
   })();
 
-  return <main className="shell">{error ? <ErrorCard message={error} /> : null}{body}</main>;
+  return (
+    <main className="shell">
+      {error ? <div className="app-error-overlay"><ErrorCard message={error} /></div> : null}
+      {body}
+    </main>
+  );
 }
