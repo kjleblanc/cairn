@@ -312,6 +312,47 @@ test("an oversized output line is skipped without killing the run", async () => 
     assert.equal(result.exitCode, 0);
     assert.equal(result.terminalEvent, "turn.completed");
     assert.equal(result.agentMessageCount, 0);
+    assert.equal(result.finalMessage, null);
+  });
+});
+
+test("a dropped oversized line clears the final message so an earlier one cannot masquerade as final", async () => {
+  // Task 045 review fix on Task 044: terminalEvidence never saw the
+  // oversized line at all — it was dropped from the parse buffer first.
+  // That dropped line could have been the worker's true final agent
+  // message, so the earlier valid message must not survive as finalMessage.
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-dropped-final-ws-"));
+  const first = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "first small valid message" } }) + "\n";
+  const giant = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "x".repeat(2 * 1024 * 1024) } }) + "\n";
+  const { bin, localAppData } = fakeInstall(first + giant + TURN_COMPLETED, "");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"],
+      cwd: workspace,
+      stdin: "bounded fake request",
+    });
+    assert.equal(result.terminalEvent, "turn.completed");
+    assert.equal(result.finalMessage, null, "the dropped line might have been the true final message; the earlier one must not masquerade as final");
+  });
+});
+
+test("a valid agent message arriving after a dropped oversized line still becomes the final message", async () => {
+  // A message genuinely later than the dropped line is not stale — it must
+  // still legitimately overwrite the null left by the drop.
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-dropped-recover-ws-"));
+  const giant = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "x".repeat(2 * 1024 * 1024) } }) + "\n";
+  const recovered = JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "recovered final" } }) + "\n";
+  const { bin, localAppData } = fakeInstall(giant + recovered + TURN_COMPLETED, "");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"],
+      cwd: workspace,
+      stdin: "bounded fake request",
+    });
+    assert.equal(result.terminalEvent, "turn.completed");
+    assert.equal(result.finalMessage, "recovered final", "a message genuinely later than the dropped line must still legitimately overwrite it");
   });
 });
 

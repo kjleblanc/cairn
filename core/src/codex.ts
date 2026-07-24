@@ -488,6 +488,17 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           failedToolItemCount: 0,
           finalMessage: null,
         };
+        // A dropped line is an overwrite-to-null event, exactly like an
+        // oversized agent_message: the dropped line may have been the true
+        // final agent message; a partial view must not let an earlier
+        // message masquerade as final. A later fully-visible message may
+        // still legitimately overwrite this. Mirrors applyEvidence's own
+        // terminal-state freeze below, since this assignment is direct and
+        // does not go through applyEvidence.
+        const clearFinalMessageForDroppedLine = (): void => {
+          if (result.terminalEvent === "error" || result.terminalEvent === "turn.failed") return;
+          result = { ...result, finalMessage: null };
+        };
         const applyEvidence = (evidence: Partial<CodexExecProcessResult> | null): void => {
           if (!evidence) return;
           if (result.terminalEvent === "error" || result.terminalEvent === "turn.failed") return;
@@ -530,6 +541,11 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
             if (skippingOversizedLine) {
               // The head of this line was dropped below; skip its tail too.
               skippingOversizedLine = false;
+              // The dropped line may have been the true final agent message; a
+              // partial view must not let an earlier message masquerade as
+              // final. A later fully-visible message may still legitimately
+              // overwrite this.
+              clearFinalMessageForDroppedLine();
               continue;
             }
             if (!line.trim()) continue;
@@ -541,6 +557,11 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
             // (the Task 004 lesson).
             skippingOversizedLine = true;
             stdout = "";
+            // The dropped line may have been the true final agent message; a
+            // partial view must not let an earlier message masquerade as
+            // final. A later fully-visible message may still legitimately
+            // overwrite this.
+            clearFinalMessageForDroppedLine();
           }
         });
         // Stream stderr to the owner's local debug copy while keeping provider,
@@ -566,6 +587,13 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           if (settled) return;
           if (stdout.trim() && !skippingOversizedLine) {
             applyEvidence(terminalEvidence(stdout));
+          } else if (skippingOversizedLine) {
+            // The close-time flush is skipping a flagged partial line rather
+            // than parsing it. The dropped line may have been the true final
+            // agent message; a partial view must not let an earlier message
+            // masquerade as final. A later fully-visible message may still
+            // legitimately overwrite this.
+            clearFinalMessageForDroppedLine();
           }
           settled = true;
           resolveRun({ ...result, exitCode: typeof code === "number" ? code : -1 });

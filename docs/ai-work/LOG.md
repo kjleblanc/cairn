@@ -44,3 +44,4 @@
 | 042 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: the claims fence scan is linear, so a crafted worker message cannot stall the app | NO |
 | 043 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: exotic line separators are rejected fail-closed, closing a two-fence blind spot; corrects the 042 report's equivalence claim | NO |
 | 044 | 2026-07-24 | Standard | Applied | DONE | completed | The worker's final agent message now rides the codex process seam into claimsText for future claims verification; the worker prompt and real-run decision logic are unchanged | NO |
+| 045 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: a dropped oversized line can no longer let a stale message pose as the worker's final word | NO |
