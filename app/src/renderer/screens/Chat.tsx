@@ -129,6 +129,16 @@ export function Chat({ dir, onOpenTask, onBack }: {
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
 
+  // Unmounting mid-stream (e.g. navigating back to the dashboard) doesn't
+  // stop the reply on its own — main keeps running it and holds the per-dir
+  // lock until the reply finishes. `inFlightRef` is a ref, so this cleanup
+  // always reads whatever was true at the moment of unmount, never a stale
+  // render's value; stopping it here means the next screen's first send
+  // never finds the lock still held.
+  useEffect(() => () => {
+    if (inFlightRef.current) void cairn.conductorStop(dir);
+  }, [dir]);
+
   // Returns whether this call actually dispatched — appended the owner turn
   // and invoked `conductorSend` — as opposed to being refused outright
   // (empty text, or already streaming). The proposed-task card uses this to
