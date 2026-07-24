@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { isCodexExecModelCallBoundaryError, isCodexExecProcessError, isCodexExecTimeoutError } from "./codex.js";
+import { isCodexExecCancelledError, isCodexExecModelCallBoundaryError, isCodexExecProcessError, isCodexExecTimeoutError } from "./codex.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import {
   routeTask,
@@ -26,6 +26,7 @@ export interface SerialRunOptions {
   adapterId?: string;
   commitRecords?: boolean;
   events?: SerialRunEvents;
+  signal?: AbortSignal;
 }
 export interface RecordCommit {
   status: "created" | "skipped";
@@ -57,7 +58,8 @@ export type SerialStopReason =
   | "REAL_MODEL_CALL_NOT_AUTHORIZED"
   | "MODEL_REPORTED_STOPPED"
   | "MODEL_RESULT_NOT_VERIFIED"
-  | "ADAPTER_TIMED_OUT";
+  | "ADAPTER_TIMED_OUT"
+  | "CANCELLED_BY_OWNER";
 
 interface GitSnapshot {
   head: string;
@@ -314,8 +316,7 @@ Disposition: **STOPPED**
   const boundedEvidence = codex && processEvidence
     ? `\n## Bounded process evidence\n\n${boundedEventSummary(processEvidence)} Cairn did not retain item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
     : "";
-  // Task 2 extends paidStarted to cancellation.
-  const paidStarted = codex && reason === "ADAPTER_TIMED_OUT";
+  const paidStarted = codex && (reason === "ADAPTER_TIMED_OUT" || reason === "CANCELLED_BY_OWNER");
   return `# Task ${pad(taskNumber)} — ${title}
 
 ## Result
@@ -730,18 +731,22 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     });
     let adapterValue: unknown;
     try {
-      adapterValue = await chosen.run(freezeContract(contract));
+      adapterValue = await chosen.run(freezeContract(contract), options.signal);
     } catch (error) {
       const reason: SerialStopReason = isCodexExecModelCallBoundaryError(error)
         ? "REAL_MODEL_CALL_NOT_AUTHORIZED"
         : isCodexExecTimeoutError(error)
           ? "ADAPTER_TIMED_OUT"
-          : "ADAPTER_FAILED";
+          : isCodexExecCancelledError(error)
+            ? "CANCELLED_BY_OWNER"
+            : "ADAPTER_FAILED";
       const processFailure: ProcessFailureNote | undefined = isCodexExecProcessError(error)
         ? { code: error.code, debugPath: error.debugPath }
         : isCodexExecTimeoutError(error)
           ? { code: error.code, debugPath: error.debugPath }
-          : undefined;
+          : isCodexExecCancelledError(error)
+            ? { code: error.code, debugPath: error.debugPath }
+            : undefined;
       emit(activities, options.events, {
         stage: "Run",
         state: "stopped",

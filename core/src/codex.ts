@@ -42,7 +42,7 @@ export interface CodexExecProcessResult {
 
 export interface CodexExecProcess {
   kind: "system" | "fake";
-  run(request: CodexExecRequest): Promise<CodexExecProcessResult>;
+  run(request: CodexExecRequest, signal?: AbortSignal): Promise<CodexExecProcessResult>;
 }
 
 export const CODEX_EXEC_PROVIDER = "OpenAI" as const;
@@ -132,6 +132,20 @@ export class CodexExecTimeoutError extends Error {
 
 export function isCodexExecTimeoutError(value: unknown): value is CodexExecTimeoutError {
   return value instanceof CodexExecTimeoutError;
+}
+
+/** The owner pressed stop. The tree is killed the same way as a timeout. */
+export class CodexExecCancelledError extends Error {
+  readonly code = "CODEX_EXEC_CANCELLED";
+
+  constructor(readonly debugPath: string | null) {
+    super("CODEX_EXEC_CANCELLED: the owner stopped the Codex Exec process.");
+    this.name = "CodexExecCancelledError";
+  }
+}
+
+export function isCodexExecCancelledError(value: unknown): value is CodexExecCancelledError {
+  return value instanceof CodexExecCancelledError;
 }
 
 export const CODEX_EXEC_INACTIVITY_MS = 600_000;
@@ -370,8 +384,12 @@ function terminalEvidence(line: string): Partial<CodexExecProcessResult> | null 
 export function createSystemCodexExecProcess(options?: CodexExecProcessOptions): CodexExecProcess {
   return {
     kind: "system",
-    run(request) {
+    run(request, signal) {
       return new Promise((resolveRun, rejectRun) => {
+        if (signal?.aborted) {
+          rejectRun(new CodexExecCancelledError(null));
+          return;
+        }
         const codexCommand = resolveCodexCommand(request.cwd);
         if (!codexCommand) {
           rejectRun(new CodexExecProcessError("CODEX_EXEC_SPAWN_FAILED", null));
@@ -404,23 +422,40 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
         const inactivityMs = options?.inactivityMs ?? CODEX_EXEC_INACTIVITY_MS;
         const absoluteMs = options?.absoluteMs ?? CODEX_EXEC_ABSOLUTE_MS;
         let timedOut: CodexExecTimeoutKind | null = null;
+        let cancelled = false;
         let forceSettle: NodeJS.Timeout | undefined;
+        // If even the tree kill cannot make the child close, settle anyway.
+        // clearWatchdog() runs first so the sibling watchdog timer (and the
+        // abort listener) can never dangle in this failed-kill fallback path
+        // (Task 1 review finding, folded in here since both callers share it).
+        const armForceSettle = (reject: () => void): NodeJS.Timeout => setTimeout(() => {
+          if (settled) return;
+          clearWatchdog();
+          settled = true;
+          // A surviving grandchild holding these pipes open must never keep
+          // the event loop (and this run) alive after the watchdog or an
+          // abort fired.
+          child.stdout.destroy();
+          child.stderr.destroy();
+          try { child.stdin.destroy(); } catch { /* already closed */ }
+          reject();
+        }, 5_000);
         const fireTimeout = (kind: CodexExecTimeoutKind): void => {
-          if (settled || timedOut) return;
+          if (settled || timedOut || cancelled) return;
           timedOut = kind;
           killCodexProcessTree(child);
-          // If even the tree kill cannot make the child close, settle anyway.
-          forceSettle = setTimeout(() => {
-            if (settled) return;
-            settled = true;
-            // A surviving grandchild holding these pipes open must never keep
-            // the event loop (and this run) alive after the watchdog fired.
-            child.stdout.destroy();
-            child.stderr.destroy();
-            try { child.stdin.destroy(); } catch { /* already closed */ }
-            rejectRun(new CodexExecTimeoutError(kind, debugPath));
-          }, 5_000);
+          forceSettle = armForceSettle(() => rejectRun(new CodexExecTimeoutError(kind, debugPath)));
         };
+        // The owner pressed stop. Killed the same way as a timeout, with the
+        // same EPIPE-race ordering: `cancelled` flips before the kill so a
+        // pending stdin-write error can never overwrite this rejection.
+        const onAbort = (): void => {
+          if (settled || cancelled || timedOut) return;
+          cancelled = true;
+          killCodexProcessTree(child);
+          forceSettle = armForceSettle(() => rejectRun(new CodexExecCancelledError(debugPath)));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
         const absoluteTimer = setTimeout(() => fireTimeout("absolute"), absoluteMs);
         let inactivityTimer = setTimeout(() => fireTimeout("inactivity"), inactivityMs);
         const sawActivity = (): void => {
@@ -431,6 +466,7 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           clearTimeout(absoluteTimer);
           clearTimeout(inactivityTimer);
           if (forceSettle) clearTimeout(forceSettle);
+          signal?.removeEventListener("abort", onAbort);
         };
         let stdout = "";
         let skippingOversizedLine = false;
@@ -467,8 +503,9 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
         };
         const fail = (code: CodexExecProcessFailureCode): void => {
           // Killing the tree can EPIPE the pending stdin write; that race must
-          // not overwrite the honest timeout rejection with a process-failure one.
-          if (settled || timedOut) return;
+          // not overwrite the honest timeout or cancellation rejection with a
+          // process-failure one.
+          if (settled || timedOut || cancelled) return;
           clearWatchdog();
           settled = true;
           rejectRun(new CodexExecProcessError(code, debugPath));
@@ -506,6 +543,12 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
         });
         child.once("close", (code) => {
           clearWatchdog();
+          if (cancelled) {
+            if (settled) return;
+            settled = true;
+            rejectRun(new CodexExecCancelledError(debugPath));
+            return;
+          }
           if (timedOut) {
             if (settled) return;
             settled = true;
@@ -635,12 +678,12 @@ export function createCodexExecAdapter(
       capabilities: ["serial-task"],
       priority: 100,
     },
-    async run(contract): Promise<CodexExecResult> {
+    async run(contract, signal): Promise<CodexExecResult> {
       const request = prepareCodexExecRequest(cwd, contract);
       if (!authorizationMatches(cwd, contract, authorization)) {
         throw new CodexExecModelCallBoundaryError();
       }
-      const result = await processRunner.run(request);
+      const result = await processRunner.run(request, signal);
       return {
         kind: "codex-exec-result",
         taskNumber: contract.taskNumber,

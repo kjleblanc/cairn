@@ -67,7 +67,7 @@ export type TaskAdapterResult = OfflineDemoResult | CodexExecResult;
 export interface TaskAdapter {
   kind: "offline-demo" | "codex-exec";
   descriptor: AdapterDescriptor;
-  run(contract: AdapterTaskContract): Promise<TaskAdapterResult>;
+  run(contract: AdapterTaskContract, signal?: AbortSignal): Promise<TaskAdapterResult>;
 }
 
 export interface RouteRequest {

@@ -13,6 +13,7 @@ import {
   createCodexExecAdapter,
   createSystemCodexExecProcess,
   detectCodexExecStatus,
+  isCodexExecCancelledError,
   isCodexExecTimeoutError,
   type CodexExecProcess,
   type CodexExecRequest,
@@ -511,6 +512,24 @@ test("a chattering codex child is killed by the absolute cap", async () => {
         stdin: "bounded fake request",
       }),
       (error: unknown) => isCodexExecTimeoutError(error) && error.timeoutKind === "absolute",
+    );
+  });
+});
+
+test("aborting the signal kills the codex child and rejects as cancelled", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-cancel-ws-"));
+  const { bin, localAppData } = wedgedInstall("silent");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 200);
+    await assert.rejects(
+      () => createSystemCodexExecProcess({ inactivityMs: 60_000, absoluteMs: 60_000 }).run({
+        command: process.platform === "win32" ? "codex.exe" : "codex",
+        args: ["exec", "-"],
+        cwd: workspace,
+        stdin: "bounded fake request",
+      }, controller.signal),
+      (error: unknown) => isCodexExecCancelledError(error) && error.code === "CODEX_EXEC_CANCELLED",
     );
   });
 });

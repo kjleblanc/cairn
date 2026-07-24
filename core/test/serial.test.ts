@@ -16,6 +16,7 @@ import { appendLogRow } from "../src/files.js";
 import {
   authorizeCodexExec,
   CODEX_EXEC_MODEL,
+  CodexExecCancelledError,
   CodexExecProcessError,
   CodexExecTimeoutError,
   createCodexExecAdapter,
@@ -144,6 +145,29 @@ test("a timed-out worker closes as ADAPTER_TIMED_OUT with the paid-call truth", 
   assert.match(report, /CODEX_EXEC_TIMED_OUT/);
   assert.match(report, /codex-wedged\.jsonl/);
   assert.match(report, /already spent/);
+});
+
+test("an owner abort closes as CANCELLED_BY_OWNER with evidence retained", async () => {
+  const root = project();
+  const controller = new AbortController();
+  const cancellable: CodexExecProcess = {
+    kind: "fake",
+    async run(_request, signal) {
+      writeFileSync(join(root, "partial.txt"), "the worker had already begun\n");
+      controller.abort();
+      assert.equal(signal?.aborted, true, "the abort signal must reach the process seam");
+      throw new CodexExecCancelledError(null);
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Improve Cairn safely"), cancellable)],
+    signal: controller.signal,
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "CANCELLED_BY_OWNER");
+  assert.equal(existsSync(join(root, "partial.txt")), true, "workspace evidence is retained, never cleaned");
+  assert.match(readFileSync(result.reportPath, "utf8"), /already spent/);
 });
 
 test("one authorized fake Codex process completes one verified serial task", async () => {
