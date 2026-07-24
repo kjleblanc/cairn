@@ -23,3 +23,4 @@
 | 021 | 2026-07-23 | Standard | Applied | DONE | completed | Streaming OpenAI-compatible conductor client with plain-words failures and usage capture | NO |
 | 022 | 2026-07-23 | Standard | Applied | DONE | completed | Project-local conversation memory under .cairn/ with a one-line gitignore guard | NO |
 | 023 | 2026-07-23 | Standard | Applied | DONE | completed | Conductor keystore, standing-consent gate, and IPC surface; the key lives only in the main process | NO |
+| 024 | 2026-07-23 | Standard | Applied | DONE | completed | The chat screen: the hillside fills the window and conversation floats in it, dark behind CAIRN_CONDUCTOR=1 | NO |

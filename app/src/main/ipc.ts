@@ -4,6 +4,7 @@ import path from "node:path";
 import { initProject, isCairnProject, projectStatus } from "@cairn/core";
 import type {
   ConductorConnectRequest,
+  ConductorConsentCard,
   ConductorDelta,
   ConductorSendRequest,
   ConductorStatus,
@@ -29,7 +30,8 @@ function toResult<T>(context: string, fn: () => T): Result<T> {
 
 async function preflight(): Promise<Preflight> {
   const mock = process.env.CAIRN_MOCK === "1";
-  return { mock, mode: mock ? "offline-demo" : "connection-required" };
+  const conductor = process.env.CAIRN_CONDUCTOR === "1";
+  return { mock, mode: mock ? "offline-demo" : "connection-required", conductor };
 }
 
 export function registerProjectIpc(): void {
@@ -107,12 +109,23 @@ export function registerProjectIpc(): void {
   });
 }
 
-/** Registered separately from `registerProjectIpc` so a future task can wire
- * it in behind its own flag (mirroring how `CAIRN_MOCK` reaches the app)
- * instead of always-on. Not yet called anywhere; nothing here is
- * user-reachable until that wiring lands. */
+/** Registered separately from `registerProjectIpc` for clarity, but called
+ * unconditionally from `main.ts` — these channels are always reachable.
+ * `CAIRN_CONDUCTOR=1` (surfaced to the renderer via `preflight:check`) gates
+ * only whether the renderer ever shows a way to reach them, mirroring how
+ * `CAIRN_MOCK` reaches the app. */
 export function registerConductorIpc(): void {
   ipcMain.handle("conductor:status", (): ConductorStatus => conductorService.status());
+
+  ipcMain.handle("conductor:consentCard", (_e, baseUrl: string, model: string): Result<ConductorConsentCard> => {
+    try {
+      return { ok: true, value: conductorService.conductorConsentCard(baseUrl, model) };
+    } catch (err) {
+      // A malformed base URL is an expected state while the owner is still
+      // typing, not a fault — declined quietly, never logged as an error.
+      return { ok: false, message: plainMessage(err) };
+    }
+  });
 
   ipcMain.handle("conductor:connect", (_e, request: ConductorConnectRequest): Result<null> => {
     try {

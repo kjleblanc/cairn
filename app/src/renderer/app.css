@@ -37,12 +37,12 @@ p:last-child { margin-bottom: 0; }
 .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .spread { justify-content: space-between; }
 
-textarea, input[type="text"] {
+textarea, input[type="text"], input[type="password"] {
   font: inherit; color: var(--ink); width: 100%; background: var(--card-solid);
   border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 14px; outline: none;
 }
 textarea { resize: vertical; }
-textarea:focus, input[type="text"]:focus { border-color: var(--green); }
+textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-color: var(--green); }
 
 .scene-wrap { position: relative; border-radius: var(--r); overflow: hidden; margin: 0 0 14px; background: var(--sky); }
 .scene-head { position: absolute; top: 14px; left: 20px; }
@@ -78,6 +78,32 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
 .run-reminder { display: flex; justify-content: space-between; width: 100%; font: inherit; border: none; border-radius: var(--r); padding: 12px 18px; margin-bottom: 12px; background: var(--green-soft); color: var(--green-deep); cursor: pointer; }
 .run-reminder-go { font-weight: 600; white-space: nowrap; }
 
+.chat-screen { position: fixed; inset: 0; overflow: hidden; background: var(--sky); }
+.chat-scene { position: absolute; inset: 0; }
+.chat-scene svg { display: block; }
+.chat-column {
+  position: relative; z-index: 1; display: flex; flex-direction: column;
+  width: min(720px, calc(100% - 32px)); height: min(86vh, 760px);
+  margin: 6vh auto 0; background: var(--card-solid); border-radius: var(--r);
+  padding: 16px 18px 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .18); overflow: hidden;
+}
+/* Before a conversation exists (loading, or the connect card) the column's
+ * content has no natural flex region to scroll inside, so it sizes to its
+ * content instead of the fixed conversation height, scrolling only if the
+ * connect card itself runs long. */
+.chat-column-static { height: auto; max-height: min(92vh, 760px); overflow-y: auto; margin-top: 3vh; }
+.chat-topbar { margin-bottom: 10px; }
+.chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+.bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; }
+.bubble-owner { align-self: flex-end; background: var(--green-soft); color: var(--green-deep); border-bottom-right-radius: 4px; }
+.bubble-cairn { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
+.chat-composer { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
+.chat-composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; }
+.chat-composer textarea:disabled { opacity: .6; }
+.body-pill-wrap { position: relative; }
+.body-pill-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; width: 260px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: 0 6px 24px rgba(0, 0, 0, .14); padding: 14px; }
+
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }
 .md h2 { font-size: 1.05rem; margin: 1em 0 .35em; }
 .md h3 { font-size: .95rem; margin: .9em 0 .3em; }
@@ -95,4 +121,6 @@ textarea:focus, input[type="text"]:focus { border-color: var(--green); }
   .serial-map { grid-template-columns: repeat(3, 1fr); }
   .route-facts { grid-template-columns: 1fr; }
   .log-row { align-items: flex-start; flex-direction: column; }
+  .chat-column { width: calc(100% - 16px); height: calc(100% - 16px); margin: 8px auto 0; padding: 12px 14px; }
+  .bubble { max-width: 92%; }
 }

@@ -1,7 +1,7 @@
 import type { CodexExecDisclosure, ProjectStatus, RouteResult, SerialActivity, SerialRunResult } from "@cairn/core";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
-export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required" };
+export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required"; conductor: boolean };
 export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number; lastOpened: string };
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string };
@@ -62,6 +62,7 @@ export interface CairnApi {
   openExternal(url: string): Promise<void>;
   onTaskActivity(cb: (event: TaskActivityEvent) => void): () => void;
   conductorStatus(): Promise<ConductorStatus>;
+  conductorConsentCard(baseUrl: string, model: string): Promise<Result<ConductorConsentCard>>;
   conductorConnect(request: ConductorConnectRequest): Promise<Result<null>>;
   conductorDisconnect(): Promise<Result<null>>;
   conductorSetModel(model: string): Promise<Result<null>>;

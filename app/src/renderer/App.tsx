@@ -3,6 +3,7 @@ import type { ProjectStatus } from "@cairn/core";
 import type { Preflight } from "../shared/ipc";
 import { cairn } from "./api";
 import { ErrorCard } from "./components/Ui";
+import { Chat } from "./screens/Chat";
 import { Dashboard } from "./screens/Dashboard";
 import { Picker } from "./screens/Picker";
 import { Settings } from "./screens/Settings";
@@ -15,12 +16,14 @@ type View =
   | { name: "picker"; startNew: boolean; note?: string }
   | { name: "dashboard"; dir: string; status: ProjectStatus }
   | { name: "task"; dir: string }
+  | { name: "chat"; dir: string }
   | { name: "settings"; dir: string | null };
 
 export function App() {
   const [view, setView] = useState<View>({ name: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [mock, setMock] = useState(false);
+  const [conductorEnabled, setConductorEnabled] = useState(false);
 
   const openProject = useCallback(async (dir: string) => {
     const response = await cairn.projectOpen(dir);
@@ -31,6 +34,7 @@ export function App() {
   const boot = useCallback(async () => {
     const preflight = await cairn.preflight();
     setMock(preflight.mock);
+    setConductorEnabled(preflight.conductor);
     const list = await cairn.projectList();
     if (list.autoOpen) { await openProject(list.autoOpen); return; }
     const last = list.recent[0];
@@ -63,11 +67,16 @@ export function App() {
         onCreated={(dir, status) => setView({ name: "dashboard", dir, status })}
         onSettings={() => setView({ name: "settings", dir: null })} />;
       case "dashboard": return <Dashboard dir={view.dir} status={view.status}
+        conductorEnabled={conductorEnabled}
         onStartTask={() => setView({ name: "task", dir: view.dir })}
+        onTalkWithCairn={() => setView({ name: "chat", dir: view.dir })}
         onSwitch={() => setView({ name: "picker", startNew: false })}
         onOpenProject={(dir) => void openProject(dir)}
         onSettings={() => setView({ name: "settings", dir: view.dir })} />;
       case "task": return <TaskRun dir={view.dir} demoAvailable={mock} onBack={() => void openProject(view.dir)} />;
+      case "chat": return <Chat dir={view.dir}
+        onOpenTask={() => setView({ name: "task", dir: view.dir })}
+        onBack={() => void openProject(view.dir)} />;
       case "settings": return <Settings onBack={() => view.dir ? void openProject(view.dir) : setView({ name: "picker", startNew: false })} />;
     }
   })();

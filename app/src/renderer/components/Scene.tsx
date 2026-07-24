@@ -1,5 +1,7 @@
-/** The log made visible: one stone per closed task on a faded hillside, a dotted trace winding up. */
-export function Scene({ stones, justAdded }: { stones: number; justAdded: boolean }) {
+/** The log made visible: one stone per closed task on a faded hillside, a dotted trace winding up.
+ * `fill` renders full-bleed (100% height, cropped to cover) instead of the Dashboard's
+ * fixed-aspect strip — used by the chat screen so the scene fills the whole window. */
+export function Scene({ stones, justAdded, fill }: { stones: number; justAdded: boolean; fill?: boolean }) {
   const visible = Math.min(stones, 7);
   const rows: { cx: number; cy: number; rx: number; ry: number }[] = [];
   let cy = 112, rx = 27, ry = 7.5;
@@ -9,7 +11,9 @@ export function Scene({ stones, justAdded }: { stones: number; justAdded: boolea
     rx *= 0.8; ry *= 0.93;
   }
   return (
-    <svg viewBox="0 0 640 140" width="100%" role="img" aria-label={`Your cairn: ${stones} ${stones === 1 ? "stone" : "stones"}`}>
+    <svg viewBox="0 0 640 140" width="100%" height={fill ? "100%" : undefined}
+      preserveAspectRatio={fill ? "xMidYMid slice" : undefined}
+      role="img" aria-label={`Your cairn: ${stones} ${stones === 1 ? "stone" : "stones"}`}>
       <ellipse cx="100" cy="30" rx="36" ry="11" fill="var(--cloud)" />
       <ellipse cx="530" cy="22" rx="44" ry="12" fill="var(--cloud)" />
       <ellipse cx="300" cy="185" rx="430" ry="85" fill="var(--hill-back)" />

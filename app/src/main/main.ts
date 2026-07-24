@@ -2,7 +2,7 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
-import { registerProjectIpc } from "./ipc.js";
+import { registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import { registerTaskIpc } from "./tasks.js";
 
 if (started) app.quit();
@@ -42,6 +42,7 @@ export function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   setContractPath(contractPath());
   registerProjectIpc();
+  registerConductorIpc();
   registerTaskIpc(() => mainWindow);
   createWindow();
   app.on("activate", () => {

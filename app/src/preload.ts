@@ -19,6 +19,7 @@ const api: CairnApi = {
     return () => ipcRenderer.removeListener("task:activity", listener);
   },
   conductorStatus: () => ipcRenderer.invoke("conductor:status"),
+  conductorConsentCard: (baseUrl, model) => ipcRenderer.invoke("conductor:consentCard", baseUrl, model),
   conductorConnect: (request) => ipcRenderer.invoke("conductor:connect", request),
   conductorDisconnect: () => ipcRenderer.invoke("conductor:disconnect"),
   conductorSetModel: (model) => ipcRenderer.invoke("conductor:setModel", model),
