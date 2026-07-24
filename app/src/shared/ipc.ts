@@ -58,6 +58,7 @@ export interface CairnApi {
   projectForget(dir: string): Promise<Result<null>>;
   taskRoute(dir: string, outcome: string, adapterId?: string): Promise<Result<TaskRoutePreview>>;
   taskRun(dir: string, outcome: string, sessionId: number, adapterId?: string, realCallConfirmed?: boolean, disclosure?: CodexExecDisclosure): Promise<Result<SerialRunResult>>;
+  taskCancel(dir: string): Promise<Result<null>>;
   updateCheck(): Promise<UpdateInfo>;
   openExternal(url: string): Promise<void>;
   onTaskActivity(cb: (event: TaskActivityEvent) => void): () => void;

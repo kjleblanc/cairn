@@ -136,6 +136,9 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
             ? "Cairn is running one confirmed ephemeral workspace-scoped Codex Exec request. There is no retry, continuation, or parallel run."
             : "The deterministic adapter is exercising the same core serial coordinator used by the CLI."}</p>
           <ActivityFeed activities={activities} />
+          <div className="row" style={{ marginTop: 12 }}>
+            <Pill kind="quiet" onClick={() => void cairn.taskCancel(dir)}>Stop this task</Pill>
+          </div>
         </Card>
       ) : null}
 

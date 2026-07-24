@@ -11,6 +11,7 @@ const api: CairnApi = {
   projectForget: (dir) => ipcRenderer.invoke("project:forget", dir),
   taskRoute: (dir, outcome, adapterId) => ipcRenderer.invoke("task:route", dir, outcome, adapterId),
   taskRun: (dir, outcome, sessionId, adapterId, realCallConfirmed, disclosure) => ipcRenderer.invoke("task:run", dir, outcome, sessionId, adapterId, realCallConfirmed, disclosure),
+  taskCancel: (dir) => ipcRenderer.invoke("task:cancel", dir),
   updateCheck: () => ipcRenderer.invoke("app:updateCheck"),
   openExternal: (url) => ipcRenderer.invoke("app:openExternal", url),
   onTaskActivity: (callback) => {

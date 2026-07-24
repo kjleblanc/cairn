@@ -17,12 +17,27 @@ import type { Result, TaskActivityEvent } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
 
 const running = new Set<string>();
+const controllers = new Map<string, AbortController>();
+const settlements = new Map<string, Promise<unknown>>();
 
 /** True while a serial task is running for `dir`. Lets other main-side
  * gates (the conductor's send gate) share this one running-set instead of
  * tracking their own. */
 export function isTaskRunning(dir: string): boolean {
   return running.has(dir);
+}
+
+/** Quit protection: name live runs, cancel them, and await their fail-closed close. */
+export function activeTaskRuns(): { dirs: string[]; cancelAll(): void; settled(): Promise<void> } {
+  return {
+    dirs: [...running],
+    cancelAll() {
+      for (const controller of controllers.values()) controller.abort();
+    },
+    async settled() {
+      await Promise.allSettled([...settlements.values()]);
+    },
+  };
 }
 
 function sameDisclosure(actual: CodexExecDisclosure | undefined, expected: CodexExecDisclosure): boolean {
@@ -76,28 +91,44 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     if (!mock && (realCallConfirmed !== true || !sameDisclosure(disclosure, codexExecDisclosure(dir, outcome)))) {
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
     }
+    const controller = new AbortController();
     running.add(dir);
-    try {
-      const detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);
-      const value = await runSerialTask(dir, outcome, {
-        adapters: detected.adapters,
-        adapterId,
-        events: {
-          onActivity: (activity) => {
-            const payload: TaskActivityEvent = { dir, sessionId, activity };
-            win()?.webContents.send("task:activity", payload);
+    controllers.set(dir, controller);
+    const run = (async () => {
+      try {
+        const detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);
+        const value = await runSerialTask(dir, outcome, {
+          adapters: detected.adapters,
+          adapterId,
+          signal: controller.signal,
+          events: {
+            onActivity: (activity) => {
+              const payload: TaskActivityEvent = { dir, sessionId, activity };
+              win()?.webContents.send("task:activity", payload);
+            },
           },
-        },
-      });
-      const safeValue = value.status === "connection-required" && detected.status
-        ? { ...value, route: { ...value.route, reason: codexExecConnectionReason(detected.status) } }
-        : value;
-      return { ok: true, value: safeValue };
-    } catch (error) {
-      logError("task:run", error);
-      return { ok: false, message: plainMessage(error) };
-    } finally {
-      running.delete(dir);
-    }
+        });
+        const safeValue = value.status === "connection-required" && detected.status
+          ? { ...value, route: { ...value.route, reason: codexExecConnectionReason(detected.status) } }
+          : value;
+        return { ok: true, value: safeValue };
+      } catch (error) {
+        logError("task:run", error);
+        return { ok: false, message: plainMessage(error) };
+      } finally {
+        running.delete(dir);
+        controllers.delete(dir);
+        settlements.delete(dir);
+      }
+    })();
+    settlements.set(dir, run);
+    return run;
+  });
+
+  ipcMain.handle("task:cancel", (_event, dir: string): Result<null> => {
+    const controller = controllers.get(dir);
+    if (!controller) return { ok: false, message: "No task is running for this project." };
+    controller.abort();
+    return { ok: true, value: null };
   });
 }

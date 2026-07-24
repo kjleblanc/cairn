@@ -17,7 +17,7 @@ function scaffold(proj: string): void {
   execFileSync("git", ["config", "user.email", "cairn-test@example.invalid"], { cwd: proj });
 }
 
-function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-records" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
+function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-records" | "slow" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
   const bin = mkdtempSync(join(tmpdir(), "cairn-fake-codex-"));
   const marker = join(bin, "real-exec-started.txt");
   const dispatcher = join(bin, "fake-codex.cjs");
@@ -31,32 +31,35 @@ if (!args.includes("exec")) process.exit(2);
 process.stdin.resume();
 process.stdin.on("end", () => {
   fs.writeFileSync(process.env.CAIRN_FAKE_CODEX_MARKER, "started\\n");
-  if (${JSON.stringify(behavior)} === "invalid-jsonl") {
-    process.stdout.write("secret-looking malformed provider output\\n");
-    return;
-  }
-  if (${JSON.stringify(behavior)} === "missing-records") {
-    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "sk-secret-event-payload" } }) + "\\n");
-    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "completed", exit_code: 0 } }) + "\\n");
-    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "failed", exit_code: 1 } }) + "\\n");
-    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "file_change", path: "sk-secret-event-payload", status: "completed" } }) + "\\n");
-    process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "file_change", path: "sk-secret-event-payload", status: "failed" } }) + "\\n");
-    process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, cached_input_tokens: 4, output_tokens: 6, reasoning_output_tokens: 2 } }) + "\\n");
-    return;
-  }
-  const root = process.cwd();
-  const tasks = path.join(root, "docs", "ai-work", "tasks");
-  const brief = fs.readdirSync(tasks).find((name) => /^\\d{3}-brief\\.md$/.test(name) && !fs.existsSync(path.join(tasks, name.replace("-brief", "-report"))));
-  if (!brief) process.exit(2);
-  const number = brief.slice(0, 3);
-  const report = path.join(tasks, number + "-report.md");
-  const visible = path.join(root, "visible.txt");
-  fs.writeFileSync(visible, "model-authored result\\n");
-  fs.writeFileSync(report, "# Task " + number + " report\\n\\n## Result\\n\\nAdded the requested visible result and verified it.\\n\\nMilestone movement: **YES**\\n\\nDisposition: **DONE**\\n");
-  const log = path.join(root, "docs", "ai-work", "LOG.md");
-  fs.appendFileSync(log, "| " + number + " | 2026-07-21 | Standard | Applied | DONE | completed | Added and verified the visible result. | YES |\\n");
-  process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "fake" }) + "\\n");
-  process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
+  const finish = () => {
+    if (${JSON.stringify(behavior)} === "invalid-jsonl") {
+      process.stdout.write("secret-looking malformed provider output\\n");
+      return;
+    }
+    if (${JSON.stringify(behavior)} === "missing-records") {
+      process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "sk-secret-event-payload" } }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "completed", exit_code: 0 } }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "failed", exit_code: 1 } }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "file_change", path: "sk-secret-event-payload", status: "completed" } }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "file_change", path: "sk-secret-event-payload", status: "failed" } }) + "\\n");
+      process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, cached_input_tokens: 4, output_tokens: 6, reasoning_output_tokens: 2 } }) + "\\n");
+      return;
+    }
+    const root = process.cwd();
+    const tasks = path.join(root, "docs", "ai-work", "tasks");
+    const brief = fs.readdirSync(tasks).find((name) => /^\\d{3}-brief\\.md$/.test(name) && !fs.existsSync(path.join(tasks, name.replace("-brief", "-report"))));
+    if (!brief) process.exit(2);
+    const number = brief.slice(0, 3);
+    const report = path.join(tasks, number + "-report.md");
+    const visible = path.join(root, "visible.txt");
+    fs.writeFileSync(visible, "model-authored result\\n");
+    fs.writeFileSync(report, "# Task " + number + " report\\n\\n## Result\\n\\nAdded the requested visible result and verified it.\\n\\nMilestone movement: **YES**\\n\\nDisposition: **DONE**\\n");
+    const log = path.join(root, "docs", "ai-work", "LOG.md");
+    fs.appendFileSync(log, "| " + number + " | 2026-07-21 | Standard | Applied | DONE | completed | Added and verified the visible result. | YES |\\n");
+    process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "fake" }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
+  };
+  setTimeout(finish, ${JSON.stringify(behavior)} === "slow" ? 8000 : 0);
 });
 `;
   writeFileSync(dispatcher, dispatcherSource);
@@ -252,5 +255,30 @@ test("retained unmatched records stay visible without blocking a new task", asyn
   await expect(win.getByText("retained task evidence")).toBeVisible();
   await expect(win.getByText(/without blocking a new task/)).toBeVisible();
   await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
+  await app.close();
+});
+
+test("the owner can stop a running worker and gets honest CANCELLED_BY_OWNER records", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-cancel-"));
+  scaffold(proj);
+  const fakeCodex = fakeCodexEnvironment(proj, true, "slow");
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await win.getByRole("button", { name: "Start a task" }).click();
+  await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
+  await win.getByRole("button", { name: "Find a route" }).click();
+  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+  const stop = win.getByRole("button", { name: "Stop this task" });
+  await expect(stop).toBeVisible({ timeout: 15_000 });
+  await stop.click();
+  await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
+  const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
+  expect(report).toContain("CANCELLED_BY_OWNER");
+  expect(report).toContain("already spent");
+  expect(existsSync(join(proj, "visible.txt"))).toBe(false);
   await app.close();
 });

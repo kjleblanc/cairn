@@ -36,3 +36,4 @@
 | 034 | 2026-07-24 | Standard | Applied | DONE | completed | The owner can stop a running worker through the adapter seam, closing honestly as CANCELLED_BY_OWNER with the already-spent cost named | NO |
 | 035 | 2026-07-24 | Standard | Applied | DONE | completed | One task at a time now holds across processes too: a self-healing cairn-run.lock file in the git common dir, never the worktree | NO |
 | 036 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: the stale-lock heal re-verifies before unlinking so it cannot delete a fresh live lock | NO |
+| 037 | 2026-07-24 | Standard | Applied | DONE | completed | The owner can stop a running task from the desktop app, and quitting while one runs asks first | NO |
