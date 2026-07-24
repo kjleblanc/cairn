@@ -19,3 +19,4 @@
 | 017 | 2026-07-23 | Standard | Applied | DONE | completed | Committed the conductor v0 implementation plan: ten test-first tasks (018-027) from parser to contract amendment and 0.1.0 | NO |
 | 018 | 2026-07-23 | Standard | Applied | DONE | completed | Conductor task-block parser with strict validation and the app unit-test harness | NO |
 | 019 | 2026-07-23 | Standard | Applied | DONE | completed | Cairn's constitution as a versioned constant with its honesty pinned by tests | NO |
+| 020 | 2026-07-23 | Standard | Applied | DONE | completed | The conductor's deterministic project briefing: facts, log, recent records, git summary, capped file tree | NO |
