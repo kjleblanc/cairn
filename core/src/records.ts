@@ -13,6 +13,10 @@ export interface ComposedRecordInput {
   evidenceSummary: string | null; // the bounded numeric line, or null
   processFailure: { code: string; debugPath: string | null } | null;
   paidCallStarted: boolean;
+  // Task 052: a Cairn-authored disclosure line for any owned-record recovery
+  // (work-log restore and/or report-path overwrite). Optional so every existing
+  // construction site stays valid; rendered under "Verified by Cairn" when set.
+  recordRecovery?: string | null;
 }
 
 const ROW_CAP = 160;
@@ -84,6 +88,7 @@ function verifiedByCairnLines(input: ComposedRecordInput): string {
       input.commit ? input.commit.reason : "none — stopped evidence is retained for inspection, never committed by Cairn"
     }`,
   ];
+  if (input.recordRecovery) lines.push(`- ${input.recordRecovery}`);
   if (input.evidenceSummary) lines.push(`- ${input.evidenceSummary}`);
   if (input.processFailure) {
     const debugPath = input.processFailure.debugPath ?? "unavailable (the local debug directory could not be created)";

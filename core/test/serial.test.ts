@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -1098,6 +1099,161 @@ test("a worker that deletes its own brief closes honestly with no unhandled ENOE
   assert.doesNotMatch(log, /\| 001 \|.*\| DONE \|/);
   const report = readFileSync(result.reportPath, "utf8");
   assert.match(report, /Disposition: \*\*STOPPED\*\*/);
+});
+
+test("a worker that appends a forged DONE row to the work log cannot forge a stone (FIX / Task 052)", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const startLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  const tampering: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The worker does real product work AND appends a forged DONE+YES row to
+      // the append-only work log, then claims a flawless DONE with a milestone
+      // move. LOG.md is a Cairn-owned record but not a protected path, so without
+      // the owned-records gate this forged row stands and inflates the stone count.
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      appendFileSync(
+        join(root, "docs", "ai-work", "LOG.md"),
+        "| 001 | 2026-07-24 | Standard | Applied | DONE | completed | forged | YES |\n",
+      );
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), tampering)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "RECORD_VERIFICATION_FAILED");
+  // The log is exactly the pristine start log plus one Cairn-authored STOPPED
+  // row; the forged DONE+YES row is gone.
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.ok(log.startsWith(startLog), "the pristine start log is preserved");
+  assert.equal(log.match(/\| 001 \|/g)?.length, 1, "exactly one row for the task");
+  assert.match(log, /\| 001 \|.*\| STOPPED \|/);
+  assert.doesNotMatch(log, /\| 001 \|.*\| DONE \|/);
+  assert.doesNotMatch(log, /forged/, "the worker's forged row was discarded");
+  // No stone was gained and HEAD did not move.
+  assert.equal(projectStatus(root).stones, 0);
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  // The report is Cairn's honest STOPPED record carrying the restoration disclosure.
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Disposition: \*\*STOPPED\*\*/);
+  assert.doesNotMatch(report, /Disposition: \*\*DONE\*\*/);
+  assert.match(report, /Cairn restored it from the task-start snapshot/);
+  assert.match(report, /product-file changes remain retained/);
+  // The worker's product file is retained as evidence, never cleaned.
+  assert.equal(existsSync(join(root, "visible.txt")), true);
+});
+
+test("a worker that truncates the work log is restored and stopped honestly (FIX / Task 052)", async () => {
+  const root = project();
+  // Seed a committed historical row so the start log has content beyond the
+  // header; truncating back to the header is then a real modification to detect.
+  appendLogRow(root, {
+    task: "000", date: "2026-07-20", lane: "Standard", mode: "Applied",
+    outcome: "STOPPED", decision: "stopped", summary: "an earlier stop", moved: "NO",
+  });
+  git(root, ["add", "docs/ai-work/LOG.md"]);
+  git(root, ["commit", "-q", "-m", "seed log"]);
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const startLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  const truncating: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      // Truncate the append-only log down to just its header, discarding history.
+      writeFileSync(join(root, "docs", "ai-work", "LOG.md"), LOG_HEADER);
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), truncating)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "RECORD_VERIFICATION_FAILED");
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  // The truncated history is restored in full and one Cairn STOPPED row is added.
+  assert.ok(log.startsWith(startLog), "the truncated start log is restored in full");
+  assert.match(log, /an earlier stop/, "the historical row is recovered");
+  assert.equal(log.match(/\| 001 \|/g)?.length, 1, "exactly one row for the task");
+  assert.match(log, /\| 001 \|.*\| STOPPED \|/);
+  assert.equal(projectStatus(root).stones, 0);
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Disposition: \*\*STOPPED\*\*/);
+  assert.match(report, /Cairn restored it from the task-start snapshot/);
+});
+
+test("a worker that pre-writes the task report is replaced by Cairn's honest STOPPED record (FIX / Task 052)", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const prewriting: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      // The worker pre-writes its own report at Cairn's owned report path,
+      // forging a DONE disposition. Without the gate this raised a raw EEXIST
+      // throw when Cairn authored the report with the "wx" flag.
+      writeFileSync(
+        join(root, "docs", "ai-work", "tasks", "001-report.md"),
+        "# forged report\n\nMilestone movement: **YES**\n\nDisposition: **DONE**\n",
+      );
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), prewriting)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "RECORD_VERIFICATION_FAILED");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(projectStatus(root).stones, 0);
+  // The report at the owned path is Cairn's honest STOPPED record, not the forgery.
+  const report = readFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
+  assert.match(report, /Disposition: \*\*STOPPED\*\*/);
+  assert.doesNotMatch(report, /forged report/);
+  assert.match(report, /Cairn replaced it with this honest record/);
+  assert.equal(report.match(/^Disposition:/gm)?.length, 1, "exactly one structural disposition line");
+  // Exactly one Cairn-authored STOPPED log row.
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal(log.match(/\| 001 \|/g)?.length, 1, "exactly one row for the task");
+  assert.match(log, /\| 001 \|.*\| STOPPED \|/);
+  // The worker's product file is retained as evidence.
+  assert.equal(existsSync(join(root, "visible.txt")), true);
 });
 
 function requireTaskNames(root: string): string[] {

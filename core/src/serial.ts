@@ -256,6 +256,18 @@ interface ProcessFailureNote {
   debugPath: string | null;
 }
 
+/**
+ * Task 052: the owned-records gate's recovery instruction for the honest stop
+ * close. `disclosure` is the Cairn-authored line naming which recoveries were
+ * applied (rendered under "Verified by Cairn"); `overwriteReport` lets the stop
+ * close replace a worker-pre-written report path with the honest record (plain
+ * write instead of "wx") — the one disclosed case where Cairn overwrites.
+ */
+interface RecordRecovery {
+  disclosure: string | null;
+  overwriteReport: boolean;
+}
+
 function reportText(
   contract: AdapterTaskContract,
   demo: boolean,
@@ -486,6 +498,7 @@ function cairnWorkerRecords(
   protectedValid: boolean,
   commit: { status: "created" | "skipped"; reason: string } | null,
   evidence: Record<string, number> | null,
+  recovery?: RecordRecovery,
 ): { reportText: string; row: LogRow; verified: boolean } {
   const input: ComposedRecordInput = {
     taskNumber: contract.taskNumber,
@@ -499,9 +512,18 @@ function cairnWorkerRecords(
     evidenceSummary: evidence ? boundedEvidenceSummary(evidence) : null,
     processFailure: null,
     paidCallStarted: true,
+    recordRecovery: recovery?.disclosure ?? null,
   };
   const report = composeWorkerReport(input);
-  writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
+  // The report path is Cairn-owned and normally authored with "wx" so Cairn
+  // never overwrites an existing file. Only in the one disclosed case where the
+  // owned-records gate found the worker had pre-written this exact path does it
+  // overwrite (plain "w") with this honest STOPPED report; the worker's product
+  // files stay retained in the workspace for inspection.
+  writeFileSync(paths.report(root, contract.taskNumber), report, {
+    encoding: "utf8",
+    flag: recovery?.overwriteReport ? "w" : "wx",
+  });
   const row: LogRow = {
     task: pad(contract.taskNumber),
     date: new Date().toISOString().slice(0, 10),
@@ -898,9 +920,9 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
 
       // A STOPPED close: Cairn authors honest STOPPED records from whatever
       // claims (if any) survived, keeps the retained evidence, commits nothing.
-      const closeStopped = (reason: SerialStopReason): SerialRunResult => {
+      const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${reason}.` });
-        const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null);
+        const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null, recovery);
         if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored evidence was retained without overwrite.");
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
         return {
@@ -932,25 +954,60 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         };
       };
 
+      // Owned-records integrity gate (Task 052). The task brief, the append-only
+      // work log, and the task report path are all Cairn-owned records that live
+      // OUTSIDE the protected-path snapshot: the brief and report are written
+      // untracked at task start, and the log is one Cairn appends to itself. A
+      // worker can therefore edit any of them and still pass every protected-work
+      // and exact-path check. Before ANY record-writing close — the claims-lane
+      // stop closes below OR the DONE authoring further down — verify all three
+      // are exactly as Cairn left them at task start. On any violation, recover
+      // Cairn's OWN records (restore the log, overwrite the report) and close
+      // honestly as STOPPED, so no forged DONE, log row, or stone can stand.
+      const briefPath = paths.brief(projectRoot, taskNumber);
+      const reportPath = paths.report(projectRoot, taskNumber);
+      const logPath = paths.log(projectRoot);
+      const ownedRecordsGuard = (): SerialRunResult | null => {
+        const briefIntact = existsSync(briefPath) && readFileSync(briefPath, "utf8") === contractMarkdown;
+        const logIntact = existsSync(logPath) && readFileSync(logPath, "utf8") === start.logText;
+        const reportPresent = existsSync(reportPath);
+        if (briefIntact && logIntact && !reportPresent) return null;
+
+        const disclosures: string[] = [];
+        if (!logIntact) {
+          // The log is Cairn's OWN append-only record. Restoring it from the
+          // task-start snapshot is NOT destroying worker evidence — the worker's
+          // product-file changes stay retained in the workspace for inspection;
+          // leaving a worker-forged row standing WOULD be dishonest. The restore
+          // must happen BEFORE the stop close writes its records so the close's
+          // byte-back append starts from the pristine log.
+          writeFileSync(logPath, start.logText, "utf8");
+          disclosures.push(
+            "The worker modified the append-only work log; Cairn restored it from the task-start snapshot and recorded this stop. " +
+              "The worker's modification was discarded from the log; its product-file changes remain retained in the workspace for inspection.",
+          );
+        }
+        if (reportPresent) {
+          disclosures.push("The worker pre-wrote the task report path; Cairn replaced it with this honest record.");
+        }
+        // A tampered or missing brief is retained as evidence (never restored);
+        // like the 051 brief check it only triggers this honest stop.
+        return closeStopped("RECORD_VERIFICATION_FAILED", {
+          disclosure: disclosures.length > 0 ? disclosures.join(" ") : null,
+          overwriteReport: reportPresent,
+        });
+      };
+      const guarded = ownedRecordsGuard();
+      if (guarded) return guarded;
+
       if (stopReason) return closeStopped(stopReason);
 
       // DONE path — the claims say DONE, the process completed, and protected
       // work is byte-identical. Cairn writes the records and owns the commit.
-      // A worker that committed on its own (head moved) is not verifiable.
+      // A worker that committed on its own (head moved) is not verifiable. The
+      // owned-records gate above already proved the brief, log, and report path
+      // are byte-exactly as Cairn left them, so no forged DONE record can stand.
       if (git(projectRoot, ["rev-parse", "HEAD"]) !== start.head) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
-
-      // The task brief is written untracked at task start, so it is NOT in the
-      // protected-path snapshot: a worker that edits or deletes its own brief
-      // passes every protected-work and exact-path check. Verify it is still the
-      // byte-exact text Cairn wrote (contractMarkdown) BEFORE authoring any DONE
-      // record; a tampered or missing brief closes as an honest STOPPED instead,
-      // so no forged DONE report, log row, or stone can be produced. The stop
-      // close writes fresh honest STOPPED records (none exist yet) and does not
-      // re-verify the tampered brief (it is retained evidence, never committed).
-      const startBriefPath = paths.brief(projectRoot, taskNumber);
-      if (!existsSync(startBriefPath) || readFileSync(startBriefPath, "utf8") !== contractMarkdown) {
-        return closeStopped("RECORD_VERIFICATION_FAILED");
-      }
 
       if (start.status.length > 0) {
         // A protected dirty start forbids an isolated commit: the records are
