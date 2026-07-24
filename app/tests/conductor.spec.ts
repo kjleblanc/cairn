@@ -172,7 +172,6 @@ test("the full loop: a proposed task with a risk chip dispatches through TaskRun
   const changed = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: project, encoding: "utf8" })
     .trim().split(/\r?\n/).filter(Boolean).sort();
   expect(changed).toEqual([
-    "?? .gitignore",
     "M docs/ai-work/LOG.md",
     "?? docs/ai-work/tasks/001-brief.md",
     "?? docs/ai-work/tasks/001-report.md",
@@ -201,10 +200,14 @@ test("a conversation persists across a relaunch, and .cairn stays out of git", a
   await expect(win2.getByText("connect cairn's brain")).not.toBeVisible();
   await relaunched.close();
 
-  const gitignore = readFileSync(join(project, ".gitignore"), "utf8");
-  expect(gitignore.split(/\r?\n/)).toContain("/.cairn/");
+  // Regression (Task 028): the exclusion lives in the per-clone
+  // .git/info/exclude, never in a file git tracks — chat must never dirty
+  // the project's own worktree.
+  expect(existsSync(join(project, ".gitignore"))).toBe(false);
+  const exclude = readFileSync(join(project, ".git", "info", "exclude"), "utf8");
+  expect(exclude.split(/\r?\n/)).toContain("/.cairn/");
   const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: project, encoding: "utf8" });
-  expect(status).not.toMatch(/\.cairn/);
+  expect(status).toBe("");
 });
 
 test("a malformed task block renders as plain chat text, never a card", async () => {

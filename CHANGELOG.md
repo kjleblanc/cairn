@@ -4,6 +4,35 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.1.1 — the disclosure tells the whole truth — 2026-07-23
+
+- Fixed an under-disclosure: the conductor's briefing has always sent a git
+  summary (branch, clean/dirty, the last five commit titles) as part of what
+  Cairn reads each turn, but neither the connect card's data-scope text nor
+  the contract's "The connected conductor" section named it. Both now say so
+  plainly, so the standing consent the owner gives actually names everything
+  that flows.
+- Fixed a worktree hazard: connecting and chatting used to write `/.cairn/`
+  into the project's own `.gitignore` on the first send — a tracked-file
+  change that made the project look "dirty" the moment chat started, which
+  can make a later task's exact-path commit skip itself the same way Tasks
+  010/011 recorded. The exclusion now lives in `.git/info/exclude` instead:
+  same one-line, append-once guard, but per-clone and never tracked, so
+  chatting with Cairn never dirties the owner's worktree.
+- Fixed a false failure message: a conversation that grows large enough used
+  to eventually hit the provider's own context-length error, which Cairn
+  reported as "trying again in a moment usually works" — untrue, since
+  retrying resends the same oversized request. Cairn now recognizes an
+  oversized conversation itself, before ever calling the provider, and says
+  so in plain words: start a new conversation, since the project's own
+  records — not the chat history — are what it relies on anyway.
+- Fixed a hang: a hand-edited or corrupted `conductor.json` with an
+  unparseable provider address used to make the status check throw instead
+  of returning, which could leave the home screen stuck instead of showing
+  the connect card. A connection file that does not parse now reads the same
+  as "not connected," same as every other malformed-file case already did.
+- Added no dependency.
+
 ## 0.1.0 — the connected conductor — 2026-07-23
 
 - Added the conductor: an optional connected conversation model that reads

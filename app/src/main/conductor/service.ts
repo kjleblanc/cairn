@@ -9,16 +9,18 @@ import type {
 } from "../../shared/ipc.js";
 import { isTaskRunning } from "../tasks.js";
 import { logError } from "../log.js";
-import { ConductorHttpError, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
+import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
 import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
 import type { StoredConnection } from "./keystore.js";
-import { appendTurn, ensureCairnIgnored, listConversations, newConversationId, readTurns } from "./store.js";
+import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, readTurns } from "./store.js";
 import { extractTaskBlock } from "./taskblock.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const ENCRYPTION_UNAVAILABLE = "This computer cannot store the key securely, so Cairn did not save it.";
+const PROMPT_TOO_LARGE_MESSAGE =
+  "This conversation has grown past what Cairn can safely send. Start a new conversation — the project records keep what matters.";
 
 /** One AbortController per project dir, so a stray second send can't stomp
  * on a stream already in flight and `stop` has something to abort. */
@@ -33,7 +35,7 @@ export function conductorConsentCard(baseUrl: string, model: string): ConductorC
     provider: new URL(baseUrl).host,
     baseUrl,
     model,
-    data: "Your messages, this project's task records (PROJECT, the work log, recent briefs and reports), and project file names. Never file contents. Never credentials. Cairn keeps conversation memory in a .cairn folder inside your project, kept out of git.",
+    data: "Your messages, this project's task records (PROJECT, the work log, recent briefs and reports), a summary of recent saved changes (the branch name and latest commit titles), and project file names. Never file contents. Never credentials. Cairn keeps conversation memory in a .cairn folder inside your project, kept out of git.",
     cost: "Pay-as-you-go on your provider account. Conversation runs without per-message approval while connected. Disconnect at any time to delete the stored key.",
   };
 }
@@ -113,7 +115,7 @@ export function send(
   }
 
   const id = conversationId ?? newConversationId(dir);
-  ensureCairnIgnored(dir);
+  ensureCairnExcluded(dir);
   appendTurn(dir, id, { role: "owner", text, ts: new Date().toISOString() });
 
   const controller = new AbortController();
@@ -140,6 +142,14 @@ async function runStream(
       { role: "system", content: assembleBriefing(dir) },
       ...history.map((turn): ChatTurnMessage => ({ role: turn.role === "owner" ? "user" : "assistant", content: turn.text })),
     ];
+    // The owner's turn is already persisted by `send()` above, so the record
+    // stays truthful either way; checked here, before any network call, so
+    // an oversized conversation fails instantly and for its real reason
+    // instead of surfacing later as an opaque provider error.
+    if (promptTooLarge(messages)) {
+      onDelta({ dir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE });
+      return;
+    }
     const slot: SlotWithKey = { baseUrl: conn.baseUrl, model: conn.model, apiKey: keystore.decryptedKey(conn) };
 
     for await (const event of streamChat(slot, messages, fetch, controller.signal)) {

@@ -19,13 +19,28 @@ export function encryptionAvailable(): boolean {
   return safeStorage.isEncryptionAvailable();
 }
 
+function isParsableUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The saved connection, or null if never connected (or the file is unreadable
- * or malformed — a corrupt file reads the same as "not connected"). */
+ * or malformed — a corrupt file reads the same as "not connected"). A
+ * `baseUrl` that does not even parse as a URL counts as malformed too, so a
+ * hand-edited or corrupted `conductor.json` never reaches `status()` (which
+ * calls `new URL(conn.baseUrl)` unguarded) and turns an IPC call that must
+ * never reject into one that does, hanging the home screen instead of
+ * showing the connect card. */
 export function readConnection(): StoredConnection | null {
   try {
     if (!existsSync(filePath())) return null;
     const data = JSON.parse(readFileSync(filePath(), "utf8")) as Partial<StoredConnection>;
     if (typeof data.baseUrl !== "string" || typeof data.model !== "string" || typeof data.keyB64 !== "string") return null;
+    if (!isParsableUrl(data.baseUrl)) return null;
     return { baseUrl: data.baseUrl, model: data.model, keyB64: data.keyB64 };
   } catch {
     return null;

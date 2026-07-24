@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRequestBody, ownerMessageFor, streamChat, ConductorHttpError } from "../src/main/conductor/client.js";
+import { buildRequestBody, ownerMessageFor, promptTooLarge, streamChat, ConductorHttpError, PROMPT_CHAR_LIMIT } from "../src/main/conductor/client.js";
 
 const SLOT = { baseUrl: "https://openrouter.ai/api/v1", model: "moonshotai/kimi-k2", apiKey: "test-key" };
 
@@ -55,6 +55,22 @@ test("an http error surfaces a plain-words owner message and no key", async () =
       return true;
     },
   );
+});
+
+test("promptTooLarge is false exactly at the limit and true just over it", () => {
+  const atLimit = [{ role: "user" as const, content: "a".repeat(PROMPT_CHAR_LIMIT) }];
+  assert.equal(promptTooLarge(atLimit), false);
+
+  const justOver = [{ role: "user" as const, content: "a".repeat(PROMPT_CHAR_LIMIT + 1) }];
+  assert.equal(promptTooLarge(justOver), true);
+
+  const summedOver = [
+    { role: "system" as const, content: "a".repeat(PROMPT_CHAR_LIMIT) },
+    { role: "user" as const, content: "b" },
+  ];
+  assert.equal(promptTooLarge(summedOver), true);
+
+  assert.equal(promptTooLarge([]), false);
 });
 
 test("owner messages exist for the failure statuses", () => {

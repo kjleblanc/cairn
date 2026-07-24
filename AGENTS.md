@@ -1,6 +1,6 @@
 # Project Contract
 
-> **What this is.** Cairn Contract v0.1.0 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.1.1 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
@@ -139,8 +139,9 @@ non-secret results and redacted errors.
 The owner may connect one conversation model — the conductor — with a single
 standing authorization, given on a connect screen that names the provider, the
 model, the data that may flow during conversation (the owner's messages, the
-project's task records, and project file names; never file contents without a
-separate authorization, and never credentials), and the cost basis. While
+project's task records, a summary of recent saved changes, and project file
+names; never file contents without a separate authorization, and never
+credentials), and the cost basis. While
 connected, a visible indicator names the conductor's provider and model, and
 conversation proceeds without per-message approval. The owner may revoke the
 connection at any time, which deletes the stored credential. Every other

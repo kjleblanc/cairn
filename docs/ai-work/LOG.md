@@ -27,3 +27,4 @@
 | 025 | 2026-07-23 | Standard | Applied | DONE | completed | The proposed-task card: concerns answered or set aside before dispatch, outcome prefills the existing task flow | NO |
 | 026 | 2026-07-23 | Standard | Applied | DONE | completed | A fake body proves the whole conductor loop offline: connect, converse, card, dispatch, persistence, honest failures | NO |
 | 027 | 2026-07-23 | Standard | Applied | DONE | completed | The connected conductor: contract amendment, version 0.1.0, chat becomes home | NO |
+| 028 | 2026-07-23 | Standard | Applied | DONE | completed | The disclosure names the git summary, .cairn moves to .git/info/exclude so chat never dirties the tree, oversized chats fail plainly (0.1.1) | NO |

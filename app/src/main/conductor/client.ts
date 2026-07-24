@@ -17,6 +17,21 @@ export interface StreamEvent {
   costUsd?: number;
 }
 
+/** No context budget exists yet (the briefing's own caps aside): without
+ * this, a conversation that has grown large enough eventually hits the
+ * provider's own context-length error, which `ownerMessageFor` maps to "try
+ * again in a moment" — false for this case, since retrying sends the exact
+ * same oversized request. 200000 total content characters is a coarse,
+ * provider-agnostic stand-in for a token budget, checked before any network
+ * call so the failure is instant and the reason is the true one. */
+export const PROMPT_CHAR_LIMIT = 200_000;
+
+export function promptTooLarge(messages: ChatTurnMessage[]): boolean {
+  let total = 0;
+  for (const message of messages) total += message.content.length;
+  return total > PROMPT_CHAR_LIMIT;
+}
+
 export function ownerMessageFor(status: number): string {
   if (status === 401 || status === 403) return "The provider did not accept the key. Reconnect with a fresh key.";
   if (status === 402) return "The provider account is out of credit. Top it up, then try again.";
