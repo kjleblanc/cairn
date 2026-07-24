@@ -108,6 +108,18 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-composer { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
 .chat-composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; }
 .chat-composer textarea:disabled { opacity: .6; }
+.task-card { align-self: stretch; margin: 0; }
+.task-card-outcome { font-weight: 600; }
+.task-card-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.task-chip { background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 14px; }
+.task-chip-risk { border-color: var(--amber-soft); }
+.task-chip-resolved { opacity: .65; }
+.task-chip-text { display: flex; gap: 8px; align-items: baseline; margin: 0; }
+.task-chip-kind { flex-shrink: 0; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.task-chip-strike { text-decoration: line-through; color: var(--muted); }
+.task-chip-status { margin: 4px 0 0; }
+.task-chip-answer { margin-top: 8px; flex-wrap: nowrap; }
+.task-chip-answer input { flex: 1; }
 .body-pill-wrap { position: relative; }
 .body-pill-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; width: 260px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: 0 6px 24px rgba(0, 0, 0, .14); padding: 14px; }
 

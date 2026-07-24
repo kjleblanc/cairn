@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import type { ConductorDelta, ConductorStatus, ConductorTurn } from "../../shared/ipc";
+import type { ConductorDelta, ConductorStatus, ConductorTurn, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
 import { Md } from "../components/Md";
 import { Scene } from "../components/Scene";
+import { TaskCard } from "../components/TaskCard";
 import { Pill } from "../components/Ui";
 
 /** Tracks one in-flight `send()`. `id` starts out as whatever conversation
@@ -18,10 +19,11 @@ type InFlight = { id: string | null };
 /** Layout A: the hillside is the room. The scene fills the window; the
  * conversation floats over it on solid (never translucent) cards.
  *
- * `onOpenTask` is part of this screen's contract for the proposed-task card
- * that a later task wires in (nothing in this screen calls it yet — no
- * `cairn-task` block is parsed or rendered here). */
-export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
+ * `onOpenTask` is the handoff for the proposed-task card: once every concern
+ * chip is answered or set aside, "Send to dispatch" calls it with the
+ * outcome sentence and the App switches to TaskRun with that outcome
+ * prefilled. */
+export function Chat({ dir, onOpenTask, onBack }: {
   dir: string;
   onOpenTask: (prefill: string) => void;
   onBack: () => void;
@@ -35,6 +37,12 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
   const [composer, setComposer] = useState("");
   const [lastOwnerText, setLastOwnerText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The current proposed-task card, if the most recent reply with a task
+  // block hasn't yet been replaced by a newer one. `taskBlockKey` changes
+  // every time it's replaced, so `TaskCard` remounts with fresh chip state
+  // instead of carrying over answers from the previous proposal.
+  const [taskBlock, setTaskBlock] = useState<TaskBlock | null>(null);
+  const [taskBlockKey, setTaskBlockKey] = useState(0);
   const streamingRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
   // Mirrors `conversationId` for synchronous reads inside the delta handler
@@ -96,6 +104,13 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
       setStreaming(false);
       inFlightRef.current = null;
       if (event.turn) setTurns((t) => [...t, event.turn as ConductorTurn]);
+      // Only a reply that carries a new task block replaces the card — a
+      // plain reply (e.g. answering a question in ordinary prose) leaves
+      // whatever card is already showing right where it is.
+      if (event.taskBlock) {
+        setTaskBlock(event.taskBlock);
+        setTaskBlockKey((k) => k + 1);
+      }
       return;
     }
     // A provider error or a manual stop, both delivered as {kind:"error"}. Any
@@ -159,6 +174,15 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
     setStreamingText("");
     setStreaming(false);
     setError(null);
+    setTaskBlock(null);
+  }
+
+  function onCardAnswer(_concern: TaskBlockConcern, answer: string) {
+    void send(`About your question — ${answer}`);
+  }
+
+  function onCardSetAside(_concern: TaskBlockConcern) {
+    void send("I understand the risk you raised — set it aside and keep the task as proposed.");
   }
 
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
@@ -187,6 +211,10 @@ export function Chat({ dir, onOpenTask: _onOpenTask, onBack }: {
                   {turn.role === "owner" ? turn.text : <Md text={turn.text} />}
                 </div>
               ))}
+              {taskBlock ? (
+                <TaskCard key={taskBlockKey} block={taskBlock}
+                  onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onOpenTask} />
+              ) : null}
               {streaming ? (
                 <div className="bubble bubble-cairn">
                   <Md text={streamingText || "…"} />

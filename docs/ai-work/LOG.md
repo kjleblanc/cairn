@@ -24,3 +24,4 @@
 | 022 | 2026-07-23 | Standard | Applied | DONE | completed | Project-local conversation memory under .cairn/ with a one-line gitignore guard | NO |
 | 023 | 2026-07-23 | Standard | Applied | DONE | completed | Conductor keystore, standing-consent gate, and IPC surface; the key lives only in the main process | NO |
 | 024 | 2026-07-23 | Standard | Applied | DONE | completed | The chat screen: the hillside fills the window and conversation floats in it, dark behind CAIRN_CONDUCTOR=1 | NO |
+| 025 | 2026-07-23 | Standard | Applied | DONE | completed | The proposed-task card: concerns answered or set aside before dispatch, outcome prefills the existing task flow | NO |

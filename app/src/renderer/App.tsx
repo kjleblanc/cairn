@@ -15,7 +15,7 @@ type View =
   | { name: "welcome"; preflight: Preflight; hasRecent: boolean }
   | { name: "picker"; startNew: boolean; note?: string }
   | { name: "dashboard"; dir: string; status: ProjectStatus }
-  | { name: "task"; dir: string }
+  | { name: "task"; dir: string; initialOutcome?: string }
   | { name: "chat"; dir: string }
   | { name: "settings"; dir: string | null };
 
@@ -73,9 +73,9 @@ export function App() {
         onSwitch={() => setView({ name: "picker", startNew: false })}
         onOpenProject={(dir) => void openProject(dir)}
         onSettings={() => setView({ name: "settings", dir: view.dir })} />;
-      case "task": return <TaskRun dir={view.dir} demoAvailable={mock} onBack={() => void openProject(view.dir)} />;
+      case "task": return <TaskRun dir={view.dir} demoAvailable={mock} initialOutcome={view.initialOutcome} onBack={() => void openProject(view.dir)} />;
       case "chat": return <Chat dir={view.dir}
-        onOpenTask={() => setView({ name: "task", dir: view.dir })}
+        onOpenTask={(prefill) => setView({ name: "task", dir: view.dir, initialOutcome: prefill })}
         onBack={() => void openProject(view.dir)} />;
       case "settings": return <Settings onBack={() => view.dir ? void openProject(view.dir) : setView({ name: "picker", startNew: false })} />;
     }

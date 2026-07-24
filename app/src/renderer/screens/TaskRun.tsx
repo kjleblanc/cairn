@@ -7,9 +7,13 @@ import { Card, ErrorCard, Pill } from "../components/Ui";
 
 type Phase = "entry" | "route" | "running" | "result";
 
-export function TaskRun({ dir, demoAvailable, onBack }: { dir: string; demoAvailable: boolean; onBack: () => void }) {
+export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
+  dir: string; demoAvailable: boolean; onBack: () => void; initialOutcome?: string;
+}) {
   const [phase, setPhase] = useState<Phase>("entry");
-  const [outcome, setOutcome] = useState("");
+  // Seeded once from the conductor's proposed-task card, if this run was
+  // opened from one; otherwise the field starts empty as before.
+  const [outcome, setOutcome] = useState(initialOutcome ?? "");
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [disclosure, setDisclosure] = useState<CodexExecDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
