@@ -13,7 +13,7 @@ Conductor can extract and validate task-block commands from model replies (fence
 
 ## Checks run
 1. RED: `npm run test:unit` fails with "Cannot find module" (implementation not yet written)
-2. GREEN: `npm run test:unit` passes all 16 tests (valid blocks, concerns, rejections, fence handling)
+2. GREEN: `npm run test:unit` passes all 14 tests (valid blocks, concerns, rejections, fence handling)
 3. Typecheck: `npm run typecheck` passes clean
 4. No stray files after commit
 
