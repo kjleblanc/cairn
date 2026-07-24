@@ -42,3 +42,4 @@
 | 040 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: a reattached run screen names the real worker lane instead of the offline demo copy | NO |
 | 041 | 2026-07-24 | Standard | Applied | DONE | completed | The cairn-claims fence parser reads a worker's account fail-closed: one fence, seven typed keys, size-capped, nothing else survives | NO |
 | 042 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: the claims fence scan is linear, so a crafted worker message cannot stall the app | NO |
+| 043 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: exotic line separators are rejected fail-closed, closing a two-fence blind spot; corrects the 042 report's equivalence claim | NO |

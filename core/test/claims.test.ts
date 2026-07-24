@@ -44,15 +44,55 @@ test("adversarial: repeated unclosed openers stay linear, not quadratic", () => 
   // [\s\S]*? re-scan all the way to end-of-string before giving up, and there
   // is one such opener per line. Empirically, 262,144 chars of repeated
   // "```cairn-claims\n" took ~880ms single-threaded against that regex. A
-  // linear line-walk should finish in roughly 1-5ms; 2000ms is a loose bound
-  // chosen to avoid CI flake while still catching a quadratic regression.
+  // linear line-walk should finish in roughly 1-5ms; 250ms is a tight-but-safe
+  // bound: the old quadratic code measured ~1000ms on this exact input, which
+  // a 2000ms bound failed to catch as a regression.
   const input = "```cairn-claims\n".repeat(262_144 / 16).slice(0, 262_144);
   assert.equal(input.length, 262_144);
   const start = Date.now();
   const result = parseWorkerClaims(input);
   const elapsed = Date.now() - start;
   assert.equal(result, null, "an unclosed trailing fence is not a fence");
-  assert.ok(elapsed < 2000, `expected a linear scan under 2000ms, took ${elapsed}ms`);
+  assert.ok(elapsed < 250, `expected a linear scan under 250ms, took ${elapsed}ms`);
+});
+
+test("fail-closed on exotic line separators that could hide a second fence", () => {
+  // JS multiline `^`/`$` anchors (the `m` flag the OLD fence regex used)
+  // treat not just \n, but also a bare \r (CR not followed by LF), U+2028
+  // (LINE SEPARATOR), and U+2029 (PARAGRAPH SEPARATOR) as line boundaries.
+  // The line walk here only recognizes \r?\n, so on adversarial input
+  // containing these characters the two parsers can disagree about how
+  // many fences a message contains. Rather than reproduce the old
+  // regex's exact boundary-shifting behavior for every possible
+  // placement, the fix rejects any message containing one of these
+  // characters outright. (Escape sequences \u2028/\u2029 are used below,
+  // not literal characters, so this source file itself stays plain ASCII.)
+
+  // The reviewer's literal reproducer for each separator: two complete,
+  // independently-recognizable fences glued together by one exotic
+  // separator. Both the old regex and the un-fixed walk already agree
+  // this is two fences (not one) and return null; kept here as a named
+  // regression guard for each of the three characters the fix covers.
+  const twoFencesGluedByBareCr = fence(JSON.stringify(VALID)) + "\r" + fence(JSON.stringify(VALID));
+  assert.equal(parseWorkerClaims(twoFencesGluedByBareCr), null, "two fences glued by a bare CR");
+  const twoFencesGluedByLs = fence(JSON.stringify(VALID)) + "\u2028" + fence(JSON.stringify(VALID));
+  assert.equal(parseWorkerClaims(twoFencesGluedByLs), null, "two fences glued by U+2028");
+  const twoFencesGluedByPs = fence(JSON.stringify(VALID)) + "\u2029" + fence(JSON.stringify(VALID));
+  assert.equal(parseWorkerClaims(twoFencesGluedByPs), null, "two fences glued by U+2029");
+
+  // The genuinely discriminating case: one single, otherwise-perfectly-
+  // valid fence, with a bare CR sitting in unrelated prose outside it.
+  // The line walk sees one clean fence and happily parses it (fail-open
+  // — this is the actual pre-fix behavior, confirmed empirically). No
+  // real worker transport emits a bare CR, so the fix rejects the whole
+  // message rather than trying to reason about what else it might hide.
+  assert.equal(parseWorkerClaims("before\rafter" + fence(JSON.stringify(VALID))), null, "lone bare CR rejects the whole message");
+
+  // CRLF acceptance is untouched: a normal fence using \r\n line endings
+  // still parses (covered already by the existing byte-identical tests,
+  // reaffirmed here alongside the new rejections).
+  const crlfFence = fence(JSON.stringify(VALID)).replace(/\n/g, "\r\n");
+  assert.deepEqual(parseWorkerClaims(crlfFence), VALID, "CRLF still parses");
 });
 
 test("total size cap boundary: exactly TOTAL_CAP parses, one char over is null", () => {

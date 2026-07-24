@@ -70,6 +70,11 @@ function extractClaimsFences(message: string): string[] {
  */
 export function parseWorkerClaims(finalMessage: string | null): WorkerClaims | null {
   if (!finalMessage || finalMessage.length > TOTAL_CAP) return null;
+  // The line walk recognizes only \n and \r\n. A bare \r, U+2028, or U+2029
+  // was a line boundary to the old multiline-regex parser and could hide a
+  // second fence from this walk (fail-open). No real worker transport emits
+  // them; reject the whole message instead of guessing.
+  if (/\r(?!\n)|\u2028|\u2029/.test(finalMessage)) return null;
   const fences = extractClaimsFences(finalMessage);
   if (fences.length !== 1) return null;
   let parsed: unknown;
