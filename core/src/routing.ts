@@ -54,6 +54,7 @@ export interface CodexExecResult {
   commandExecutionCount: number;
   fileChangeCount: number;
   failedToolItemCount: number;
+  claimsText: string | null;
   statement: "One Codex Exec process returned bounded completion evidence.";
 }
 

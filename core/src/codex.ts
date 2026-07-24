@@ -38,6 +38,7 @@ export interface CodexExecProcessResult {
   commandExecutionCount: number;
   fileChangeCount: number;
   failedToolItemCount: number;
+  finalMessage: string | null;
 }
 
 export interface CodexExecProcess {
@@ -360,8 +361,12 @@ function terminalEvidence(line: string): Partial<CodexExecProcessResult> | null 
     const fileChange = item.type === "file_change";
     const failed = (command || fileChange) &&
       (item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0));
+    const agent = item.type === "agent_message";
     return {
-      agentMessageCount: item.type === "agent_message" ? 1 : 0,
+      finalMessage: agent
+        ? (typeof item.text === "string" && item.text.length <= 262_144 ? item.text : null)
+        : undefined,
+      agentMessageCount: agent ? 1 : 0,
       commandExecutionCount: command ? 1 : 0,
       fileChangeCount: fileChange ? 1 : 0,
       failedToolItemCount: failed ? 1 : 0,
@@ -481,6 +486,7 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
           commandExecutionCount: 0,
           fileChangeCount: 0,
           failedToolItemCount: 0,
+          finalMessage: null,
         };
         const applyEvidence = (evidence: Partial<CodexExecProcessResult> | null): void => {
           if (!evidence) return;
@@ -490,6 +496,7 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
             commandExecutionCount = 0,
             fileChangeCount = 0,
             failedToolItemCount = 0,
+            finalMessage,
             ...terminal
           } = evidence;
           result = {
@@ -499,6 +506,7 @@ export function createSystemCodexExecProcess(options?: CodexExecProcessOptions):
             commandExecutionCount: result.commandExecutionCount + commandExecutionCount,
             fileChangeCount: result.fileChangeCount + fileChangeCount,
             failedToolItemCount: result.failedToolItemCount + failedToolItemCount,
+            finalMessage: finalMessage !== undefined ? finalMessage : result.finalMessage,
           };
         };
         const fail = (code: CodexExecProcessFailureCode): void => {
@@ -699,6 +707,7 @@ export function createCodexExecAdapter(
         commandExecutionCount: result.commandExecutionCount,
         fileChangeCount: result.fileChangeCount,
         failedToolItemCount: result.failedToolItemCount,
+        claimsText: result.finalMessage,
         statement: "One Codex Exec process returned bounded completion evidence.",
       };
     },

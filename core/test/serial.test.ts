@@ -208,6 +208,7 @@ test("one authorized fake Codex process completes one verified serial task", asy
         commandExecutionCount: 2,
         fileChangeCount: 1,
         failedToolItemCount: 0,
+        finalMessage: null,
       };
     },
   };
@@ -271,6 +272,7 @@ test("a confirmed exact-path commit stays DONE despite a phantom stat-dirty file
         exitCode: 0, terminalEvent: "turn.completed",
         inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
         agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: null,
       };
     },
   };
@@ -332,6 +334,7 @@ test("a phantom stat-dirty start still creates the exact-path task commit", asyn
         exitCode: 0, terminalEvent: "turn.completed",
         inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
         agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: null,
       };
     },
   };
@@ -376,7 +379,7 @@ test("an already-satisfied fake Codex task closes honestly without a product edi
         task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
         outcome: "DONE", decision: "completed", summary: "Verified the already-satisfied behavior without inventing a change.", moved: "NO",
       });
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 0, failedToolItemCount: 0 };
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 0, failedToolItemCount: 0, finalMessage: null };
     },
   };
   const outcome = "Keep the existing verified behavior";
@@ -405,7 +408,7 @@ test("a completed Codex process with no model records stops with a precise reaso
     kind: "fake",
     async run() {
       calls += 1;
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 0, fileChangeCount: 0, failedToolItemCount: 0 };
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 0, fileChangeCount: 0, failedToolItemCount: 0, finalMessage: null };
     },
   };
   const outcome = "Verify one existing behavior";
@@ -422,7 +425,7 @@ test("a completed Codex process with no model records stops with a precise reaso
   const report = readFileSync(result.reportPath, "utf8");
   assert.match(report, /MODEL_RECORDS_MISSING/);
   assert.match(report, /Bounded Codex events: 1 agent messages; 0 command executions; 0 file changes; 0 failed command\/file-change items/);
-  assert.match(report, /did not retain item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials/);
+  assert.match(report, /retained only the worker's final message \(for claims verification\) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials/);
   assert.match(result.activities.map((activity) => activity.detail).join("\n"), /Bounded Codex events: 1 agent messages; 0 command executions; 0 file changes; 0 failed command\/file-change items/);
   assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — MODEL_RECORDS_MISSING/);
 });
@@ -433,7 +436,7 @@ test("a negative bounded Codex event count fails the exact adapter schema", asyn
   const fake: CodexExecProcess = {
     kind: "fake",
     async run() {
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 0, fileChangeCount: -1, failedToolItemCount: 0 };
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 0, fileChangeCount: -1, failedToolItemCount: 0, finalMessage: null };
     },
   };
   const result = await runSerialTask(root, outcome, {
@@ -465,7 +468,7 @@ test("a dirty-start Codex result preserves owner work and remains uncommitted", 
         task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
         outcome: "DONE", decision: "completed", summary: "Added a visible result.", moved: "YES",
       });
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0 };
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0, finalMessage: null };
     },
   };
   const result = await runSerialTask(root, "Add one visible result", {
@@ -497,7 +500,7 @@ test("an unrelated task-record path prevents Cairn from committing model work", 
         task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
         outcome: "DONE", decision: "completed", summary: "Added a visible result.", moved: "YES",
       });
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0 };
+      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0, finalMessage: null };
     },
   };
   const result = await runSerialTask(root, "Add one visible result", {

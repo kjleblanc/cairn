@@ -315,7 +315,7 @@ Disposition: **STOPPED**
   const title = codex ? "Codex Exec adapter report" : "offline serial demonstration report";
   const subject = codex ? "Codex Exec route" : "serial demonstration";
   const boundedEvidence = codex && processEvidence
-    ? `\n## Bounded process evidence\n\n${boundedEventSummary(processEvidence)} Cairn did not retain item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
+    ? `\n## Bounded process evidence\n\n${boundedEventSummary(processEvidence)} Cairn retained only the worker's final message (for claims verification) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
     : "";
   const paidStarted = codex && (reason === "ADAPTER_TIMED_OUT" || reason === "CANCELLED_BY_OWNER");
   return `# Task ${pad(taskNumber)} — ${title}
@@ -400,7 +400,7 @@ function validateCodexResult(value: unknown, contract: AdapterTaskContract): val
     if (prototype !== Object.prototype && prototype !== null) return false;
     const keys = Reflect.ownKeys(value);
     const expected = [
-      "agentMessageCount", "cachedInputTokens", "commandExecutionCount", "exitCode",
+      "agentMessageCount", "cachedInputTokens", "claimsText", "commandExecutionCount", "exitCode",
       "failedToolItemCount", "fileChangeCount", "inputTokens", "kind", "outputTokens",
       "processCount", "reasoningOutputTokens", "requestedOutcomeSha256", "statement",
       "taskNumber", "terminalEvent",
@@ -422,6 +422,7 @@ function validateCodexResult(value: unknown, contract: AdapterTaskContract): val
       terminalEvents.has(descriptors.terminalEvent.value) &&
       counts.every((key) => Number.isFinite(descriptors[key].value) && descriptors[key].value >= 0) &&
       eventCounts.every((key) => Number.isInteger(descriptors[key].value) && descriptors[key].value >= 0) &&
+      (descriptors.claimsText.value === null || typeof descriptors.claimsText.value === "string") &&
       descriptors.statement.value === "One Codex Exec process returned bounded completion evidence.";
   } catch {
     return false;

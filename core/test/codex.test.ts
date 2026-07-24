@@ -150,13 +150,48 @@ test("the system process reduces JSONL items to numeric evidence without retaini
       commandExecutionCount: 2,
       fileChangeCount: 2,
       failedToolItemCount: 2,
+      finalMessage: SECRET_SENTINEL,
     });
-    assert.doesNotMatch(JSON.stringify(result), new RegExp(SECRET_SENTINEL));
+    assert.equal(result.finalMessage, SECRET_SENTINEL, "the last agent message text is retained for claims parsing");
+    const { finalMessage: _retained, ...bounded } = result;
+    assert.doesNotMatch(JSON.stringify(bounded), new RegExp(SECRET_SENTINEL));
   } finally {
     process.env[pathKey] = previous;
     if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = previousLocalAppData;
   }
+});
+
+test("only the last agent message is retained, and an oversized final message becomes null", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-final-msg-ws-"));
+  const lastWins = [
+    { type: "item.completed", item: { id: "a", type: "agent_message", text: "first" } },
+    { type: "item.completed", item: { id: "b", type: "agent_message", text: "second and final" } },
+    { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } },
+  ].map((value) => JSON.stringify(value)).join("\n") + "\n";
+  const { bin, localAppData } = fakeInstall(lastWins, "");
+  await withFakeEnvironment(bin, localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"], cwd: workspace, stdin: "bounded fake request",
+    });
+    assert.equal(result.finalMessage, "second and final");
+  });
+
+  const workspace2 = mkdtempSync(join(tmpdir(), "cairn-codex-oversize-msg-ws-"));
+  const oversized = [
+    { type: "item.completed", item: { id: "a", type: "agent_message", text: "small early message" } },
+    { type: "item.completed", item: { id: "b", type: "agent_message", text: "x".repeat(262_145) } },
+    { type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, reasoning_output_tokens: 0 } },
+  ].map((value) => JSON.stringify(value)).join("\n") + "\n";
+  const big = fakeInstall(oversized, "");
+  await withFakeEnvironment(big.bin, big.localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"], cwd: workspace2, stdin: "bounded fake request",
+    });
+    assert.equal(result.finalMessage, null, "an oversized final message overwrites to null — the earlier message must not masquerade as final");
+  });
 });
 
 test(
@@ -375,6 +410,7 @@ test("one authorized fake verifies the real-call request without a model", async
         commandExecutionCount: 3,
         fileChangeCount: 4,
         failedToolItemCount: 1,
+        finalMessage: null,
       };
     },
   };
@@ -453,6 +489,7 @@ test("one authorized fake verifies the real-call request without a model", async
     commandExecutionCount: 3,
     fileChangeCount: 4,
     failedToolItemCount: 1,
+    claimsText: null,
     statement: "One Codex Exec process returned bounded completion evidence.",
   });
 });
