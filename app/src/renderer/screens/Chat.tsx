@@ -129,9 +129,14 @@ export function Chat({ dir, onOpenTask, onBack }: {
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
 
-  async function send(text: string) {
+  // Returns whether this call actually dispatched — appended the owner turn
+  // and invoked `conductorSend` — as opposed to being refused outright
+  // (empty text, or already streaming). The proposed-task card uses this to
+  // decide whether a chip may mark itself resolved: a chip must never look
+  // resolved for a message that never left the composer.
+  async function send(text: string): Promise<boolean> {
     const trimmed = text.trim();
-    if (!trimmed || streaming) return;
+    if (!trimmed || streaming) return false;
     setError(null);
     setComposer("");
     setLastOwnerText(trimmed);
@@ -145,13 +150,14 @@ export function Chat({ dir, onOpenTask, onBack }: {
     inFlightRef.current = inFlight;
 
     const response = await cairn.conductorSend({ dir, conversationId: startingId, text: trimmed });
-    if (inFlightRef.current !== inFlight) return; // superseded by "New conversation" or another send meanwhile
-    if (!response.ok) { inFlightRef.current = null; setStreaming(false); setError(response.message); return; }
+    if (inFlightRef.current !== inFlight) return true; // superseded by "New conversation" or another send meanwhile — this call still dispatched
+    if (!response.ok) { inFlightRef.current = null; setStreaming(false); setError(response.message); return true; }
     if (inFlight.id === null) {
       // The response resolved before any delta raced ahead of it — adopt now.
       inFlight.id = response.value.conversationId;
       setConvId(response.value.conversationId);
     }
+    return true;
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -177,12 +183,12 @@ export function Chat({ dir, onOpenTask, onBack }: {
     setTaskBlock(null);
   }
 
-  function onCardAnswer(_concern: TaskBlockConcern, answer: string) {
-    void send(`About your question — ${answer}`);
+  function onCardAnswer(_concern: TaskBlockConcern, answer: string): Promise<boolean> {
+    return send(`About your question — ${answer}`);
   }
 
-  function onCardSetAside(_concern: TaskBlockConcern) {
-    void send("I understand the risk you raised — set it aside and keep the task as proposed.");
+  function onCardSetAside(_concern: TaskBlockConcern): Promise<boolean> {
+    return send("I understand the risk you raised — set it aside and keep the task as proposed.");
   }
 
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
@@ -212,7 +218,7 @@ export function Chat({ dir, onOpenTask, onBack }: {
                 </div>
               ))}
               {taskBlock ? (
-                <TaskCard key={taskBlockKey} block={taskBlock}
+                <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
                   onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onOpenTask} />
               ) : null}
               {streaming ? (

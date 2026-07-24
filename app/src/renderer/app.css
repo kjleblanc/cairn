@@ -118,6 +118,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .task-chip-kind { flex-shrink: 0; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .task-chip-strike { text-decoration: line-through; color: var(--muted); }
 .task-chip-status { margin: 4px 0 0; }
+.task-chip-hint { margin: 6px 0 0; }
 .task-chip-answer { margin-top: 8px; flex-wrap: nowrap; }
 .task-chip-answer input { flex: 1; }
 .body-pill-wrap { position: relative; }

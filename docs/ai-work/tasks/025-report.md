@@ -153,6 +153,69 @@ screenshots (`scratch-taskcard-check.mjs`,
 `scratch-taskcard-before-send.png`, `scratch-taskcard-taskrun.png`) were
 deleted from `app/` after the manual run, leaving no stray untracked files.
 
+## Review fix
+
+Review found one Important issue: a chip marked itself resolved
+unconditionally the instant its own callback was invoked, but `Chat.send()`
+silently no-ops (does nothing, returns without dispatching) while a reply is
+already streaming. That opened two real gaps: (1) resolving a second chip
+while the first chip's answer was still streaming could open "Send to
+dispatch" without that second concern's message ever reaching the
+conductor, and (2) a send refused for any reason left the chip falsely
+marked resolved regardless. Fixed honestly, smallest robust shape, no new
+repo task number, per the coordinator's direction:
+
+- `app/src/renderer/screens/Chat.tsx`: `send()` now returns `Promise<boolean>`
+  — `true` when it actually dispatched (appended the owner turn and invoked
+  `conductorSend`), `false` when refused outright (empty text, or already
+  streaming). `onCardAnswer`/`onCardSetAside` now return that boolean
+  straight through instead of `void`-firing it. `TaskCard` is now also
+  passed `busy={streaming}`.
+
+- `app/src/renderer/components/TaskCard.tsx`: added a required `busy:
+  boolean` prop. Both `onAnswer`/`onSetAside` props are now typed `(...) =>
+  boolean | Promise<boolean>`. `submitAnswer`/`setAside` are now `async`,
+  guard on `busy` up front (so the common case never even attempts a call
+  that would be refused), `await` the callback's result, and mark the chip
+  resolved *only* when that result is `true` — never optimistically before
+  the call, and never regardless of outcome. While `busy`, the "Answer" and
+  "Set aside" pills are `disabled`, and an unresolved chip shows a small
+  sentence-case hint, "Wait for Cairn to finish answering." (new
+  `.task-chip-hint` rule in `app.css`, matching the existing `.task-chip-
+  status` spacing). No other behavior changed: remount-on-replace via
+  `taskBlockKey`, the exact owner-message strings, the `allResolved` gating
+  math, and the `onSend`/prefill handoff into `TaskRun` are all untouched.
+
+Re-verified live with a throwaway fake SSE server (not committed), this
+time with the second call (the reply to the answered question) delayed
+1.5s so the busy window is actually observable rather than resolving
+near-instantly: answered the question chip — it flipped to "Answered"
+almost immediately, because `send()`'s own promise resolves as soon as the
+`conductorSend` IPC call returns, well before the model's delayed reply
+finishes streaming. Critically, at that exact moment — one chip already
+answered, the model still streaming — "Set aside" on the *other* chip was
+disabled, its hint text was visible, and "Send to dispatch" stayed
+disabled. A forced click on the disabled "Set aside" button (Playwright
+`{force: true}`, bypassing the library's own actionability check) produced
+no state change at all — a real disabled `<button>` doesn't dispatch a
+click event in the first place, so `setAside()`'s own `if (busy) return`
+guard was never even reached; the chip stayed unresolved. Once the delayed
+reply actually finished (the "done" delta, confirmed by the assistant's
+"Understood, thanks." bubble appearing), "Set aside" became enabled and the
+hint disappeared; clicking it for real resolved the chip, "Send to
+dispatch" enabled, and the send-to-TaskRun handoff still prefilled the
+outcome exactly as before. Scratch script and its failure-only screenshot
+were deleted after the run.
+
+Re-ran `npm run typecheck` (clean), `npm run test:unit` (37/37), `npm run
+build:vite` (clean), and `npm run test:smoke` (13/13) after the fix — all
+green. `git status --porcelain=v1` at the repo root listed only
+`app/src/renderer/components/TaskCard.tsx`, `app/src/renderer/screens/
+Chat.tsx`, `app/src/renderer/app.css`, and this report before staging.
+
+Commit: `Task 025: review fix — a chip resolves only when its message was
+sent`.
+
 Milestone movement: NO
 
 Disposition: DONE
