@@ -7,3 +7,4 @@ app/.vite/
 app/out/
 app/resources/contract.md
 app/test-results/
+app/dist-unit/

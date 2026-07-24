@@ -16,7 +16,8 @@
     "package": "electron-forge package",
     "typecheck": "tsc --noEmit",
     "build:vite": "node scripts/copy-assets.mjs && vite build -c vite.main.config.ts && vite build -c vite.preload.config.ts && vite build -c vite.renderer.config.ts",
-    "test:smoke": "npm run build:vite && playwright test"
+    "test:smoke": "npm run build:vite && playwright test",
+    "test:unit": "tsc -p tsconfig.unit.json && node --test dist-unit/tests-unit/*.test.js"
   },
   "dependencies": {
     "@cairn/core": "file:../core",

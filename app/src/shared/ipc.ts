@@ -23,3 +23,22 @@ export interface CairnApi {
   openExternal(url: string): Promise<void>;
   onTaskActivity(cb: (event: TaskActivityEvent) => void): () => void;
 }
+
+export interface TaskBlockConcern {
+  kind: "question" | "risk";
+  text: string;
+}
+
+export interface TaskBlock {
+  outcome: string;
+  concerns: TaskBlockConcern[];
+  notes: string;
+}
+
+export interface ConductorTurn {
+  role: "owner" | "cairn";
+  text: string;
+  ts: string;
+  tokens?: number;
+  costUsd?: number;
+}
