@@ -95,7 +95,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     const controller = new AbortController();
     running.add(dir);
     controllers.set(dir, controller);
-    sessions.set(dir, { dir, outcome, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
+    sessions.set(dir, { dir, outcome, worker: realCallConfirmed === true, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
     const run = (async () => {
       try {
         const detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);

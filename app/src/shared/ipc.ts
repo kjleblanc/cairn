@@ -11,6 +11,8 @@ export type TaskRoutePreview = { route: RouteResult; disclosure?: CodexExecDiscl
 export type RunSessionSnapshot = {
   dir: string;
   outcome: string;
+  // true when this run is a real confirmed worker call, not the offline demo; Task 10 re-keys lane wording off adapter capabilities
+  worker: boolean;
   startedAt: string;
   activities: SerialActivity[];
   phase: "running" | "closed";

@@ -301,6 +301,7 @@ test("navigating away and back reattaches to the running worker and its finished
   await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await win.getByRole("button", { name: "Start a task" }).click();
   await expect(win.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 10_000 });
+  await expect(win.getByText(/Cairn is running one confirmed ephemeral workspace-scoped Codex Exec request/)).toBeVisible();
   await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
   expect(readFileSync(join(proj, "visible.txt"), "utf8")).toBe("model-authored result\n");
   await app.close();

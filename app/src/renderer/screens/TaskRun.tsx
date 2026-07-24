@@ -21,9 +21,10 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
   const [error, setError] = useState<string | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+  const [sessionWorker, setSessionWorker] = useState(false);
   const codexRoute = route?.status === "ready" && route.recommended.id === "codex-exec";
   const resultCodex = result && result.status !== "connection-required" && result.route.recommended.id === "codex-exec";
-  const codexish = codexRoute || Boolean(resultCodex);
+  const codexish = codexRoute || Boolean(resultCodex) || sessionWorker;
   const realCallStopped = result?.status === "stopped" && result.reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
 
   useEffect(() => {
@@ -34,6 +35,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
     const session = await cairn.taskCurrent(dir);
     if (!session) return;
     setOutcome(session.outcome);
+    setSessionWorker(session.worker);
     setActivities(session.activities);
     if (session.phase === "running") setPhase("running");
     else if (session.result && session.result.status !== "connection-required") {
@@ -82,7 +84,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
 
   function tryAnother() {
     void cairn.taskAcknowledge(dir);
-    setPhase("entry"); setOutcome(""); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false);
+    setPhase("entry"); setOutcome(""); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false); setSessionWorker(false);
   }
 
   return (
