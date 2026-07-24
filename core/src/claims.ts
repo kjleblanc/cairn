@@ -23,6 +23,45 @@ function cappedString(value: unknown, cap: number): value is string {
   return typeof value === "string" && value.length <= cap;
 }
 
+const FENCE_OPENER = /^```cairn-claims[ \t]*$/;
+const FENCE_CLOSER = /^```[ \t]*$/;
+
+/**
+ * Finds every `cairn-claims` fence in a message in one pass over its lines,
+ * returning each fence's body text (joined with "\n").
+ *
+ * This replaces a line-anchored regex
+ * (`/^```cairn-claims[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm`) that was
+ * O(n^2): with no closer ahead, its lazy `[\s\S]*?` body group re-scanned
+ * all the way to end-of-string from every opener line before giving up, and
+ * a crafted message can have one opener per line. This line walk keeps the
+ * exact same fence grammar (a line matching the opener while closed opens a
+ * fence; a line matching the closer while open closes it; any other line
+ * while open — including one that merely looks like another opener,
+ * matching the old regex's lazy-match behavior — is body text; anything
+ * while closed is prose; an unclosed trailing fence is discarded, just as
+ * the old regex found no match for it) but does it in a single O(n) scan.
+ */
+function extractClaimsFences(message: string): string[] {
+  const fences: string[] = [];
+  let open = false;
+  let body: string[] = [];
+  for (const line of message.split(/\r?\n/)) {
+    if (open) {
+      if (FENCE_CLOSER.test(line)) {
+        fences.push(body.join("\n"));
+        open = false;
+      } else {
+        body.push(line);
+      }
+    } else if (FENCE_OPENER.test(line)) {
+      open = true;
+      body = [];
+    }
+  }
+  return fences;
+}
+
 /**
  * The worker's account of its own work, parsed fail-closed from the one
  * fenced cairn-claims block in its final message. Anything unexpected —
@@ -31,11 +70,11 @@ function cappedString(value: unknown, cap: number): value is string {
  */
 export function parseWorkerClaims(finalMessage: string | null): WorkerClaims | null {
   if (!finalMessage || finalMessage.length > TOTAL_CAP) return null;
-  const fences = [...finalMessage.matchAll(/^```cairn-claims[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm)];
+  const fences = extractClaimsFences(finalMessage);
   if (fences.length !== 1) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fences[0][1]);
+    parsed = JSON.parse(fences[0]);
   } catch {
     return null;
   }

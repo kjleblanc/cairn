@@ -41,3 +41,4 @@
 | 039 | 2026-07-24 | Standard | Applied | DONE | completed | The main process now owns live run state; navigating away or reloading mid-run reattaches to the running worker and its result instead of orphaning it | NO |
 | 040 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: a reattached run screen names the real worker lane instead of the offline demo copy | NO |
 | 041 | 2026-07-24 | Standard | Applied | DONE | completed | The cairn-claims fence parser reads a worker's account fail-closed: one fence, seven typed keys, size-capped, nothing else survives | NO |
+| 042 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: the claims fence scan is linear, so a crafted worker message cannot stall the app | NO |
