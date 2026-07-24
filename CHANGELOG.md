@@ -4,6 +4,48 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.2.0 — the envelope holds the pen — 2026-07-24
+
+- Added a watchdog and an honest stop path: a wedged worker (default 600 000 ms
+  inactivity, 3 600 000 ms absolute) is killed tree-and-all on both Windows and
+  POSIX and closes as `ADAPTER_TIMED_OUT`, naming the cost already spent
+  instead of hanging forever. The owner can also stop a running worker
+  directly — a "Stop this task" control reaches the same adapter seam and
+  closes as `CANCELLED_BY_OWNER`, again naming the already-spent cost and
+  writing no product change. Quitting the app while a task is running now
+  asks first ("Stop the task and quit" / "Keep running") instead of silently
+  abandoning a paid, still-running process.
+- Added a cross-process run lock (`cairn-run.lock` in the Git common
+  directory, never the project worktree and never `.git/cairn`) so "one task
+  at a time" holds even across separate app or CLI processes; a stale lock
+  from a crashed process is re-verified before being cleared so it can never
+  delete a fresh, live lock.
+- Added run-reattach: the main process now owns live run state, so navigating
+  away from a running task and back, or reloading the window mid-run, no
+  longer orphans the worker — the screen reattaches to the same run, names
+  the real lane it is actually running in, and shows the same verified result
+  once it closes.
+- Moved task-record authorship from the worker to Cairn. A worker now ends its
+  final message with one fenced `cairn-claims` JSON block instead of writing
+  `docs/ai-work` files itself; Cairn parses that block fail-closed and
+  authors the report and log row from the worker's claims plus its own Git
+  verification. `MODEL_RECORDS_MISSING` is retired in favor of
+  `WORKER_CLAIMS_MISSING` (no fence, or a malformed one, stops the task
+  honestly before any commit). Every composed report keeps the worker's own
+  words blockquote-quarantined so worker text can never forge a structural
+  disposition, milestone, or log line. Stated plainly: Cairn now retains the
+  worker's final message across the run (for claims verification) in
+  addition to the existing bounded counts — previously no item text was
+  retained at all, and the report's own privacy sentence says so honestly.
+- Added the universal worker-result contract: one result shape, one error
+  family, and one disclosure seam that every worker adapter returns through,
+  replacing the Codex-specific result and validator with a single
+  `validateWorkerResult`. Proven by a synthetic fixture adapter in the test
+  suite that reaches a verified DONE result with no changes to the envelope
+  code at all — the shape future adapters (a different model, a different
+  runner) will need is already load-bearing today.
+- Added no dependency.
+
 ## 0.1.2 — connecting is one paste — 2026-07-24
 
 - Added a one-paste default to the connect card: paste an OpenRouter key and

@@ -49,3 +49,4 @@
 | 047 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: worker claims are blockquote-quarantined so no worker text can forge a structural record line | NO |
 | 048 | 2026-07-24 | Standard | Applied | DONE | completed | The inversion: the worker drops record duties and speaks one cairn-claims fence; Cairn authors the report and log row from those claims and its own Git verification; core and app flip together | NO |
 | 049 | 2026-07-24 | Standard | Applied | DONE | completed | One worker-result contract: every adapter returns one shape, throws one error family, and discloses through one seam; a synthetic third adapter reaches verified DONE with no envelope changes | NO |
+| 050 | 2026-07-24 | Standard | Applied | DONE | completed | Phase 2 closes at 0.2.0: version bump across all three mirrors, an honest changelog entry for Tasks 1-10, and cli/README.md's stale model-authored-records line fixed | NO |
