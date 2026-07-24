@@ -21,3 +21,4 @@
 | 019 | 2026-07-23 | Standard | Applied | DONE | completed | Cairn's constitution as a versioned constant with its honesty pinned by tests | NO |
 | 020 | 2026-07-23 | Standard | Applied | DONE | completed | The conductor's deterministic project briefing: facts, log, recent records, git summary, capped file tree | NO |
 | 021 | 2026-07-23 | Standard | Applied | DONE | completed | Streaming OpenAI-compatible conductor client with plain-words failures and usage capture | NO |
+| 022 | 2026-07-23 | Standard | Applied | DONE | completed | Project-local conversation memory under .cairn/ with a one-line gitignore guard | NO |
