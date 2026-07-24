@@ -55,10 +55,13 @@ app.on("window-all-closed", () => {
 });
 
 let quitting = false;
+let readyToQuit = false;
 app.on("before-quit", (event) => {
+  if (readyToQuit) return;
   const runs = activeTaskRuns();
-  if (quitting || runs.dirs.length === 0) return;
+  if (runs.dirs.length === 0) return;
   event.preventDefault();
+  if (quitting) return; // grace already underway; keep blocking, no second dialog
   const choice = dialog.showMessageBoxSync({
     type: "warning",
     buttons: ["Stop the task and quit", "Keep running"],
@@ -71,5 +74,8 @@ app.on("before-quit", (event) => {
   quitting = true;
   runs.cancelAll();
   const grace = new Promise((resolve) => setTimeout(resolve, 8_000));
-  void Promise.race([runs.settled(), grace]).then(() => app.quit());
+  void Promise.race([runs.settled(), grace]).then(() => {
+    readyToQuit = true;
+    app.quit();
+  });
 });
