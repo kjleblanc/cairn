@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/main/conductor/taskblock.ts", "src/shared/ipc.ts", "tests-unit/**/*.ts"]
+  "include": ["src/main/conductor/constitution.ts", "src/main/conductor/taskblock.ts", "src/shared/ipc.ts", "tests-unit/**/*.ts"]
 }
