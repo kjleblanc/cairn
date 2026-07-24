@@ -46,3 +46,4 @@
 | 044 | 2026-07-24 | Standard | Applied | DONE | completed | The worker's final agent message now rides the codex process seam into claimsText for future claims verification; the worker prompt and real-run decision logic are unchanged | NO |
 | 045 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: a dropped oversized line can no longer let a stale message pose as the worker's final word | NO |
 | 046 | 2026-07-24 | Standard | Applied | DONE | completed | Added core/src/records.ts: composes a worker report and LOG row that separate what Cairn verified (Git facts) from what the worker only claims | NO |
+| 047 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: worker claims are blockquote-quarantined so no worker text can forge a structural record line | NO |

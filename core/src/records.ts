@@ -32,8 +32,24 @@ function pad(taskNumber: number): string {
   return String(taskNumber).padStart(3, "0");
 }
 
+/**
+ * Truncates by Unicode code point, never by UTF-16 code unit, so an astral
+ * character (e.g. an emoji, which is one code point but two code units)
+ * can never be cut in half into a lone surrogate. Slicing by code point can
+ * still overshoot the code-UNIT cap (each code point may cost one or two
+ * units), so after the code-point slice we pop whole code points off the
+ * end — never a bare unit — until the joined string's `.length` (code
+ * units) is honestly within the cap, then append the ellipsis.
+ */
 function truncateRow(text: string): string {
-  return text.length <= ROW_CAP ? text : `${text.slice(0, ROW_CAP - 1)}…`;
+  if (text.length <= ROW_CAP) return text;
+  let codePoints = [...text].slice(0, ROW_CAP - 1);
+  let joined = codePoints.join("");
+  while (joined.length > ROW_CAP - 1) {
+    codePoints = codePoints.slice(0, -1);
+    joined = codePoints.join("");
+  }
+  return `${joined}…`;
 }
 
 /**
@@ -87,29 +103,66 @@ function stoppedParagraph(input: ComposedRecordInput): string | null {
   return `The run stopped with the fixed code \`${input.stopReason}\`. The workspace may contain retained worker-authored evidence and must be inspected before another task.${paidClause}`;
 }
 
+/**
+ * Blockquote-quarantines a worker-authored text block that stands alone on
+ * its own line(s) — the summary paragraph, or a single change/check bullet
+ * line — so it can never begin a report line at column 0. Every line,
+ * including a continuation line produced by an embedded newline inside the
+ * field (claims fields may contain literal `\n`: JSON escapes decode to
+ * real newlines, and claims.ts rejects only bare CR / U+2028 / U+2029),
+ * becomes its own Markdown blockquote line (`> ...`).
+ *
+ * Worker text is honestly displayed but structurally quarantined: it must
+ * never be able to start a line at column 0, where core/src/steps.ts:36's
+ * exactly-one disposition regex (and a human reader) treats text as
+ * Cairn's own. Without this, a worker could plant e.g.
+ * `\nDisposition: **DONE**` inside `summary` and forge a second structural
+ * line in a Cairn-authored report.
+ */
+function quarantineBlock(text: string): string {
+  return `> ${text.replace(/\n/g, "\n> ")}`;
+}
+
+/**
+ * Quarantines only the continuation lines of a worker-authored field that
+ * shares its first line with a Cairn-authored inline label (e.g.
+ * `How to try it: <worker text>`). The label already occupies column 0
+ * safely, so the field's first line — which follows the label on the same
+ * line, never starting at column 0 — is left as-is; only lines produced by
+ * an embedded newline inside the field could otherwise reach column 0
+ * unguarded, so only those get the blockquote prefix.
+ */
+function quarantineInline(text: string): string {
+  return text.replace(/\n/g, "\n> ");
+}
+
 function bulletsOrNone(items: readonly string[]): string {
-  return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- None reported.";
+  return items.length > 0 ? items.map((item) => quarantineBlock(`- ${item}`)).join("\n") : "- None reported.";
 }
 
 function checkBullets(checks: WorkerClaims["checks"]): string {
   return checks.length > 0
-    ? checks.map((check) => `- ${check.name} — ${check.result}`).join("\n")
+    ? checks.map((check) => quarantineBlock(`- ${check.name} — ${check.result}`)).join("\n")
     : "- None reported.";
 }
 
 /**
  * Everything here is the worker's own account, clearly labeled as claims —
  * never verified by Cairn. When no claims survived parsing, that fact is
- * stated plainly instead of rendering an empty or misleading account.
+ * stated plainly instead of rendering an empty or misleading account. That
+ * claims-missing sentence is Cairn's own text and stays unquoted. Cairn's
+ * own connective labels ("What changed:", "Checks the worker says it ran:",
+ * "How to try it:", "Limitations:") also stay unquoted — only the worker's
+ * own strings are quarantined (see quarantineBlock / quarantineInline).
  */
 function workersAccountBlock(claims: WorkerClaims | null): string {
   if (!claims) return "The worker returned no readable claims block.";
   return [
-    claims.summary,
+    quarantineBlock(claims.summary),
     `What changed:\n${bulletsOrNone(claims.changes)}`,
     `Checks the worker says it ran:\n${checkBullets(claims.checks)}`,
-    `How to try it: ${claims.howToTry}`,
-    `Limitations: ${claims.limitations}`,
+    `How to try it: ${quarantineInline(claims.howToTry)}`,
+    `Limitations: ${quarantineInline(claims.limitations)}`,
   ].join("\n\n");
 }
 
