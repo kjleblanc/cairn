@@ -2,7 +2,19 @@ import { app, dialog, ipcMain, shell } from "electron";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { initProject, isCairnProject, projectStatus } from "@cairn/core";
-import type { InitInput, Preflight, ProjectList, RecentProject, Result, UpdateInfo } from "../shared/ipc.js";
+import type {
+  ConductorConnectRequest,
+  ConductorDelta,
+  ConductorSendRequest,
+  ConductorStatus,
+  InitInput,
+  Preflight,
+  ProjectList,
+  RecentProject,
+  Result,
+  UpdateInfo,
+} from "../shared/ipc.js";
+import * as conductorService from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
 
@@ -93,4 +105,54 @@ export function registerProjectIpc(): void {
     if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/)/.test(url)) return;
     await shell.openExternal(url);
   });
+}
+
+/** Registered separately from `registerProjectIpc` so a future task can wire
+ * it in behind its own flag (mirroring how `CAIRN_MOCK` reaches the app)
+ * instead of always-on. Not yet called anywhere; nothing here is
+ * user-reachable until that wiring lands. */
+export function registerConductorIpc(): void {
+  ipcMain.handle("conductor:status", (): ConductorStatus => conductorService.status());
+
+  ipcMain.handle("conductor:connect", (_e, request: ConductorConnectRequest): Result<null> => {
+    try {
+      return conductorService.connect(request);
+    } catch (err) {
+      logError("conductor:connect", err);
+      return { ok: false, message: plainMessage(err) };
+    }
+  });
+
+  ipcMain.handle("conductor:disconnect", () =>
+    toResult("conductor:disconnect", () => {
+      conductorService.disconnect();
+      return null;
+    }));
+
+  ipcMain.handle("conductor:setModel", (_e, model: string) =>
+    toResult("conductor:setModel", () => {
+      conductorService.setModel(model);
+      return null;
+    }));
+
+  ipcMain.handle("conductor:send", (event, request: ConductorSendRequest): Result<{ conversationId: string }> => {
+    try {
+      return conductorService.send(request.dir, request.conversationId, request.text, (delta: ConductorDelta) => {
+        event.sender.send("conductor:delta", delta);
+      });
+    } catch (err) {
+      logError("conductor:send", err);
+      return { ok: false, message: plainMessage(err) };
+    }
+  });
+
+  ipcMain.handle("conductor:stop", (_e, dir: string) =>
+    toResult("conductor:stop", () => {
+      conductorService.stop(dir);
+      return null;
+    }));
+
+  ipcMain.handle("conductor:conversations", (_e, dir: string) => conductorService.conversations(dir));
+
+  ipcMain.handle("conductor:turns", (_e, dir: string, id: string) => conductorService.turns(dir, id));
 }

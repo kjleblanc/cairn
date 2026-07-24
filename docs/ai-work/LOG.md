@@ -22,3 +22,4 @@
 | 020 | 2026-07-23 | Standard | Applied | DONE | completed | The conductor's deterministic project briefing: facts, log, recent records, git summary, capped file tree | NO |
 | 021 | 2026-07-23 | Standard | Applied | DONE | completed | Streaming OpenAI-compatible conductor client with plain-words failures and usage capture | NO |
 | 022 | 2026-07-23 | Standard | Applied | DONE | completed | Project-local conversation memory under .cairn/ with a one-line gitignore guard | NO |
+| 023 | 2026-07-23 | Standard | Applied | DONE | completed | Conductor keystore, standing-consent gate, and IPC surface; the key lives only in the main process | NO |

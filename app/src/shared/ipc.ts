@@ -8,6 +8,45 @@ export type InitInput = { dir: string; name: string; what: string; who: string; 
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 export type TaskActivityEvent = { dir: string; sessionId: number; activity: SerialActivity };
 export type TaskRoutePreview = { route: RouteResult; disclosure?: CodexExecDisclosure };
+export type ConductorConversationSummary = { id: string; startedTs: string; preview: string };
+
+export interface ConductorStatus {
+  connected: boolean;
+  baseUrl: string;
+  model: string;
+  provider: string;
+  encryptionAvailable: boolean;
+}
+
+export interface ConductorConsentCard {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  data: string;
+  cost: string;
+}
+
+export interface ConductorConnectRequest {
+  card: ConductorConsentCard;
+  apiKey: string;
+  consentConfirmed: boolean;
+}
+
+export interface ConductorSendRequest {
+  dir: string;
+  conversationId: string | null;
+  text: string;
+}
+
+export interface ConductorDelta {
+  dir: string;
+  conversationId: string;
+  kind: "delta" | "done" | "error";
+  text?: string;
+  turn?: ConductorTurn;
+  taskBlock?: TaskBlock | null;
+  message?: string;
+}
 
 export interface CairnApi {
   preflight(): Promise<Preflight>;
@@ -22,6 +61,15 @@ export interface CairnApi {
   updateCheck(): Promise<UpdateInfo>;
   openExternal(url: string): Promise<void>;
   onTaskActivity(cb: (event: TaskActivityEvent) => void): () => void;
+  conductorStatus(): Promise<ConductorStatus>;
+  conductorConnect(request: ConductorConnectRequest): Promise<Result<null>>;
+  conductorDisconnect(): Promise<Result<null>>;
+  conductorSetModel(model: string): Promise<Result<null>>;
+  conductorSend(request: ConductorSendRequest): Promise<Result<{ conversationId: string }>>;
+  conductorStop(dir: string): Promise<Result<null>>;
+  conductorConversations(dir: string): Promise<ConductorConversationSummary[]>;
+  conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
+  onConductorDelta(cb: (event: ConductorDelta) => void): () => void;
 }
 
 export interface TaskBlockConcern {

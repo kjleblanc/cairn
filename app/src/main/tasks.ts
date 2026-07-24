@@ -18,6 +18,13 @@ import { logError, plainMessage } from "./log.js";
 
 const running = new Set<string>();
 
+/** True while a serial task is running for `dir`. Lets other main-side
+ * gates (the conductor's send gate) share this one running-set instead of
+ * tracking their own. */
+export function isTaskRunning(dir: string): boolean {
+  return running.has(dir);
+}
+
 function sameDisclosure(actual: CodexExecDisclosure | undefined, expected: CodexExecDisclosure): boolean {
   return Boolean(actual) && actual?.provider === expected.provider && actual.model === expected.model &&
     actual.project === expected.project && actual.task === expected.task && actual.data === expected.data &&
