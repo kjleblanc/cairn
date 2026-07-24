@@ -21,7 +21,12 @@ test("a beginner completes the offline serial path through a verified honest res
   const app = await electron.launch({ args: ["."], env: { ...process.env, CAIRN_MOCK: "1", CAIRN_OPEN: proj } });
   const win = await app.firstWindow();
 
-  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Create a welcome page");
   await win.getByRole("button", { name: "Find a route" }).click();

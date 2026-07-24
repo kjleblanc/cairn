@@ -4,6 +4,45 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.1.0 — the connected conductor — 2026-07-23
+
+- Added the conductor: an optional connected conversation model that reads
+  the project's real records (contract facts, `PROJECT.md`, the work log,
+  recent briefs and reports, a git summary, and the file tree by name) and
+  talks with the owner in the chat screen, which is now the app's home view
+  for a governed project — Dashboard stays one click away. The conductor
+  cannot read file contents, cannot use tools, cannot touch git, and cannot
+  dispatch a task on its own; when it proposes one well-scoped task, the
+  owner still opens today's existing route-preview-disclosure-run path and
+  presses the dispatch button.
+- The connection itself is one standing authorization, given once on a
+  connect screen naming the provider, the model, exactly what may flow
+  during conversation, and the pay-as-you-go cost basis; while connected, a
+  visible pill names the provider and model and conversation proceeds
+  without a per-message prompt. Every other boundary keeps confirming per
+  action regardless: each worker dispatch, each paid worker call, and every
+  concrete-risk action still waits for its own approval, and a risk the
+  conductor raises rides the proposed task as a chip the owner must answer
+  or knowingly set aside before it can be sent. The owner can revoke the
+  connection at any time, which deletes the stored credential immediately.
+- The provider key is encrypted with Electron's `safeStorage` and held only
+  in the main process — the renderer, the conversation log, and Cairn's own
+  logs never see it, and a provider failure (bad key, no credit, model gone,
+  network down) reaches the owner in plain words with a reconnect path,
+  never a raw status code.
+- Added the contract's own `## The connected conductor` section describing
+  this boundary, mirrored across `AGENTS.md` and the `cairn.html` embed, and
+  the amendment lands with this same version bump so the contract never
+  trails the capability.
+- A fake-body Playwright suite (`app/tests/conductor.spec.ts`) proves the
+  whole loop offline — connect, converse, the proposed-task card with a risk
+  chip, offline dispatch through the unchanged serial path, disk
+  persistence across a relaunch, and honest failure copy — against a
+  scripted local server, never a real provider or real spend.
+- Added no dependency: the conductor speaks the OpenAI-compatible
+  `chat/completions` API over the platform's built-in `fetch`, and the key
+  store uses Electron's existing `safeStorage`.
+
 ## 0.0.5 — a phantom-dirty start no longer skips a task's commit — 2026-07-23
 
 - Fixed the start-side twin of the 0.0.4 fix: `git status` can report a file

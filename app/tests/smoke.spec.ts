@@ -19,7 +19,11 @@ test("Desktop opens a project on the single serial task path", async () => {
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: { ...process.env, CAIRN_MOCK: "1", CAIRN_OPEN: project } });
   const window = await app.firstWindow();
-  await expect(window.getByRole("heading", { name: "Smoke" })).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = window.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await expect(window.getByRole("heading", { name: "Smoke" })).toBeVisible();
   await expect(window.getByText("ProjectTaskRouteRunCheckResult")).toBeVisible();
   await window.getByRole("button", { name: "Start a task" }).click();
   await expect(window.getByText("one serial task")).toBeVisible();

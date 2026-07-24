@@ -22,7 +22,6 @@ function baseEnv(project: string): { [key: string]: string } {
   const env: { [key: string]: string } = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
   env.CAIRN_MOCK = "1";
-  env.CAIRN_CONDUCTOR = "1";
   env.CAIRN_OPEN = project;
   return env;
 }
@@ -37,10 +36,11 @@ function conductorFile(): string {
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "Cairn", "conductor.json");
 }
 
+// A governed project boots straight into chat (0.1.0), so the connect card
+// is already the first thing on screen — no navigation click needed first.
 async function connectToFixture(win: Page, fixtureUrl: string, model: string, apiKey = "sk-test-key"): Promise<void> {
-  await win.getByRole("button", { name: "Talk with Cairn" }).click();
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
-  await expect(card).toBeVisible();
+  await expect(card).toBeVisible({ timeout: 30_000 });
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
   await win.getByPlaceholder("e.g. moonshotai/kimi-k2").fill(model);
   await win.getByPlaceholder("Stored encrypted; shown never again").fill(apiKey);
@@ -101,11 +101,9 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
-  await win.getByRole("button", { name: "Talk with Cairn" }).click();
 
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
-  await expect(card).toBeVisible();
+  await expect(card).toBeVisible({ timeout: 30_000 });
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
   await win.getByPlaceholder("e.g. moonshotai/kimi-k2").fill("fixture-model");
   await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-test-key");
@@ -130,9 +128,7 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
 
   const relaunched = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win2 = await relaunched.firstWindow();
-  await expect(win2.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
-  await win2.getByRole("button", { name: "Talk with Cairn" }).click();
-  await expect(win2.getByText("connect cairn's brain")).toBeVisible();
+  await expect(win2.getByText("connect cairn's brain")).toBeVisible({ timeout: 30_000 });
   await relaunched.close();
 });
 
@@ -141,7 +137,6 @@ test("the full loop: a proposed task with a risk chip dispatches through TaskRun
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
   await sendChat(win, "Change the page title");
@@ -191,7 +186,6 @@ test("a conversation persists across a relaunch, and .cairn stays out of git", a
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
   await sendChat(win, "Hello, quick check-in.");
@@ -202,11 +196,9 @@ test("a conversation persists across a relaunch, and .cairn stays out of git", a
 
   const relaunched = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win2 = await relaunched.firstWindow();
-  await expect(win2.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
-  await win2.getByRole("button", { name: "Talk with Cairn" }).click();
-  await expect(win2.getByText("connect cairn's brain")).not.toBeVisible();
-  await expect(win2.getByText("Hello, quick check-in.")).toBeVisible({ timeout: 15_000 });
+  await expect(win2.getByText("Hello, quick check-in.")).toBeVisible({ timeout: 30_000 });
   await expect(win2.getByText("Sure, got it.")).toBeVisible();
+  await expect(win2.getByText("connect cairn's brain")).not.toBeVisible();
   await relaunched.close();
 
   const gitignore = readFileSync(join(project, ".gitignore"), "utf8");
@@ -220,7 +212,6 @@ test("a malformed task block renders as plain chat text, never a card", async ()
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
   await sendChat(win, "garble");
@@ -238,7 +229,6 @@ test("a 401 from the provider shows only the plain-words key message", async () 
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
   const apiKey = "sk-test-should-never-render-88213";
   await connectToFixture(win, fixtureUrl, "fixture-model", apiKey);
 
@@ -258,12 +248,13 @@ test("navigating back mid-stream releases the lock so the next send succeeds imm
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
   await sendChat(win, "Please slowstream a reply.");
   await expect(win.getByText("One moment", { exact: false })).toBeVisible({ timeout: 10_000 });
 
+  // Chat is the home view; the dashboard stays one click away behind this
+  // same back control that used to lead there directly at boot.
   await win.getByRole("button", { name: "← Project home" }).click();
   await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible();
 
@@ -284,7 +275,6 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
-  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible({ timeout: 30_000 });
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
   await sendChat(win, "Please plan the twoconcerns page title change.");

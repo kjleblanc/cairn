@@ -106,7 +106,11 @@ test("normal mode shows connection-required and creates no task records", async 
   const fakeCodex = fakeCodexEnvironment(proj, false);
   const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
   const win = await app.firstWindow();
-  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Create a welcome page");
   await win.getByRole("button", { name: "Find a route" }).click();
@@ -123,7 +127,11 @@ test("connected Codex requires confirmation then completes one fake-process real
   const fakeCodex = fakeCodexEnvironment(proj, true);
   const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
   const win = await app.firstWindow();
-  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
   await win.getByRole("button", { name: "Find a route" }).click();
@@ -180,7 +188,11 @@ test("malformed Codex JSONL fails closed without exposing raw process output", a
   const fakeCodex = fakeCodexEnvironment(proj, true, "invalid-jsonl");
   const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
   const win = await app.firstWindow();
-  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
   await win.getByRole("button", { name: "Find a route" }).click();
@@ -204,7 +216,11 @@ test("missing model records show only bounded numeric Codex event evidence", asy
   const fakeCodex = fakeCodexEnvironment(proj, true, "missing-records");
   const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
   const win = await app.firstWindow();
-  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Add one bounded diagnostic");
   await win.getByRole("button", { name: "Find a route" }).click();
@@ -229,7 +245,11 @@ test("retained unmatched records stay visible without blocking a new task", asyn
 
   const app = await electron.launch({ args: ["."], env: { ...process.env, CAIRN_MOCK: "1", CAIRN_OPEN: proj } });
   const win = await app.firstWindow();
-  await expect(win.getByText("retained task evidence")).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = win.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+  await expect(win.getByText("retained task evidence")).toBeVisible();
   await expect(win.getByText(/without blocking a new task/)).toBeVisible();
   await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await app.close();

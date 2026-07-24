@@ -40,7 +40,7 @@
 </head>
 <body>
 <main>
-  <p class="eyebrow">Cairn Contract v0.0.5</p>
+  <p class="eyebrow">Cairn Contract v0.1.0</p>
   <h1>One task.<br>One honest result.</h1>
   <p class="lead">Cairn helps beginners use AI without turning planning, building,
   reviewing, and deciding into an endless owner-facing workflow.</p>
@@ -92,7 +92,7 @@
 
 <script type="text/plain" id="src-contract"># Project Contract
 
-> **What this is.** Cairn Contract v0.0.5 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.1.0 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
@@ -225,6 +225,20 @@ or an operating-system credential store. The AI must not operate or inspect
 that login. Before a paid or data-bearing model call, confirm the provider,
 model, data being sent, target project, and cost or quota limit. Record only
 non-secret results and redacted errors.
+
+## The connected conductor
+
+The owner may connect one conversation model — the conductor — with a single
+standing authorization, given on a connect screen that names the provider, the
+model, the data that may flow during conversation (the owner's messages, the
+project's task records, and project file names; never file contents without a
+separate authorization, and never credentials), and the cost basis. While
+connected, a visible indicator names the conductor's provider and model, and
+conversation proceeds without per-message approval. The owner may revoke the
+connection at any time, which deletes the stored credential. Every other
+boundary keeps its own pause: each worker dispatch, each paid worker call, and
+every action on the concrete-risk list still waits for that action's own
+approval.
 
 ## When a qualified person is required
 

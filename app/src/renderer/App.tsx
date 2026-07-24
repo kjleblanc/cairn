@@ -23,7 +23,6 @@ export function App() {
   const [view, setView] = useState<View>({ name: "loading" });
   const [error, setError] = useState<string | null>(null);
   const [mock, setMock] = useState(false);
-  const [conductorEnabled, setConductorEnabled] = useState(false);
 
   const openProject = useCallback(async (dir: string) => {
     const response = await cairn.projectOpen(dir);
@@ -31,21 +30,30 @@ export function App() {
     else setError(response.message);
   }, []);
 
+  // A governed project boots straight into chat (0.1.0's home view); the
+  // dashboard stays one click away behind chat's own back control. On
+  // failure, autoOpen (an explicit CAIRN_OPEN target) surfaces the error
+  // overlay, while a stale last-recent entry falls back to the picker with
+  // a plain note instead of a dead end.
   const boot = useCallback(async () => {
     const preflight = await cairn.preflight();
     setMock(preflight.mock);
-    setConductorEnabled(preflight.conductor);
     const list = await cairn.projectList();
-    if (list.autoOpen) { await openProject(list.autoOpen); return; }
+    if (list.autoOpen) {
+      const response = await cairn.projectOpen(list.autoOpen);
+      if (response.ok) { setError(null); setView({ name: "chat", dir: list.autoOpen }); }
+      else setError(response.message);
+      return;
+    }
     const last = list.recent[0];
     if (last) {
       const response = await cairn.projectOpen(last.dir);
-      if (response.ok) { setView({ name: "dashboard", dir: last.dir, status: response.value }); return; }
+      if (response.ok) { setView({ name: "chat", dir: last.dir }); return; }
       setView({ name: "picker", startNew: false, note: `Cairn couldn't reopen ${last.name || "your last project"} — the folder may have moved or lost its rulebook.` });
       return;
     }
     setView({ name: "welcome", preflight, hasRecent: false });
-  }, [openProject]);
+  }, []);
 
   useEffect(() => { void boot(); }, [boot]);
 
@@ -67,7 +75,6 @@ export function App() {
         onCreated={(dir, status) => setView({ name: "dashboard", dir, status })}
         onSettings={() => setView({ name: "settings", dir: null })} />;
       case "dashboard": return <Dashboard dir={view.dir} status={view.status}
-        conductorEnabled={conductorEnabled}
         onStartTask={() => setView({ name: "task", dir: view.dir })}
         onTalkWithCairn={() => setView({ name: "chat", dir: view.dir })}
         onSwitch={() => setView({ name: "picker", startNew: false })}

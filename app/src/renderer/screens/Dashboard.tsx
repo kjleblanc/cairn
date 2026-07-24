@@ -5,8 +5,8 @@ import { Scene } from "../components/Scene";
 import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { pluck } from "../sound";
 
-export function Dashboard({ dir, status, conductorEnabled, onStartTask, onTalkWithCairn, onSwitch, onOpenProject, onSettings }: {
-  dir: string; status: ProjectStatus; conductorEnabled: boolean;
+export function Dashboard({ dir, status, onStartTask, onTalkWithCairn, onSwitch, onOpenProject, onSettings }: {
+  dir: string; status: ProjectStatus;
   onStartTask: () => void; onTalkWithCairn: () => void; onSwitch: () => void;
   onOpenProject: (dir: string) => void; onSettings: () => void;
 }) {
@@ -24,7 +24,7 @@ export function Dashboard({ dir, status, conductorEnabled, onStartTask, onTalkWi
       <div className="row spread" style={{ marginBottom: 12 }}>
         <span className="status-pill">▸ idle · {stones} {stones === 1 ? "stone" : "stones"}</span>
         <div className="row">
-          {conductorEnabled ? <Pill kind="soft" onClick={onTalkWithCairn}>Talk with Cairn</Pill> : null}
+          <Pill kind="soft" onClick={onTalkWithCairn}>Talk with Cairn</Pill>
           {canStart ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
         </div>
       </div>

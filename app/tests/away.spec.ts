@@ -24,7 +24,12 @@ test("legacy state is preserved and the project conversion path remains visible"
 
   const app = await electron.launch({ args: ["."], env: { ...process.env, CAIRN_MOCK: "1", CAIRN_OPEN: project } });
   const window = await app.firstWindow();
-  await expect(window.getByText("Legacy task state is preserved.")).toBeVisible({ timeout: 30_000 });
+  // A governed project boots straight into chat; the dashboard is one click away.
+  const projectHome = window.getByRole("button", { name: "← Project home" });
+  await expect(projectHome).toBeVisible({ timeout: 30_000 });
+  await projectHome.click();
+
+  await expect(window.getByText("Legacy task state is preserved.")).toBeVisible();
   await expect(window.getByRole("button", { name: "Start a task" })).not.toBeVisible();
   expect(readFileSync(evidence, "utf8")).toBe("preserve exactly\n");
 

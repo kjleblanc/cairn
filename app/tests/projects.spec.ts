@@ -89,7 +89,11 @@ test.describe("remembered projects: load, switch, track", () => {
     for (const [proj, name] of [[projA, "Alpha"], [projB, "Beta"]] as const) {
       const app = await electron.launch({ args: ["."], env: { ...baseEnv(), CAIRN_OPEN: proj } });
       const win = await app.firstWindow();
-      await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible({ timeout: 30000 });
+      // A governed project boots straight into chat; the dashboard is one click away.
+      const projectHome = win.getByRole("button", { name: "← Project home" });
+      await expect(projectHome).toBeVisible({ timeout: 30000 });
+      await projectHome.click();
+      await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
       await expect(win.getByRole("heading", { name })).toBeVisible();
       await app.close();
     }
@@ -106,10 +110,14 @@ test.describe("remembered projects: load, switch, track", () => {
   });
 
   test("launch reopens the last project, and the switcher swaps in one click", async () => {
-    // No CAIRN_OPEN: the app should land straight on Beta's dashboard (most recent).
+    // No CAIRN_OPEN: the app should land straight on Beta (most recent), in chat.
     const app = await electron.launch({ args: ["."], env: baseEnv() });
     const win = await app.firstWindow();
-    await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible({ timeout: 30000 });
+    // Chat is the home view; the dashboard is one click away.
+    const projectHome = win.getByRole("button", { name: "← Project home" });
+    await expect(projectHome).toBeVisible({ timeout: 30000 });
+    await projectHome.click();
+    await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
     await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
 
     // The in-place switcher lists the other project with its stone count,

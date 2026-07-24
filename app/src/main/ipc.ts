@@ -30,8 +30,7 @@ function toResult<T>(context: string, fn: () => T): Result<T> {
 
 async function preflight(): Promise<Preflight> {
   const mock = process.env.CAIRN_MOCK === "1";
-  const conductor = process.env.CAIRN_CONDUCTOR === "1";
-  return { mock, mode: mock ? "offline-demo" : "connection-required", conductor };
+  return { mock, mode: mock ? "offline-demo" : "connection-required" };
 }
 
 export function registerProjectIpc(): void {
@@ -110,10 +109,9 @@ export function registerProjectIpc(): void {
 }
 
 /** Registered separately from `registerProjectIpc` for clarity, but called
- * unconditionally from `main.ts` — these channels are always reachable.
- * `CAIRN_CONDUCTOR=1` (surfaced to the renderer via `preflight:check`) gates
- * only whether the renderer ever shows a way to reach them, mirroring how
- * `CAIRN_MOCK` reaches the app. */
+ * unconditionally from `main.ts` — these channels are always reachable; the
+ * chat screen that reaches them is the app's home view for a governed
+ * project (0.1.0), with no separate flag gating whether it shows. */
 export function registerConductorIpc(): void {
   ipcMain.handle("conductor:status", (): ConductorStatus => conductorService.status());
 
