@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isCodexExecCancelledError, isCodexExecModelCallBoundaryError, isCodexExecProcessError, isCodexExecTimeoutError } from "./codex.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
+import { acquireRunLock, type RunLock } from "./lock.js";
 import {
   routeTask,
   type AdapterTaskContract,
@@ -666,6 +667,13 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
   });
   if (route.status === "connection-required") return { status: "connection-required", route, activities };
   activeRoots.add(projectRoot);
+  let lock: RunLock;
+  try {
+    lock = acquireRunLock(projectRoot);
+  } catch (error) {
+    activeRoots.delete(projectRoot);
+    throw error;
+  }
   try {
     const chosen = options.adapters.find((item) => item.descriptor.id === route.recommended.id);
     if (!chosen) throw new Error("ROUTE_ADAPTER_MISSING");
@@ -888,6 +896,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       reportText: closed.reportText, row: closed.row, route, activities, commit,
     };
   } finally {
+    lock.release();
     activeRoots.delete(projectRoot);
   }
 }

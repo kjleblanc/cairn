@@ -34,3 +34,4 @@
 | 032 | 2026-07-24 | Standard | Applied | DONE | completed | Committed the Phase 2 implementation plan: eleven test-first tasks, adversarially verified against spec and code before landing | NO |
 | 033 | 2026-07-24 | Standard | Applied | DONE | completed | Watchdog timers and process-tree kill stop a wedged Codex child honestly as ADAPTER_TIMED_OUT, naming the already-spent cost | NO |
 | 034 | 2026-07-24 | Standard | Applied | DONE | completed | The owner can stop a running worker through the adapter seam, closing honestly as CANCELLED_BY_OWNER with the already-spent cost named | NO |
+| 035 | 2026-07-24 | Standard | Applied | DONE | completed | One task at a time now holds across processes too: a self-healing cairn-run.lock file in the git common dir, never the worktree | NO |
