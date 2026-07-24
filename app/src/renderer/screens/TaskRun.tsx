@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { CodexExecDisclosure, RouteResult, SerialActivity, SerialRunResult } from "@cairn/core";
+import type { RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { ModelRoute } from "../components/ModelRoute";
@@ -15,16 +15,19 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
   // opened from one; otherwise the field starts empty as before.
   const [outcome, setOutcome] = useState(initialOutcome ?? "");
   const [route, setRoute] = useState<RouteResult | null>(null);
-  const [disclosure, setDisclosure] = useState<CodexExecDisclosure | null>(null);
+  const [disclosure, setDisclosure] = useState<WorkerDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
   const [activities, setActivities] = useState<SerialActivity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const [sessionWorker, setSessionWorker] = useState(false);
-  const codexRoute = route?.status === "ready" && route.recommended.id === "codex-exec";
-  const resultCodex = result && result.status !== "connection-required" && result.route.recommended.id === "codex-exec";
-  const codexish = codexRoute || Boolean(resultCodex) || sessionWorker;
+  // The lane is a real worker whenever the routed adapter is not the offline
+  // demo — a capability check, never an adapter-id check, so a third adapter
+  // needs no renderer change.
+  const workerRoute = route?.status === "ready" && !route.recommended.capabilities.includes("offline-demo");
+  const resultWorker = result && result.status !== "connection-required" && !result.route.recommended.capabilities.includes("offline-demo");
+  const workerish = workerRoute || Boolean(resultWorker) || sessionWorker;
   const realCallStopped = result?.status === "stopped" && result.reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
 
   useEffect(() => {
@@ -68,9 +71,9 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
 
   async function run() {
     if (!route || route.status !== "ready") return;
-    if (codexRoute && !realCallConfirmed) { setError("Confirm the displayed real-call boundary before starting Codex Exec."); return; }
+    if (workerRoute && !realCallConfirmed) { setError(`Confirm the displayed real-call boundary before starting ${route.recommended.label}.`); return; }
     setError(null); setActivities([]); setPhase("running");
-    const response = await cairn.taskRun(dir, outcome.trim(), route.recommended.id, codexRoute && realCallConfirmed, disclosure ?? undefined);
+    const response = await cairn.taskRun(dir, outcome.trim(), route.recommended.id, workerRoute && realCallConfirmed, disclosure ?? undefined);
     if (!response.ok) { setError(response.message); setPhase("route"); return; }
     if (response.value.status === "connection-required") {
       setRoute(response.value.route);
@@ -141,12 +144,12 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
                   checked={realCallConfirmed}
                   onChange={(event) => setRealCallConfirmed(event.target.checked)}
                 />
-                <span>I confirm this one real Codex Exec call.</span>
+                <span>{`I confirm this one real ${route.recommended.label} call.`}</span>
               </label>
             </Card>
           ) : null}
           <div className="row">
-            <Pill kind="primary" disabled={codexRoute && !realCallConfirmed} onClick={() => void run()}>{codexRoute ? "Start one real Codex Exec call" : "Run offline demonstration"}</Pill>
+            <Pill kind="primary" disabled={workerRoute && !realCallConfirmed} onClick={() => void run()}>{workerRoute ? `Start one real ${route.recommended.label} call` : "Run offline demonstration"}</Pill>
             <Pill kind="quiet" onClick={tryAnother}>Edit the task</Pill>
           </div>
         </>
@@ -154,7 +157,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
 
       {phase === "running" ? (
         <Card title="route → run → check → result">
-          <p>{codexish
+          <p>{workerish
             ? "Cairn is running one confirmed ephemeral workspace-scoped Codex Exec request. There is no retry, continuation, or parallel run."
             : "The deterministic adapter is exercising the same core serial coordinator used by the CLI."}</p>
           <ActivityFeed activities={activities} />
@@ -168,18 +171,18 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
         <>
           <Card title={result.status === "done" ? "verified" : "stopped safely"}>
             <h2>{result.status === "done"
-              ? codexish ? "Verified real Codex Exec result" : "Verified offline result"
+              ? workerish ? "Verified real Codex Exec result" : "Verified offline result"
               : realCallStopped
                 ? "Stopped before the real model call"
                 : "Adapter stopped safely"}</h2>
             <p><strong>{realCallStopped
               ? "Real Codex Exec process: not started"
-              : codexish
+              : workerish
                 ? `Codex Exec task: ${result.status === "done" ? "verified" : "stopped"}`
                 : `Routing demonstration: ${result.status === "done" ? "verified" : "stopped"}`}</strong></p>
-            <p><strong>Requested product change: {codexish ? result.status === "done" ? "completed and verified" : "not verified" : "not attempted"}</strong></p>
+            <p><strong>Requested product change: {workerish ? result.status === "done" ? "completed and verified" : "not verified" : "not attempted"}</strong></p>
             <p><strong>Milestone movement: {result.row.moved}</strong></p>
-            <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {codexish
+            <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {workerish
               ? result.status === "done"
                 ? "Cairn verified the worker's changes and authored the task records itself."
                 : "Cairn stopped this task safely and authored honest STOPPED records. Retained evidence needs inspection before another task."

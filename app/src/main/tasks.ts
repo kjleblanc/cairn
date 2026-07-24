@@ -10,8 +10,8 @@ import {
   projectStatus,
   runSerialTask,
   type CodexExecStatus,
-  type CodexExecDisclosure,
   type TaskAdapter,
+  type WorkerDisclosure,
 } from "@cairn/core";
 import type { Result, RunSessionSnapshot, TaskActivityEvent } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
@@ -41,7 +41,7 @@ export function activeTaskRuns(): { dirs: string[]; cancelAll(): void; settled()
   };
 }
 
-function sameDisclosure(actual: CodexExecDisclosure | undefined, expected: CodexExecDisclosure): boolean {
+function sameDisclosure(actual: WorkerDisclosure | undefined, expected: WorkerDisclosure): boolean {
   return Boolean(actual) && actual?.provider === expected.provider && actual.model === expected.model &&
     actual.project === expected.project && actual.task === expected.task && actual.data === expected.data &&
     actual.quota === expected.quota;
@@ -72,13 +72,17 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const value = route.status === "connection-required" && detected.status
         ? { ...route, reason: codexExecConnectionReason(detected.status) }
         : route;
+      // The disclosure comes from the ROUTED adapter's own seam, not a codex-only
+      // ternary: any adapter that makes a real call declares its own six facts,
+      // and an offline (no-disclosure) adapter simply returns undefined.
+      const routed = value.status === "ready"
+        ? detected.adapters.find((adapter) => adapter.descriptor.id === value.recommended.id)
+        : undefined;
       return {
         ok: true,
         value: {
           route: value,
-          disclosure: value.status === "ready" && value.recommended.id === "codex-exec"
-            ? codexExecDisclosure(dir, outcome)
-            : undefined,
+          disclosure: routed?.disclosure?.(outcome),
         },
       };
     } catch (error) {
@@ -87,7 +91,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     }
   });
 
-  ipcMain.handle("task:run", async (_event, dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: CodexExecDisclosure) => {
+  ipcMain.handle("task:run", async (_event, dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: WorkerDisclosure) => {
     if (running.has(dir)) return { ok: false, message: "SERIAL_RUN_ACTIVE: One task is already running for this project." } satisfies Result<never>;
     if (!mock && (realCallConfirmed !== true || !sameDisclosure(disclosure, codexExecDisclosure(dir, outcome)))) {
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;

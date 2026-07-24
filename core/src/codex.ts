@@ -2,10 +2,13 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, appendFileSync, constants, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, relative, resolve } from "node:path";
-import type {
-  AdapterTaskContract,
-  CodexExecResult,
-  TaskAdapter,
+import {
+  WorkerBoundaryError,
+  WorkerProcessError,
+  type AdapterTaskContract,
+  type TaskAdapter,
+  type WorkerDisclosure,
+  type WorkerRunResult,
 } from "./routing.js";
 
 export interface CodexExecStatus {
@@ -82,7 +85,7 @@ export function authorizeCodexExec(workspaceRoot: string, requestedOutcome: stri
   return Object.freeze({ ...codexExecDisclosure(workspaceRoot, requestedOutcome), approved: true as const });
 }
 
-export class CodexExecModelCallBoundaryError extends Error {
+export class CodexExecModelCallBoundaryError extends WorkerBoundaryError {
   readonly code = REAL_MODEL_CALL_NOT_AUTHORIZED;
 
   constructor() {
@@ -99,14 +102,14 @@ export type CodexExecProcessFailureCode = "CODEX_EXEC_SPAWN_FAILED" | "CODEX_EXE
 
 /**
  * Task 004 stopped with one opaque rejection and no retained cause. Process
- * failures now carry a precise code and the local debug evidence path.
+ * failures now carry a precise code and the local debug evidence path. This is
+ * the codex specialization of the universal `WorkerProcessError` (failure
+ * "process"); its (code, debugPath) constructor is unchanged so existing
+ * positional callers and tests keep working.
  */
-export class CodexExecProcessError extends Error {
-  constructor(
-    readonly code: CodexExecProcessFailureCode,
-    readonly debugPath: string | null,
-  ) {
-    super(`${code}: the Codex Exec process did not return a result.`);
+export class CodexExecProcessError extends WorkerProcessError {
+  constructor(code: CodexExecProcessFailureCode, debugPath: string | null) {
+    super("process", code, debugPath);
     this.name = "CodexExecProcessError";
   }
 }
@@ -118,15 +121,14 @@ export function isCodexExecProcessError(value: unknown): value is CodexExecProce
 export type CodexExecTimeoutKind = "inactivity" | "absolute";
 
 /** A wedged CLI used to hold a task open forever (Phase 2). The watchdog
- * kills the whole process tree and rejects with the timer that fired. */
-export class CodexExecTimeoutError extends Error {
-  readonly code = "CODEX_EXEC_TIMED_OUT";
-
+ * kills the whole process tree and rejects with the timer that fired. The
+ * codex specialization of `WorkerProcessError` (failure "timeout"). */
+export class CodexExecTimeoutError extends WorkerProcessError {
   constructor(
     readonly timeoutKind: CodexExecTimeoutKind,
-    readonly debugPath: string | null,
+    debugPath: string | null,
   ) {
-    super(`CODEX_EXEC_TIMED_OUT: the Codex Exec process was stopped by the ${timeoutKind} watchdog.`);
+    super("timeout", "CODEX_EXEC_TIMED_OUT", debugPath);
     this.name = "CodexExecTimeoutError";
   }
 }
@@ -135,12 +137,11 @@ export function isCodexExecTimeoutError(value: unknown): value is CodexExecTimeo
   return value instanceof CodexExecTimeoutError;
 }
 
-/** The owner pressed stop. The tree is killed the same way as a timeout. */
-export class CodexExecCancelledError extends Error {
-  readonly code = "CODEX_EXEC_CANCELLED";
-
-  constructor(readonly debugPath: string | null) {
-    super("CODEX_EXEC_CANCELLED: the owner stopped the Codex Exec process.");
+/** The owner pressed stop. The tree is killed the same way as a timeout. The
+ * codex specialization of `WorkerProcessError` (failure "cancelled"). */
+export class CodexExecCancelledError extends WorkerProcessError {
+  constructor(debugPath: string | null) {
+    super("cancelled", "CODEX_EXEC_CANCELLED", debugPath);
     this.name = "CodexExecCancelledError";
   }
 }
@@ -708,7 +709,6 @@ export function createCodexExecAdapter(
   const cwd = resolve(workspaceRoot);
   const connected = status.installed && status.connected;
   return {
-    kind: "codex-exec",
     descriptor: {
       id: CODEX_EXEC_ADAPTER_ID,
       label: "Codex Exec",
@@ -718,29 +718,37 @@ export function createCodexExecAdapter(
       capabilities: ["serial-task"],
       priority: 100,
     },
-    async run(contract, signal): Promise<CodexExecResult> {
+    disclosure(outcome: string): WorkerDisclosure {
+      return codexExecDisclosure(cwd, outcome);
+    },
+    async run(contract, signal): Promise<WorkerRunResult> {
       const request = prepareCodexExecRequest(cwd, contract);
       if (!authorizationMatches(cwd, contract, authorization)) {
         throw new CodexExecModelCallBoundaryError();
       }
       const result = await processRunner.run(request, signal);
+      // Translate the bounded process evidence into the universal result: one
+      // completed status (exit 0 and a completed terminal event), the worker's
+      // final message for claims parsing, and the nine numeric evidence fields.
+      const status: WorkerRunResult["status"] =
+        result.exitCode === 0 && result.terminalEvent === "turn.completed" ? "completed" : "failed";
       return {
-        kind: "codex-exec-result",
+        kind: "worker-result/v1",
         taskNumber: contract.taskNumber,
         requestedOutcomeSha256: contract.requestedOutcomeSha256,
-        processCount: 1,
-        exitCode: result.exitCode,
-        terminalEvent: result.terminalEvent,
-        inputTokens: result.inputTokens,
-        cachedInputTokens: result.cachedInputTokens,
-        outputTokens: result.outputTokens,
-        reasoningOutputTokens: result.reasoningOutputTokens,
-        agentMessageCount: result.agentMessageCount,
-        commandExecutionCount: result.commandExecutionCount,
-        fileChangeCount: result.fileChangeCount,
-        failedToolItemCount: result.failedToolItemCount,
+        status,
         claimsText: result.finalMessage,
-        statement: "One Codex Exec process returned bounded completion evidence.",
+        evidence: {
+          exitCode: result.exitCode,
+          inputTokens: result.inputTokens,
+          cachedInputTokens: result.cachedInputTokens,
+          outputTokens: result.outputTokens,
+          reasoningOutputTokens: result.reasoningOutputTokens,
+          agentMessageCount: result.agentMessageCount,
+          commandExecutionCount: result.commandExecutionCount,
+          fileChangeCount: result.fileChangeCount,
+          failedToolItemCount: result.failedToolItemCount,
+        },
       };
     },
   };

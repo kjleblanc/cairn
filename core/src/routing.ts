@@ -32,33 +32,54 @@ export interface AdapterTaskContract {
   stopConditions: readonly string[];
 }
 
-export interface OfflineDemoResult {
-  kind: "offline-demo-result";
+/**
+ * The one result shape every adapter returns — codex, offline demo, or a
+ * future third adapter alike. `evidence` is a bounded numeric map the adapter
+ * chooses; `claimsText` is the worker's final message (parsed for its
+ * cairn-claims fence) or null. The serial envelope validates this exact shape
+ * and never special-cases which adapter produced it.
+ */
+export interface WorkerRunResult {
+  kind: "worker-result/v1";
   taskNumber: number;
   requestedOutcomeSha256: string;
-  statement: "The offline route completed without attempting the requested product change.";
-}
-
-export interface CodexExecResult {
-  kind: "codex-exec-result";
-  taskNumber: number;
-  requestedOutcomeSha256: string;
-  processCount: 1;
-  exitCode: number;
-  terminalEvent: "turn.completed" | "turn.failed" | "error" | "missing";
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  reasoningOutputTokens: number;
-  agentMessageCount: number;
-  commandExecutionCount: number;
-  fileChangeCount: number;
-  failedToolItemCount: number;
+  status: "completed" | "failed";
   claimsText: string | null;
-  statement: "One Codex Exec process returned bounded completion evidence.";
+  evidence: Record<string, number>;
 }
 
-export type TaskAdapterResult = OfflineDemoResult | CodexExecResult;
+/** The six confirmation facts an adapter that makes a real call must disclose. */
+export interface WorkerDisclosure {
+  provider: string;
+  model: string;
+  project: string;
+  task: string;
+  data: string;
+  quota: string;
+}
+
+/** An adapter stopped at its own real-call boundary before doing paid work. */
+export class WorkerBoundaryError extends Error {
+  readonly boundary = "real-call" as const;
+}
+
+export type WorkerFailureKind = "process" | "timeout" | "cancelled";
+
+/**
+ * The worker process did not return a verified result. `failure` tells the
+ * envelope how to close: `timeout` → ADAPTER_TIMED_OUT, `cancelled` →
+ * CANCELLED_BY_OWNER, `process` → ADAPTER_FAILED. `code` and `debugPath` are
+ * the adapter's own precise diagnostics.
+ */
+export class WorkerProcessError extends Error {
+  constructor(
+    readonly failure: WorkerFailureKind,
+    readonly code: string,
+    readonly debugPath: string | null,
+  ) {
+    super(`${code}: the worker process did not return a verified result.`);
+  }
+}
 
 /**
  * The only execution seam in the serial foundation. An adapter receives a
@@ -66,9 +87,9 @@ export type TaskAdapterResult = OfflineDemoResult | CodexExecResult;
  * process, Git handle, network client, credential, tool, or delegation hook.
  */
 export interface TaskAdapter {
-  kind: "offline-demo" | "codex-exec";
   descriptor: AdapterDescriptor;
-  run(contract: AdapterTaskContract, signal?: AbortSignal): Promise<TaskAdapterResult>;
+  run(contract: AdapterTaskContract, signal?: AbortSignal): Promise<WorkerRunResult>;
+  disclosure?(outcome: string): WorkerDisclosure;
 }
 
 export interface RouteRequest {
@@ -133,7 +154,6 @@ export function routeTask(request: RouteRequest, adapters: readonly TaskAdapter[
 /** Explicit demo-only transport. It is deterministic and is not a local model. */
 export function createOfflineDemoAdapter(): TaskAdapter {
   return {
-    kind: "offline-demo",
     descriptor: {
       id: "cairn-offline-demo",
       label: "Cairn offline demonstration",
@@ -143,12 +163,14 @@ export function createOfflineDemoAdapter(): TaskAdapter {
       capabilities: ["serial-task", "offline-demo"],
       priority: 0,
     },
-    async run(contract) {
+    async run(contract): Promise<WorkerRunResult> {
       return {
-        kind: "offline-demo-result",
+        kind: "worker-result/v1",
         taskNumber: contract.taskNumber,
         requestedOutcomeSha256: contract.requestedOutcomeSha256,
-        statement: "The offline route completed without attempting the requested product change.",
+        status: "completed",
+        claimsText: null,
+        evidence: {},
       };
     },
   };

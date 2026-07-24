@@ -224,11 +224,11 @@ test("missing worker claims show only bounded numeric Codex event evidence", asy
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
   await expect(win.getByText(/Stopped safely: WORKER_CLAIMS_MISSING/)).toBeVisible();
-  await expect(win.getByText(/Bounded Codex events: 1 agent messages; 2 command executions; 2 file changes; 2 failed command\/file-change items/)).toBeVisible();
+  await expect(win.getByText(/Bounded worker evidence: agentMessageCount=1; cachedInputTokens=4; commandExecutionCount=2; exitCode=0;/)).toBeVisible();
   expect(await win.locator("body").innerText()).not.toContain("sk-secret-event-payload");
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("WORKER_CLAIMS_MISSING");
-  expect(report).toContain("Bounded Codex events: 1 agent messages; 2 command executions; 2 file changes; 2 failed command/file-change items.");
+  expect(report).toContain("Bounded worker evidence: agentMessageCount=1; cachedInputTokens=4; commandExecutionCount=2; exitCode=0; failedToolItemCount=2; fileChangeCount=2; inputTokens=20; outputTokens=6; reasoningOutputTokens=2.");
   expect(report).not.toContain("sk-secret-event-payload");
   expect(existsSync(join(proj, "visible.txt"))).toBe(false);
   await app.close();

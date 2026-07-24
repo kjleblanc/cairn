@@ -2,23 +2,22 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { isCodexExecCancelledError, isCodexExecModelCallBoundaryError, isCodexExecProcessError, isCodexExecTimeoutError } from "./codex.js";
 import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
 import { composeWorkerReport, composeWorkerRowSummary, type ComposedRecordInput } from "./records.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
 import {
   routeTask,
+  WorkerBoundaryError,
+  WorkerProcessError,
   type AdapterTaskContract,
-  type CodexExecResult,
-  type OfflineDemoResult,
   type RouteResult,
   type TaskAdapter,
+  type WorkerRunResult,
 } from "./routing.js";
 
 const OFFLINE_SUPPORTED_OUTCOME = "Demonstrate serial routing and verify honest task records without implementing the requested product change.";
-const CODEX_SUPPORTED_OUTCOME = "Run one explicitly confirmed, ephemeral, workspace-scoped Codex Exec task and verify its task records and Git result.";
-const RESULT_STATEMENT = "The offline route completed without attempting the requested product change.";
+const WORKER_SUPPORTED_OUTCOME = "Run one explicitly confirmed worker task through the connected adapter and verify its result and Git state.";
 const activeRoots = new Set<string>();
 
 export type SerialStage = "Route" | "Run" | "Check" | "Result";
@@ -189,19 +188,20 @@ function escapeLine(text: string): string {
   return text.replace(/\r?\n/g, " ").trim();
 }
 
-function briefText(contract: AdapterTaskContract): string {
+function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
-  const codex = contract.route.adapterId === "codex-exec";
-  const title = codex ? "one confirmed real Codex Exec task" : "offline serial demonstration";
-  const lane = codex
-    ? "one explicitly confirmed OpenAI Codex Exec call; the model may make in-scope local workspace changes"
-    : "local, deterministic, record-only demonstration";
-  const done = codex
-    ? "DONE means the one Codex Exec process completed, the requested outcome and checks are reported, the append-only log row matches, protected starting work remains intact, and Cairn verified Git isolation and created the exact-path commit when the task started clean."
-    : "DONE means the offline route and its three records are verified. It does not mean the requested product change was implemented.";
-  const stopped = codex
-    ? "STOPPED means the call was not authorized, the model reported a stop, process evidence failed, protected work changed, or the result records could not be verified."
-    : "STOPPED means the serial demonstration or its protection checks did not complete.";
+  const label = contract.route.adapterLabel;
+  const provider = contract.route.provider;
+  const title = demo ? "offline serial demonstration" : `one confirmed real ${label} task`;
+  const lane = demo
+    ? "local, deterministic, record-only demonstration"
+    : `one explicitly confirmed ${provider} ${label} call; the model may make in-scope local workspace changes`;
+  const done = demo
+    ? "DONE means the offline route and its three records are verified. It does not mean the requested product change was implemented."
+    : `DONE means the one ${label} process completed, the requested outcome and checks are reported, the append-only log row matches, protected starting work remains intact, and Cairn verified Git isolation and created the exact-path commit when the task started clean.`;
+  const stopped = demo
+    ? "STOPPED means the serial demonstration or its protection checks did not complete."
+    : "STOPPED means the call was not authorized, the model reported a stop, process evidence failed, protected work changed, or the result records could not be verified.";
   return `# Task ${pad(contract.taskNumber)} — ${title}
 
 Requested outcome: ${escapeLine(contract.requestedOutcome)}
@@ -241,8 +241,14 @@ ${stopped}
 `;
 }
 
-function boundedEventSummary(result: CodexExecResult): string {
-  return `Bounded Codex events: ${result.agentMessageCount} agent messages; ${result.commandExecutionCount} command executions; ${result.fileChangeCount} file changes; ${result.failedToolItemCount} failed command/file-change items.`;
+/**
+ * The one bounded-evidence line for any adapter: its numeric evidence map,
+ * sorted by key, rendered `key=value` and joined by "; ". Adapter-agnostic —
+ * codex's nine fields, a third adapter's own keys, all render the same way.
+ */
+function boundedEvidenceSummary(evidence: Record<string, number>): string {
+  const entries = Object.keys(evidence).sort().map((key) => `${key}=${evidence[key]}`);
+  return `Bounded worker evidence: ${entries.join("; ")}.`;
 }
 
 interface ProcessFailureNote {
@@ -252,14 +258,15 @@ interface ProcessFailureNote {
 
 function reportText(
   contract: AdapterTaskContract,
+  demo: boolean,
   disposition: "DONE" | "STOPPED",
   reason: SerialStopReason | null,
   commitRequested: boolean,
-  processEvidence?: CodexExecResult,
+  processEvidence?: Record<string, number>,
   processFailure?: ProcessFailureNote,
 ): string {
   const taskNumber = contract.taskNumber;
-  const codex = contract.route.adapterId === "codex-exec";
+  const codex = !demo;
   if (disposition === "DONE") {
     return `# Task ${pad(taskNumber)} — offline serial demonstration report
 
@@ -317,7 +324,7 @@ Disposition: **STOPPED**
   const title = codex ? "Codex Exec adapter report" : "offline serial demonstration report";
   const subject = codex ? "Codex Exec route" : "serial demonstration";
   const boundedEvidence = codex && processEvidence
-    ? `\n## Bounded process evidence\n\n${boundedEventSummary(processEvidence)} Cairn retained only the worker's final message (for claims verification) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
+    ? `\n## Bounded process evidence\n\n${boundedEvidenceSummary(processEvidence)} Cairn retained only the worker's final message (for claims verification) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
     : "";
   const paidStarted = codex && (reason === "ADAPTER_TIMED_OUT" || reason === "CANCELLED_BY_OWNER");
   return `# Task ${pad(taskNumber)} — ${title}
@@ -352,9 +359,9 @@ function expectedLogLine(row: LogRow): string {
   return `| ${cleanCell(row.task)} | ${cleanCell(row.date)} | ${cleanCell(row.lane)} | ${cleanCell(row.mode)} | ${cleanCell(row.outcome)} | ${cleanCell(row.decision)} | ${cleanCell(row.summary)} | ${cleanCell(row.moved)} |\n`;
 }
 
-function rowFor(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null): LogRow {
-  const codexBoundary = contract.route.adapterId === "codex-exec" && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
-  const codex = contract.route.adapterId === "codex-exec";
+function rowFor(contract: AdapterTaskContract, demo: boolean, disposition: "DONE" | "STOPPED", reason: SerialStopReason | null): LogRow {
+  const label = contract.route.adapterLabel;
+  const workerBoundary = !demo && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED";
   return {
     task: pad(contract.taskNumber),
     date: new Date().toISOString().slice(0, 10),
@@ -362,10 +369,10 @@ function rowFor(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", 
     mode: "Applied",
     outcome: disposition,
     decision: disposition === "DONE" ? "completed" : "stopped",
-    summary: codexBoundary
-      ? "Codex Exec was installed and connected; Cairn stopped before the real process or model call."
-      : codex
-        ? `Codex Exec stopped safely (${reason}); requested change was not verified.`
+    summary: workerBoundary
+      ? `${label} was installed and connected; Cairn stopped before the real process or model call.`
+      : !demo
+        ? `${label} stopped safely (${reason}); requested change was not verified.`
       : disposition === "DONE"
         ? "Offline routing demonstration verified; requested product change not attempted."
         : `Offline routing demonstration stopped safely (${reason}); requested product change not attempted.`,
@@ -373,59 +380,59 @@ function rowFor(contract: AdapterTaskContract, disposition: "DONE" | "STOPPED", 
   };
 }
 
-function validateAdapterResult(value: unknown, contract: AdapterTaskContract): value is OfflineDemoResult {
-  try {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return false;
-    const keys = Reflect.ownKeys(value);
-    const expected = ["kind", "requestedOutcomeSha256", "statement", "taskNumber"].sort();
-    if (keys.some((key) => typeof key !== "string") || !sameLines((keys as string[]).sort(), expected)) return false;
-    const descriptors = Object.getOwnPropertyDescriptors(value);
-    for (const key of expected) {
-      const descriptor = descriptors[key];
-      if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return false;
-    }
-    return descriptors.kind.value === "offline-demo-result" &&
-      descriptors.taskNumber.value === contract.taskNumber &&
-      descriptors.requestedOutcomeSha256.value === contract.requestedOutcomeSha256 &&
-      descriptors.statement.value === RESULT_STATEMENT;
-  } catch {
-    return false;
+/**
+ * The evidence map is a plain object of at most 24 bounded numeric entries:
+ * string keys ≤ 40 chars, values finite numbers with |v| ≤ 1e12. Negatives
+ * are allowed — `exitCode: -1` is the honest translation of a child that
+ * closed without a numeric exit code; count-vs-sign semantics belong to the
+ * adapter that produced the key, and the envelope never trusts evidence as
+ * ground truth anyway. A NaN value or a 25-entry map fails closed.
+ */
+function validEvidence(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length > 24) return false;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of keys) {
+    if (typeof key !== "string" || key.length > 40) return false;
+    const descriptor = descriptors[key];
+    if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return false;
+    const entry = descriptor.value;
+    if (typeof entry !== "number" || !Number.isFinite(entry) || Math.abs(entry) > 1_000_000_000_000) return false;
   }
+  return true;
 }
 
-function validateCodexResult(value: unknown, contract: AdapterTaskContract): value is CodexExecResult {
+/**
+ * The ONE result validator every adapter passes through — codex, offline demo,
+ * a future third adapter alike. Exactly six own string keys, an ordinary
+ * object prototype, all data descriptors (no getter/setter can run), the
+ * literal kind and matching task identity, a completed/failed status, a
+ * null-or-capped claims string, and a bounded numeric evidence map. All the
+ * hostile-object paranoia the two old validators carried, in one place.
+ */
+function validateWorkerResult(value: unknown, contract: AdapterTaskContract): value is WorkerRunResult {
   try {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return false;
     const keys = Reflect.ownKeys(value);
-    const expected = [
-      "agentMessageCount", "cachedInputTokens", "claimsText", "commandExecutionCount", "exitCode",
-      "failedToolItemCount", "fileChangeCount", "inputTokens", "kind", "outputTokens",
-      "processCount", "reasoningOutputTokens", "requestedOutcomeSha256", "statement",
-      "taskNumber", "terminalEvent",
-    ].sort();
+    const expected = ["claimsText", "evidence", "kind", "requestedOutcomeSha256", "status", "taskNumber"];
     if (keys.some((key) => typeof key !== "string") || !sameLines((keys as string[]).sort(), expected)) return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     for (const key of expected) {
       const descriptor = descriptors[key];
       if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return false;
     }
-    const terminalEvents = new Set(["turn.completed", "turn.failed", "error", "missing"]);
-    const counts = ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens"];
-    const eventCounts = ["agentMessageCount", "commandExecutionCount", "fileChangeCount", "failedToolItemCount"];
-    return descriptors.kind.value === "codex-exec-result" &&
+    const claimsText = descriptors.claimsText.value;
+    return descriptors.kind.value === "worker-result/v1" &&
       descriptors.taskNumber.value === contract.taskNumber &&
       descriptors.requestedOutcomeSha256.value === contract.requestedOutcomeSha256 &&
-      descriptors.processCount.value === 1 &&
-      Number.isInteger(descriptors.exitCode.value) &&
-      terminalEvents.has(descriptors.terminalEvent.value) &&
-      counts.every((key) => Number.isFinite(descriptors[key].value) && descriptors[key].value >= 0) &&
-      eventCounts.every((key) => Number.isInteger(descriptors[key].value) && descriptors[key].value >= 0) &&
-      (descriptors.claimsText.value === null || typeof descriptors.claimsText.value === "string") &&
-      descriptors.statement.value === "One Codex Exec process returned bounded completion evidence.";
+      (descriptors.status.value === "completed" || descriptors.status.value === "failed") &&
+      (claimsText === null || (typeof claimsText === "string" && claimsText.length <= 262_144)) &&
+      validEvidence(descriptors.evidence.value);
   } catch {
     return false;
   }
@@ -470,7 +477,7 @@ function cairnWorkerRecords(
   claims: WorkerClaims | null,
   protectedValid: boolean,
   commit: { status: "created" | "skipped"; reason: string } | null,
-  processEvidence: CodexExecResult | null,
+  evidence: Record<string, number> | null,
 ): { reportText: string; row: LogRow; verified: boolean } {
   const input: ComposedRecordInput = {
     taskNumber: contract.taskNumber,
@@ -481,7 +488,7 @@ function cairnWorkerRecords(
     filesChanged: scanChangedPaths(root).slice(0, 100),
     protectedIntact: protectedValid,
     commit,
-    evidenceSummary: processEvidence ? boundedEventSummary(processEvidence) : null,
+    evidenceSummary: evidence ? boundedEvidenceSummary(evidence) : null,
     processFailure: null,
     paidCallStarted: true,
   };
@@ -500,7 +507,7 @@ function cairnWorkerRecords(
   appendLogRow(root, row);
   const actualLog = readFileSync(paths.log(root), "utf8");
   const checks = {
-    brief: readFileSync(paths.brief(root, contract.taskNumber), "utf8") === briefText(contract),
+    brief: readFileSync(paths.brief(root, contract.taskNumber), "utf8") === briefText(contract, false),
     report: readFileSync(paths.report(root, contract.taskNumber), "utf8") === report,
     log: actualLog === start.logText + expectedLogLine(row),
     row: parseLog(root).filter((item) => item.task === pad(contract.taskNumber)).length === 1,
@@ -629,20 +636,21 @@ function recordCommit(root: string, taskNumber: number, start: GitSnapshot, owne
 function writeClosedRecords(
   root: string,
   contract: AdapterTaskContract,
+  demo: boolean,
   disposition: "DONE" | "STOPPED",
   reason: SerialStopReason | null,
   start: GitSnapshot,
   commitRequested: boolean,
-  processEvidence?: CodexExecResult,
+  processEvidence?: Record<string, number>,
   processFailure?: ProcessFailureNote,
 ): { reportText: string; row: LogRow; verified: boolean } {
-  const report = reportText(contract, disposition, reason, commitRequested, processEvidence, processFailure);
+  const report = reportText(contract, demo, disposition, reason, commitRequested, processEvidence, processFailure);
   writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
-  const row = rowFor(contract, disposition, reason);
+  const row = rowFor(contract, demo, disposition, reason);
   appendLogRow(root, row);
   const actualLog = readFileSync(paths.log(root), "utf8");
   const checks = {
-    brief: readFileSync(paths.brief(root, contract.taskNumber), "utf8") === briefText(contract),
+    brief: readFileSync(paths.brief(root, contract.taskNumber), "utf8") === briefText(contract, demo),
     report: readFileSync(paths.report(root, contract.taskNumber), "utf8") === report,
     log: actualLog === start.logText + expectedLogLine(row),
     row: parseLog(root).filter((item) => item.task === pad(contract.taskNumber)).length === 1,
@@ -654,25 +662,27 @@ function writeClosedRecords(
 function writeSafetyRecordsWhenUnclaimed(
   root: string,
   contract: AdapterTaskContract,
+  demo: boolean,
   reason: SerialStopReason,
   start: GitSnapshot,
   commitRequested: boolean,
-  processEvidence?: CodexExecResult,
+  processEvidence?: Record<string, number>,
   processFailure?: ProcessFailureNote,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   if (existsSync(paths.report(root, contract.taskNumber))) return null;
   if (readFileSync(paths.log(root), "utf8") !== start.logText) return null;
-  return writeClosedRecords(root, contract, "STOPPED", reason, start, commitRequested, processEvidence, processFailure);
+  return writeClosedRecords(root, contract, demo, "STOPPED", reason, start, commitRequested, processEvidence, processFailure);
 }
 
 function replaceDoneRecordsWithStopped(
   root: string,
   contract: AdapterTaskContract,
+  demo: boolean,
   start: GitSnapshot,
   commitRequested: boolean,
   done: { reportText: string; row: LogRow },
   reason: SerialStopReason = "RECORD_VERIFICATION_FAILED",
-  processEvidence?: CodexExecResult,
+  processEvidence?: Record<string, number>,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   const reportPath = paths.report(root, contract.taskNumber);
   const currentReport = readFileSync(reportPath, "utf8");
@@ -681,8 +691,8 @@ function replaceDoneRecordsWithStopped(
     return null;
   }
 
-  const stoppedReport = reportText(contract, "STOPPED", reason, commitRequested, processEvidence);
-  const stoppedRow = rowFor(contract, "STOPPED", reason);
+  const stoppedReport = reportText(contract, demo, "STOPPED", reason, commitRequested, processEvidence);
+  const stoppedRow = rowFor(contract, demo, "STOPPED", reason);
   writeFileSync(reportPath, stoppedReport, "utf8");
   writeFileSync(paths.log(root), start.logText + expectedLogLine(stoppedRow), "utf8");
 
@@ -719,7 +729,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
   try {
     const chosen = options.adapters.find((item) => item.descriptor.id === route.recommended.id);
     if (!chosen) throw new Error("ROUTE_ADAPTER_MISSING");
-    const codex = chosen.kind === "codex-exec";
+    const demo = chosen.descriptor.capabilities.includes("offline-demo");
     const start = snapshot(projectRoot);
     const taskNumber = nextTaskNumber(projectRoot);
     mkdirSync(paths.tasks(projectRoot), { recursive: true });
@@ -734,7 +744,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       taskNumber,
       requestedOutcome: outcome.trim(),
       requestedOutcomeSha256: sha256(outcome.trim()),
-      supportedOutcome: codex ? CODEX_SUPPORTED_OUTCOME : OFFLINE_SUPPORTED_OUTCOME,
+      supportedOutcome: demo ? OFFLINE_SUPPORTED_OUTCOME : WORKER_SUPPORTED_OUTCOME,
       lane: "Standard",
       route: {
         adapterId: route.recommended.id,
@@ -749,64 +759,66 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         dirty: start.status.length > 0,
         staged: start.staged.length > 0,
       },
-      checks: codex ? [
-        "Confirm exactly one Codex Exec process returns a completed JSONL terminal event.",
-        "Confirm the worker's final message carries one readable cairn-claims block and the append-only log gains one matching Cairn-authored row.",
-        "Confirm protected starting work is byte-identical and Cairn creates one exact-path local commit for a clean-start DONE result.",
-      ] : [
+      checks: demo ? [
         "Validate the adapter result against the exact fixed schema.",
         "Confirm only the three owned records changed beyond the protected starting state.",
         "Confirm one terminal disposition and one append-only log row.",
+      ] : [
+        `Confirm exactly one ${route.recommended.label} worker returns one completed result with bounded numeric evidence.`,
+        "Confirm the worker's final message carries one readable cairn-claims block and the append-only log gains one matching Cairn-authored row.",
+        "Confirm protected starting work is byte-identical and Cairn creates one exact-path local commit for a clean-start DONE result.",
       ],
-      stopConditions: codex ? [
-        "A real Codex Exec process or model call would start without separate authorization.",
-        "The process fails, returns invalid bounded evidence, returns no readable claims, or claims STOPPED.",
+      stopConditions: demo ? [
+        "The adapter fails or returns an invalid value.",
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
       ] : [
-        "The adapter fails or returns an invalid value.",
+        "A real worker process or model call would start without separate authorization.",
+        "The process fails, returns invalid bounded evidence, returns no readable claims, or claims STOPPED.",
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
       ],
     };
-    const contractMarkdown = briefText(contract);
+    const contractMarkdown = briefText(contract, demo);
     writeFileSync(paths.brief(projectRoot, taskNumber), contractMarkdown, { encoding: "utf8", flag: "wx" });
 
     emit(activities, options.events, {
       stage: "Run",
       state: "working",
-      detail: codex
-        ? "Running one confirmed ephemeral workspace-scoped Codex Exec request."
-        : "Running the deterministic offline demonstration.",
+      detail: demo
+        ? "Running the deterministic offline demonstration."
+        : `Running one confirmed ephemeral workspace-scoped ${contract.route.adapterLabel} request.`,
     });
     let adapterValue: unknown;
     try {
       adapterValue = await chosen.run(freezeContract(contract), options.signal);
     } catch (error) {
-      const reason: SerialStopReason = isCodexExecModelCallBoundaryError(error)
+      // The catch keys only on the UNIVERSAL error classes: a boundary stop is
+      // REAL_MODEL_CALL_NOT_AUTHORIZED; a process error closes by its `failure`
+      // kind (timeout → ADAPTER_TIMED_OUT, cancelled → CANCELLED_BY_OWNER,
+      // process → ADAPTER_FAILED); anything else is ADAPTER_FAILED.
+      const reason: SerialStopReason = error instanceof WorkerBoundaryError
         ? "REAL_MODEL_CALL_NOT_AUTHORIZED"
-        : isCodexExecTimeoutError(error)
-          ? "ADAPTER_TIMED_OUT"
-          : isCodexExecCancelledError(error)
-            ? "CANCELLED_BY_OWNER"
-            : "ADAPTER_FAILED";
-      const processFailure: ProcessFailureNote | undefined = isCodexExecProcessError(error)
+        : error instanceof WorkerProcessError
+          ? error.failure === "timeout"
+            ? "ADAPTER_TIMED_OUT"
+            : error.failure === "cancelled"
+              ? "CANCELLED_BY_OWNER"
+              : "ADAPTER_FAILED"
+          : "ADAPTER_FAILED";
+      const processFailure: ProcessFailureNote | undefined = error instanceof WorkerProcessError
         ? { code: error.code, debugPath: error.debugPath }
-        : isCodexExecTimeoutError(error)
-          ? { code: error.code, debugPath: error.debugPath }
-          : isCodexExecCancelledError(error)
-            ? { code: error.code, debugPath: error.debugPath }
-            : undefined;
+        : undefined;
       emit(activities, options.events, {
         stage: "Run",
         state: "stopped",
         detail: reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
-          ? "Stopped before starting the real Codex Exec process."
+          ? `Stopped before starting the real ${contract.route.adapterLabel} process.`
           : processFailure
             ? `The adapter stopped safely (${processFailure.code}).${processFailure.debugPath ? ` Raw run evidence: ${processFailure.debugPath}` : ""}`
             : "The adapter stopped safely.",
       });
-      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, reason, start, Boolean(options.commitRecords), undefined, processFailure);
+      const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, demo, reason, start, Boolean(options.commitRecords), undefined, processFailure);
       if (!closed?.verified) {
         throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
       }
@@ -821,22 +833,22 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     emit(activities, options.events, {
       stage: "Run",
       state: "done",
-      detail: codex ? "One Codex Exec process returned bounded terminal evidence." : "The offline adapter returned one result.",
+      detail: demo ? "The offline adapter returned one result." : `One ${contract.route.adapterLabel} process returned bounded terminal evidence.`,
     });
     emit(activities, options.events, { stage: "Check", state: "working", detail: "Checking the result, records, and protected Git state." });
-    if (codex) {
-      const codexResult = validateCodexResult(adapterValue, contract) ? adapterValue : null;
-      const resultValid = codexResult !== null;
-      if (codexResult) {
-        emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEventSummary(codexResult) });
+    if (!demo) {
+      const workerResult = validateWorkerResult(adapterValue, contract) ? adapterValue : null;
+      const resultValid = workerResult !== null;
+      if (workerResult) {
+        emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEvidenceSummary(workerResult.evidence) });
       }
-      const processCompleted = codexResult?.exitCode === 0 && codexResult.terminalEvent === "turn.completed";
+      const workerCompleted = workerResult?.status === "completed";
       const protectedValid = verifyProtectedStartingPaths(projectRoot, start);
       // The worker authored no record; it speaks through one cairn-claims fence.
-      const claims = codexResult ? parseWorkerClaims(codexResult.claimsText) : null;
+      const claims = workerResult ? parseWorkerClaims(workerResult.claimsText) : null;
       const stopReason: SerialStopReason | null = !resultValid
         ? "INVALID_ADAPTER_RESULT"
-        : !processCompleted
+        : !workerCompleted
           ? "ADAPTER_FAILED"
           : !protectedValid
             ? "PROTECTED_WORK_CHANGED"
@@ -850,7 +862,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       // claims (if any) survived, keeps the retained evidence, commits nothing.
       const closeStopped = (reason: SerialStopReason): SerialRunResult => {
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${reason}.` });
-        const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, codexResult);
+        const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null);
         if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored evidence was retained without overwrite.");
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
         return {
@@ -872,10 +884,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         // A protected dirty start forbids an isolated commit: the records are
         // written but the product changes stay uncommitted for the owner.
         const commit: RecordCommit = { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
-        const records = cairnWorkerRecords(projectRoot, contract, start, "DONE", null, claims, protectedValid, commit, codexResult);
+        const records = cairnWorkerRecords(projectRoot, contract, start, "DONE", null, claims, protectedValid, commit, workerResult?.evidence ?? null);
         if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored records could not be verified.");
         emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
-        emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE — one real Codex Exec task completed and was verified." });
+        emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
         return {
           status: "done", taskNumber, disposition: "DONE",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -889,7 +901,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       const records = cairnWorkerRecords(
         projectRoot, contract, start, "DONE", null, claims, protectedValid,
         { status: "created", reason: "One exact-path commit contains the product changes and these records." },
-        codexResult,
+        workerResult?.evidence ?? null,
       );
       if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored records could not be verified.");
       const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
@@ -900,7 +912,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         // MODEL_RESULT_NOT_VERIFIED with the evidence retained.
         unstageExactPaths(projectRoot, expectedCommitSet);
         const stopped = replaceDoneRecordsWithStopped(
-          projectRoot, contract, start, Boolean(options.commitRecords), records, "MODEL_RESULT_NOT_VERIFIED", codexResult ?? undefined,
+          projectRoot, contract, demo, start, Boolean(options.commitRecords), records, "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined,
         );
         if (!stopped?.verified) throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: MODEL_RESULT_NOT_VERIFIED." });
@@ -913,14 +925,14 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         };
       }
       emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result, task records, protected work, and Cairn-owned Git result were verified." });
-      emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE — one real Codex Exec task completed and was verified." });
+      emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
       return {
         status: "done", taskNumber, disposition: "DONE",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
         reportText: records.reportText, row: records.row, route, activities, commit,
       };
     }
-    const resultValid = chosen.kind === "offline-demo" && validateAdapterResult(adapterValue, contract);
+    const resultValid = chosen.descriptor.capabilities.includes("offline-demo") && validateWorkerResult(adapterValue, contract);
     const protectedValid = verifyProtected(projectRoot, start, ownedSet);
     const stopReason: SerialStopReason | null = !resultValid
       ? "INVALID_ADAPTER_RESULT"
@@ -929,7 +941,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         : null;
     if (stopReason) {
       emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReason}.` });
-      const closed = writeClosedRecords(projectRoot, contract, "STOPPED", stopReason, start, Boolean(options.commitRecords));
+      const closed = writeClosedRecords(projectRoot, contract, demo, "STOPPED", stopReason, start, Boolean(options.commitRecords));
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReason}` });
       return {
         status: "stopped", reason: stopReason, taskNumber, disposition: "STOPPED",
@@ -938,7 +950,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         commit: { status: "skipped", reason: "Stopped tasks are retained for inspection." },
       };
     }
-    const closed = writeClosedRecords(projectRoot, contract, "DONE", null, start, Boolean(options.commitRecords));
+    const closed = writeClosedRecords(projectRoot, contract, demo, "DONE", null, start, Boolean(options.commitRecords));
     if (!closed.verified || !verifyProtected(projectRoot, start, ownedSet)) {
       // Replace the success records only when they are byte-for-byte the records
       // written above. This keeps the log and report honest without overwriting a
@@ -946,6 +958,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       const stopped = replaceDoneRecordsWithStopped(
         projectRoot,
         contract,
+        demo,
         start,
         Boolean(options.commitRecords),
         closed,

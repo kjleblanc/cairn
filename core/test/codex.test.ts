@@ -396,7 +396,7 @@ test("an unresolvable codex command rejects with a precise spawn code", async ()
 
 test("the production adapter stops before starting a real Codex Exec process", async () => {
   const adapter = createCodexExecAdapter(resolve("codex-production-fixture"), { installed: true, connected: true });
-  assert.equal(adapter.kind, "codex-exec");
+  assert.equal(adapter.descriptor.id, "codex-exec");
   assert.deepEqual(adapter.descriptor, {
     id: "codex-exec",
     label: "Codex Exec",
@@ -516,22 +516,22 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.match(requests[0].stdin, /Cairn owns the exact-path local commit/);
   assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);
   assert.deepEqual(result, {
-    kind: "codex-exec-result",
+    kind: "worker-result/v1",
     taskNumber: 33,
     requestedOutcomeSha256: "f".repeat(64),
-    processCount: 1,
-    exitCode: 0,
-    terminalEvent: "turn.completed",
-    inputTokens: 100,
-    cachedInputTokens: 20,
-    outputTokens: 30,
-    reasoningOutputTokens: 10,
-    agentMessageCount: 2,
-    commandExecutionCount: 3,
-    fileChangeCount: 4,
-    failedToolItemCount: 1,
+    status: "completed",
     claimsText: null,
-    statement: "One Codex Exec process returned bounded completion evidence.",
+    evidence: {
+      exitCode: 0,
+      inputTokens: 100,
+      cachedInputTokens: 20,
+      outputTokens: 30,
+      reasoningOutputTokens: 10,
+      agentMessageCount: 2,
+      commandExecutionCount: 3,
+      fileChangeCount: 4,
+      failedToolItemCount: 1,
+    },
   });
 });
 

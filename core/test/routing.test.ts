@@ -8,7 +8,6 @@ import {
 
 function adapter(id: string, connected: boolean, capabilities: string[], priority = 0): TaskAdapter {
   return {
-    kind: "offline-demo",
     descriptor: {
       id,
       label: id,
@@ -20,10 +19,12 @@ function adapter(id: string, connected: boolean, capabilities: string[], priorit
     },
     async run(contract) {
       return {
-        kind: "offline-demo-result",
+        kind: "worker-result/v1",
         taskNumber: contract.taskNumber,
         requestedOutcomeSha256: contract.requestedOutcomeSha256,
-        statement: "The offline route completed without attempting the requested product change.",
+        status: "completed",
+        claimsText: null,
+        evidence: {},
       };
     },
   };
@@ -70,7 +71,6 @@ test("an override is accepted only for another connected compatible candidate", 
 
 test("the explicit offline adapter remains an honest non-model demonstration", async () => {
   const demo = createOfflineDemoAdapter();
-  assert.equal(demo.kind, "offline-demo");
   assert.deepEqual(demo.descriptor, {
     id: "cairn-offline-demo",
     label: "Cairn offline demonstration",

@@ -59,10 +59,12 @@ function project(): string {
 
 function validResult(contract: Parameters<TaskAdapter["run"]>[0]) {
   return {
-    kind: "offline-demo-result" as const,
+    kind: "worker-result/v1" as const,
     taskNumber: contract.taskNumber,
     requestedOutcomeSha256: contract.requestedOutcomeSha256,
-    statement: "The offline route completed without attempting the requested product change." as const,
+    status: "completed" as const,
+    claimsText: null,
+    evidence: {},
   };
 }
 
@@ -423,29 +425,63 @@ test("a completed process with no claims fence stops WORKER_CLAIMS_MISSING", asy
   const report = readFileSync(result.reportPath, "utf8");
   assert.match(report, /WORKER_CLAIMS_MISSING/);
   assert.match(report, /The worker returned no readable claims block\./);
-  assert.match(report, /Bounded Codex events: 1 agent messages; 0 command executions; 0 file changes; 0 failed command\/file-change items/);
+  assert.match(report, /Bounded worker evidence: agentMessageCount=1; cachedInputTokens=0; commandExecutionCount=0; exitCode=0; failedToolItemCount=0; fileChangeCount=0; inputTokens=1; outputTokens=1; reasoningOutputTokens=0\./);
   assert.match(report, /no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials/);
-  assert.match(result.activities.map((activity) => activity.detail).join("\n"), /Bounded Codex events: 1 agent messages; 0 command executions; 0 file changes; 0 failed command\/file-change items/);
+  assert.match(result.activities.map((activity) => activity.detail).join("\n"), /Bounded worker evidence: agentMessageCount=1; cachedInputTokens=0; commandExecutionCount=0; exitCode=0;/);
   assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — WORKER_CLAIMS_MISSING/);
 });
 
-test("a negative bounded Codex event count fails the exact adapter schema", async () => {
-  const root = project();
-  const outcome = "Verify one bounded result";
-  const fake: CodexExecProcess = {
-    kind: "fake",
-    async run() {
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 0, fileChangeCount: -1, failedToolItemCount: 0, finalMessage: null };
+function fixtureAdapter(id: string, evidence: Record<string, number>): TaskAdapter {
+  return {
+    descriptor: { id, label: id, provider: "Fixture Provider", model: "fixture-1", connected: true, capabilities: ["serial-task"], priority: 50 },
+    async run(contract) {
+      return {
+        kind: "worker-result/v1",
+        taskNumber: contract.taskNumber,
+        requestedOutcomeSha256: contract.requestedOutcomeSha256,
+        status: "completed",
+        claimsText: null,
+        evidence,
+      } as never;
     },
   };
-  const result = await runSerialTask(root, outcome, {
-    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, outcome), fake)],
-  });
+}
 
+test("a NaN evidence value fails the universal worker-result schema", async () => {
+  const root = project();
+  const result = await runSerialTask(root, "Verify one bounded result", {
+    adapters: [fixtureAdapter("nan-worker", { bounded: Number.NaN })],
+  });
   assert.equal(result.status, "stopped");
   if (result.status !== "stopped") return;
   assert.equal(result.reason, "INVALID_ADAPTER_RESULT");
-  assert.doesNotMatch(result.reportText, /Bounded Codex events/);
+  assert.doesNotMatch(result.reportText, /Bounded worker evidence/);
+});
+
+test("an oversized 25-entry evidence map fails the universal worker-result schema", async () => {
+  const root = project();
+  const evidence: Record<string, number> = {};
+  for (let index = 0; index < 25; index += 1) evidence[`k${index}`] = index;
+  const result = await runSerialTask(root, "Verify one bounded result", {
+    adapters: [fixtureAdapter("big-worker", evidence)],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "INVALID_ADAPTER_RESULT");
+  assert.doesNotMatch(result.reportText, /Bounded worker evidence/);
+});
+
+test("a negative evidence value is honest and does not fail the schema (exitCode -1)", async () => {
+  const root = project();
+  const result = await runSerialTask(root, "Verify one bounded result", {
+    adapters: [fixtureAdapter("neg-worker", { exitCode: -1, fileChangeCount: 0 })],
+  });
+  // Negatives are allowed; with no claims fence the run stops WORKER_CLAIMS_MISSING,
+  // NOT INVALID_ADAPTER_RESULT — the evidence itself is valid.
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "WORKER_CLAIMS_MISSING");
+  assert.match(result.reportText, /Bounded worker evidence: exitCode=-1; fileChangeCount=0\./);
 });
 
 test("a dirty-start Codex result preserves owner work and remains uncommitted", async () => {
@@ -605,18 +641,24 @@ test("perfect DONE claims cannot outrank a protected-work change", async () => {
 });
 
 test("the real offline demonstration adapter never claims it attempted the product change", async () => {
-  // Guards the honest-labeling promise at its source: every fixture in the
-  // suite hardcodes this sentence, but nothing asserts the real adapter still
-  // returns it. A drift to a claim of completed work must fail here.
+  // Guards the honest-labeling promise at its source. The adapter now returns
+  // the universal worker-result with no claims text of its own — it can make no
+  // claim of work at all — and the demo lane's own report still says the product
+  // change was not attempted. A drift to a claim of completed work must fail here.
   const adapter = createOfflineDemoAdapter();
   const result = await adapter.run({
     taskNumber: 7,
     requestedOutcomeSha256: "a".repeat(64),
   } as unknown as Parameters<TaskAdapter["run"]>[0]);
-  assert.equal(result.kind, "offline-demo-result");
-  const statement = (result as { statement: string }).statement;
-  assert.equal(statement, "The offline route completed without attempting the requested product change.");
-  assert.doesNotMatch(statement, /\bimplemented\b|completed the requested product change|attempted the requested/i);
+  assert.equal(result.kind, "worker-result/v1");
+  assert.equal(result.claimsText, null);
+
+  const root = project();
+  const run = await runSerialTask(root, "Create a welcome page", { adapters: [createOfflineDemoAdapter()] });
+  assert.equal(run.status, "done");
+  if (run.status !== "done") return;
+  assert.match(run.reportText, /Requested product change: \*\*not attempted\*\*/);
+  assert.doesNotMatch(run.reportText, /\bimplemented\b|completed the requested product change|attempted the requested/i);
 });
 
 test("the offline demonstration writes only one brief, report, and log row", async () => {
@@ -790,8 +832,9 @@ test("symbol, accessor, and Proxy adapter results fail closed without invoking a
       async run(contract) {
         const base = validResult(contract) as Record<PropertyKey, unknown>;
         if (shape === "symbol") base[Symbol("hidden")] = root;
-        if (shape === "accessor") Object.defineProperty(base, "statement", {
+        if (shape === "accessor") Object.defineProperty(base, "status", {
           enumerable: true,
+          configurable: true,
           get() { accessorCalls += 1; throw new Error("must not run"); },
         });
         if (shape === "proxy") return new Proxy(base, { ownKeys() { throw new Error("must stay redacted"); } }) as never;
@@ -843,6 +886,49 @@ test("an exact record-only commit is available when the starting index is safe",
     "docs/ai-work/tasks/001-report.md",
   ]);
   assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("PHASE 4 READINESS: a synthetic third adapter reaches verified DONE with no serial.ts special-casing", async () => {
+  const root = project();
+  const synthetic: TaskAdapter = {
+    descriptor: {
+      id: "fixture-worker", label: "Fixture Worker", provider: "Fixture Provider", model: "fixture-1",
+      connected: true, capabilities: ["serial-task"], priority: 50,
+    },
+    async run(contract) {
+      writeFileSync(join(root, "visible.txt"), "fixture worker result\n");
+      return {
+        kind: "worker-result/v1",
+        taskNumber: contract.taskNumber,
+        requestedOutcomeSha256: contract.requestedOutcomeSha256,
+        status: "completed",
+        claimsText: [
+          "Done.", "", "```cairn-claims",
+          JSON.stringify({
+            disposition: "DONE", summary: "Added the visible result.",
+            changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+            howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+          }),
+          "```",
+        ].join("\n"),
+        evidence: { anythingBounded: 3 },
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", { adapters: [synthetic] });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.commit.status, "created");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Fixture Worker/);
+  assert.match(report, /Fixture Provider/);
+  assert.doesNotMatch(report, /Codex|offline demonstration/i);
+  assert.deepEqual(git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(), [
+    "docs/ai-work/LOG.md",
+    "docs/ai-work/tasks/001-brief.md",
+    "docs/ai-work/tasks/001-report.md",
+    "visible.txt",
+  ]);
 });
 
 function requireTaskNames(root: string): string[] {
