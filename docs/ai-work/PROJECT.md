@@ -12,12 +12,15 @@ itself through its own workflow.
 
 Milestone history: the first visible milestone — a real-model `cairn task`
 completing an improvement to Cairn itself, end to end — was achieved twice on
-2026-07-23 (Task 006, commit 80f7ba3, and Task 010).
+2026-07-23 (Task 006, commit 80f7ba3, and Task 010). The conductor milestone —
+reading the real project records, turning a vague request into a well-scoped
+task that dispatches and completes DONE — was achieved on 2026-07-24 in the
+owner's Bookshelf evaluation project (its task 004, commit 5b65dab; recorded
+here as Task 055).
 
-First visible milestone (current): Cairn's conductor, reading the real project
-records, turns a vague request into a well-scoped task — asking a clarifying
-question or flagging a risk when one is warranted — and that task dispatches
-and completes DONE.
+First visible milestone (current): one conversation on Cairn itself runs
+request → pushback → dispatch → verified DONE → honest explanation, with the
+conductor relaying only what the envelope verified.
 
 Route: the owner-approved phases live in
 `docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md`.
