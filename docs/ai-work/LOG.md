@@ -16,3 +16,4 @@
 | 014 | 2026-07-23 | Standard | Applied | DONE | completed | A fresh checkout passes npm test (build now precedes the mirror test) and a new ci workflow runs the suites on every push | NO |
 | 015 | 2026-07-23 | Standard | Applied | DONE | completed | Docs tell the truth: stale version prose removed for good, achieved milestone recorded, conductor destination and new milestone named | NO |
 | 016 | 2026-07-23 | Standard | Applied | DONE | completed | Committed the conductor v0 design spec: voice, pushback, OpenRouter slot, layout A, constitution draft, contract amendment, eval set | NO |
+| 017 | 2026-07-23 | Standard | Applied | DONE | completed | Committed the conductor v0 implementation plan: ten test-first tasks (018-027) from parser to contract amendment and 0.1.0 | NO |
