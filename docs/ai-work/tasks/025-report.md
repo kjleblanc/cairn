@@ -216,6 +216,23 @@ Chat.tsx`, `app/src/renderer/app.css`, and this report before staging.
 Commit: `Task 025: review fix — a chip resolves only when its message was
 sent`.
 
+### Follow-up correction
+
+Re-review caught one remaining deterministic gap: the `!response.ok` branch
+in `send()` still returned `true`, but main's `service.ts` `send()` only
+calls `appendTurn` (persisting the owner turn) *after* every `ok: false`
+early return (task already running, already answering, not connected) —
+so a refused response means the message provably never reached the
+conductor, yet the chip would still resolve. Changed that branch to
+`return false`, matching the `!trimmed || streaming` guard's semantics;
+nothing else in `send()`'s logic changed. Confirmed the branch above it
+(`inFlightRef.current !== inFlight → return true`, the "superseded by New
+conversation" case) is unrelated: by the time a response resolves `ok:
+true`, main has already persisted the owner turn synchronously before
+returning, regardless of what the renderer does afterward, so that branch
+returning `true` stays correct. Re-ran `npm run typecheck` (clean), `npm
+run test:unit` (37/37), and `npm run test:smoke` (13/13) — all green.
+
 Milestone movement: NO
 
 Disposition: DONE

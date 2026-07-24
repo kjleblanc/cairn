@@ -151,7 +151,7 @@ export function Chat({ dir, onOpenTask, onBack }: {
 
     const response = await cairn.conductorSend({ dir, conversationId: startingId, text: trimmed });
     if (inFlightRef.current !== inFlight) return true; // superseded by "New conversation" or another send meanwhile — this call still dispatched
-    if (!response.ok) { inFlightRef.current = null; setStreaming(false); setError(response.message); return true; }
+    if (!response.ok) { inFlightRef.current = null; setStreaming(false); setError(response.message); return false; } // main refused before persisting the owner turn — never reached the conductor
     if (inFlight.id === null) {
       // The response resolved before any delta raced ahead of it — adopt now.
       inFlight.id = response.value.conversationId;
