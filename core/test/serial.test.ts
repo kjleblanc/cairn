@@ -66,6 +66,13 @@ function validResult(contract: Parameters<TaskAdapter["run"]>[0]) {
   };
 }
 
+// Task 048 (the inversion): the worker authors no record; it speaks its account
+// through exactly one cairn-claims fence in its final message. Cairn parses that
+// fence and authors the report and log row itself.
+function claimsFence(claims: Record<string, unknown>): string {
+  return ["Done.", "", "```cairn-claims", JSON.stringify(claims), "```"].join("\n");
+}
+
 test("normal mode stops at connection-required without writing records", async () => {
   const root = project();
   const before = git(root, ["status", "--porcelain=v1", "--untracked-files=all"]);
@@ -178,37 +185,28 @@ test("one authorized fake Codex process completes one verified serial task", asy
     kind: "fake",
     async run() {
       calls += 1;
+      // The pre-surgery world stopped this run MODEL_RECORDS_MISSING: a worker
+      // that wrote no report/log row failed paperwork verification. Now the
+      // worker only does product work and speaks through the claims fence.
       writeFileSync(join(root, "visible.txt"), "model-authored result\n");
-      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
-        "# Task 001 report",
-        "",
-        "## Result",
-        "",
-        "Added the requested visible result and verified it.",
-        "",
-        "Milestone movement: **YES**",
-        "",
-        "Disposition: **DONE**",
-        "",
-      ].join("\n"));
-      appendLogRow(root, {
-        task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
-        outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
-      });
       assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
       assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
       return {
-        exitCode: 0,
-        terminalEvent: "turn.completed",
-        inputTokens: 200,
-        cachedInputTokens: 50,
-        outputTokens: 80,
-        reasoningOutputTokens: 20,
-        agentMessageCount: 1,
-        commandExecutionCount: 2,
-        fileChangeCount: 1,
-        failedToolItemCount: 0,
-        finalMessage: null,
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: [
+          "Done.",
+          "",
+          "```cairn-claims",
+          JSON.stringify({
+            disposition: "DONE", summary: "Added the visible result.",
+            changes: ["visible.txt — created with the requested text"],
+            checks: [{ name: "read the file back", result: "matches" }],
+            howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+          }),
+          "```",
+        ].join("\n"),
       };
     },
   };
@@ -228,6 +226,7 @@ test("one authorized fake Codex process completes one verified serial task", asy
   assert.equal(result.route.recommended.model, CODEX_EXEC_MODEL);
   assert.equal(result.commit.status, "created");
   assert.notEqual(result.commit.hash, beforeHead);
+  assert.equal(result.row.moved, "YES");
   assert.equal(readFileSync(join(root, "visible.txt"), "utf8"), "model-authored result\n");
   assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
   assert.deepEqual(git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(), [
@@ -237,6 +236,10 @@ test("one authorized fake Codex process completes one verified serial task", asy
     "visible.txt",
   ]);
   assert.match(result.reportText, /Disposition: \*\*DONE\*\*/);
+  // Cairn authored the report: it separates what Cairn itself verified from
+  // what the worker only claims.
+  assert.match(result.reportText, /## Verified by Cairn/);
+  assert.match(result.reportText, /claims, not verified by Cairn/);
   assert.match(result.activities.at(-1)?.detail ?? "", /real Codex Exec task completed/i);
 });
 
@@ -256,15 +259,6 @@ test("a confirmed exact-path commit stays DONE despite a phantom stat-dirty file
     kind: "fake",
     async run() {
       writeFileSync(join(root, "visible.txt"), "model-authored result\n");
-      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
-        "# Task 001 report", "", "## Result", "",
-        "Added the requested visible result and verified it.", "",
-        "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
-      ].join("\n"));
-      appendLogRow(root, {
-        task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
-        outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
-      });
       // Content-identical CRLF rewrite of an unrelated tracked file: invisible
       // to a content diff, but stat-dirty to `git status --porcelain`.
       writeFileSync(join(root, "phantom.txt"), "line one\r\nline two\r\n");
@@ -272,7 +266,11 @@ test("a confirmed exact-path commit stays DONE despite a phantom stat-dirty file
         exitCode: 0, terminalEvent: "turn.completed",
         inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
         agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
-        finalMessage: null,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
       };
     },
   };
@@ -321,20 +319,15 @@ test("a phantom stat-dirty start still creates the exact-path task commit", asyn
     kind: "fake",
     async run() {
       writeFileSync(join(root, "visible.txt"), "model-authored result\n");
-      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
-        "# Task 001 report", "", "## Result", "",
-        "Added the requested visible result and verified it.", "",
-        "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
-      ].join("\n"));
-      appendLogRow(root, {
-        task: "001", date: "2026-07-21", lane: "Standard", mode: "Applied",
-        outcome: "DONE", decision: "completed", summary: "Added and verified the visible result.", moved: "YES",
-      });
       return {
         exitCode: 0, terminalEvent: "turn.completed",
         inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
         agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
-        finalMessage: null,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
       };
     },
   };
@@ -371,15 +364,18 @@ test("an already-satisfied fake Codex task closes honestly without a product edi
   const fake: CodexExecProcess = {
     kind: "fake",
     async run() {
-      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
-        "# Task 001 report", "", "The requested behavior was already present and its focused checks passed.", "",
-        "Milestone movement: **NO**", "", "Disposition: **DONE**", "",
-      ].join("\n"));
-      appendLogRow(root, {
-        task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
-        outcome: "DONE", decision: "completed", summary: "Verified the already-satisfied behavior without inventing a change.", moved: "NO",
-      });
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 0, failedToolItemCount: 0, finalMessage: null };
+      // No product change: the worker verifies the already-satisfied behavior
+      // and says so honestly through its claims, milestone NO.
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 0, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Verified the already-satisfied behavior without inventing a change.",
+          changes: [], checks: [{ name: "ran the focused check", result: "already passing" }],
+          howToTry: "Re-run the existing behavior.", limitations: "None.", milestone: "NO",
+        }),
+      };
     },
   };
   const outcome = "Keep the existing verified behavior";
@@ -400,7 +396,7 @@ test("an already-satisfied fake Codex task closes honestly without a product edi
   assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
 });
 
-test("a completed Codex process with no model records stops with a precise reason", async () => {
+test("a completed process with no claims fence stops WORKER_CLAIMS_MISSING", async () => {
   const root = project();
   const beforeHead = git(root, ["rev-parse", "HEAD"]);
   let calls = 0;
@@ -408,6 +404,8 @@ test("a completed Codex process with no model records stops with a precise reaso
     kind: "fake",
     async run() {
       calls += 1;
+      // The process completes but its final message carries no cairn-claims
+      // fence, so Cairn has no readable worker account and stops honestly.
       return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 0, fileChangeCount: 0, failedToolItemCount: 0, finalMessage: null };
     },
   };
@@ -419,15 +417,16 @@ test("a completed Codex process with no model records stops with a precise reaso
   assert.equal(calls, 1);
   assert.equal(result.status, "stopped");
   if (result.status !== "stopped") return;
-  assert.equal(result.reason, "MODEL_RECORDS_MISSING");
+  assert.equal(result.reason, "WORKER_CLAIMS_MISSING");
   assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
   assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
   const report = readFileSync(result.reportPath, "utf8");
-  assert.match(report, /MODEL_RECORDS_MISSING/);
+  assert.match(report, /WORKER_CLAIMS_MISSING/);
+  assert.match(report, /The worker returned no readable claims block\./);
   assert.match(report, /Bounded Codex events: 1 agent messages; 0 command executions; 0 file changes; 0 failed command\/file-change items/);
-  assert.match(report, /retained only the worker's final message \(for claims verification\) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials/);
+  assert.match(report, /no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials/);
   assert.match(result.activities.map((activity) => activity.detail).join("\n"), /Bounded Codex events: 1 agent messages; 0 command executions; 0 file changes; 0 failed command\/file-change items/);
-  assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — MODEL_RECORDS_MISSING/);
+  assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — WORKER_CLAIMS_MISSING/);
 });
 
 test("a negative bounded Codex event count fails the exact adapter schema", async () => {
@@ -461,14 +460,16 @@ test("a dirty-start Codex result preserves owner work and remains uncommitted", 
     kind: "fake",
     async run() {
       writeFileSync(join(root, "visible.txt"), "model-authored result\n");
-      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
-        "# Task 001 report", "", "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
-      ].join("\n"));
-      appendLogRow(root, {
-        task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
-        outcome: "DONE", decision: "completed", summary: "Added a visible result.", moved: "YES",
-      });
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0, finalMessage: null };
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added a visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
     },
   };
   const result = await runSerialTask(root, "Add one visible result", {
@@ -492,15 +493,19 @@ test("an unrelated task-record path prevents Cairn from committing model work", 
     kind: "fake",
     async run() {
       writeFileSync(join(root, "visible.txt"), "model-authored result\n");
-      writeFileSync(join(root, "docs", "ai-work", "tasks", "001-report.md"), [
-        "# Task 001 report", "", "Milestone movement: **YES**", "", "Disposition: **DONE**", "",
-      ].join("\n"));
+      // An unrelated, non-owned task-record path in the change set must block
+      // Cairn's exact-path commit even when the claims are a valid DONE.
       writeFileSync(join(root, "docs", "ai-work", "tasks", "999-report.md"), "unrelated task record\n");
-      appendLogRow(root, {
-        task: "001", date: "2026-07-22", lane: "Standard", mode: "Applied",
-        outcome: "DONE", decision: "completed", summary: "Added a visible result.", moved: "YES",
-      });
-      return { exitCode: 0, terminalEvent: "turn.completed", inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0, finalMessage: null };
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added a visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
     },
   };
   const result = await runSerialTask(root, "Add one visible result", {
@@ -514,6 +519,89 @@ test("an unrelated task-record path prevents Cairn from committing model work", 
   assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
   assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "999-report.md")), true);
   assert.match(readFileSync(result.reportPath, "utf8"), /MODEL_RESULT_NOT_VERIFIED/);
+});
+
+test("claims saying STOPPED close as MODEL_REPORTED_STOPPED with evidence retained", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The worker did partial work and then honestly reported it could not
+      // finish. Cairn keeps that evidence and never commits it.
+      writeFileSync(join(root, "partial.txt"), "half a change\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 10, cachedInputTokens: 2, outputTokens: 4, reasoningOutputTokens: 1,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "STOPPED", summary: "Could not finish safely.",
+          changes: ["partial.txt — started but incomplete"], checks: [{ name: "attempted the change", result: "left partial" }],
+          howToTry: "Inspect partial.txt.", limitations: "The change is incomplete.", milestone: "NO",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), fake)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "MODEL_REPORTED_STOPPED");
+  assert.equal(result.commit.status, "skipped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
+  assert.equal(existsSync(join(root, "partial.txt")), true, "the worker's partial evidence is retained, never cleaned");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /MODEL_REPORTED_STOPPED/);
+  // The worker's own stopped summary is displayed as a quarantined claim,
+  // never as one of Cairn's own structural lines.
+  assert.match(report, /> Could not finish safely\./);
+  assert.match(report, /partial\.txt/);
+  assert.match(report, /Disposition: \*\*STOPPED\*\*/);
+});
+
+test("perfect DONE claims cannot outrank a protected-work change", async () => {
+  const root = project();
+  writeFileSync(join(root, "protected.txt"), "owner original\n");
+  git(root, ["add", "--", "protected.txt"]);
+  git(root, ["commit", "-q", "-m", "protected fixture"]);
+  // The owner has an uncommitted edit at the start — protected work.
+  writeFileSync(join(root, "protected.txt"), "owner uncommitted edit\n");
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The worker overwrites the owner's protected edit AND returns a flawless
+      // DONE claims fence. Protection must win over the claims regardless.
+      writeFileSync(join(root, "protected.txt"), "worker overwrote the owner's edit\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Everything looks perfect.",
+          changes: ["did the thing"], checks: [{ name: "tests", result: "all pass" }],
+          howToTry: "Run it.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), fake)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "PROTECTED_WORK_CHANGED");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(
+    readFileSync(join(root, "protected.txt"), "utf8"),
+    "worker overwrote the owner's edit\n",
+    "the worker's change is retained as evidence, never reverted or cleaned by Cairn",
+  );
+  assert.match(readFileSync(result.reportPath, "utf8"), /PROTECTED_WORK_CHANGED/);
 });
 
 test("the real offline demonstration adapter never claims it attempted the product change", async () => {

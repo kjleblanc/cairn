@@ -640,12 +640,16 @@ function taskPrompt(contract: AdapterTaskContract): string {
     "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
     "Use Codex's built-in apply_patch tool for file edits. Do not invoke an apply_patch command inherited from PATH.",
     "Implement the requested outcome and run proportionate checks.",
-    // Task 003: a perfect product change still failed verification when the
-    // record shape stayed implicit, so the prompt states the exact format
-    // Cairn's verifier requires.
-    `Write docs/ai-work/tasks/${padded}-report.md. It must begin with "# Task ${padded}", contain exactly one line starting "Milestone movement: " with value YES, NO, or UNCLEAR, and exactly one line starting "Disposition: " with value DONE or "STOPPED — [reason]".`,
-    `Append exactly one row to docs/ai-work/LOG.md shaped exactly like: | ${padded} | <date> | Standard | Applied | DONE | completed | <one-line summary> | <YES/NO/UNCLEAR> | — use outcome DONE with decision completed, or outcome STOPPED with decision stopped, and the last column must equal the report's milestone movement value.`,
-    "If the requested outcome is already satisfied, do not invent a product change. Verify the existing behavior, still write the report and log row, use milestone movement NO, and choose the honest terminal disposition.",
+    // Task 048 (the inversion): the worker no longer authors any record. It
+    // does product work and speaks through one claims fence; Cairn writes the
+    // report and log row itself from those claims and its own Git verification.
+    "Do not write any file under docs/ai-work. Cairn authors the task report and log row itself, from your claims block and its own Git verification.",
+    "End your final message with exactly one fenced block labeled cairn-claims containing only JSON with exactly these keys, for example:",
+    "```cairn-claims",
+    "{ \"disposition\": \"DONE\", \"summary\": \"<one line>\", \"changes\": [\"<what changed and why>\"], \"checks\": [{ \"name\": \"<check you ran>\", \"result\": \"<its real result>\" }], \"howToTry\": \"<safe local steps>\", \"limitations\": \"<what still needs human judgment>\", \"milestone\": \"NO\" }",
+    "```",
+    "Use disposition DONE only when the outcome truly holds and your checks passed; otherwise STOPPED. milestone is YES, NO, or UNCLEAR.",
+    "If the requested outcome is already satisfied, do not invent a product change. Verify the existing behavior and say so in your claims, with milestone NO and the honest disposition.",
     "Do not run git add, git commit, or otherwise modify .git. Leave every task change unstaged; after verification, Cairn owns the exact-path local commit.",
     "Do not install or update dependencies, use external services, publish, deploy, or cross another concrete risk boundary.",
     "Work serially. Do not delegate, schedule, retry, resume, continue into another session, or start another task.",

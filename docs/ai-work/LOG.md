@@ -47,3 +47,4 @@
 | 045 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: a dropped oversized line can no longer let a stale message pose as the worker's final word | NO |
 | 046 | 2026-07-24 | Standard | Applied | DONE | completed | Added core/src/records.ts: composes a worker report and LOG row that separate what Cairn verified (Git facts) from what the worker only claims | NO |
 | 047 | 2026-07-24 | Standard | Applied | DONE | completed | Review fix: worker claims are blockquote-quarantined so no worker text can forge a structural record line | NO |
+| 048 | 2026-07-24 | Standard | Applied | DONE | completed | The inversion: the worker drops record duties and speaks one cairn-claims fence; Cairn authors the report and log row from those claims and its own Git verification; core and app flip together | NO |

@@ -181,8 +181,8 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
             <p><strong>Milestone movement: {result.row.moved}</strong></p>
             <p className="small muted">Task {String(result.taskNumber).padStart(3, "0")} has one brief, one report, and one append-only log row. {codexish
               ? result.status === "done"
-                ? "Cairn verified the model-authored task records and Git result."
-                : "Cairn could not verify the model-authored records or Git result. Retained evidence needs inspection before another task."
+                ? "Cairn verified the worker's changes and authored the task records itself."
+                : "Cairn stopped this task safely and authored honest STOPPED records. Retained evidence needs inspection before another task."
               : "No model was called."}</p>
             <p className="small mono">{result.reportPath}</p>
           </Card>

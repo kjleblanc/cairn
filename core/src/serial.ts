@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isCodexExecCancelledError, isCodexExecModelCallBoundaryError, isCodexExecProcessError, isCodexExecTimeoutError } from "./codex.js";
+import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
+import { composeWorkerReport, composeWorkerRowSummary, type ComposedRecordInput } from "./records.js";
 import { appendLogRow, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
 import {
@@ -55,7 +57,7 @@ export type SerialStopReason =
   | "INVALID_ADAPTER_RESULT"
   | "PROTECTED_WORK_CHANGED"
   | "RECORD_VERIFICATION_FAILED"
-  | "MODEL_RECORDS_MISSING"
+  | "WORKER_CLAIMS_MISSING"
   | "REAL_MODEL_CALL_NOT_AUTHORIZED"
   | "MODEL_REPORTED_STOPPED"
   | "MODEL_RESULT_NOT_VERIFIED"
@@ -439,33 +441,72 @@ function verifyProtectedStartingPaths(root: string, start: GitSnapshot): boolean
   return true;
 }
 
-interface ModelRecords {
-  disposition: "DONE" | "STOPPED";
-  reportText: string;
-  row: LogRow;
+/**
+ * The bounded set of changed and untracked paths, forward-slashed and sorted.
+ * This is the ground truth for what the worker (and Cairn's own record writes)
+ * touched — always from Git, never from the worker's claims.
+ */
+function scanChangedPaths(root: string): string[] {
+  return [...new Set([
+    ...gitZ(root, ["diff", "--name-only", "-z", "--"]),
+    ...gitZ(root, ["ls-files", "--others", "--exclude-standard", "-z", "--"]),
+  ].map((path) => path.replace(/\\/g, "/")))].sort();
 }
 
-function readModelRecords(root: string, contract: AdapterTaskContract, start: GitSnapshot): ModelRecords | null {
-  const briefPath = paths.brief(root, contract.taskNumber);
-  const reportPath = paths.report(root, contract.taskNumber);
-  if (!existsSync(reportPath) || readFileSync(briefPath, "utf8") !== briefText(contract)) return null;
-  const report = readFileSync(reportPath, "utf8");
-  if (!new RegExp(`^# Task ${pad(contract.taskNumber)}\\b`, "m").test(report)) return null;
-  const dispositions = [...report.matchAll(/^Disposition:\s*(?:\*\*)?(DONE|STOPPED)\b/gm)];
-  if (dispositions.length !== 1) return null;
-  const milestones = [...report.matchAll(/^Milestone movement:\s*(?:\*\*)?(YES|NO|UNCLEAR)\b/gm)];
-  if (milestones.length !== 1) return null;
-  const disposition = dispositions[0][1] as "DONE" | "STOPPED";
+/**
+ * Cairn authors the worker's task records from the parsed claims and its own
+ * Git verification (Task 048, the inversion). The worker writes no record; this
+ * writes the report (flag "wx" — never overwriting) and appends exactly one
+ * log row, then verifies its own writes byte-back exactly as writeClosedRecords
+ * does. `filesChanged` is the bounded Git-derived change set (never the claims);
+ * on a stop it lists the RETAINED evidence.
+ */
+function cairnWorkerRecords(
+  root: string,
+  contract: AdapterTaskContract,
+  start: GitSnapshot,
+  disposition: "DONE" | "STOPPED",
+  stopReason: SerialStopReason | null,
+  claims: WorkerClaims | null,
+  protectedValid: boolean,
+  commit: { status: "created" | "skipped"; reason: string } | null,
+  processEvidence: CodexExecResult | null,
+): { reportText: string; row: LogRow; verified: boolean } {
+  const input: ComposedRecordInput = {
+    taskNumber: contract.taskNumber,
+    route: contract.route,
+    disposition,
+    stopReason,
+    claims,
+    filesChanged: scanChangedPaths(root).slice(0, 100),
+    protectedIntact: protectedValid,
+    commit,
+    evidenceSummary: processEvidence ? boundedEventSummary(processEvidence) : null,
+    processFailure: null,
+    paidCallStarted: true,
+  };
+  const report = composeWorkerReport(input);
+  writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
+  const row: LogRow = {
+    task: pad(contract.taskNumber),
+    date: new Date().toISOString().slice(0, 10),
+    lane: "Standard",
+    mode: "Applied",
+    outcome: disposition,
+    decision: disposition === "DONE" ? "completed" : "stopped",
+    summary: composeWorkerRowSummary(input),
+    moved: claims?.milestone ?? "NO",
+  };
+  appendLogRow(root, row);
   const actualLog = readFileSync(paths.log(root), "utf8");
-  if (!actualLog.startsWith(start.logText)) return null;
-  const taskRows = parseLog(root).filter((item) => item.task === pad(contract.taskNumber));
-  if (taskRows.length !== 1 || taskRows[0].outcome !== disposition) return null;
-  const row = taskRows[0];
-  if (row.lane !== "Standard" || row.mode !== "Applied" ||
-      row.decision !== (disposition === "DONE" ? "completed" : "stopped") ||
-      row.moved !== milestones[0][1]) return null;
-  if (actualLog !== start.logText + expectedLogLine(row)) return null;
-  return { disposition, reportText: report, row };
+  const checks = {
+    brief: readFileSync(paths.brief(root, contract.taskNumber), "utf8") === briefText(contract),
+    report: readFileSync(paths.report(root, contract.taskNumber), "utf8") === report,
+    log: actualLog === start.logText + expectedLogLine(row),
+    row: parseLog(root).filter((item) => item.task === pad(contract.taskNumber)).length === 1,
+  };
+  const verified = checks.brief && checks.report && checks.log && checks.row;
+  return { reportText: report, row, verified };
 }
 
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
@@ -490,7 +531,10 @@ function changedTaskPaths(root: string, contract: AdapterTaskContract): string[]
     if (path.split("/").includes(".git")) return null;
     if (path.startsWith("docs/ai-work/tasks/") && !owned.has(path)) return null;
   }
-  if (!contract.ownedRecords.every((path) => values.has(path))) return null;
+  // Cairn now authors the owned records AFTER this scan (Task 048), so they are
+  // no longer required to pre-exist in the change set. Every other safety line
+  // stays: no path escapes the project, touches .git, or writes a task record
+  // Cairn does not own.
   return [...values].sort();
 }
 
@@ -502,47 +546,44 @@ function unstageExactPaths(root: string, pathsToUnstage: readonly string[]): voi
   }
 }
 
-function verifyModelGitResult(
-  root: string,
-  start: GitSnapshot,
-  contract: AdapterTaskContract,
-  disposition: "DONE" | "STOPPED",
-): RecordCommit | null {
-  if (!verifyProtectedStartingPaths(root, start)) return null;
-  const head = git(root, ["rev-parse", "HEAD"]);
-  if (head !== start.head) return null;
-  if (disposition === "STOPPED") {
-    return { status: "skipped", reason: "The model reported STOPPED; retained workspace evidence was not committed by Cairn." };
-  }
-  if (start.status.length > 0) {
-    return { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
-  }
-  const taskPaths = changedTaskPaths(root, contract);
-  if (!taskPaths || taskPaths.length === 0) return null;
+/**
+ * Stages exactly the expected set (product paths ∪ owned records) and creates
+ * one isolated exact-path task commit. The full changed set must already equal
+ * the expected set; the staged list must match it with nothing else changed or
+ * untracked; ancestry and a single-commit count confirm one isolated commit.
+ * Any failure returns null with the index restored, and the caller closes
+ * MODEL_RESULT_NOT_VERIFIED.
+ */
+function commitExactPaths(root: string, start: GitSnapshot, expected: readonly string[], taskNumber: number): RecordCommit | null {
+  if (expected.length === 0) return null;
+  const expectedSorted = [...expected].sort();
   try {
-    git(root, ["add", "--", ...taskPaths]);
-    const staged = gitZ(root, ["diff", "--cached", "--name-only", "-z", "--"]).sort();
-    if (!sameLines(staged, taskPaths) ||
+    // Recompute the full changed set now that the records are written; it must
+    // be exactly the product paths plus the owned records, nothing else.
+    if (!sameLines(scanChangedPaths(root), expectedSorted)) return null;
+    git(root, ["add", "--", ...expectedSorted]);
+    const staged = gitZ(root, ["diff", "--cached", "--name-only", "-z", "--"]).map((path) => path.replace(/\\/g, "/")).sort();
+    if (!sameLines(staged, expectedSorted) ||
         gitZ(root, ["diff", "--name-only", "-z", "--"]).length > 0 ||
         gitZ(root, ["ls-files", "--others", "--exclude-standard", "-z", "--"]).length > 0) {
-      unstageExactPaths(root, taskPaths);
+      unstageExactPaths(root, expectedSorted);
       return null;
     }
-    git(root, ["commit", "-m", `Task ${pad(contract.taskNumber)}: complete verified Codex Exec task`]);
+    git(root, ["commit", "-m", `Task ${pad(taskNumber)}: complete verified worker task`]);
   } catch {
-    if (git(root, ["rev-parse", "HEAD"]) === start.head) unstageExactPaths(root, taskPaths);
+    if (git(root, ["rev-parse", "HEAD"]) === start.head) unstageExactPaths(root, expectedSorted);
     return null;
   }
   const committedHead = git(root, ["rev-parse", "HEAD"]);
   if (!isAncestor(root, start.head, committedHead)) return null;
   if (Number(git(root, ["rev-list", "--count", `${start.head}..${committedHead}`])) !== 1) return null;
   // The commit's correctness is fully established before and by the commit:
-  // the pre-commit checks proved exactly the derived task paths were staged
-  // with nothing else changed or untracked, and the ancestry and single-commit
-  // count confirm one isolated commit. A post-commit whole-tree cleanliness
-  // check is not re-run here: it can report a file as dirty on a stat
-  // difference alone (identical content, e.g. a CRLF working copy over an LF
-  // index) and would tear a correct DONE commit into STOPPED (Task 006).
+  // the pre-commit checks proved exactly the expected set was staged with
+  // nothing else changed or untracked, and the ancestry and single-commit count
+  // confirm one isolated commit. A post-commit whole-tree cleanliness check is
+  // not re-run here: it can report a file as dirty on a stat difference alone
+  // (identical content, e.g. a CRLF working copy over an LF index) and would
+  // tear a correct DONE commit into STOPPED (Task 006).
   return { status: "created", reason: "Cairn created one isolated exact-path local task commit.", hash: committedHead };
 }
 
@@ -710,7 +751,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       },
       checks: codex ? [
         "Confirm exactly one Codex Exec process returns a completed JSONL terminal event.",
-        "Confirm the model-authored report has one terminal disposition and the append-only log has one matching row.",
+        "Confirm the worker's final message carries one readable cairn-claims block and the append-only log gains one matching Cairn-authored row.",
         "Confirm protected starting work is byte-identical and Cairn creates one exact-path local commit for a clean-start DONE result.",
       ] : [
         "Validate the adapter result against the exact fixed schema.",
@@ -719,7 +760,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       ],
       stopConditions: codex ? [
         "A real Codex Exec process or model call would start without separate authorization.",
-        "The process fails, returns invalid bounded evidence, or the model reports STOPPED.",
+        "The process fails, returns invalid bounded evidence, returns no readable claims, or claims STOPPED.",
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
       ] : [
@@ -790,62 +831,93 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEventSummary(codexResult) });
       }
       const processCompleted = codexResult?.exitCode === 0 && codexResult.terminalEvent === "turn.completed";
-      const modelRecords = readModelRecords(projectRoot, contract, start);
       const protectedValid = verifyProtectedStartingPaths(projectRoot, start);
-      const modelCommit = resultValid && processCompleted && modelRecords && protectedValid
-        ? verifyModelGitResult(projectRoot, start, contract, modelRecords.disposition)
-        : null;
+      // The worker authored no record; it speaks through one cairn-claims fence.
+      const claims = codexResult ? parseWorkerClaims(codexResult.claimsText) : null;
       const stopReason: SerialStopReason | null = !resultValid
         ? "INVALID_ADAPTER_RESULT"
         : !processCompleted
           ? "ADAPTER_FAILED"
           : !protectedValid
             ? "PROTECTED_WORK_CHANGED"
-            : !modelRecords
-              ? "MODEL_RECORDS_MISSING"
-              : !modelCommit
-                ? "MODEL_RESULT_NOT_VERIFIED"
-                : modelRecords.disposition === "STOPPED"
-                  ? "MODEL_REPORTED_STOPPED"
-                  : null;
-      if (stopReason) {
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReason}.` });
-        const safety = modelRecords?.disposition === "STOPPED"
-          ? modelRecords
-          : modelRecords?.disposition === "DONE"
-            ? replaceDoneRecordsWithStopped(
-              projectRoot,
-              contract,
-              start,
-              Boolean(options.commitRecords),
-              modelRecords,
-              stopReason,
-              codexResult ?? undefined,
-            )
-            : writeSafetyRecordsWhenUnclaimed(
-              projectRoot,
-              contract,
-              stopReason,
-              start,
-              Boolean(options.commitRecords),
-              codexResult ?? undefined,
-            );
-        if (!safety) throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReason}` });
+            : !claims
+              ? "WORKER_CLAIMS_MISSING"
+              : claims.disposition === "STOPPED"
+                ? "MODEL_REPORTED_STOPPED"
+                : null;
+
+      // A STOPPED close: Cairn authors honest STOPPED records from whatever
+      // claims (if any) survived, keeps the retained evidence, commits nothing.
+      const closeStopped = (reason: SerialStopReason): SerialRunResult => {
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${reason}.` });
+        const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, codexResult);
+        if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored evidence was retained without overwrite.");
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
         return {
-          status: "stopped", reason: stopReason, taskNumber, disposition: "STOPPED",
+          status: "stopped", reason, taskNumber, disposition: "STOPPED",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
-          reportText: safety.reportText, row: safety.row, route, activities,
-          commit: modelCommit ?? { status: "skipped", reason: "Stopped evidence was retained for inspection." },
+          reportText: records.reportText, row: records.row, route, activities,
+          commit: { status: "skipped", reason: "Stopped evidence was retained for inspection." },
+        };
+      };
+
+      if (stopReason) return closeStopped(stopReason);
+
+      // DONE path — the claims say DONE, the process completed, and protected
+      // work is byte-identical. Cairn writes the records and owns the commit.
+      // A worker that committed on its own (head moved) is not verifiable.
+      if (git(projectRoot, ["rev-parse", "HEAD"]) !== start.head) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
+
+      if (start.status.length > 0) {
+        // A protected dirty start forbids an isolated commit: the records are
+        // written but the product changes stay uncommitted for the owner.
+        const commit: RecordCommit = { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
+        const records = cairnWorkerRecords(projectRoot, contract, start, "DONE", null, claims, protectedValid, commit, codexResult);
+        if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored records could not be verified.");
+        emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
+        emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE — one real Codex Exec task completed and was verified." });
+        return {
+          status: "done", taskNumber, disposition: "DONE",
+          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+          reportText: records.reportText, row: records.row, route, activities, commit,
         };
       }
-      if (!modelRecords || !modelCommit) throw new Error("MODEL_RESULT_NOT_VERIFIED");
-      emit(activities, options.events, { stage: "Check", state: "done", detail: "The model result, task records, protected work, and Cairn-owned Git result were verified." });
+
+      // Clean start: the product change set must be Cairn-committable exactly.
+      const productPaths = changedTaskPaths(projectRoot, contract);
+      if (!productPaths) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
+      const records = cairnWorkerRecords(
+        projectRoot, contract, start, "DONE", null, claims, protectedValid,
+        { status: "created", reason: "One exact-path commit contains the product changes and these records." },
+        codexResult,
+      );
+      if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored records could not be verified.");
+      const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
+      const commit = commitExactPaths(projectRoot, start, expectedCommitSet, taskNumber);
+      if (!commit) {
+        // Any staging/commit failure: undo staging, rewrite the DONE records as
+        // STOPPED (this self-check is the one surviving use), and close
+        // MODEL_RESULT_NOT_VERIFIED with the evidence retained.
+        unstageExactPaths(projectRoot, expectedCommitSet);
+        const stopped = replaceDoneRecordsWithStopped(
+          projectRoot, contract, start, Boolean(options.commitRecords), records, "MODEL_RESULT_NOT_VERIFIED", codexResult ?? undefined,
+        );
+        if (!stopped?.verified) throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: MODEL_RESULT_NOT_VERIFIED." });
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — MODEL_RESULT_NOT_VERIFIED" });
+        return {
+          status: "stopped", reason: "MODEL_RESULT_NOT_VERIFIED", taskNumber, disposition: "STOPPED",
+          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+          reportText: stopped.reportText, row: stopped.row, route, activities,
+          commit: { status: "skipped", reason: "Record verification failed." },
+        };
+      }
+      emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result, task records, protected work, and Cairn-owned Git result were verified." });
       emit(activities, options.events, { stage: "Result", state: "done", detail: "DONE — one real Codex Exec task completed and was verified." });
       return {
         status: "done", taskNumber, disposition: "DONE",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
-        reportText: modelRecords.reportText, row: modelRecords.row, route, activities, commit: modelCommit,
+        reportText: records.reportText, row: records.row, route, activities, commit,
       };
     }
     const resultValid = chosen.kind === "offline-demo" && validateAdapterResult(adapterValue, contract);

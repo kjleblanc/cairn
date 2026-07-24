@@ -17,7 +17,7 @@ function scaffold(proj: string): void {
   execFileSync("git", ["config", "user.email", "cairn-test@example.invalid"], { cwd: proj });
 }
 
-function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-records" | "slow" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
+function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-claims" | "slow" = "success"): { env: NodeJS.ProcessEnv; marker: string } {
   const bin = mkdtempSync(join(tmpdir(), "cairn-fake-codex-"));
   const marker = join(bin, "real-exec-started.txt");
   const dispatcher = join(bin, "fake-codex.cjs");
@@ -36,7 +36,9 @@ process.stdin.on("end", () => {
       process.stdout.write("secret-looking malformed provider output\\n");
       return;
     }
-    if (${JSON.stringify(behavior)} === "missing-records") {
+    if (${JSON.stringify(behavior)} === "missing-claims") {
+      // The same secret-bearing event stream, but no cairn-claims fence, so
+      // Cairn parses no readable claims and stops WORKER_CLAIMS_MISSING.
       process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "sk-secret-event-payload" } }) + "\\n");
       process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "completed", exit_code: 0 } }) + "\\n");
       process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "sk-secret-event-payload", status: "failed", exit_code: 1 } }) + "\\n");
@@ -45,18 +47,11 @@ process.stdin.on("end", () => {
       process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, cached_input_tokens: 4, output_tokens: 6, reasoning_output_tokens: 2 } }) + "\\n");
       return;
     }
+    // Task 048 (the inversion): the worker does product work and speaks its
+    // account through one cairn-claims fence. It writes no report or log row.
     const root = process.cwd();
-    const tasks = path.join(root, "docs", "ai-work", "tasks");
-    const brief = fs.readdirSync(tasks).find((name) => /^\\d{3}-brief\\.md$/.test(name) && !fs.existsSync(path.join(tasks, name.replace("-brief", "-report"))));
-    if (!brief) process.exit(2);
-    const number = brief.slice(0, 3);
-    const report = path.join(tasks, number + "-report.md");
-    const visible = path.join(root, "visible.txt");
-    fs.writeFileSync(visible, "model-authored result\\n");
-    fs.writeFileSync(report, "# Task " + number + " report\\n\\n## Result\\n\\nAdded the requested visible result and verified it.\\n\\nMilestone movement: **YES**\\n\\nDisposition: **DONE**\\n");
-    const log = path.join(root, "docs", "ai-work", "LOG.md");
-    fs.appendFileSync(log, "| " + number + " | 2026-07-21 | Standard | Applied | DONE | completed | Added and verified the visible result. | YES |\\n");
-    process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "fake" }) + "\\n");
+    fs.writeFileSync(path.join(root, "visible.txt"), "model-authored result\\n");
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "m", type: "agent_message", text: "Done.\\n\\n\`\`\`cairn-claims\\n" + JSON.stringify({ disposition: "DONE", summary: "Added the visible result.", changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }], howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES" }) + "\\n\`\`\`" } }) + "\\n");
     process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
   };
   setTimeout(finish, ${JSON.stringify(behavior)} === "slow" ? 8000 : 0);
@@ -173,7 +168,7 @@ test("connected Codex requires confirmation then completes one fake-process real
   await start.click();
   await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
   await expect(win.getByText("Requested product change: completed and verified")).toBeVisible();
-  await expect(win.getByText("Cairn verified the model-authored task records and Git result.")).toBeVisible();
+  await expect(win.getByText("Cairn verified the worker's changes and authored the task records itself.")).toBeVisible();
   await expect(win.getByText("DONE — one real Codex Exec task completed and was verified.")).toBeVisible();
   expect(existsSync(fakeCodex.marker)).toBe(true);
   expect(readFileSync(join(proj, "visible.txt"), "utf8")).toBe("model-authored result\n");
@@ -200,9 +195,9 @@ test("malformed Codex JSONL fails closed without exposing raw process output", a
   await win.getByLabel("I confirm this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
-  await expect(win.getByText(/Cairn could not verify the model-authored records or Git result/)).toBeVisible();
+  await expect(win.getByText(/Cairn stopped this task safely and authored honest STOPPED records/)).toBeVisible();
   await expect(win.getByText(/Retained evidence needs inspection before another task/)).toBeVisible();
-  await expect(win.getByText("Cairn verified the model-authored task records and Git result.")).toHaveCount(0);
+  await expect(win.getByText("Cairn verified the worker's changes and authored the task records itself.")).toHaveCount(0);
   expect(existsSync(fakeCodex.marker)).toBe(true);
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("ADAPTER_FAILED");
@@ -211,10 +206,10 @@ test("malformed Codex JSONL fails closed without exposing raw process output", a
   await app.close();
 });
 
-test("missing model records show only bounded numeric Codex event evidence", async () => {
-  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-missing-records-"));
+test("missing worker claims show only bounded numeric Codex event evidence", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-codex-missing-claims-"));
   scaffold(proj);
-  const fakeCodex = fakeCodexEnvironment(proj, true, "missing-records");
+  const fakeCodex = fakeCodexEnvironment(proj, true, "missing-claims");
   const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
   const win = await app.firstWindow();
   // A governed project boots straight into chat; the dashboard is one click away.
@@ -228,11 +223,11 @@ test("missing model records show only bounded numeric Codex event evidence", asy
   await win.getByLabel("I confirm this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
-  await expect(win.getByText(/Stopped safely: MODEL_RECORDS_MISSING/)).toBeVisible();
+  await expect(win.getByText(/Stopped safely: WORKER_CLAIMS_MISSING/)).toBeVisible();
   await expect(win.getByText(/Bounded Codex events: 1 agent messages; 2 command executions; 2 file changes; 2 failed command\/file-change items/)).toBeVisible();
   expect(await win.locator("body").innerText()).not.toContain("sk-secret-event-payload");
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
-  expect(report).toContain("MODEL_RECORDS_MISSING");
+  expect(report).toContain("WORKER_CLAIMS_MISSING");
   expect(report).toContain("Bounded Codex events: 1 agent messages; 2 command executions; 2 file changes; 2 failed command/file-change items.");
   expect(report).not.toContain("sk-secret-event-payload");
   expect(existsSync(join(proj, "visible.txt"))).toBe(false);

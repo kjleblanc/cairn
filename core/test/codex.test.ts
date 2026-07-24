@@ -499,19 +499,19 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
   assert.match(requests[0].stdin, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
   assert.match(requests[0].stdin, /grants no authority beyond this one call and in-scope local reversible work/i);
-  // The Task 003 smoke call proved a model can complete the product change
-  // perfectly and still fail record verification when the prompt leaves the
-  // record shape implicit; the prompt must state the exact verified format.
-  assert.match(requests[0].stdin, /begin with "# Task 033"/);
-  assert.match(requests[0].stdin, /exactly one line starting "Milestone movement: " with value YES, NO, or UNCLEAR/);
-  assert.match(requests[0].stdin, /exactly one line starting "Disposition: " with value DONE or "STOPPED — \[reason\]"/);
-  assert.match(requests[0].stdin, /\| 033 \| <date> \| Standard \| Applied \| DONE \| completed \| <one-line summary> \| <YES\/NO\/UNCLEAR> \|/);
-  assert.match(requests[0].stdin, /outcome STOPPED with decision stopped/);
-  assert.match(requests[0].stdin, /last column must equal the report's milestone movement value/);
+  // Task 048 (the inversion): the worker authors no record and speaks only
+  // through one cairn-claims fence; the prompt must forbid docs/ai-work writes
+  // and specify the exact claims block, not a report/log-row shape.
+  assert.match(requests[0].stdin, /Do not write any file under docs\/ai-work/);
+  assert.match(requests[0].stdin, /exactly one fenced block labeled cairn-claims/);
+  assert.match(requests[0].stdin, /"disposition": "DONE"/);
+  assert.match(requests[0].stdin, /milestone is YES, NO, or UNCLEAR/);
+  assert.match(requests[0].stdin, /say so in your claims, with milestone NO/);
+  assert.doesNotMatch(requests[0].stdin, /-report\.md/);
+  assert.doesNotMatch(requests[0].stdin, /Append exactly one row/);
   assert.match(requests[0].stdin, /Use Codex's built-in apply_patch tool for file edits/);
   assert.match(requests[0].stdin, /Do not invoke an apply_patch command inherited from PATH/);
   assert.match(requests[0].stdin, /If the requested outcome is already satisfied, do not invent a product change/);
-  assert.match(requests[0].stdin, /still write the report and log row, use milestone movement NO/);
   assert.match(requests[0].stdin, /Do not run git add, git commit, or otherwise modify \.git/);
   assert.match(requests[0].stdin, /Cairn owns the exact-path local commit/);
   assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);
