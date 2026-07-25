@@ -68,6 +68,16 @@ const REMOTE_AHEAD_PATTERN = /fetch first|non-fast-forward|\[rejected\]/;
 // configured"; conflating the two would make the message false for the
 // untracked-branch case (repo task 073's review-fix finding). That case now
 // falls into "other", which reports git's own real wording instead.
+//
+// Repo task 075 narrowed its REACH, not its wording: git only says "No
+// configured push destination" for a bare `git push`, and this module now
+// always names the remote, so real git no longer produces it. The pattern and
+// its message are kept unchanged — the `kind` union is fixed by the plan, the
+// classifier stays proven by an injected-exec test, and the sentence remains
+// true whenever it does fire. A push naming a remote that does not exist says
+// something different (`fatal: '<remote>' does not appear to be a git
+// repository`) and now correctly reports git's own words through `other`,
+// rather than being folded into a bucket that would assert more than git did.
 const NO_REMOTE_PATTERN = /No configured push destination/;
 
 function firstLine(text: string): string {
@@ -92,9 +102,20 @@ function summarizeSuccess(stderr: string): string {
  * One plain `git push` — never retried, never forced, whatever the outcome.
  * The owner asked for exactly one push and gets exactly one git invocation,
  * full stop; classification below only reads what that single call reported.
+ *
+ * `remote` and `branch` are REQUIRED, and the refspec is pinned to them
+ * (`git push <remote> HEAD:<branch>`) rather than left to a bare `git push`
+ * (repo task 075's review finding). A bare push is governed by the machine's
+ * `push.default`: under `matching` it publishes every same-named branch —
+ * commits the confirmation panel never listed — and under `current` it can
+ * push to a remote branch other than the `@{u}` branch the panel named. The
+ * default `simple` happens to match the disclosure, so a bare push was
+ * correct on this machine; pinning makes it correct by construction on every
+ * machine. Callers must pass the values from the SAME preview the owner
+ * approved, never re-derived at execute time.
  */
-export function pushExecute(dir: string, exec: ExecFn = realExec(dir)): PushResult {
-  const result = exec(["push"]);
+export function pushExecute(dir: string, remote: string, branch: string, exec: ExecFn = realExec(dir)): PushResult {
+  const result = exec(["push", remote, `HEAD:${branch}`]);
 
   if (result.status === 0) {
     return { ok: true, summary: summarizeSuccess(result.stderr) };
@@ -103,14 +124,19 @@ export function pushExecute(dir: string, exec: ExecFn = realExec(dir)): PushResu
     return {
       ok: false,
       kind: "auth",
-      message: "Cairn could not sign in to the remote to push. Sign in again — refresh your saved credentials or SSH key — then try the push again.",
+      // These two sentences say what to put right and stop there. They used to
+      // end "then try the push again", which pointed at a control that does not
+      // exist: the settled outcome carries no button, because Cairn never
+      // retries a push and a second attempt is a new decision that gets its own
+      // confirmation (repo task 075's review finding).
+      message: "Cairn could not sign in to the remote to push. Nothing was published. Refresh your saved credentials or SSH key before the next push.",
     };
   }
   if (REMOTE_AHEAD_PATTERN.test(result.stderr)) {
     return {
       ok: false,
       kind: "remote-ahead",
-      message: "The remote has commits this project does not have yet. Fetch and merge or rebase locally, then try the push again.",
+      message: "The remote has commits this project does not have yet. Nothing was published. Fetch and merge or rebase locally before the next push.",
     };
   }
   if (NO_REMOTE_PATTERN.test(result.stderr)) {

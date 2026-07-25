@@ -956,15 +956,33 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await expect(chipButton).toBeVisible();
   await expect(chip).not.toContainText("1 commits");
 
+  // Mark the live region's DOM node now, while the flow is still only a chip.
+  // The mark is an attribute React never writes, so if the outcome later
+  // arrived in a region that had just been mounted — the case a screen reader
+  // announces least reliably — it would be gone. Same idiom, and the same
+  // reason, as the run strip's probe (repo task 065).
+  await win.evaluate(() => {
+    const region = document.querySelector(".push-outcome");
+    if (region instanceof HTMLElement) region.dataset.liveRegionProbe = "same-node";
+  });
+  await expect(win.locator(".push-outcome")).toHaveAttribute("role", "status");
+
   // Pressing the chip does NOT push. It opens the pause the contract requires
   // immediately before a write to an external service: the exact target, the
   // exact effect, and the recovery plan.
   await chipButton.click();
   const pause = win.locator(".push-confirm");
   await expect(pause).toBeVisible({ timeout: 15_000 });
+  // The press moved focus INTO the pause. Without this, the button that was
+  // focused has just left the DOM and a keyboard owner would have to tab from
+  // the top of the document to reach Push or Not now.
+  await expect(pause).toBeFocused();
   await expect(pause).toContainText(`origin — ${fixture.url}`);
   await expect(pause).toContainText(fixture.branch);
   await expect(pause).toContainText(fixture.subject);
+  // The count leads the effect, so an empty-message commit missing from the
+  // subject list can never make the disclosure understate what publishes.
+  await expect(pause).toContainText("this push publishes 1 commit");
   await expect(pause).toContainText("Pushing publishes these commits. On a public repository they become publicly visible.");
   await expect(pause).toContainText("A pushed commit can be reverted by a new commit. Publication itself cannot be recalled.");
   // Nothing has left the machine on the first press.
@@ -983,8 +1001,10 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await pause.getByRole("button", { name: "Push", exact: true }).click();
 
   const outcome = win.locator(".push-outcome");
-  await expect(outcome).toBeVisible({ timeout: 30_000 });
-  await expect(outcome).toContainText(`Pushed ${fixture.branch} to`);
+  await expect(outcome).toContainText(`Pushed ${fixture.branch} to`, { timeout: 30_000 });
+  // And it arrived as a change inside the region marked above, not as a new
+  // region carrying a message no one hears.
+  await expect(outcome).toHaveAttribute("data-live-region-probe", "same-node");
   // The honest outcome is honest: the commit really is on the upstream now.
   expect(aheadCount(project)).toBe("0");
   expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
@@ -1027,8 +1047,13 @@ test("a refused push reports the real reason and leaves the project exactly as i
   await pause.getByRole("button", { name: "Push", exact: true }).click();
 
   const outcome = win.locator(".push-outcome");
-  await expect(outcome).toBeVisible({ timeout: 30_000 });
-  await expect(outcome).toContainText("The remote has commits this project does not have yet. Fetch and merge or rebase locally, then try the push again.");
+  await expect(outcome).toContainText(
+    "The remote has commits this project does not have yet. Nothing was published. Fetch and merge or rebase locally before the next push.",
+    { timeout: 30_000 });
+  // The sentence does not send the owner to a control that is not there: the
+  // settled outcome carries no button, because Cairn never retries a push.
+  await expect(outcome).not.toContainText("try the push again");
+  await expect(outcome.getByRole("button")).toHaveCount(0);
   // Nothing was claimed that did not happen, and nothing was rewritten to make
   // it happen: same commit, same one-ahead count, and the upstream still
   // carries the other clone's work.

@@ -112,12 +112,16 @@ export function registerProjectIpc(): void {
     await shell.openExternal(url);
   });
 
-  // Task 10's push machinery: local-only preview, one honest push. This is
-  // machinery only — Task 11 builds the chip and the owner-facing
-  // confirmation that actually calls push:execute.
+  // Task 10's push machinery: local-only preview, one honest push. Task 11
+  // built the chip and the owner-facing confirmation on top of it.
   ipcMain.handle("push:preview", (_e, dir: string): PushPreview | null => pushPreview(dir));
 
-  ipcMain.handle("push:execute", (_e, dir: string): PushResult => pushExecute(dir));
+  // `remote` and `branch` ride the request because the push is pinned to
+  // exactly what the confirmation panel disclosed — they are the panel's own
+  // preview values, not anything re-derived here. Re-reading git at this point
+  // would reopen the gap the pinning closes.
+  ipcMain.handle("push:execute", (_e, dir: string, remote: string, branch: string): PushResult =>
+    pushExecute(dir, remote, branch));
 }
 
 /** Registered separately from `registerProjectIpc` for clarity, but called

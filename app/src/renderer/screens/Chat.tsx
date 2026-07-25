@@ -51,9 +51,11 @@ type Dispatch = {
 type PushFlow = {
   preview: PushPreview;
   /** `opening` and `pushing` are the two awaits, held as states so neither
-   * control can be pressed twice; `nothing` is the honest answer when the
-   * re-read finds the project no longer ahead. */
-  phase: "chip" | "opening" | "confirm" | "pushing" | "settled" | "nothing";
+   * control can be pressed twice. `nothing` and `gone` are the two honest
+   * answers when the press-time re-read finds no push left to make, and they
+   * are separate because they know different things: `nothing` still has a
+   * remote to name, `gone` has lost the upstream and may not claim otherwise. */
+  phase: "chip" | "opening" | "confirm" | "pushing" | "settled" | "nothing" | "gone";
   result: PushResult | null;
 };
 
@@ -67,8 +69,12 @@ const PUSH_RECOVERY = "A pushed commit can be reverted by a new commit. Publicat
  * never appears near it, because the envelope has not verified the owner's own
  * commits and never claims to. Singular when one, since "1 commits" would be
  * Cairn miscounting out loud. */
+function commitCount(n: number): string {
+  return `${n} ${n === 1 ? "commit" : "commits"}`;
+}
+
 function aheadPhrase(ahead: number): string {
-  return `${ahead} ${ahead === 1 ? "commit" : "commits"} ahead`;
+  return `${commitCount(ahead)} ahead`;
 }
 
 /**
@@ -77,6 +83,26 @@ function aheadPhrase(ahead: number): string {
  * the model is never told a chip exists, is never asked whether to push, and
  * never sees the result.
  */
+/** What the flow has to say once the press has resolved, or null while it
+ * still has nothing to announce. Kept out of the render body so the live
+ * region below has exactly one source. */
+function pushAnnouncement(flow: PushFlow): string | null {
+  if (flow.phase === "settled" && flow.result) {
+    return flow.result.ok ? flow.result.summary : flow.result.message;
+  }
+  if (flow.phase === "nothing") {
+    return `This project is no longer ahead of ${flow.preview.remote}. Nothing was pushed.`;
+  }
+  // Deliberately says less than the sentence above: the re-read found no
+  // upstream at all, so the previous preview's remote may no longer be this
+  // branch's remote, and claiming "no longer ahead of origin" would assert
+  // something Cairn just stopped being able to check.
+  if (flow.phase === "gone") {
+    return "This branch no longer has an upstream to push to. Nothing was pushed.";
+  }
+  return null;
+}
+
 function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
   flow: PushFlow;
   onOpen: () => void;
@@ -84,69 +110,85 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
   onDecline: () => void;
 }) {
   const { preview, result } = flow;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const announcement = pushAnnouncement(flow);
+  const gitsOwnWords = flow.phase === "settled" && result !== null && !result.ok && result.kind === "other";
 
-  if (flow.phase === "chip" || flow.phase === "opening") {
-    return (
-      <div className="push-chip">
-        <Pill kind="soft" disabled={flow.phase === "opening"} onClick={onOpen}>
-          This project is {aheadPhrase(preview.ahead)} of {preview.remote}. Push?
-        </Pill>
-      </div>
-    );
-  }
+  // Pressing the chip removes the focused button from the DOM. Without this,
+  // focus falls to <body> and a keyboard owner has to tab from the top of the
+  // document to reach the two controls of the pause — on the one surface whose
+  // whole purpose is that the pause is reached before the write.
+  useEffect(() => {
+    if (flow.phase === "confirm") panelRef.current?.focus();
+  }, [flow.phase]);
 
-  if (flow.phase === "nothing") {
-    return (
-      <div className="card push-outcome">
-        <p className="push-outcome-text">This project is no longer ahead of {preview.remote}. Nothing was pushed.</p>
-      </div>
-    );
-  }
-
-  if (flow.phase === "settled" && result) {
-    return (
-      <div className="card push-outcome">
-        <p className="card-title">the push</p>
-        <p className="push-outcome-text">{result.ok ? result.summary : result.message}</p>
-        {/* Task 073 carried this forward: the `other` bucket appends git's own
-          * first stderr line, which can carry a local absolute path. It is
-          * kept — a real error in git's own words beats a falsely generic
-          * sentence — but it is labeled here, so nothing in it reads as
-          * Cairn's own account of what happened. */}
-        {!result.ok && result.kind === "other" ? (
-          <p className="small muted">The sentence above ends with git&apos;s own words about this failure, quoted as git reported them.</p>
-        ) : null}
-      </div>
-    );
-  }
-
-  // Only the two panel states below put a control on screen that can write.
-  // Anything else — including a settled flow whose result somehow went missing
-  // — renders nothing rather than falling through to a live Push button.
-  if (flow.phase !== "confirm" && flow.phase !== "pushing") return null;
-  const pushing = flow.phase === "pushing";
   return (
-    <div className="card push-confirm">
-      <p className="card-title">before this push</p>
-      <ul className="push-confirm-facts">
-        <li>Target: {preview.remote} — <span className="mono">{preview.url}</span></li>
-        <li>Branch: <span className="mono">{preview.branch}</span></li>
-        <li>
-          Effect: this push publishes the following {preview.subjects.length === 1 ? "commit" : "commits"}:
-          <ul className="push-confirm-subjects">
-            {preview.subjects.map((subject, i) => <li key={i}>{subject}</li>)}
-          </ul>
-        </li>
-      </ul>
-      <p className="push-confirm-sentence">{PUSH_PUBLICATION}</p>
-      <p className="push-confirm-sentence">{PUSH_RECOVERY}</p>
-      <div className="row" style={{ marginTop: 12 }}>
-        <Pill kind="primary" disabled={pushing} onClick={onApprove}>Push</Pill>
-        <Pill kind="quiet" disabled={pushing} onClick={onDecline}>Not now</Pill>
-      </div>
-      {pushing ? (
-        <p className="small muted">Pushing. Cairn runs one plain git push — never a retry, never a force.</p>
+    <div className="push-flow">
+      {flow.phase === "chip" || flow.phase === "opening" ? (
+        <div className="push-chip">
+          <Pill kind="soft" disabled={flow.phase === "opening"} onClick={onOpen}>
+            This project is {aheadPhrase(preview.ahead)} of {preview.remote}. Push?
+          </Pill>
+        </div>
       ) : null}
+
+      {flow.phase === "confirm" || flow.phase === "pushing" ? (
+        // `tabIndex={-1}` makes the panel focusable by script without adding it
+        // to the tab order; the heading is its accessible name.
+        <div className="card push-confirm" ref={panelRef} tabIndex={-1} role="group" aria-labelledby="push-confirm-title">
+          <p className="card-title" id="push-confirm-title">before this push</p>
+          <ul className="push-confirm-facts">
+            <li>Target: {preview.remote} — <span className="mono">{preview.url}</span></li>
+            <li>Branch: <span className="mono">{preview.branch}</span></li>
+            {/* The COUNT leads, and the subjects follow as git's own answer.
+              * `pushPreview` drops empty lines from `log --format=%s`, so a
+              * commit with an empty message leaves the list shorter than the
+              * count — the count is what cannot understate the effect. */}
+            <li>
+              Effect: this push publishes {commitCount(preview.ahead)}. Their subjects, as git reports them:
+              <ul className="push-confirm-subjects">
+                {preview.subjects.map((subject, i) => <li key={i}>{subject}</li>)}
+              </ul>
+              {preview.subjects.length !== preview.ahead ? (
+                <span className="small muted">Git reported {preview.subjects.length} of these {preview.ahead} subjects; a commit with an empty message has none to report.</span>
+              ) : null}
+            </li>
+          </ul>
+          <p className="push-confirm-sentence">{PUSH_PUBLICATION}</p>
+          <p className="push-confirm-sentence">{PUSH_RECOVERY}</p>
+          <div className="row" style={{ marginTop: 12 }}>
+            <Pill kind="primary" disabled={flow.phase === "pushing"} onClick={onApprove}>Push</Pill>
+            <Pill kind="quiet" disabled={flow.phase === "pushing"} onClick={onDecline}>Not now</Pill>
+          </div>
+          {flow.phase === "pushing" ? (
+            <p className="small muted">Pushing. Cairn runs one plain git push — never a retry, never a force.</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* ONE live region, mounted with the flow and never replaced: only its
+        * CONTENT swaps, from empty to the outcome of the one irreversible
+        * action this screen can take. Same reason as the run strip's region
+        * (Task 065): a region that appears already holding its message is the
+        * case screen readers announce least reliably, so this element outlives
+        * the change it carries. It is empty and zero-height until there is
+        * something true to say, and only then does it take the card styling. */}
+      <div className={`push-outcome${announcement === null ? "" : " card"}`} role="status">
+        {announcement === null ? null : (
+          <>
+            <p className="card-title">the push</p>
+            <p className="push-outcome-text">{announcement}</p>
+            {/* Task 073 carried this forward: the `other` bucket appends git's
+              * own first stderr line, which can carry a local absolute path. It
+              * is kept — a real error in git's own words beats a falsely
+              * generic sentence — but it is labeled here, so nothing in it
+              * reads as Cairn's own account of what happened. */}
+            {gitsOwnWords ? (
+              <p className="small muted">The sentence above ends with git&apos;s own words about this failure, quoted as git reported them.</p>
+            ) : null}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -478,7 +520,11 @@ export function Chat({ dir, onBack, onOpenRun }: {
     const fresh = await cairn.pushPreview(dir);
     setPushFlow((f) => {
       if (f === null || f.phase !== "opening") return f; // a newer card replaced this flow meanwhile
-      if (fresh === null || fresh.ahead < 1) return { ...f, phase: "nothing", result: null };
+      // Two different findings, kept apart: the upstream is gone, or it is
+      // still there and there is nothing ahead of it. Saying the second when
+      // only the first is known would name a remote Cairn can no longer check.
+      if (fresh === null) return { ...f, phase: "gone", result: null };
+      if (fresh.ahead < 1) return { preview: fresh, phase: "nothing", result: null };
       return { preview: fresh, phase: "confirm", result: null };
     });
   }
@@ -486,12 +532,17 @@ export function Chat({ dir, onBack, onOpenRun }: {
   // The owner's approval of that exact action, and the only path in this
   // screen that writes anything outside this machine. One press, one plain
   // `git push`, whatever it reports.
-  async function approvePush() {
+  //
+  // `preview` is the panel's OWN preview, handed in from the render that the
+  // owner read — not re-read here. The push is pinned to its remote and
+  // branch, so what executes is what was disclosed; re-deriving either value
+  // at this point would reopen exactly the gap the pinning closes.
+  async function approvePush(preview: PushPreview) {
     if (pushRunning.current) return;
     pushRunning.current = true;
     setPushFlow((f) => (f !== null && f.phase === "confirm" ? { ...f, phase: "pushing" } : f));
     try {
-      const result = await cairn.pushExecute(dir);
+      const result = await cairn.pushExecute(dir, preview.remote, preview.branch);
       setPushFlow((f) => (f !== null && f.phase === "pushing" ? { ...f, phase: "settled", result } : f));
     } finally {
       pushRunning.current = false;
@@ -707,7 +758,7 @@ export function Chat({ dir, onBack, onOpenRun }: {
                   {pushFlow !== null && turn.card === latestCard ? (
                     <PushFlowView flow={pushFlow}
                       onOpen={() => { if (pushFlow.phase === "chip") void openPushConfirm(); }}
-                      onApprove={() => { if (pushFlow.phase === "confirm") void approvePush(); }}
+                      onApprove={() => { if (pushFlow.phase === "confirm") void approvePush(pushFlow.preview); }}
                       onDecline={() => setPushFlow((f) => (f !== null && f.phase === "confirm" ? { ...f, phase: "chip", result: null } : f))} />
                   ) : null}
                 </Fragment>

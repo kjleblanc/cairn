@@ -120,7 +120,10 @@ export interface CairnApi {
   conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
   onConductorDelta(cb: (event: ConductorDelta) => void): () => void;
   pushPreview(dir: string): Promise<PushPreview | null>;
-  pushExecute(dir: string): Promise<PushResult>;
+  /** `remote` and `branch` come from the preview the owner actually approved,
+   * so the push is pinned to what was disclosed rather than left to the
+   * machine's `push.default`. */
+  pushExecute(dir: string, remote: string, branch: string): Promise<PushResult>;
 }
 
 export interface TaskBlockConcern {
