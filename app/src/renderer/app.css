@@ -117,9 +117,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
 /* The run, living in the conversation: one compact line above the composer. */
 .run-strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); }
-.run-strip-stage { flex-shrink: 0; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+/* One element, two looks: the live region persists across the state change
+ * (see Chat.tsx), so only the modifier class swaps under it. */
+.run-strip-state { flex-shrink: 0; }
+.run-strip-stage { font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .run-strip-elapsed { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--muted); }
-.run-strip-terminal { flex-shrink: 0; font-weight: 600; }
+.run-strip-terminal { font-weight: 600; }
 .run-strip-outcome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .run-strip-controls { display: flex; flex-shrink: 0; gap: 8px; }
 .composer-closed { margin: 8px 0 0; }

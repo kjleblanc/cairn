@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -408,7 +408,7 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
 // proposes, the risk chip is set aside, the confirmation panel discloses the
 // six facts, and the confirmed run starts. From there the run has to live in
 // the conversation itself.
-async function dispatchOneRealCall(win: Page): Promise<void> {
+async function dispatchOneRealCall(win: Page, beforeStart?: () => void): Promise<void> {
   await sendChat(win, "Change the page title");
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
@@ -424,7 +424,26 @@ async function dispatchOneRealCall(win: Page): Promise<void> {
   // shows, never retyped.
   await expect(panel).toContainText("Keep the counts 74, 477, 256 exactly.");
   await panel.getByLabel("I confirm this one real Codex Exec call.").check();
+  beforeStart?.();
   await panel.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+}
+
+// Task 065: stages the readiness-changed race — routed while Codex was ready,
+// gone by the time the owner confirms. The shim is overwritten IN PLACE rather
+// than deleted, deliberately: it stays first on PATH and simply stops
+// answering `--version`, so `detectCodexExecStatus` reports it gone. Deleting
+// it would let PATH resolution fall through to a real Codex install on the
+// machine running this test — the one paid call this whole lane exists to
+// prevent.
+function breakFakeCodex(marker: string): void {
+  const bin = dirname(marker);
+  if (process.platform === "win32") {
+    writeFileSync(join(bin, "codex.cmd"), "@exit /b 1\r\n");
+  } else {
+    const executable = join(bin, "codex");
+    writeFileSync(executable, "#!/bin/sh\nexit 1\n");
+    chmodSync(executable, 0o755);
+  }
 }
 
 test("a dispatched run lives in the conversation: the strip names its stage, the composer closes, and Stop lands the terminal state", async () => {
@@ -444,6 +463,16 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(strip.locator(".run-strip-elapsed")).toHaveText(/^\d+:\d\d$/);
   await expect(strip.getByRole("button", { name: "Open the run screen" })).toBeVisible();
 
+  // Task 065: mark the live region's DOM node. A live region announces a
+  // content change reliably; a region that appears already holding its message
+  // does not. The mark is an attribute React never writes, so if the terminal
+  // state replaced the node instead of changing its text, it would be gone.
+  await win.evaluate(() => {
+    const state = document.querySelector(".run-strip-state");
+    if (state instanceof HTMLElement) state.dataset.liveRegionProbe = "same-node";
+  });
+  await expect(strip.locator(".run-strip-state")).toHaveAttribute("role", "status");
+
   // The composer says what is true instead of accepting a send the serial
   // gate would refuse.
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeDisabled();
@@ -457,6 +486,10 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // The interim result relay (until Task 8): the conversation is not left
   // silent — the strip carries the terminal state and the way to the records.
   await expect(strip).toContainText("STOPPED — CANCELLED_BY_OWNER", { timeout: 30_000 });
+  // The terminal line arrived as a change INSIDE the live region marked above,
+  // not as a new region carrying a message no one hears.
+  await expect(strip.locator(".run-strip-state")).toHaveAttribute("data-live-region-probe", "same-node");
+  await expect(strip.locator(".run-strip-terminal")).toContainText("CANCELLED_BY_OWNER");
   await expect(strip.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toHaveCount(0);
@@ -501,5 +534,51 @@ test("a reload mid-run reattaches the conversation's strip and shows the finishe
   await expect(strip).toContainText("DONE —", { timeout: 30_000 });
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   expect(readFileSync(join(project, "visible.txt"), "utf8")).toBe("model-authored result\n");
+  await app.close();
+});
+
+// Task 065 (review fix): the model goes away between the route and the
+// confirmed start. Two different closes come out of that race, and neither may
+// claim records that were never written — the run ends before a task number,
+// a brief, or a log row exists (core/src/serial.ts:841).
+test("a run that closes connection-required says so without inventing records", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-strip-gone-"));
+  scaffold(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win, () => breakFakeCodex(fakeCodex.marker));
+
+  // The dispatched path names its adapter, and core throws
+  // ROUTE_OVERRIDE_UNAVAILABLE when a named adapter is no longer connected —
+  // so main refuses before any run session survives, and there is nothing for
+  // a strip to reattach to. The refusal lands on the panel that asked for it.
+  await expect(win.locator(".dispatch-panel .dispatch-error")).toBeVisible({ timeout: 30_000 });
+  await expect(win.locator(".run-strip")).toHaveCount(0);
+
+  // The other close: no named adapter, so core returns connection-required
+  // instead of throwing, and the session stays closed-but-present for chat to
+  // reattach to. THIS is the one the strip has to render honestly.
+  const closed = await win.evaluate((dir) => window.cairn.taskRun({
+    dir, outcome: "Add one visible result", details: "", realCallConfirmed: false, conversationId: null,
+  }), project);
+  expect(closed.ok).toBe(true);
+  if (closed.ok) expect(closed.value.status).toBe("connection-required");
+
+  const strip = win.locator(".run-strip");
+  await expect(strip).toBeVisible({ timeout: 30_000 });
+  await expect(strip).toContainText("No task records or model call were created.", { timeout: 30_000 });
+  await expect(strip).not.toContainText("docs/ai-work");
+
+  // And the claim is true on disk: no process, no records, no row.
+  expect(existsSync(fakeCodex.marker)).toBe(false);
+  expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-report.md"))).toBe(false);
+  expect(readFileSync(join(project, "docs", "ai-work", "LOG.md"), "utf8")).not.toMatch(/\|\s*001\s*\|/);
+
+  // Nothing is running, so the composer never closed.
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
+  await expect(win.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
   await app.close();
 });

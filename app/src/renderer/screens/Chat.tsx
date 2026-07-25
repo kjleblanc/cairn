@@ -325,6 +325,7 @@ export function Chat({ dir, onBack, onOpenRun }: {
     if (!response.ok) { setDispatch({ ...request, phase: "confirm", error: response.message }); return; }
     if (response.value.status === "connection-required") {
       setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex Exec readiness changed. No task records or model call were created." });
+      void refreshSession(); // this close leaves a closed session too — the strip must not keep showing it as running
       return;
     }
     // The confirmation panel's work is done: the run's own records are on
@@ -341,9 +342,21 @@ export function Chat({ dir, onBack, onOpenRun }: {
   // until the first one arrives, which is a plainer truth than naming a stage
   // the run has not reached. When it closes, it is the run's own Result line
   // (`DONE — …` / `STOPPED — …`), or the thrown error when it never got one.
+  //
+  // The last resort claims NO facts about the filesystem. A close can happen
+  // before any record exists: core returns connection-required from the route
+  // itself (serial.ts:841), before a task number, a brief, or a log row, and
+  // that session still stays closed-but-present for this strip to read. Saying
+  // "its records are in docs/ai-work" there would invent three files and
+  // contradict the panel above, which says none were created. The
+  // readiness sentence is the one the run screen already uses for this close.
   const latestStage = session?.activities.at(-1)?.stage ?? null;
   const resultLine = session ? [...session.activities].reverse().find((a) => a.stage === "Result")?.detail ?? null : null;
-  const terminalLine = session?.error ?? resultLine ?? "This task closed. Its records are in this project's docs/ai-work.";
+  const terminalLine = session?.error
+    ?? resultLine
+    ?? (session?.result?.status === "connection-required"
+      ? "Codex Exec readiness changed. No task records or model call were created."
+      : "This task closed.");
   const dispatchRoute = dispatch?.route ?? null;
   const dispatchReady = dispatchRoute !== null && dispatchRoute.status === "ready" ? dispatchRoute : null;
   // A real worker lane is anything that is not the offline demo — a
@@ -440,19 +453,21 @@ export function Chat({ dir, onBack, onOpenRun }: {
             </div>
             {session ? (
               <div className="run-strip">
-                {/* The stage and the terminal line are the announced part —
-                  * they change a handful of times in a whole run. The clock
-                  * deliberately sits OUTSIDE the live region: a polite region
-                  * wrapped around a value that changes every second would
-                  * read itself aloud once a second. */}
+                {/* ONE live region, mounted with the strip and never replaced:
+                  * only its TEXT swaps, from the stage word to the terminal
+                  * line. The announcement that matters most is how the run
+                  * ended, and a region that appears already holding its
+                  * message is the case screen readers announce least
+                  * reliably — so this element outlives the change it carries.
+                  * The clock stays outside it: a polite region wrapped around
+                  * a value that changes every second would read itself aloud
+                  * once a second. */}
+                <span className={`run-strip-state ${session.phase === "running" ? "run-strip-stage" : "run-strip-terminal"}`} role="status">
+                  {session.phase === "running" ? latestStage ?? "Starting" : terminalLine}
+                </span>
                 {session.phase === "running" ? (
-                  <>
-                    <span className="run-strip-stage" role="status">{latestStage ?? "Starting"}</span>
-                    <span className="run-strip-elapsed">{elapsedSince(session.startedAt, now)}</span>
-                  </>
-                ) : (
-                  <span className="run-strip-terminal" role="status">{terminalLine}</span>
-                )}
+                  <span className="run-strip-elapsed">{elapsedSince(session.startedAt, now)}</span>
+                ) : null}
                 <span className="run-strip-outcome">{session.outcome}</span>
                 <span className="run-strip-controls">
                   {session.phase === "running" ? (
