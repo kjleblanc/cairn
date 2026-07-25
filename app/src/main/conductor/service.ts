@@ -6,6 +6,7 @@ import type {
   ConductorStatus,
   ConductorTurn,
   Result,
+  ResultCard,
 } from "../../shared/ipc.js";
 import { isTaskRunning } from "../rungate.js";
 import { logError } from "../log.js";
@@ -22,6 +23,31 @@ const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const ENCRYPTION_UNAVAILABLE = "This computer cannot store the key securely, so Cairn did not save it.";
 const PROMPT_TOO_LARGE_MESSAGE =
   "This conversation has grown past what Cairn can safely send. Start a new conversation — the project records keep what matters.";
+
+/**
+ * What a turn is FOR. The streaming body is one and the same; this decides
+ * three things about it.
+ *
+ * A "reply" answers the owner. They asked, so a proposed task is welcome and a
+ * failure is theirs to see and retry.
+ *
+ * "commentary" is the ENVELOPE's own paid call, on a card the owner asked
+ * nothing about. It proposes nothing — a comment on finished work is not a
+ * pitch for more — and if it fails, the card stands alone rather than growing
+ * an error bubble and a "Try again" for a question no one asked.
+ */
+type TurnKind = "reply" | "commentary";
+
+/**
+ * The envelope's whole request of the conductor, verbatim.
+ *
+ * The card itself is already in the prompt: it rides the history as SYSTEM
+ * context through `cardBriefing`, which keeps the report's own separation —
+ * what Cairn's runtime verified under one label, what the worker claims under
+ * another. So this says only what to do with it: comment once, in plain words,
+ * on the records rather than on impressions, and propose nothing.
+ */
+const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. Add one short plain-language comment for the owner. State result facts only from the card or the records in your briefing, and name your source. Do not propose a task.";
 
 /** One AbortController per project dir, so a stray second send can't stomp
  * on a stream already in flight and `stop` has something to abort. */
@@ -121,17 +147,59 @@ export function send(
 
   const controller = new AbortController();
   controllers.set(dir, controller);
-  void runStream(dir, id, conn, controller, onDelta);
+  void streamTurn(dir, id, conn, controller, onDelta, "reply");
 
   return { ok: true, value: { conversationId: id } };
 }
 
-async function runStream(
+/**
+ * One short comment from the conductor on the card the envelope just posted.
+ *
+ * This is the only call Cairn makes that the OWNER did not ask for, so every
+ * guard here points the same way. It returns at once and can neither delay nor
+ * block the card: by the time it runs the card is already written and already
+ * on screen, and if this whole function did nothing the card would be exactly
+ * what it is. It never retries. It skips silently — spending nothing, saying
+ * nothing — when:
+ *
+ * - there is no stored connection. A disconnected Cairn makes no paid call, and
+ *   the card standing alone is the honest outcome, not a failure to report.
+ * - a stream is already in flight for this project. One voice at a time.
+ * - a task is running for this project. Evaluated post-settle, where the run
+ *   that produced this very card has already cleared the running set — so this
+ *   guards only against a genuinely new, overlapping run.
+ */
+export function commentary(
+  dir: string,
+  conversationId: string,
+  card: ResultCard,
+  onDelta: (delta: ConductorDelta) => void,
+): void {
+  const conn = keystore.readConnection();
+  if (!conn) return;
+  if (controllers.has(dir)) return;
+  if (isTaskRunning(dir)) return;
+  // The instruction says "the card above", so the card has to really be there.
+  // `readTurns` DROPS an envelope line whose card fails its guard, and a card
+  // the conversation cannot read back is a card the model cannot see: better
+  // silence than a comment on a run that is not in front of it.
+  const posted = readTurns(dir, conversationId).at(-1);
+  if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) return;
+
+  const controller = new AbortController();
+  controllers.set(dir, controller);
+  void streamTurn(dir, conversationId, conn, controller, onDelta, "commentary");
+}
+
+/** The one streaming body, shared by both turns Cairn takes: the owner's reply
+ * and the envelope's commentary. Everything they differ about is `kind`. */
+async function streamTurn(
   dir: string,
   id: string,
   conn: StoredConnection,
   controller: AbortController,
   onDelta: (delta: ConductorDelta) => void,
+  kind: TurnKind,
 ): Promise<void> {
   let full = "";
   let tokens: number | undefined;
@@ -150,13 +218,18 @@ async function runStream(
       ...history.map((turn): ChatTurnMessage => (turn.role === "envelope"
         ? { role: "system", content: cardBriefing(turn.card) }
         : { role: turn.role === "owner" ? "user" : "assistant", content: turn.text })),
+      // The envelope's instruction goes LAST, after the card it is about, so
+      // "the card above" names the message immediately above it.
+      ...(kind === "commentary" ? [{ role: "system", content: COMMENTARY_INSTRUCTION } satisfies ChatTurnMessage] : []),
     ];
-    // The owner's turn is already persisted by `send()` above, so the record
-    // stays truthful either way; checked here, before any network call, so
-    // an oversized conversation fails instantly and for its real reason
-    // instead of surfacing later as an opaque provider error.
+    // Checked here, before any network call, so an oversized conversation fails
+    // instantly and for its real reason instead of surfacing later as an opaque
+    // provider error. For a reply, the owner's turn is already persisted by
+    // `send()`, so the record stays truthful either way and the owner is told.
+    // A commentary turn nobody asked for tells nobody: it simply does not
+    // happen, and the card is unaffected.
     if (promptTooLarge(messages)) {
-      onDelta({ dir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE });
+      if (kind === "reply") onDelta({ dir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE });
       return;
     }
     const slot: SlotWithKey = { baseUrl: conn.baseUrl, model: conn.model, apiKey: keystore.decryptedKey(conn) };
@@ -180,9 +253,18 @@ async function runStream(
       ...(costUsd !== undefined ? { costUsd } : {}),
     };
     appendTurn(dir, id, cairnTurn);
-    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: block });
+    // "Do not propose a task" is enforced here as well as asked for above: a
+    // model that emits a block anyway has its fence stripped from the text like
+    // any other, and the proposal is dropped rather than put on screen as a
+    // card the owner never asked a question to get.
+    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: kind === "reply" ? block : null });
   } catch (err) {
-    if (controller.signal.aborted) {
+    if (kind === "commentary") {
+      // The envelope started this call, not the owner. A comment that failed is
+      // logged and dropped: no partial turn, no retry, and no error bubble for
+      // a question that was never asked. The card already said what happened.
+      logError("conductor:commentary", err);
+    } else if (controller.signal.aborted) {
       const cairnTurn: ConductorTurn = { role: "cairn", text: `${full}\n\n(stopped early)`, ts: new Date().toISOString() };
       appendTurn(dir, id, cairnTurn);
       onDelta({ dir, conversationId: id, kind: "error", message: "Stopped." });

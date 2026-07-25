@@ -15,6 +15,7 @@ import {
 } from "@cairn/core";
 import type { ConductorDelta, Result, ResultCard, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
+import { commentary } from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 
@@ -185,15 +186,32 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     const conversationId = request.conversationId ?? null;
     if (conversationId !== null) {
       const post = (build: () => ResultCard): void => {
+        let posted: ResultCard | null = null;
         try {
-          const turn = postResultCard(dir, conversationId, build());
+          const card = build();
+          const turn = postResultCard(dir, conversationId, card);
           const delta: ConductorDelta = { dir, conversationId, kind: "envelope", turn };
           win()?.webContents.send("conductor:delta", delta);
+          posted = card;
         } catch (error) {
           // The card is an addition to a run that already closed and already
           // wrote its own records. A failure to write it is logged and never
           // allowed to change what the run reported.
           logError("task:run result card", error);
+        }
+        // Task 9: the card is written and announced; now — and only now — the
+        // conductor may add one short comment on it. The order is the point.
+        // This is an envelope-initiated PAID call, so it comes strictly after
+        // the card, never before and never in its way: `commentary` returns
+        // immediately, and it skips silently when there is no connection, when
+        // a reply is already streaming for this project, or when a new run has
+        // started meanwhile. A card that failed to post is not commented on at
+        // all — there would be nothing above for the comment to be about.
+        if (posted === null) return;
+        try {
+          commentary(dir, conversationId, posted, (delta) => { win()?.webContents.send("conductor:delta", delta); });
+        } catch (error) {
+          logError("task:run commentary", error);
         }
       };
       void run.then(

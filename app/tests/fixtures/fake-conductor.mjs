@@ -44,6 +44,15 @@ const DETAILS_TASK_BLOCK = JSON.stringify({
   details: "74, 477, 256",
 });
 
+// Task 9 (Phase 3): the commentary turn. It is the one request that ends with
+// a SYSTEM message and adds no user turn at all, so keying off the last user
+// message would replay whatever the owner said before the dispatch and pass a
+// stale reply off as a comment on the card.
+const COMMENTARY_SCRIPT = {
+  parts: ["The card says this task finished DONE", ", and the report is in docs/ai-work."],
+  delayMs: DELAY_MS,
+};
+
 function scriptFor(content) {
   if (content.includes("garble")) {
     return { parts: [`Here's the plan.\n\n\`\`\`cairn-task\n${GARBLED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
@@ -63,18 +72,30 @@ function scriptFor(content) {
   return { parts: ["Sure, ", "got it."], delayMs: DELAY_MS };
 }
 
-function lastUserContent(rawBody) {
+function messagesOf(rawBody) {
   let parsed;
   try {
     parsed = JSON.parse(rawBody);
   } catch {
-    return "";
+    return [];
   }
-  const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+  return Array.isArray(parsed.messages) ? parsed.messages : [];
+}
+
+function lastUserContent(messages) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i] && messages[i].role === "user" && typeof messages[i].content === "string") return messages[i].content;
   }
   return "";
+}
+
+// A commentary request is the only one whose LAST message is a system message,
+// and the envelope's instruction names what it is about. Read off the last
+// message, so an ordinary reply — which always ends with the owner's own user
+// turn — can never be mistaken for one.
+function commentaryRequested(messages) {
+  const last = messages[messages.length - 1];
+  return Boolean(last) && last.role === "system" && typeof last.content === "string" && last.content.includes("result card");
 }
 
 function sleep(ms) {
@@ -85,13 +106,13 @@ function sse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function streamReply(res, content) {
+async function streamReply(res, script) {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
-  const { parts, delayMs } = scriptFor(content);
+  const { parts, delayMs } = script;
   for (const part of parts) {
     sse(res, { choices: [{ delta: { content: part } }] });
     await sleep(delayMs);
@@ -111,13 +132,18 @@ export function start() {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", () => {
-        const content = lastUserContent(Buffer.concat(chunks).toString("utf8"));
+        const messages = messagesOf(Buffer.concat(chunks).toString("utf8"));
+        if (commentaryRequested(messages)) {
+          void streamReply(res, COMMENTARY_SCRIPT);
+          return;
+        }
+        const content = lastUserContent(messages);
         if (content.includes("fail-key")) {
           res.writeHead(401, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: "invalid api key" } }));
           return;
         }
-        void streamReply(res, content);
+        void streamReply(res, scriptFor(content));
       });
     });
     server.listen(0, "127.0.0.1", () => {

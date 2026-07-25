@@ -1,9 +1,10 @@
 import { _electron as electron, expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { conductorFile, detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
 
 // Task 026: the fake body proves the whole conductor loop offline — connect,
@@ -41,16 +42,6 @@ function codexEnv(project: string, fake: { env: NodeJS.ProcessEnv }): { [key: st
   for (const [k, v] of Object.entries(fake.env)) if (v !== undefined) env[k] = v;
   env.CAIRN_MOCK = "0";
   return env;
-}
-
-// The provider connection lives in the app's real per-user settings folder
-// (Electron resolves it through the OS; it can't be redirected from here —
-// same constraint projects.spec.ts documents for the projects registry), so
-// every test snapshots it and the whole file restores it byte-for-byte.
-function conductorFile(): string {
-  if (process.platform === "win32") return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Cairn", "conductor.json");
-  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Cairn", "conductor.json");
-  return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "Cairn", "conductor.json");
 }
 
 // A governed project boots straight into chat (0.1.0), so the connect card
@@ -91,7 +82,6 @@ test.describe.configure({ mode: "serial" });
 
 let fixtureUrl = "";
 let fixtureClose: () => Promise<void> = async () => {};
-let savedConductorFile: Buffer | null = null;
 
 test.beforeAll(async () => {
   const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
@@ -100,19 +90,12 @@ test.beforeAll(async () => {
   fixtureUrl = server.url;
   fixtureClose = server.close;
 
-  const file = conductorFile();
-  savedConductorFile = existsSync(file) ? readFileSync(file) : null;
+  detachStoredConnection();
 });
 
 test.afterAll(async () => {
   await fixtureClose();
-  const file = conductorFile();
-  if (savedConductorFile !== null) {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, savedConductorFile);
-  } else {
-    rmSync(file, { force: true });
-  }
+  restoreStoredConnection();
 });
 
 // Every test starts from a clean, disconnected slate regardless of what a
@@ -703,5 +686,133 @@ test("a run that closes connection-required says so without inventing records", 
   // Nothing is running, so the composer never closed.
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
+  await app.close();
+});
+
+// Task 9 (Phase 3), mock lane. The card is not the last word: once it is
+// posted, the conductor adds one short comment on it in its own voice. The
+// comment is a paid call the ENVELOPE started, so it is arranged to be purely
+// additive — the card is already written and already on screen before it
+// begins, and nothing it says can change what the card says.
+test("the conductor comments on the card the envelope just posted, and the comment is an ordinary cairn turn", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-comment-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+
+  // The comment FOLLOWS the card, and the sibling combinator is the whole
+  // assertion: the two replies that came before the dispatch — the proposal
+  // and the set-aside acknowledgement — can never satisfy it.
+  const comment = win.locator(".chat-messages .result-card ~ .bubble-cairn");
+  await expect(comment).toHaveCount(1, { timeout: 30_000 });
+  await expect(comment).toContainText("The card says this task finished DONE");
+  // The card is untouched by it, and nothing was surfaced as a failure.
+  await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
+  await expect(win.locator(".bubble-system")).toHaveCount(0);
+
+  // On disk it is an ordinary cairn turn, written after the envelope's, and it
+  // carries the usage the provider reported — a paid turn accounted for like
+  // every other paid turn.
+  const turns = await win.evaluate(async (dir) => {
+    const list = await window.cairn.conductorConversations(dir);
+    return window.cairn.conductorTurns(dir, list[list.length - 1].id);
+  }, project);
+  expect(turns.at(-2)?.role).toBe("envelope");
+  const last = turns.at(-1);
+  expect(last?.role).toBe("cairn");
+  if (last?.role === "cairn") {
+    expect(last.text).toContain("The card says this task finished DONE");
+    expect(last.tokens).toBe(29);
+    expect(last.costUsd).toBe(0.00002);
+  }
+  await app.close();
+});
+
+// Task 9 (Phase 3). The case the connection guard exists for: the owner
+// disconnects while the task is still running. The run settles anyway and the
+// card lands on disk regardless — but there is no provider to call, and an
+// envelope-initiated PAID call must never be attempted without one. The card
+// stands alone, and the missing comment is not an error the owner has to read.
+//
+// The brief names the mock lane. The offline demo finishes in well under a
+// second, which would make "disconnect while the run finishes" a race against
+// the click; the fake-codex slow lane makes the same choreography
+// deterministic — the marker proves the exec really started, and the finish is
+// eight seconds further on.
+test("a card that lands while the owner is disconnected stands alone: no comment, and no error", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-comment-offline-"));
+  scaffold(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win);
+
+  const strip = win.locator(".run-strip");
+  await expect(strip).toBeVisible({ timeout: 30_000 });
+  const conversationId = (await win.evaluate((dir) => window.cairn.conductorConversations(dir), project))[0].id;
+  await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
+
+  // Disconnect with the run still going. The pane swaps to the connect card —
+  // expected — and the run itself belongs to main, so it carries on.
+  await win.locator(".body-pill-wrap button").first().click();
+  await win.getByRole("button", { name: "Disconnect" }).click();
+  await expect(win.getByText("connect cairn's brain")).toBeVisible();
+
+  // The run settles and the envelope writes its card, disconnected or not.
+  await expect.poll(
+    async () => (await win.evaluate(
+      (args) => window.cairn.conductorTurns(args.dir, args.id),
+      { dir: project, id: conversationId },
+    )).at(-1)?.role,
+    { timeout: 60_000 },
+  ).toBe("envelope");
+
+  // Reconnect and reopen the conversation: the card is there, and nothing
+  // followed it.
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(0);
+  await expect(win.locator(".bubble-system")).toHaveCount(0);
+
+  // And it stays alone. One full round trip through the same fixture — the
+  // owner asks, Cairn answers — proves the provider was reachable the whole
+  // time, and gives a comment that should never have started every chance to
+  // land. Waiting on a real exchange is what makes this a proof rather than a
+  // snapshot taken a moment too early.
+  await sendChat(win, "Hello, quick check-in.");
+  await waitStreamDone(win);
+  // Exactly one Cairn turn now follows the card: the answer to the question
+  // just asked. Nothing was refused as "already answering", and nothing was
+  // surfaced as an error.
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(1);
+  await expect(win.locator(".bubble-system")).toHaveCount(0);
+
+  // The turn that follows the card is the owner's own question, and the only
+  // Cairn turn after it is the answer to that question.
+  const turns = await win.evaluate(
+    (args) => window.cairn.conductorTurns(args.dir, args.id),
+    { dir: project, id: conversationId },
+  );
+  const cardIndex = turns.findIndex((turn) => turn.role === "envelope");
+  expect(cardIndex).toBeGreaterThan(-1);
+  expect(turns.slice(cardIndex + 1).map((turn) => turn.role)).toEqual(["owner", "cairn"]);
   await app.close();
 });

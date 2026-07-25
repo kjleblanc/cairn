@@ -4,7 +4,16 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
+
+// One test here dispatches with `conversationId: "conv-1"`, which since Task 8
+// posts a result card and since Task 9 asks the conductor to comment on it —
+// a paid call against whatever provider connection is stored on this machine.
+// This spec never wants one, so it runs against no connection at all and puts
+// back exactly what it found.
+test.beforeAll(() => { detachStoredConnection(); });
+test.afterAll(() => { restoreStoredConnection(); });
 
 function scaffold(proj: string): void {
   const core = pathToFileURL(join(__dirname, "..", "node_modules", "@cairn", "core", "dist", "src", "index.js")).href;
