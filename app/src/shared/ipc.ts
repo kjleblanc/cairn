@@ -8,9 +8,27 @@ export type InitInput = { dir: string; name: string; what: string; who: string; 
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 export type TaskActivityEvent = { dir: string; activity: SerialActivity };
 export type TaskRoutePreview = { route: RouteResult; disclosure?: WorkerDisclosure };
+/**
+ * One dispatch request, whole. It travels as a single object because every
+ * part of it is load-bearing at the gate: the outcome and the owner's own
+ * `details` are BOTH re-derived into the expected disclosure card, so a
+ * positional signature that quietly drops one would dispatch something the
+ * owner never read. `conversationId` names the conversation the request came
+ * from (null when it was typed on the task screen instead).
+ */
+export type TaskRunRequest = {
+  dir: string;
+  outcome: string;
+  details: string;
+  adapterId?: string;
+  realCallConfirmed?: boolean;
+  disclosure?: WorkerDisclosure;
+  conversationId?: string | null;
+};
 export type RunSessionSnapshot = {
   dir: string;
   outcome: string;
+  conversationId: string | null;
   // true when this run is a real confirmed worker call, not the offline demo; Task 10 re-keys lane wording off adapter capabilities
   worker: boolean;
   startedAt: string;
@@ -67,8 +85,8 @@ export interface CairnApi {
   projectInit(input: InitInput): Promise<Result<ProjectStatus>>;
   projectStatus(dir: string): Promise<Result<ProjectStatus>>;
   projectForget(dir: string): Promise<Result<null>>;
-  taskRoute(dir: string, outcome: string, adapterId?: string): Promise<Result<TaskRoutePreview>>;
-  taskRun(dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: WorkerDisclosure): Promise<Result<SerialRunResult>>;
+  taskRoute(dir: string, outcome: string, details: string, adapterId?: string): Promise<Result<TaskRoutePreview>>;
+  taskRun(request: TaskRunRequest): Promise<Result<SerialRunResult>>;
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
   taskAcknowledge(dir: string): Promise<Result<null>>;

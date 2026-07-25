@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
+import type { RouteResult, WorkerDisclosure } from "@cairn/core";
 import type { ConductorDelta, ConductorStatus, ConductorTurn, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
+import { DisclosureConfirm } from "../components/DisclosureConfirm";
 import { Md } from "../components/Md";
 import { Scene } from "../components/Scene";
 import { TaskCard } from "../components/TaskCard";
@@ -16,16 +18,31 @@ import { Pill } from "../components/Ui";
  * delta. Once locked, it never changes for this send. */
 type InFlight = { id: string | null };
 
+/** One dispatch the owner is deciding on, or has just started. `route` is
+ * null until `taskRoute` answers (and stays null when it refuses, with the
+ * plain reason in `error`); `disclosure` is null whenever the routed adapter
+ * declares no real call to confirm — the offline demo, today. */
+type Dispatch = {
+  outcome: string;
+  details: string;
+  route: RouteResult | null;
+  disclosure: WorkerDisclosure | null;
+  phase: "confirm" | "running";
+  error: string | null;
+};
+
 /** Layout A: the hillside is the room. The scene fills the window; the
  * conversation floats over it on solid (never translucent) cards.
  *
- * `onOpenTask` is the handoff for the proposed-task card: once every concern
- * chip is answered or set aside, "Send to dispatch" calls it with the
- * outcome sentence and the App switches to TaskRun with that outcome
- * prefilled. */
-export function Chat({ dir, onOpenTask, onBack }: {
+ * Dispatch happens here too. Once every concern chip on the proposed-task
+ * card is answered or set aside, "Send to dispatch" opens a confirmation
+ * panel in the conversation itself: the outcome and the owner's details,
+ * verbatim, and — when the routed adapter declares a real call — the six
+ * facts of that call with the same confirm box the task screen uses. Nothing
+ * is retyped, nothing is re-derived from a sentence, and the request that
+ * runs is the one the owner just read. */
+export function Chat({ dir, onBack }: {
   dir: string;
-  onOpenTask: (prefill: string) => void;
   onBack: () => void;
 }) {
   const [status, setStatus] = useState<ConductorStatus | null>(null);
@@ -43,6 +60,11 @@ export function Chat({ dir, onOpenTask, onBack }: {
   // instead of carrying over answers from the previous proposal.
   const [taskBlock, setTaskBlock] = useState<TaskBlock | null>(null);
   const [taskBlockKey, setTaskBlockKey] = useState(0);
+  const [dispatch, setDispatch] = useState<Dispatch | null>(null);
+  const [realCallConfirmed, setRealCallConfirmed] = useState(false);
+  // Names the dispatch a route lookup belongs to, so a slow answer for a
+  // panel the owner already replaced can never land on the newer one.
+  const dispatchToken = useRef(0);
   const streamingRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
   // Mirrors `conversationId` for synchronous reads inside the delta handler
@@ -191,6 +213,11 @@ export function Chat({ dir, onOpenTask, onBack }: {
     setStreaming(false);
     setError(null);
     setTaskBlock(null);
+    // A running dispatch belongs to the project, not to the conversation it
+    // was started from, so it stays on screen; an undecided one goes with the
+    // conversation that proposed it.
+    setDispatch((current) => (current !== null && current.phase === "running" ? current : null));
+    setRealCallConfirmed(false);
   }
 
   function onCardAnswer(_concern: TaskBlockConcern, answer: string): Promise<boolean> {
@@ -201,14 +228,60 @@ export function Chat({ dir, onOpenTask, onBack }: {
     return send("I understand the risk you raised — set it aside and keep the task as proposed.");
   }
 
-  // Task 5 threads `details` on into TaskRun; for now the card's widened
-  // signature is accepted here but only the outcome sentence routes into
-  // the existing prefill navigation.
-  function onCardSend(outcome: string, _details: string): void {
-    onOpenTask(outcome);
+  // "Send to dispatch": open the confirmation panel for BOTH parts of the
+  // request at once, then ask main which adapter would take it and what it
+  // would disclose. The panel shows immediately so the press is never
+  // silent; the route fills in when it answers.
+  function onCardSend(outcome: string, details: string): void {
+    const token = dispatchToken.current + 1;
+    dispatchToken.current = token;
+    setRealCallConfirmed(false);
+    setDispatch({ outcome, details, route: null, disclosure: null, phase: "confirm", error: null });
+    void cairn.taskRoute(dir, outcome, details).then((response) => {
+      if (dispatchToken.current !== token) return; // a newer dispatch replaced this one
+      setDispatch((current) => (current === null ? null : {
+        ...current,
+        route: response.ok ? response.value.route : null,
+        disclosure: response.ok ? response.value.disclosure ?? null : null,
+        error: response.ok ? null : response.message,
+      }));
+    });
+  }
+
+  // The paid-call pause ends here. Everything the run receives — outcome,
+  // details, the confirmed disclosure — is the panel's own state, so what
+  // starts is what was on screen.
+  async function startDispatch(request: Dispatch, adapterId: string, worker: boolean) {
+    if (worker && !realCallConfirmed) return;
+    setDispatch({ ...request, phase: "running", error: null });
+    const response = await cairn.taskRun({
+      dir,
+      outcome: request.outcome,
+      details: request.details,
+      adapterId,
+      realCallConfirmed: worker && realCallConfirmed,
+      disclosure: request.disclosure ?? undefined,
+      conversationId: conversationIdRef.current,
+    });
+    if (!response.ok) { setDispatch({ ...request, phase: "confirm", error: response.message }); return; }
+    if (response.value.status === "connection-required") {
+      setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex Exec readiness changed. No task records or model call were created." });
+      return;
+    }
+    // The run's own records are on disk and its session stays readable on the
+    // task screen until it is acknowledged there; the conversation-side
+    // result relay is the next task's work.
+    setDispatch(null);
+    setRealCallConfirmed(false);
   }
 
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
+  const dispatchRoute = dispatch?.route ?? null;
+  const dispatchReady = dispatchRoute !== null && dispatchRoute.status === "ready" ? dispatchRoute : null;
+  // A real worker lane is anything that is not the offline demo — a
+  // capability check, never an adapter-id check, so a third adapter needs no
+  // change here.
+  const dispatchWorker = dispatchReady !== null && !dispatchReady.recommended.capabilities.includes("offline-demo");
 
   return (
     <div className="chat-screen">
@@ -237,6 +310,49 @@ export function Chat({ dir, onOpenTask, onBack }: {
               {taskBlock ? (
                 <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
                   onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onCardSend} />
+              ) : null}
+              {dispatch ? (
+                <div className="card dispatch-panel">
+                  <p className="card-title">dispatch this task</p>
+                  <p className="dispatch-outcome">{dispatch.outcome}</p>
+                  {dispatch.details ? (
+                    <div className="task-card-details">
+                      <p className="small muted task-card-details-label">Details (sent verbatim)</p>
+                      <p className="task-card-details-text">{dispatch.details}</p>
+                    </div>
+                  ) : null}
+                  {dispatch.phase === "running" ? (
+                    <p className="small muted">Cairn is running this task. Its records land in this project's docs/ai-work.</p>
+                  ) : (
+                    <>
+                      {dispatch.error ? <p className="dispatch-error">{dispatch.error}</p> : null}
+                      {dispatchRoute === null && !dispatch.error ? <p className="small muted">Finding a route…</p> : null}
+                      {dispatchRoute?.status === "connection-required" ? (
+                        <>
+                          <p>{dispatchRoute.reason}</p>
+                          <p className="small muted">Install or connect Codex yourself through official Codex controls. Cairn does not open login, read credential files, or choose another provider.</p>
+                        </>
+                      ) : null}
+                      {dispatchReady && dispatch.disclosure ? (
+                        <DisclosureConfirm
+                          disclosure={dispatch.disclosure}
+                          label={dispatchReady.recommended.label}
+                          confirmed={realCallConfirmed}
+                          onConfirmedChange={setRealCallConfirmed}
+                        />
+                      ) : null}
+                      <div className="row" style={{ marginTop: 12 }}>
+                        {dispatchReady ? (
+                          <Pill kind="primary" disabled={dispatchWorker && !realCallConfirmed}
+                            onClick={() => void startDispatch(dispatch, dispatchReady.recommended.id, dispatchWorker)}>
+                            {dispatchWorker ? `Start one real ${dispatchReady.recommended.label} call` : "Run offline demonstration"}
+                          </Pill>
+                        ) : null}
+                        <Pill kind="quiet" onClick={() => { setDispatch(null); setRealCallConfirmed(false); }}>Cancel</Pill>
+                      </div>
+                    </>
+                  )}
+                </div>
               ) : null}
               {streaming ? (
                 <div className="bubble bubble-cairn">

@@ -75,7 +75,7 @@ test("FIX 4: the demo lane runs through task:run with no disclosure because its 
   // gate takes no `expected` disclosure and needs no confirmation: task:run
   // succeeds with neither realCallConfirmed nor a disclosure argument.
   const done = await win.evaluate(async ({ project }) =>
-    window.cairn.taskRun(project, "Create a welcome page"), { project: proj });
+    window.cairn.taskRun({ dir: project, outcome: "Create a welcome page", details: "" }), { project: proj });
   expect(done.ok).toBe(true);
   if (done.ok) expect(done.value.status).toBe("done");
   await app.close();

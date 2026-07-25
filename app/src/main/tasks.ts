@@ -12,7 +12,7 @@ import {
   type TaskAdapter,
   type WorkerDisclosure,
 } from "@cairn/core";
-import type { Result, RunSessionSnapshot, TaskActivityEvent } from "../shared/ipc.js";
+import type { Result, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 
@@ -43,11 +43,21 @@ function adapters(mock: boolean): TaskAdapter[] {
   return mock ? [createOfflineDemoAdapter()] : [];
 }
 
-async function detectedAdapters(mock: boolean, dir: string, authorizedOutcome?: string): Promise<{ adapters: TaskAdapter[]; status?: CodexExecStatus }> {
+/**
+ * `authorized` names the WHOLE request the owner confirmed — outcome and
+ * details together. The codex authorization gate re-derives its expected card
+ * from both, so passing only the outcome here would refuse every
+ * details-bearing dispatch.
+ */
+async function detectedAdapters(
+  mock: boolean,
+  dir: string,
+  authorized?: { outcome: string; details: string },
+): Promise<{ adapters: TaskAdapter[]; status?: CodexExecStatus }> {
   if (mock) return { adapters: adapters(true) };
   const status = await detectCodexExecStatus(dir);
   return {
-    adapters: [createCodexExecAdapter(dir, status, authorizedOutcome ? authorizeCodexExec(dir, authorizedOutcome) : undefined)],
+    adapters: [createCodexExecAdapter(dir, status, authorized ? authorizeCodexExec(dir, authorized.outcome, authorized.details) : undefined)],
     status,
   };
 }
@@ -55,7 +65,7 @@ async function detectedAdapters(mock: boolean, dir: string, authorizedOutcome?: 
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const mock = process.env.CAIRN_MOCK === "1";
 
-  ipcMain.handle("task:route", async (_event, dir: string, outcome: string, adapterId?: string) => {
+  ipcMain.handle("task:route", async (_event, dir: string, outcome: string, details: string, adapterId?: string) => {
     try {
       const status = projectStatus(dir);
       if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. Migrate it safely before starting another task.");
@@ -74,7 +84,9 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         ok: true,
         value: {
           route: value,
-          disclosure: routed?.disclosure?.(outcome),
+          // Both parts, always: the card the owner reads names the details it
+          // will send, so a confirmation can never cover less than the request.
+          disclosure: routed?.disclosure?.(outcome, details ?? ""),
         },
       };
     } catch (error) {
@@ -83,7 +95,9 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     }
   });
 
-  ipcMain.handle("task:run", async (_event, dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: WorkerDisclosure) => {
+  ipcMain.handle("task:run", async (_event, request: TaskRunRequest) => {
+    const { dir, outcome, adapterId, realCallConfirmed, disclosure } = request;
+    const details = request.details ?? "";
     const refusal = runRefusal(isTaskRunning(dir), isQuitDraining());
     if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
     // Register the live session BEFORE the (single) detection so a reattach can
@@ -93,7 +107,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     const controller = new AbortController();
     markRunning(dir);
     controllers.set(dir, controller);
-    sessions.set(dir, { dir, outcome, worker: realCallConfirmed === true, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
+    sessions.set(dir, { dir, outcome, conversationId: request.conversationId ?? null, worker: realCallConfirmed === true, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
     const cleanup = (): void => { clearRunning(dir); controllers.delete(dir); sessions.delete(dir); };
     // The run-time disclosure gate follows the ROUTED adapter's own seam, not a
     // codex-pinned check: resolve the route exactly as task:route does and take
@@ -103,12 +117,12 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     let detected: Awaited<ReturnType<typeof detectedAdapters>>;
     let expected: WorkerDisclosure | undefined;
     try {
-      detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? outcome : undefined);
+      detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? { outcome, details } : undefined);
       const preview = previewSerialRoute(outcome, detected.adapters, adapterId);
       const routed = preview.status === "ready"
         ? detected.adapters.find((adapter) => adapter.descriptor.id === preview.recommended.id)
         : undefined;
-      expected = routed?.disclosure?.(outcome);
+      expected = routed?.disclosure?.(outcome, details);
     } catch (error) {
       cleanup();
       logError("task:run", error);
@@ -123,6 +137,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         const value = await runSerialTask(dir, outcome, {
           adapters: detected.adapters,
           adapterId,
+          details,
           signal: controller.signal,
           events: {
             onActivity: (activity) => {

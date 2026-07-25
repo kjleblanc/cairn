@@ -2,18 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 import type { RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
+import { DisclosureConfirm } from "../components/DisclosureConfirm";
 import { ModelRoute } from "../components/ModelRoute";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 
 type Phase = "entry" | "route" | "running" | "result";
 
-export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
-  dir: string; demoAvailable: boolean; onBack: () => void; initialOutcome?: string;
+/** The typed-by-hand lane. A task proposed in chat no longer arrives here as
+ * a prefilled sentence — chat dispatches it inline, with its details — so
+ * this screen owns only what the owner types, and always sends `details: ""`.
+ * It still reattaches to whatever run is live for this project, wherever that
+ * run was started from. */
+export function TaskRun({ dir, demoAvailable, onBack }: {
+  dir: string; demoAvailable: boolean; onBack: () => void;
 }) {
   const [phase, setPhase] = useState<Phase>("entry");
-  // Seeded once from the conductor's proposed-task card, if this run was
-  // opened from one; otherwise the field starts empty as before.
-  const [outcome, setOutcome] = useState(initialOutcome ?? "");
+  const [outcome, setOutcome] = useState("");
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [disclosure, setDisclosure] = useState<WorkerDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
@@ -62,7 +66,7 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
   async function findRoute() {
     if (outcome.trim().length < 5) { setError("Describe one visible outcome in a sentence."); return; }
     setError(null);
-    const response = await cairn.taskRoute(dir, outcome.trim());
+    const response = await cairn.taskRoute(dir, outcome.trim(), "");
     if (!response.ok) { setError(response.message); return; }
     setRoute(response.value.route);
     setDisclosure(response.value.disclosure ?? null);
@@ -73,7 +77,15 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
     if (!route || route.status !== "ready") return;
     if (workerRoute && !realCallConfirmed) { setError(`Confirm the displayed real-call boundary before starting ${route.recommended.label}.`); return; }
     setError(null); setActivities([]); setPhase("running");
-    const response = await cairn.taskRun(dir, outcome.trim(), route.recommended.id, workerRoute && realCallConfirmed, disclosure ?? undefined);
+    const response = await cairn.taskRun({
+      dir,
+      outcome: outcome.trim(),
+      details: "",
+      adapterId: route.recommended.id,
+      realCallConfirmed: workerRoute && realCallConfirmed,
+      disclosure: disclosure ?? undefined,
+      conversationId: null,
+    });
     if (!response.ok) { setError(response.message); setPhase("route"); return; }
     if (response.value.status === "connection-required") {
       setRoute(response.value.route);
@@ -129,23 +141,12 @@ export function TaskRun({ dir, demoAvailable, onBack, initialOutcome }: {
           <ModelRoute route={route.recommended} reason={route.reason} />
           {disclosure ? (
             <Card title="confirm one real model call">
-              <p>This confirmation applies only to this task.</p>
-              <div className="route-facts">
-                <p><span>Provider</span><strong>{disclosure.provider}</strong></p>
-                <p><span>Model</span><strong>{disclosure.model}</strong></p>
-                <p><span>Target project</span><strong className="mono">{disclosure.project}</strong></p>
-                <p><span>Task</span><strong>{disclosure.task}</strong></p>
-              </div>
-              <p><strong>Data sent or readable:</strong> {disclosure.data}</p>
-              <p><strong>Cost/quota boundary:</strong> {disclosure.quota}</p>
-              <label className="row" style={{ marginTop: 12 }}>
-                <input
-                  type="checkbox"
-                  checked={realCallConfirmed}
-                  onChange={(event) => setRealCallConfirmed(event.target.checked)}
-                />
-                <span>{`I confirm this one real ${route.recommended.label} call.`}</span>
-              </label>
+              <DisclosureConfirm
+                disclosure={disclosure}
+                label={route.recommended.label}
+                confirmed={realCallConfirmed}
+                onConfirmedChange={setRealCallConfirmed}
+              />
             </Card>
           ) : null}
           <div className="row">

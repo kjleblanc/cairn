@@ -11,9 +11,13 @@ import { createServer } from "node:http";
 // window to observe it in — never a wall-clock sleep in the test itself.
 const DELAY_MS = 300;
 
+// Task 5 (Phase 3): the full-loop reply carries details as well as a risk
+// chip, so one test walks the whole path — chip resolved, inline
+// confirmation showing both parts, dispatch, records on disk.
 const RISK_TASK_BLOCK = JSON.stringify({
   outcome: "Change the page title",
   concerns: [{ kind: "risk", text: "Renaming the title may break bookmarked links." }],
+  details: "Keep the counts 74, 477, 256 exactly.",
 });
 
 const TWO_CONCERN_TASK_BLOCK = JSON.stringify({

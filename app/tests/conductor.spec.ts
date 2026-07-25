@@ -167,7 +167,12 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await relaunched.close();
 });
 
-test("the full loop: a proposed task with a risk chip dispatches through TaskRun and lands a LOG.md row", async () => {
+// Task 5 (Phase 3) rewrote this test: dispatch is now inline. The card's
+// "Send to dispatch" opens a confirmation panel inside the conversation —
+// the app never navigates to the task screen and nothing is re-typed — and
+// the run starts from there. The landing assertions (report, LOG row, git
+// status) are the legacy test's, carried over unchanged.
+test("the full loop: a proposed task with a risk chip dispatches inline and lands a LOG.md row", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-loop-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
@@ -191,15 +196,38 @@ test("the full loop: a proposed task with a risk chip dispatches through TaskRun
   await waitStreamDone(win);
 
   await sendToDispatch.click();
-  await expect(win.getByRole("heading", { name: "What should change?" })).toBeVisible();
-  await expect(win.getByPlaceholder("Describe one visible outcome")).toHaveValue("Change the page title");
-  await win.getByRole("button", { name: "Find a route" }).click();
-  const route = win.getByRole("region", { name: "Recommended route" });
-  await expect(route).toContainText("Cairn offline demonstration");
-  await win.getByRole("button", { name: "Run offline demonstration" }).click();
-  await expect(win.getByRole("heading", { name: "Verified offline result" })).toBeVisible({ timeout: 30_000 });
-  await expect(win.getByText("Milestone movement: NO")).toBeVisible();
 
+  // The confirmation is inline: both parts of the request are on screen, the
+  // conversation is still there, and the task screen never opened.
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await expect(panel).toContainText("Change the page title");
+  await expect(panel).toContainText("Keep the counts 74, 477, 256 exactly.");
+  await expect(win.getByRole("heading", { name: "What should change?" })).toHaveCount(0);
+  await expect(win.getByPlaceholder("Describe one visible outcome")).toHaveCount(0);
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeVisible();
+  // CAIRN_MOCK routes to the offline demo adapter, which declares no
+  // disclosure seam — so this panel is outcome, details, and start only.
+  await expect(panel.locator('input[type="checkbox"]')).toHaveCount(0);
+
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  // The run is the main process's, keyed to this project and tagged with the
+  // conversation it was dispatched from.
+  await expect.poll(
+    async () => (await win.evaluate((dir) => window.cairn.taskCurrent(dir), project))?.phase,
+    { timeout: 30_000 },
+  ).toBe("closed");
+  const session = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
+  const conversations = await win.evaluate((dir) => window.cairn.conductorConversations(dir), project);
+  expect(conversations.length).toBe(1);
+  expect(session?.conversationId).toBe(conversations[0].id);
+  await expect(win.getByRole("heading", { name: "What should change?" })).toHaveCount(0);
+
+  // The owner's own data reached the task record verbatim, not just the card.
+  const brief = readFileSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"), "utf8");
+  expect(brief).toContain("Details (verbatim)");
+  expect(brief).toContain("Keep the counts 74, 477, 256 exactly.");
   const report = readFileSync(join(project, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("Milestone movement: **NO**");
   const log = readFileSync(join(project, "docs", "ai-work", "LOG.md"), "utf8");
