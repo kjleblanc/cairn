@@ -71,19 +71,26 @@ export interface CodexExecAuthorization extends CodexExecDisclosure {
 export const CODEX_EXEC_ADAPTER_ID = "codex-exec";
 export const REAL_MODEL_CALL_NOT_AUTHORIZED = "REAL_MODEL_CALL_NOT_AUTHORIZED";
 
-export function codexExecDisclosure(workspaceRoot: string, requestedOutcome: string): CodexExecDisclosure {
+/**
+ * The card the owner reads before a real call. `task` carries BOTH parts of the
+ * request — the outcome and the owner's own details, verbatim — because the
+ * owner confirms these exact bytes and the gate below re-derives them.
+ */
+export function codexExecDisclosure(workspaceRoot: string, requestedOutcome: string, details = ""): CodexExecDisclosure {
+  const outcome = requestedOutcome.trim();
+  const supplied = details.trim();
   return Object.freeze({
     provider: CODEX_EXEC_PROVIDER,
     model: CODEX_EXEC_MODEL,
     project: resolve(workspaceRoot),
-    task: requestedOutcome.trim(),
+    task: supplied ? `${outcome}\n\nDetails (verbatim):\n${supplied}` : outcome,
     data: CODEX_EXEC_DATA_SCOPE,
     quota: CODEX_EXEC_QUOTA,
   });
 }
 
-export function authorizeCodexExec(workspaceRoot: string, requestedOutcome: string): CodexExecAuthorization {
-  return Object.freeze({ ...codexExecDisclosure(workspaceRoot, requestedOutcome), approved: true as const });
+export function authorizeCodexExec(workspaceRoot: string, requestedOutcome: string, details = ""): CodexExecAuthorization {
+  return Object.freeze({ ...codexExecDisclosure(workspaceRoot, requestedOutcome, details), approved: true as const });
 }
 
 export class CodexExecModelCallBoundaryError extends WorkerBoundaryError {
@@ -657,11 +664,16 @@ export function codexExecConnectionReason(status: CodexExecStatus): string {
 
 function taskPrompt(contract: AdapterTaskContract): string {
   const padded = String(contract.taskNumber).padStart(3, "0");
+  // The owner's own numbers, names, and wording go to the worker unedited. The
+  // first milestone run carried only the outcome sentence, and the worker
+  // invented plausible numbers to fill the gap.
+  const details = contract.details.trim();
   return [
     "Complete exactly one Cairn task in this workspace.",
     "Read and follow AGENTS.md and the existing task brief before editing.",
     `Task number: ${padded}`,
     `Requested visible outcome: ${contract.requestedOutcome}`,
+    ...(details ? ["Details from the owner (use verbatim, do not restate):", details] : []),
     `Requested outcome SHA-256: ${contract.requestedOutcomeSha256}`,
     "Cairn already created this task's brief. Do not create another brief or start another task.",
     "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
@@ -717,7 +729,11 @@ export function prepareCodexExecRequest(workspaceRoot: string, contract: Adapter
 
 function authorizationMatches(workspaceRoot: string, contract: AdapterTaskContract, authorization: CodexExecAuthorization | undefined): boolean {
   if (!authorization || authorization.approved !== true) return false;
-  const expected = codexExecDisclosure(workspaceRoot, contract.requestedOutcome);
+  // The expected card is recomputed from BOTH parts of this contract — the
+  // outcome and the owner's details. An authorization confirmed for the outcome
+  // alone therefore cannot dispatch a details-bearing request, and neither can
+  // one confirmed for different details: what ran is what the owner read.
+  const expected = codexExecDisclosure(workspaceRoot, contract.requestedOutcome, contract.details);
   return authorization.provider === expected.provider &&
     authorization.model === expected.model &&
     authorization.project === expected.project &&
@@ -744,8 +760,8 @@ export function createCodexExecAdapter(
       capabilities: ["serial-task"],
       priority: 100,
     },
-    disclosure(outcome: string): WorkerDisclosure {
-      return codexExecDisclosure(cwd, outcome);
+    disclosure(outcome: string, details: string): WorkerDisclosure {
+      return codexExecDisclosure(cwd, outcome, details);
     },
     async run(contract, signal): Promise<WorkerRunResult> {
       const request = prepareCodexExecRequest(cwd, contract);

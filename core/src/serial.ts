@@ -26,6 +26,11 @@ export interface SerialRunEvents { onActivity?: (activity: SerialActivity) => vo
 export interface SerialRunOptions {
   adapters: readonly TaskAdapter[];
   adapterId?: string;
+  /**
+   * The owner's own supplied data — numbers, names, exact wording — carried to
+   * the worker verbatim and bound into the contract digest. Defaults to "".
+   */
+  details?: string;
   commitRecords?: boolean;
   events?: SerialRunEvents;
   signal?: AbortSignal;
@@ -197,6 +202,16 @@ function escapeLine(text: string): string {
   return text.replace(/\r?\n/g, " ").trim();
 }
 
+/**
+ * Owner-supplied text lands in the brief quarantined as a blockquote — the same
+ * containment Cairn uses for worker text (Task 047). The words stay verbatim;
+ * a heading or table row inside them can never become structure of Cairn's own
+ * record.
+ */
+function blockquote(text: string): string {
+  return text.split(/\r?\n/).map((line) => (line.trim() ? `> ${line}` : ">")).join("\n");
+}
+
 function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
   const label = contract.route.adapterLabel;
@@ -211,6 +226,11 @@ function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const stopped = demo
     ? "STOPPED means the serial demonstration or its protection checks did not complete."
     : "STOPPED means the call was not authorized, the model reported a stop, process evidence failed, protected work changed, or the result records could not be verified.";
+  // The owner's own data — numbers, names, exact wording — shown in the brief
+  // exactly as given, so what the worker was handed is readable afterwards.
+  const details = contract.details.trim()
+    ? `\n## Details (verbatim)\n\n${blockquote(contract.details)}\n`
+    : "";
   return `# Task ${pad(contract.taskNumber)} — ${title}
 
 Requested outcome: ${escapeLine(contract.requestedOutcome)}
@@ -218,7 +238,7 @@ Requested outcome: ${escapeLine(contract.requestedOutcome)}
 Supported outcome: ${contract.supportedOutcome}
 
 Lane: **Standard** — ${lane}.
-
+${details}
 ## Route
 
 - Adapter: ${contract.route.adapterLabel}
@@ -839,6 +859,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     const chosen = options.adapters.find((item) => item.descriptor.id === route.recommended.id);
     if (!chosen) throw new Error("ROUTE_ADAPTER_MISSING");
     const demo = chosen.descriptor.capabilities.includes("offline-demo");
+    const details = (options.details ?? "").trim();
     const start = snapshot(projectRoot);
     const taskNumber = nextTaskNumber(projectRoot);
     mkdirSync(paths.tasks(projectRoot), { recursive: true });
@@ -849,10 +870,15 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     ];
     const ownedSet = new Set(owned);
     const contract: AdapterTaskContract = {
-      version: "cairn-serial-task/v1",
+      version: "cairn-serial-task/v2",
       taskNumber,
       requestedOutcome: outcome.trim(),
-      requestedOutcomeSha256: sha256(outcome.trim()),
+      details,
+      // The digest binds the outcome AND the owner's details together, always
+      // as the two-part JSON array (an empty details string included). A result
+      // echoing the outcome-only digest cannot pass for a detailed request, and
+      // an authorization bound to one pair cannot dispatch the other.
+      requestedOutcomeSha256: sha256(JSON.stringify([outcome.trim(), details])),
       supportedOutcome: demo ? OFFLINE_SUPPORTED_OUTCOME : WORKER_SUPPORTED_OUTCOME,
       lane: "Standard",
       route: {

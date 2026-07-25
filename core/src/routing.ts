@@ -9,9 +9,17 @@ export interface AdapterDescriptor {
 }
 
 export interface AdapterTaskContract {
-  version: "cairn-serial-task/v1";
+  version: "cairn-serial-task/v2";
   taskNumber: number;
   requestedOutcome: string;
+  /**
+   * The owner's own supplied data — numbers, names, exact wording — carried to
+   * the worker unedited; "" when the owner supplied none. It is bound into
+   * `requestedOutcomeSha256` together with the outcome, so a worker can never
+   * be handed one request and authorized for another.
+   */
+  details: string;
+  /** sha256(JSON.stringify([requestedOutcome, details])) — always two-part. */
   requestedOutcomeSha256: string;
   supportedOutcome: string;
   lane: "Standard";
@@ -95,7 +103,13 @@ export class WorkerProcessError extends Error {
 export interface TaskAdapter {
   descriptor: AdapterDescriptor;
   run(contract: AdapterTaskContract, signal?: AbortSignal): Promise<WorkerRunResult>;
-  disclosure?(outcome: string): WorkerDisclosure;
+  /**
+   * The disclosure the owner reads and byte-confirms before a real call. It
+   * takes BOTH parts of the request: the outcome and the owner's details ("" for
+   * none). A card confirmed for the outcome alone must never dispatch a request
+   * carrying details, so both parts are named here.
+   */
+  disclosure?(outcome: string, details: string): WorkerDisclosure;
 }
 
 export interface RouteRequest {

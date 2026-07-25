@@ -26,7 +26,7 @@ import {
   createCodexExecAdapter,
   type CodexExecProcess,
 } from "../src/codex.js";
-import { createOfflineDemoAdapter, type TaskAdapter } from "../src/routing.js";
+import { createOfflineDemoAdapter, type AdapterTaskContract, type TaskAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
 import { projectStatus } from "../src/steps.js";
 
@@ -1389,4 +1389,58 @@ test("an aliased spelling of the project root still completes a serial task (FIX
   });
   assert.equal(result.status, "done");
   assert.deepEqual(requireTaskNames(root), ["001-brief.md", "001-report.md"]);
+});
+
+// Phase 3 Task 3: the owner's own data — numbers, names, exact wording — must
+// reach the worker unedited and bound to the digest. In the first milestone run
+// the pipeline carried only the outcome sentence, the owner's word counts were
+// dropped, and the worker invented plausible ones.
+// The capture is an array, this suite's idiom (codex.test.ts `requests`),
+// because a `let` assigned only inside the adapter callback narrows to `never`
+// for every later read under strict TypeScript.
+test("owner details ride verbatim into the brief, digest-bound (Phase 3 Task 3)", async () => {
+  const root = project();
+  const seen: AdapterTaskContract[] = [];
+  const capturing: TaskAdapter = {
+    ...createOfflineDemoAdapter(),
+    async run(contract) { seen.push(contract); return validResult(contract); },
+  };
+  const result = await runSerialTask(root, "Books sort by word count", {
+    adapters: [capturing], details: "Word counts: 74, 477, 256",
+  });
+  assert.equal(result.status, "done");
+  assert.equal(seen.length, 1);
+  const contract = seen[0];
+  assert.equal(contract.version, "cairn-serial-task/v2");
+  assert.equal(contract.details, "Word counts: 74, 477, 256");
+  assert.equal(
+    contract.requestedOutcomeSha256,
+    createHash("sha256").update(JSON.stringify(["Books sort by word count", "Word counts: 74, 477, 256"])).digest("hex"),
+  );
+  const brief = readFileSync(join(root, "docs", "ai-work", "tasks", "001-brief.md"), "utf8");
+  assert.match(brief, /## Details \(verbatim\)/);
+  assert.match(brief, /Word counts: 74, 477, 256/);
+});
+
+// Phase 3 Task 3, fail-closed: the digest is genuinely two-part. A worker that
+// echoes the digest of the outcome ALONE is answering a request the owner never
+// made, and its result is refused rather than recorded as this task's.
+test("a result echoing the outcome-only digest is refused for a details-bearing task (Phase 3 Task 3)", async () => {
+  const root = project();
+  const forging: TaskAdapter = {
+    ...createOfflineDemoAdapter(),
+    async run(contract) {
+      return {
+        ...validResult(contract),
+        requestedOutcomeSha256: createHash("sha256").update("Books sort by word count").digest("hex"),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Books sort by word count", {
+    adapters: [forging], details: "Word counts: 74, 477, 256",
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "INVALID_ADAPTER_RESULT");
+  assert.match(readFileSync(result.reportPath, "utf8"), /INVALID_ADAPTER_RESULT/);
 });

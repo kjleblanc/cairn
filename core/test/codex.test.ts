@@ -9,6 +9,7 @@ import {
   CODEX_EXEC_DATA_SCOPE,
   CODEX_EXEC_MODEL,
   CODEX_EXEC_QUOTA,
+  codexExecDisclosure,
   CodexExecModelCallBoundaryError,
   CodexExecProcessError,
   createCodexExecAdapter,
@@ -79,11 +80,12 @@ test("system readiness ignores a workspace-local Codex command under an aliased 
   }
 });
 
-function contract(): AdapterTaskContract {
+function contract(details = ""): AdapterTaskContract {
   return {
-    version: "cairn-serial-task/v1",
+    version: "cairn-serial-task/v2",
     taskNumber: 33,
     requestedOutcome: "Add one visible result",
+    details,
     requestedOutcomeSha256: "f".repeat(64),
     supportedOutcome: "Prepare one fake Codex Exec request.",
     lane: "Standard",
@@ -619,6 +621,67 @@ test("a chattering codex child is killed by the absolute cap", async () => {
       (error: unknown) => isCodexExecTimeoutError(error) && error.timeoutKind === "absolute",
     );
   });
+});
+
+// Phase 3 Task 3: the owner's supplied data must reach the worker unedited, be
+// named in the disclosure the owner byte-confirms, and be bound by the
+// authorization gate. An outcome-only confirmation can never dispatch a
+// details-bearing contract — otherwise the card the owner approved would not be
+// the request that ran.
+test("owner details reach the worker prompt, the disclosure, and the authorization gate (Phase 3 Task 3)", async () => {
+  const workspace = resolve("codex-details-workspace");
+  const details = "Word counts: 74, 477, 256";
+  const requests: CodexExecRequest[] = [];
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run(request) {
+      requests.push(request);
+      return {
+        exitCode: 0,
+        terminalEvent: "turn.completed",
+        inputTokens: 1,
+        cachedInputTokens: 0,
+        outputTokens: 1,
+        reasoningOutputTokens: 0,
+        agentMessageCount: 1,
+        commandExecutionCount: 0,
+        fileChangeCount: 0,
+        failedToolItemCount: 0,
+        finalMessage: null,
+      };
+    },
+  };
+
+  // The disclosure the owner reads and byte-confirms carries the details.
+  assert.equal(codexExecDisclosure(workspace, "o", "d").task, "o\n\nDetails (verbatim):\nd");
+  assert.equal(codexExecDisclosure(workspace, "o").task, "o");
+
+  const bound = createCodexExecAdapter(
+    workspace,
+    { installed: true, connected: true },
+    authorizeCodexExec(workspace, "Add one visible result", details),
+    fake,
+  );
+  // The adapter's own seam passes both parts through to that same disclosure.
+  assert.equal(bound.disclosure?.("o", "d").task, "o\n\nDetails (verbatim):\nd");
+
+  const result = await bound.run(contract(details));
+  assert.equal(result.status, "completed");
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
+  assert.match(requests[0].stdin, /Details from the owner \(use verbatim, do not restate\):/);
+  assert.match(requests[0].stdin, /Word counts: 74, 477, 256/);
+
+  // The refusal that protects the byte-confirmed card: an authorization bound to
+  // the outcome alone cannot dispatch a contract carrying details.
+  const outcomeOnly = createCodexExecAdapter(
+    workspace,
+    { installed: true, connected: true },
+    authorizeCodexExec(workspace, "Add one visible result"),
+    fake,
+  );
+  await assert.rejects(() => outcomeOnly.run(contract(details)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  assert.equal(requests.length, 1, "no second process was started");
 });
 
 test("aborting the signal kills the codex child and rejects as cancelled", async () => {
