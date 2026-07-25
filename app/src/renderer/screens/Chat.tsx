@@ -439,14 +439,19 @@ export function Chat({ dir, onBack, onOpenRun }: {
               <div ref={endRef} />
             </div>
             {session ? (
-              <div className="run-strip" role="status" aria-label="Task run">
+              <div className="run-strip">
+                {/* The stage and the terminal line are the announced part —
+                  * they change a handful of times in a whole run. The clock
+                  * deliberately sits OUTSIDE the live region: a polite region
+                  * wrapped around a value that changes every second would
+                  * read itself aloud once a second. */}
                 {session.phase === "running" ? (
                   <>
-                    <span className="run-strip-stage">{latestStage ?? "Starting"}</span>
+                    <span className="run-strip-stage" role="status">{latestStage ?? "Starting"}</span>
                     <span className="run-strip-elapsed">{elapsedSince(session.startedAt, now)}</span>
                   </>
                 ) : (
-                  <span className="run-strip-terminal">{terminalLine}</span>
+                  <span className="run-strip-terminal" role="status">{terminalLine}</span>
                 )}
                 <span className="run-strip-outcome">{session.outcome}</span>
                 <span className="run-strip-controls">
