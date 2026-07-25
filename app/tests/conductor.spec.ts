@@ -245,6 +245,24 @@ test("a conversation persists across a relaunch, and .cairn stays out of git", a
   expect(status).toBe("");
 });
 
+test("a task block with details shows a details section on the card", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-details-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Please detailtask this page title change.");
+  await waitStreamDone(win);
+
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await expect(taskCard).toContainText("Change the page title");
+  await expect(taskCard).toContainText("Details (sent verbatim)");
+  await expect(taskCard).toContainText("74, 477, 256");
+  await app.close();
+});
+
 test("a malformed task block renders as plain chat text, never a card", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-garble-"));
   scaffold(project);

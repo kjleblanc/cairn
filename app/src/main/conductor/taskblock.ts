@@ -25,12 +25,16 @@ function parseBlock(raw: string): TaskBlock | null {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const allowed = new Set(["outcome", "concerns", "notes"]);
+  const allowed = new Set(["outcome", "concerns", "notes", "details"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) return null;
   const record = value as Record<string, unknown>;
   if (typeof record.outcome !== "string") return null;
   const outcome = record.outcome.trim();
   if (!outcome || outcome.length > 300) return null;
+  // The confirmed disclosure card concatenates outcome and details into one
+  // string (see codexExecDisclosure); a multi-line outcome could otherwise
+  // impersonate a details section within that concatenation. Fail closed.
+  if (/[\r\n]/.test(outcome)) return null;
   const concernsRaw = record.concerns ?? [];
   if (!Array.isArray(concernsRaw) || concernsRaw.length > 3) return null;
   const concerns: TaskBlockConcern[] = [];
@@ -45,5 +49,7 @@ function parseBlock(raw: string): TaskBlock | null {
   }
   const notesRaw = record.notes ?? "";
   if (typeof notesRaw !== "string" || notesRaw.length > 1000) return null;
-  return { outcome, concerns, notes: notesRaw.trim() };
+  const detailsRaw = record.details ?? "";
+  if (typeof detailsRaw !== "string" || detailsRaw.length > 2000) return null;
+  return { outcome, concerns, notes: notesRaw.trim(), details: detailsRaw.trim() };
 }

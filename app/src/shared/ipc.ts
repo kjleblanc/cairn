@@ -96,6 +96,7 @@ export interface TaskBlock {
   outcome: string;
   concerns: TaskBlockConcern[];
   notes: string;
+  details: string;
 }
 
 export interface ConductorTurn {

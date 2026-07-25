@@ -32,9 +32,20 @@ const GARBLED_TASK_BLOCK = JSON.stringify({
   extra: "not allowed",
 });
 
+// Task 4 (Phase 3): the `details` channel carries data verbatim to the card
+// and, later, into the confirmed disclosure — never reworded by the model.
+const DETAILS_TASK_BLOCK = JSON.stringify({
+  outcome: "Change the page title",
+  concerns: [],
+  details: "74, 477, 256",
+});
+
 function scriptFor(content) {
   if (content.includes("garble")) {
     return { parts: [`Here's the plan.\n\n\`\`\`cairn-task\n${GARBLED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
+  }
+  if (content.includes("detailtask")) {
+    return { parts: [`Sure, here's the plan.\n\n\`\`\`cairn-task\n${DETAILS_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
   if (content.includes("twoconcerns")) {
     return { parts: [`Sure, here's the plan.\n\n\`\`\`cairn-task\n${TWO_CONCERN_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };

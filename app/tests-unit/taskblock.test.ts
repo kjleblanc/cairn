@@ -39,6 +39,7 @@ for (const [name, body] of [
   ["too many concerns", '{"outcome": "x", "concerns": [{"kind":"risk","text":"a"},{"kind":"risk","text":"b"},{"kind":"risk","text":"c"},{"kind":"risk","text":"d"}], "notes": ""}'],
   ["array payload", '["outcome"]'],
   ["oversized notes", `{"outcome": "x", "concerns": [], "notes": "${"n".repeat(1001)}"}`],
+  ["outcome contains a newline", '{"outcome": "line one\\nline two", "concerns": [], "notes": ""}'],
 ] as const) {
   test(`invalid block is rejected: ${name}`, () => {
     const { block, text } = extractTaskBlock(fence(body));
@@ -46,6 +47,17 @@ for (const [name, body] of [
     assert.ok(text.length > 0, "conversation text is preserved even when the block is invalid");
   });
 }
+
+test("details parses verbatim within its cap and fails closed beyond it", () => {
+  const ok = extractTaskBlock('```cairn-task\n{"outcome":"x","details":"74, 477, 256"}\n```');
+  assert.equal(ok.block?.details, "74, 477, 256");
+  const none = extractTaskBlock('```cairn-task\n{"outcome":"x"}\n```');
+  assert.equal(none.block?.details, "");
+  const big = extractTaskBlock('```cairn-task\n{"outcome":"x","details":"' + "a".repeat(2001) + '"}\n```');
+  assert.equal(big.block, null);
+  const wrongType = extractTaskBlock('```cairn-task\n{"outcome":"x","details":7}\n```');
+  assert.equal(wrongType.block, null);
+});
 
 test("only the first fence is honored", () => {
   const reply = fence('{"outcome": "first", "concerns": [], "notes": ""}') + "\n" + fence('{"outcome": "second", "concerns": [], "notes": ""}');

@@ -201,6 +201,13 @@ export function Chat({ dir, onOpenTask, onBack }: {
     return send("I understand the risk you raised — set it aside and keep the task as proposed.");
   }
 
+  // Task 5 threads `details` on into TaskRun; for now the card's widened
+  // signature is accepted here but only the outcome sentence routes into
+  // the existing prefill navigation.
+  function onCardSend(outcome: string, _details: string): void {
+    onOpenTask(outcome);
+  }
+
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
 
   return (
@@ -229,7 +236,7 @@ export function Chat({ dir, onOpenTask, onBack }: {
               ))}
               {taskBlock ? (
                 <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
-                  onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onOpenTask} />
+                  onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onCardSend} />
               ) : null}
               {streaming ? (
                 <div className="bubble bubble-cairn">

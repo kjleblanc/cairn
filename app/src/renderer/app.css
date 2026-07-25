@@ -120,6 +120,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-composer textarea:disabled { opacity: .6; }
 .task-card { align-self: stretch; margin: 0; }
 .task-card-outcome { font-weight: 600; }
+.task-card-details { margin-top: 8px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.task-card-details-label { margin: 0 0 2px; }
+.task-card-details-text { margin: 0; white-space: pre-wrap; }
 .task-card-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .task-chip { background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 14px; }
 .task-chip-risk { border-color: var(--amber-soft); }

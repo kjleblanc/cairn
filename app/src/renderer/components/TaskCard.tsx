@@ -22,7 +22,7 @@ export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
   block: TaskBlock;
   onAnswer: (concern: TaskBlockConcern, answer: string) => boolean | Promise<boolean>;
   onSetAside: (concern: TaskBlockConcern) => boolean | Promise<boolean>;
-  onSend: (outcome: string) => void;
+  onSend: (outcome: string, details: string) => void;
   busy: boolean;
 }) {
   const [resolved, setResolved] = useState<Record<number, Resolution>>({});
@@ -46,6 +46,12 @@ export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
   return (
     <div className="card task-card">
       <p className="task-card-outcome">{block.outcome}</p>
+      {block.details ? (
+        <div className="task-card-details">
+          <p className="small muted task-card-details-label">Details (sent verbatim)</p>
+          <p className="task-card-details-text">{block.details}</p>
+        </div>
+      ) : null}
       {block.concerns.length ? (
         <div className="task-card-chips">
           {block.concerns.map((concern, i) => {
@@ -81,7 +87,7 @@ export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
         </div>
       ) : null}
       <div className="row" style={{ marginTop: 12 }}>
-        <Pill kind="primary" disabled={!allResolved} onClick={() => onSend(block.outcome)}>Send to dispatch</Pill>
+        <Pill kind="primary" disabled={!allResolved} onClick={() => onSend(block.outcome, block.details)}>Send to dispatch</Pill>
       </div>
     </div>
   );
