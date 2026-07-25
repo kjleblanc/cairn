@@ -338,7 +338,10 @@ export function Chat({ dir, onBack, onOpenRun }: {
     setError(null);
     setComposer("");
     setLastOwnerText(trimmed);
-    setTurns((t) => [...t, { role: "owner", text: trimmed, ts: new Date().toISOString() }]);
+    // Shown at once so typing feels answered, and held by identity so a refusal
+    // can take back this exact turn and no other.
+    const optimistic: ConductorTurn = { role: "owner", text: trimmed, ts: new Date().toISOString() };
+    setTurns((t) => [...t, optimistic]);
     setStreaming(true);
     streamingRef.current = "";
     setStreamingText("");
@@ -349,7 +352,22 @@ export function Chat({ dir, onBack, onOpenRun }: {
 
     const response = await cairn.conductorSend({ dir, conversationId: startingId, text: trimmed });
     if (inFlightRef.current !== inFlight) return true; // superseded by "New conversation" or another send meanwhile — this call still dispatched
-    if (!response.ok) { inFlightRef.current = null; setStreaming(false); setError(response.message); return false; } // main refused before persisting the owner turn — never reached the conductor
+    if (!response.ok) {
+      // Main refused before persisting anything, so this message is not in the
+      // conversation on disk. Take it back out of the transcript: a bubble that
+      // would vanish on the next reload is a message the screen is claiming was
+      // sent when it never was. The text is not lost — the refusal bubble below
+      // carries it as "Try again", which resends this exact string.
+      //
+      // Reachable in ordinary use since Task 070: while the envelope's comment
+      // streams, main holds this project's stream lock and the renderer, which
+      // did not start that stream, leaves the composer open.
+      inFlightRef.current = null;
+      setStreaming(false);
+      setTurns((t) => t.filter((turn) => turn !== optimistic));
+      setError(response.message);
+      return false;
+    }
     if (inFlight.id === null) {
       // The response resolved before any delta raced ahead of it — adopt now.
       inFlight.id = response.value.conversationId;

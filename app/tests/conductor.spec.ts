@@ -73,9 +73,12 @@ async function waitStreamDone(win: Page): Promise<void> {
   await expect(win.getByRole("button", { name: "Stop", exact: true })).not.toBeVisible({ timeout: 15_000 });
 }
 
+// `exact` for the same reason as "Stop" above: role-name matching is substring
+// by default, and a proposed-task card on screen puts a "Send to dispatch"
+// button in the same window as the composer's "Send".
 async function sendChat(win: Page, text: string): Promise<void> {
   await win.getByPlaceholder("Talk with Cairn").fill(text);
-  await win.getByRole("button", { name: "Send" }).click();
+  await win.getByRole("button", { name: "Send", exact: true }).click();
 }
 
 test.describe.configure({ mode: "serial" });
@@ -740,6 +743,68 @@ test("the conductor comments on the card the envelope just posted, and the comme
     expect(last.tokens).toBe(29);
     expect(last.costUsd).toBe(0.00002);
   }
+  await app.close();
+});
+
+// Task 071 (review fix on 070), mock lane. Task 9 opened a window that never
+// existed before: while the envelope's comment streams, main holds the
+// project's one stream lock, but the renderer never started a stream, so the
+// composer stays open and invites a message main will refuse. Two things must
+// hold in that window — the transcript must never keep a message the main
+// process refused, and the owner must never be told to stop something with no
+// Stop control on screen.
+test("a message sent while the comment streams is refused, leaves no phantom turn, and is not lost", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-comment-busy-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  // The card and the commentary call leave main in the same synchronous block,
+  // so the lock is already held by the time this card is painted.
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
+
+  await sendChat(win, "Is that everything?");
+  const refusal = win.locator(".bubble-system");
+  await expect(refusal).toBeVisible({ timeout: 10_000 });
+
+  // The message never reached the conversation — main refused before persisting
+  // anything — so it must not sit in the transcript looking sent. A reload would
+  // have made it vanish, which is the same thing as it never having been true.
+  await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(0);
+
+  // And the refusal says what is actually happening, without pointing at a Stop
+  // control that only ever appears for a reply the owner started.
+  await expect(refusal).toContainText("short comment");
+  await expect(refusal).not.toContainText("stop it first");
+  await expect(win.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
+
+  // Nothing was lost either: the comment lands, and the message goes through.
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(1, { timeout: 30_000 });
+  await refusal.getByRole("button", { name: "Try again" }).click();
+  await waitStreamDone(win);
+  await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(1);
+  await expect(win.locator(".bubble-system")).toHaveCount(0);
+
+  // On disk, exactly once — the refused send left no trace there either.
+  const turns = await win.evaluate(async (dir) => {
+    const list = await window.cairn.conductorConversations(dir);
+    return window.cairn.conductorTurns(dir, list[list.length - 1].id);
+  }, project);
+  expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Is that everything?").length).toBe(1);
   await app.close();
 });
 

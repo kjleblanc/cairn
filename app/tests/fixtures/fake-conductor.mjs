@@ -48,9 +48,14 @@ const DETAILS_TASK_BLOCK = JSON.stringify({
 // a SYSTEM message and adds no user turn at all, so keying off the last user
 // message would replay whatever the owner said before the dispatch and pass a
 // stale reply off as a comment on the card.
+//
+// Task 071 split it into four slower chunks. The window while a comment streams
+// is a real state with its own rules — main holds the project's lock and the
+// renderer never started a stream — and a test can only stand in that window if
+// it lasts longer than a click. Same words, more room.
 const COMMENTARY_SCRIPT = {
-  parts: ["The card says this task finished DONE", ", and the report is in docs/ai-work."],
-  delayMs: DELAY_MS,
+  parts: ["The card says", " this task finished DONE", ", and the report", " is in docs/ai-work."],
+  delayMs: 400,
 };
 
 function scriptFor(content) {

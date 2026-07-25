@@ -18,6 +18,22 @@ export function conductorFile(): string {
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "Cairn", "conductor.json");
 }
 
+/**
+ * The snapshot lives in module state, which makes this pair safe for exactly
+ * one detach at a time — and `playwright.config.ts` pins `workers: 1`, so specs
+ * run one after another and never overlap. That line of config is load-bearing
+ * for this file: raise it, and two specs in separate worker PROCESSES each hold
+ * their own `saved`, so one restore can put the real key back part-way through
+ * another spec's dispatching tests, and one can write back `null` over a
+ * connection it never saw. Either silently reopens the real-money hole this
+ * fixture exists to close.
+ *
+ * The re-entrancy throw below catches the same mistake within one process
+ * (a spec that detaches twice, or forgets to restore). A cross-process version
+ * would need a lock file beside `conductor.json` rather than module state; it
+ * is not built because nothing today runs the suite in parallel, and the
+ * config, not this file, is where that decision is made.
+ */
 let saved: Buffer | null = null;
 let detached = false;
 
@@ -32,6 +48,12 @@ let detached = false;
  * machine that is a real key and a real provider account.
  */
 export function detachStoredConnection(): void {
+  if (detached) {
+    // Fail loudly rather than overwrite the snapshot: a second detach would
+    // record "there was nothing here" and the restore that follows would then
+    // DELETE the owner's real connection instead of putting it back.
+    throw new Error("CONDUCTOR_CONNECTION_ALREADY_DETACHED: restore the stored connection before detaching it again.");
+  }
   const file = conductorFile();
   saved = existsSync(file) ? readFileSync(file) : null;
   detached = true;

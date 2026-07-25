@@ -8,7 +8,7 @@ import type {
   Result,
   ResultCard,
 } from "../../shared/ipc.js";
-import { isTaskRunning } from "../rungate.js";
+import { isQuitDraining, isTaskRunning } from "../rungate.js";
 import { logError } from "../log.js";
 import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
 import { CONSTITUTION } from "./constitution.js";
@@ -49,9 +49,12 @@ type TurnKind = "reply" | "commentary";
  */
 const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. Add one short plain-language comment for the owner. State result facts only from the card or the records in your briefing, and name your source. Do not propose a task.";
 
-/** One AbortController per project dir, so a stray second send can't stomp
- * on a stream already in flight and `stop` has something to abort. */
-const controllers = new Map<string, AbortController>();
+/** One live stream per project dir, so a stray second send can't stomp on a
+ * stream already in flight and `stop` has something to abort. It carries its
+ * `kind` because the refusal the next send gets has to name what is actually in
+ * flight: a reply the owner started is on screen with a Stop control, and a
+ * comment the envelope started is neither. */
+const controllers = new Map<string, { controller: AbortController; kind: TurnKind }>();
 
 /** The owner-facing disclosure Cairn shows before it may act on the
  * conversation without per-message approval. Main re-derives this from the
@@ -119,7 +122,7 @@ export function turns(dir: string, id: string): ConductorTurn[] {
 /** Aborts the in-flight stream for `dir`, if any. The stream's own catch
  * block persists the partial turn and emits the stopped delta. */
 export function stop(dir: string): void {
-  controllers.get(dir)?.abort();
+  controllers.get(dir)?.controller.abort();
 }
 
 /** Starts (or continues) a conversation for `dir`. Returns immediately with
@@ -133,8 +136,14 @@ export function send(
   if (isTaskRunning(dir)) {
     return { ok: false, message: "SERIAL_RUN_ACTIVE: A task is already running for this project. Wait for it to finish before messaging Cairn." };
   }
-  if (controllers.has(dir)) {
-    return { ok: false, message: "Cairn is already answering for this project. Wait for that reply, or stop it first." };
+  // The refusal names the stream that is actually in flight. A reply the owner
+  // started is on screen with a Stop control under it; a comment the envelope
+  // started has neither, so telling the owner to stop it would point at nothing.
+  const live = controllers.get(dir);
+  if (live) {
+    return { ok: false, message: live.kind === "commentary"
+      ? "Cairn is finishing a short comment on the result card. Try again in a moment."
+      : "Cairn is already answering for this project. Wait for that reply, or stop it first." };
   }
   const conn = keystore.readConnection();
   if (!conn) {
@@ -146,7 +155,7 @@ export function send(
   appendTurn(dir, id, { role: "owner", text, ts: new Date().toISOString() });
 
   const controller = new AbortController();
-  controllers.set(dir, controller);
+  controllers.set(dir, { controller, kind: "reply" });
   void streamTurn(dir, id, conn, controller, onDelta, "reply");
 
   return { ok: true, value: { conversationId: id } };
@@ -156,11 +165,12 @@ export function send(
  * One short comment from the conductor on the card the envelope just posted.
  *
  * This is the only call Cairn makes that the OWNER did not ask for, so every
- * guard here points the same way. It returns at once and can neither delay nor
- * block the card: by the time it runs the card is already written and already
- * on screen, and if this whole function did nothing the card would be exactly
- * what it is. It never retries. It skips silently — spending nothing, saying
- * nothing — when:
+ * guard here points the same way. Nothing about the card depends on it: the
+ * card is written and its delta already sent before this is called, so whatever
+ * happens here, the card is exactly what it is. (It is not instantaneous —
+ * like `send()`, it runs synchronously as far as the first await, which
+ * includes `assembleBriefing`'s git calls. Nothing is waiting on that.) It
+ * never retries. It skips silently — spending nothing, saying nothing — when:
  *
  * - there is no stored connection. A disconnected Cairn makes no paid call, and
  *   the card standing alone is the honest outcome, not a failure to report.
@@ -168,6 +178,12 @@ export function send(
  * - a task is running for this project. Evaluated post-settle, where the run
  *   that produced this very card has already cleared the running set — so this
  *   guards only against a genuinely new, overlapping run.
+ * - Cairn is quitting. The post-settle hook is registered before the quit
+ *   drain subscribes to the same promise, so every quit-cancelled run would
+ *   otherwise start a comment inside the drain — a call paid for, killed
+ *   part-way by the process ending, and never persisted or seen. The quit
+ *   dialog has just told the owner that the call already made is already paid
+ *   for; starting another one after that is not a thing this may do.
  */
 export function commentary(
   dir: string,
@@ -179,6 +195,7 @@ export function commentary(
   if (!conn) return;
   if (controllers.has(dir)) return;
   if (isTaskRunning(dir)) return;
+  if (isQuitDraining()) return;
   // The instruction says "the card above", so the card has to really be there.
   // `readTurns` DROPS an envelope line whose card fails its guard, and a card
   // the conversation cannot read back is a card the model cannot see: better
@@ -187,7 +204,7 @@ export function commentary(
   if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) return;
 
   const controller = new AbortController();
-  controllers.set(dir, controller);
+  controllers.set(dir, { controller, kind: "commentary" });
   void streamTurn(dir, conversationId, conn, controller, onDelta, "commentary");
 }
 
