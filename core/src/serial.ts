@@ -756,27 +756,52 @@ function replaceDoneRecordsWithStopped(
 }
 
 /**
- * Task 058: the throw-site log restore — the catch-path residual Task 052 left
- * open. A `RECORD_VERIFICATION_FAILED` throw out of `runSerialTask` returns no
- * result, so the run is must-inspect; the one thing that must not survive it is
- * a row in Cairn's own append-only work log that Cairn never verified — a
- * worker-forged row, or a DONE row whose honest STOPPED rewrite failed. At every
- * such throw site the last log state Cairn itself verified is the task-start
- * snapshot (no row written during the run passed its byte-back), so the log is
- * written back to `start.logText` with the same mechanics the 052 owned-records
- * gate uses. Only Cairn's OWN record is restored: the worker's product-file
- * changes, its report, and its brief stay retained in the workspace for
- * inspection. A restore that cannot be written is swallowed — the throw, and the
- * inspection it forces, is what the caller must see.
+ * Task 058, corrected by Task 059: the throw-site log restore — the catch-path
+ * residual Task 052 left open. A `RECORD_VERIFICATION_FAILED` throw out of
+ * `runSerialTask` returns no result, so the run is must-inspect; the one thing
+ * that must not survive it is a row in Cairn's own append-only work log that
+ * does not describe a run that finished — a worker-forged row, or a DONE row
+ * whose honest STOPPED rewrite failed.
+ *
+ * Why the task-start snapshot is the right state to write back is NOT that no
+ * row written during the run passed its byte-back check: at the two
+ * `replaceDoneRecordsWithStopped` sites below a DONE row demonstrably did pass
+ * it. Verified-as-written is not verified-as-true. Those rows say DONE, and the
+ * run they describe threw instead of completing, so the DONE row — and the stone
+ * it would earn — must not stand. The last log state that is both Cairn's own
+ * and still true of this run is therefore the task-start snapshot, written back
+ * with the same mechanics the 052 owned-records gate uses.
+ *
+ * Only Cairn's OWN record is restored: the worker's product-file changes, its
+ * report, and its brief stay retained in the workspace for inspection. Restoring
+ * a log an owner edited mid-run discards that edit; LOG.md is committed, so it
+ * is recoverable from Git (see the Task 059 report).
+ *
+ * Like every other record write in this file, the restore is read back. It
+ * returns whether the restore took, so the caller can say so in the thrown
+ * message; a false return NEVER suppresses the throw.
  */
-function restoreLogBeforeThrow(root: string, start: GitSnapshot): void {
+function restoreLogBeforeThrow(root: string, start: GitSnapshot): boolean {
   try {
     const logPath = paths.log(root);
-    if (existsSync(logPath) && readFileSync(logPath, "utf8") === start.logText) return;
+    if (existsSync(logPath) && readFileSync(logPath, "utf8") === start.logText) return true;
     writeFileSync(logPath, start.logText, "utf8");
+    return readFileSync(logPath, "utf8") === start.logText;
   } catch {
-    // The log could not be restored; the throw still forces inspection.
+    // The log could not be restored. The throw still forces inspection, and the
+    // caller appends the unrestored-log clause so the owner is told why.
+    return false;
   }
+}
+
+/**
+ * Task 059: one `RECORD_VERIFICATION_FAILED` message, plus a plain clause when
+ * the throw-site log restore did not take. Silence would let an unrestorable log
+ * read exactly like a restored one.
+ */
+function recordVerificationFailed(detail: string, restored: boolean): Error {
+  const unrestored = " The work log could not be restored and may carry rows Cairn did not write.";
+  return new Error(`RECORD_VERIFICATION_FAILED: ${detail}${restored ? "" : unrestored}`);
 }
 
 export function previewSerialRoute(outcome: string, adapters: readonly TaskAdapter[], adapterId?: string): RouteResult {
@@ -915,8 +940,8 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       if (!closed?.verified) {
         // The worker may have forged a log row before forcing this thrown close
         // (a tampered log is exactly why the safety close returns null here).
-        restoreLogBeforeThrow(projectRoot, start);
-        throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
+        const restored = restoreLogBeforeThrow(projectRoot, start);
+        throw recordVerificationFailed("Model-authored evidence was retained without overwrite.", restored);
       }
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
       return {
@@ -960,8 +985,8 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${reason}.` });
         const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null, recovery);
         if (!records.verified) {
-          restoreLogBeforeThrow(projectRoot, start);
-          throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored evidence was retained without overwrite.");
+          const restored = restoreLogBeforeThrow(projectRoot, start);
+          throw recordVerificationFailed("Worker-authored evidence was retained without overwrite.", restored);
         }
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
         return {
@@ -983,10 +1008,12 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined,
         );
         if (!stopped?.verified) {
-          // The DONE row could not be rewritten as an honest STOPPED row, so no
-          // row here was ever verified: leave the log as Cairn last verified it.
-          restoreLogBeforeThrow(projectRoot, start);
-          throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+          // The DONE row could not be rewritten as an honest STOPPED row. That
+          // row may well have passed its own byte-back check, but the run it
+          // claims threw instead of completing, so it must not stand: restore
+          // the log to what Cairn last wrote that is still true of this run.
+          const restored = restoreLogBeforeThrow(projectRoot, start);
+          throw recordVerificationFailed("Task records were retained for inspection.", restored);
         }
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });
@@ -1088,8 +1115,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           projectRoot, contract, demo, start, Boolean(options.commitRecords), records, "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined,
         );
         if (!stopped?.verified) {
-          restoreLogBeforeThrow(projectRoot, start);
-          throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+          // The verified DONE row above described a run that then failed to
+          // commit; a DONE row for a thrown run must not stand.
+          const restored = restoreLogBeforeThrow(projectRoot, start);
+          throw recordVerificationFailed("Task records were retained for inspection.", restored);
         }
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: MODEL_RESULT_NOT_VERIFIED." });
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — MODEL_RESULT_NOT_VERIFIED" });
@@ -1140,8 +1169,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         closed,
       );
       if (!stopped?.verified) {
-        restoreLogBeforeThrow(projectRoot, start);
-        throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        // Reachable with a verified DONE row on disk (the protected-work
+        // disjunct above); the run still did not finish honestly, so the row goes.
+        const restored = restoreLogBeforeThrow(projectRoot, start);
+        throw recordVerificationFailed("Task records were retained for inspection.", restored);
       }
       emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });

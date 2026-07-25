@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -64,6 +65,24 @@ function project(): string {
   git(root, ["add", "AGENTS.md", "docs/ai-work/PROJECT.md", "docs/ai-work/LOG.md"]);
   git(root, ["commit", "-q", "-m", "fixture"]);
   return root;
+}
+
+// Task 059: staging an unwritable record file needs a read-only file to actually
+// refuse writes. Windows honors FILE_ATTRIBUTE_READONLY for every user; POSIX
+// honors 0444 for every user except root. Probe once rather than assume.
+function readOnlyBlocksWrites(root: string): boolean {
+  const probe = join(root, "readonly-probe.tmp");
+  writeFileSync(probe, "probe\n");
+  chmodSync(probe, 0o444);
+  try {
+    writeFileSync(probe, "written\n");
+    return false;
+  } catch {
+    return true;
+  } finally {
+    chmodSync(probe, 0o644);
+    rmSync(probe, { force: true });
+  }
 }
 
 function validResult(contract: Parameters<TaskAdapter["run"]>[0]) {
@@ -1298,15 +1317,55 @@ test("a worker that forges a log row and forces a thrown close leaves the log re
       throw new CodexExecProcessError("CODEX_EXEC_STDIN_FAILED", null);
     },
   };
-  await assert.rejects(
-    () => runSerialTask(root, "Add one visible result", {
-      adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), forging)],
-    }),
-    /RECORD_VERIFICATION_FAILED/,
-  );
+  const error = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), forging)],
+  }).then(() => null, (reason: unknown) => reason);
+  assert.ok(error instanceof Error, "the run must throw");
+  assert.match(error.message, /RECORD_VERIFICATION_FAILED/);
   const after = readFileSync(logPath, "utf8");
   assert.equal(after.includes("forged stone"), false, "the forged row must not survive the thrown run");
   assert.equal(after, before, "the log is byte-identical to Cairn's last own write");
+  // Task 059: a restore that DID take says nothing extra — the unrestored
+  // warning must not cry wolf on the ordinary path.
+  assert.doesNotMatch(error.message, /could not be restored/);
+});
+
+// Task 059 (review of 058): the restore is a record write like any other, so it
+// is read back, and a restore that did not take is disclosed in the very message
+// the owner sees — never swallowed. Fail-closed: the throw still stands.
+test("a thrown close whose log restore cannot be written says so in the thrown message (FIX / Task 059)", async (t) => {
+  const root = project();
+  if (!readOnlyBlocksWrites(root)) {
+    t.skip("this filesystem or user does not honor a read-only file, so the restore cannot be made to fail");
+    return;
+  }
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const forging: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      appendFileSync(logPath, "| 001 | 2026-07-24 | Standard | Applied | DONE | completed | forged stone | YES |\n");
+      // Read-only blocks writeFileSync on Windows (FILE_ATTRIBUTE_READONLY) and
+      // on POSIX (0444), so the throw-site restore cannot take.
+      chmodSync(logPath, 0o444);
+      throw new CodexExecProcessError("CODEX_EXEC_STDIN_FAILED", null);
+    },
+  };
+  try {
+    const error = await runSerialTask(root, "Add one visible result", {
+      adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), forging)],
+    }).then(() => null, (reason: unknown) => reason);
+    assert.ok(error instanceof Error, "a failed restore never suppresses the throw");
+    assert.match(error.message, /^RECORD_VERIFICATION_FAILED: /);
+    assert.match(
+      error.message,
+      /The work log could not be restored and may carry rows Cairn did not write\./,
+      "the owner is told the log may carry rows Cairn did not write",
+    );
+    // The forged row really did survive: the warning is true, not decorative.
+    assert.equal(readFileSync(logPath, "utf8").includes("forged stone"), true);
+  } finally {
+    chmodSync(logPath, 0o644);
+  }
 });
 
 function requireTaskNames(root: string): string[] {
