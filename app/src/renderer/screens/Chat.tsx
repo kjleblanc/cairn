@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorDelta, ConductorStatus, ConductorTurn, ResultCard, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
+import type { ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
@@ -30,6 +30,126 @@ type Dispatch = {
   phase: "confirm" | "running";
   error: string | null;
 };
+
+/**
+ * The push flow — the one place in this screen that writes to the world
+ * outside this machine.
+ *
+ * It is deliberately TWO presses, and the second one is not a formality. The
+ * contract's concrete risk boundaries require that immediately before writing
+ * to an external service, the owner is shown the exact target, effect, likely
+ * exposure, and recovery plan, and approves that exact action. The chip is
+ * only the nudge; the confirmation IS that pause; the press on the
+ * confirmation is the approval. One press that both disclosed and published
+ * would satisfy neither half of the rule.
+ *
+ * `preview` is refreshed from git when the chip is pressed, so the facts the
+ * owner approves are the facts at the moment of approval — never a snapshot
+ * taken when the card landed, which a commit made meanwhile would have
+ * silently outgrown.
+ */
+type PushFlow = {
+  preview: PushPreview;
+  /** `opening` and `pushing` are the two awaits, held as states so neither
+   * control can be pressed twice; `nothing` is the honest answer when the
+   * re-read finds the project no longer ahead. */
+  phase: "chip" | "opening" | "confirm" | "pushing" | "settled" | "nothing";
+  result: PushResult | null;
+};
+
+/** The two sentences the confirmation must carry, fixed here because they are
+ * the disclosure itself: what the write exposes, and what can and cannot be
+ * undone afterward. */
+const PUSH_PUBLICATION = "Pushing publishes these commits. On a public repository they become publicly visible.";
+const PUSH_RECOVERY = "A pushed commit can be reverted by a new commit. Publication itself cannot be recalled.";
+
+/** A plain count of local commits, whatever their origin — the word "verified"
+ * never appears near it, because the envelope has not verified the owner's own
+ * commits and never claims to. Singular when one, since "1 commits" would be
+ * Cairn miscounting out loud. */
+function aheadPhrase(ahead: number): string {
+  return `${ahead} ${ahead === 1 ? "commit" : "commits"} ahead`;
+}
+
+/**
+ * The chip, the pause, and the outcome — one element at a time, under the
+ * DONE card that prompted it. Nothing here is routed through the conductor:
+ * the model is never told a chip exists, is never asked whether to push, and
+ * never sees the result.
+ */
+function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
+  flow: PushFlow;
+  onOpen: () => void;
+  onApprove: () => void;
+  onDecline: () => void;
+}) {
+  const { preview, result } = flow;
+
+  if (flow.phase === "chip" || flow.phase === "opening") {
+    return (
+      <div className="push-chip">
+        <Pill kind="soft" disabled={flow.phase === "opening"} onClick={onOpen}>
+          This project is {aheadPhrase(preview.ahead)} of {preview.remote}. Push?
+        </Pill>
+      </div>
+    );
+  }
+
+  if (flow.phase === "nothing") {
+    return (
+      <div className="card push-outcome">
+        <p className="push-outcome-text">This project is no longer ahead of {preview.remote}. Nothing was pushed.</p>
+      </div>
+    );
+  }
+
+  if (flow.phase === "settled" && result) {
+    return (
+      <div className="card push-outcome">
+        <p className="card-title">the push</p>
+        <p className="push-outcome-text">{result.ok ? result.summary : result.message}</p>
+        {/* Task 073 carried this forward: the `other` bucket appends git's own
+          * first stderr line, which can carry a local absolute path. It is
+          * kept — a real error in git's own words beats a falsely generic
+          * sentence — but it is labeled here, so nothing in it reads as
+          * Cairn's own account of what happened. */}
+        {!result.ok && result.kind === "other" ? (
+          <p className="small muted">The sentence above ends with git&apos;s own words about this failure, quoted as git reported them.</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  // Only the two panel states below put a control on screen that can write.
+  // Anything else — including a settled flow whose result somehow went missing
+  // — renders nothing rather than falling through to a live Push button.
+  if (flow.phase !== "confirm" && flow.phase !== "pushing") return null;
+  const pushing = flow.phase === "pushing";
+  return (
+    <div className="card push-confirm">
+      <p className="card-title">before this push</p>
+      <ul className="push-confirm-facts">
+        <li>Target: {preview.remote} — <span className="mono">{preview.url}</span></li>
+        <li>Branch: <span className="mono">{preview.branch}</span></li>
+        <li>
+          Effect: this push publishes the following {preview.subjects.length === 1 ? "commit" : "commits"}:
+          <ul className="push-confirm-subjects">
+            {preview.subjects.map((subject, i) => <li key={i}>{subject}</li>)}
+          </ul>
+        </li>
+      </ul>
+      <p className="push-confirm-sentence">{PUSH_PUBLICATION}</p>
+      <p className="push-confirm-sentence">{PUSH_RECOVERY}</p>
+      <div className="row" style={{ marginTop: 12 }}>
+        <Pill kind="primary" disabled={pushing} onClick={onApprove}>Push</Pill>
+        <Pill kind="quiet" disabled={pushing} onClick={onDecline}>Not now</Pill>
+      </div>
+      {pushing ? (
+        <p className="small muted">Pushing. Cairn runs one plain git push — never a retry, never a force.</p>
+      ) : null}
+    </div>
+  );
+}
 
 /** The run clock, as an owner would count it: m:ss since the run started. */
 function elapsedSince(startedAt: string, now: number): string {
@@ -188,6 +308,13 @@ export function Chat({ dir, onBack, onOpenRun }: {
   // post into the conversation whose id rode the run request.
   const [session, setSession] = useState<RunSessionSnapshot | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // The push nudge under the newest DONE card, or null when there is nothing
+  // to offer. One flow at a time, because one project has one branch to push.
+  const [pushFlow, setPushFlow] = useState<PushFlow | null>(null);
+  // Guards the one real write: a second press while `git push` is still
+  // running would be a second push, and Cairn runs exactly the one the owner
+  // approved. A ref, not state, so the guard is true the instant it is set.
+  const pushRunning = useRef(false);
   // Names the dispatch a route lookup belongs to, so a slow answer for a
   // panel the owner already replaced can never land on the newer one.
   const dispatchToken = useRef(0);
@@ -315,6 +442,61 @@ export function Chat({ dir, onBack, onOpenRun }: {
   }), [dir, setConvId]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
+
+  // The newest card in view. Turn objects keep their identity when a turn is
+  // appended, so this is referentially stable until a genuinely new card
+  // arrives — which is what keeps the effect below from re-firing every time
+  // the conductor's comment or the owner's next message lands.
+  const latestCard = turns.reduce<ResultCard | null>(
+    (found, turn) => (turn.role === "envelope" ? turn.card : found), null);
+
+  // The chip's one trigger, and its only one: a DONE card. A STOPPED or ERROR
+  // card clears the flow without asking git anything at all — a run that was
+  // stopped verified nothing, and a run that threw left a workspace needing
+  // inspection; neither is a moment to offer to publish. A null preview (no
+  // upstream configured) offers nothing either, and neither does ahead 0.
+  //
+  // This runs whenever such a card is the newest one in view, including on a
+  // reload that reads it back from disk: the count is a live git fact, and
+  // suppressing a true nudge because the screen was rebuilt would lose it for
+  // good.
+  useEffect(() => {
+    if (latestCard === null || latestCard.disposition !== "DONE") { setPushFlow(null); return; }
+    let live = true;
+    void cairn.pushPreview(dir).then((preview) => {
+      if (!live) return;
+      setPushFlow(preview !== null && preview.ahead > 0 ? { preview, phase: "chip", result: null } : null);
+    });
+    return () => { live = false; };
+  }, [latestCard, dir]);
+
+  // The chip's press is not the push. It re-reads git — locally, no network —
+  // and opens the confirmation on facts that are true now, so the target and
+  // the exact commit list the owner approves are the ones that would publish.
+  async function openPushConfirm() {
+    setPushFlow((f) => (f !== null && f.phase === "chip" ? { ...f, phase: "opening" } : f));
+    const fresh = await cairn.pushPreview(dir);
+    setPushFlow((f) => {
+      if (f === null || f.phase !== "opening") return f; // a newer card replaced this flow meanwhile
+      if (fresh === null || fresh.ahead < 1) return { ...f, phase: "nothing", result: null };
+      return { preview: fresh, phase: "confirm", result: null };
+    });
+  }
+
+  // The owner's approval of that exact action, and the only path in this
+  // screen that writes anything outside this machine. One press, one plain
+  // `git push`, whatever it reports.
+  async function approvePush() {
+    if (pushRunning.current) return;
+    pushRunning.current = true;
+    setPushFlow((f) => (f !== null && f.phase === "confirm" ? { ...f, phase: "pushing" } : f));
+    try {
+      const result = await cairn.pushExecute(dir);
+      setPushFlow((f) => (f !== null && f.phase === "pushing" ? { ...f, phase: "settled", result } : f));
+    } finally {
+      pushRunning.current = false;
+    }
+  }
 
   // Unmounting mid-stream (e.g. navigating back to the dashboard) doesn't
   // stop the reply on its own — main keeps running it and holds the per-dir
@@ -517,7 +699,18 @@ export function Chat({ dir, onBack, onOpenRun }: {
           <>
             <div className="chat-messages">
               {turns.map((turn, i) => (turn.role === "envelope" ? (
-                <ResultCardView key={i} card={turn.card} onOpenRun={onOpenRun} />
+                <Fragment key={i}>
+                  <ResultCardView card={turn.card} onOpenRun={onOpenRun} />
+                  {/* Under the card that prompted it, and under that card only
+                    * — never under an older one, and never under a card whose
+                    * disposition was not DONE. */}
+                  {pushFlow !== null && turn.card === latestCard ? (
+                    <PushFlowView flow={pushFlow}
+                      onOpen={() => { if (pushFlow.phase === "chip") void openPushConfirm(); }}
+                      onApprove={() => { if (pushFlow.phase === "confirm") void approvePush(); }}
+                      onDecline={() => setPushFlow((f) => (f !== null && f.phase === "confirm" ? { ...f, phase: "chip", result: null } : f))} />
+                  ) : null}
+                </Fragment>
               ) : (
                 <div key={i} className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}`}>
                   {turn.role === "owner" ? turn.text : <Md text={turn.text} />}

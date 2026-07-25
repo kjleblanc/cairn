@@ -145,6 +145,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-claims-label { margin: 0 0 2px; }
 .result-card-claims-text { margin: 0 0 4px; white-space: pre-wrap; }
 .result-card-path { margin: 8px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+/* The push flow. The chip is a nudge and looks like one; the confirmation is
+ * the contract's pause and looks like the other cards that ask for a decision
+ * before something leaves this machine. */
+.push-chip { align-self: stretch; display: flex; }
+.push-confirm, .push-outcome { align-self: stretch; margin: 0; border: 1px solid var(--line); }
+.push-confirm-facts { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.push-confirm-subjects { margin: 4px 0 0; padding-left: 16px; }
+.push-confirm-sentence { margin: 0 0 6px; }
+.push-outcome-text { margin: 0; overflow-wrap: anywhere; }
 .task-card { align-self: stretch; margin: 0; }
 .task-card-outcome { font-weight: 600; }
 .task-card-details { margin-top: 8px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); }

@@ -881,3 +881,202 @@ test("a card that lands while the owner is disconnected stands alone: no comment
   expect(turns.slice(cardIndex + 1).map((turn) => turn.role)).toEqual(["owner", "cairn"]);
   await app.close();
 });
+
+// Task 11 (Phase 3): the push chip and the contract's pause.
+//
+// The fixture is the one the plan's review corrected. A CAIRN_MOCK DONE run
+// commits NOTHING — `task:run` never passes `commitRecords` on that lane — so
+// a project whose upstream already holds the scaffold is ahead 0 after a DONE
+// run and the chip correctly never appears. Setup therefore pushes the
+// scaffold to a bare `file://` upstream and then makes exactly ONE extra local
+// commit that is never pushed. Ahead is then exactly 1, whichever lane runs,
+// and the chip's count must read in the singular.
+function pushFixture(project: string): { url: string; branch: string; subject: string; upstream: string } {
+  const upstream = mkdtempSync(join(tmpdir(), "cairn-push-upstream-"));
+  execFileSync("git", ["init", "-q", "--bare", "."], { cwd: upstream });
+  const url = pathToFileURL(upstream).href;
+  const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: project, encoding: "utf8" }).trim();
+  execFileSync("git", ["remote", "add", "origin", url], { cwd: project });
+  execFileSync("git", ["push", "-q", "-u", "origin", "HEAD"], { cwd: project });
+  const subject = "Add the owner's own local note";
+  writeFileSync(join(project, "notes.txt"), "a local note\n");
+  execFileSync("git", ["add", "notes.txt"], { cwd: project });
+  execFileSync("git", ["commit", "-q", "-m", subject], { cwd: project });
+  return { url, branch, subject, upstream };
+}
+
+/** What git itself says is waiting, read straight from the project. The tests
+ * below never trust the screen for this: the whole point of the two-step is
+ * that nothing leaves the machine until the second press. */
+function aheadCount(project: string): string {
+  return execFileSync("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd: project, encoding: "utf8" }).trim();
+}
+
+/** Puts a commit on the upstream that the project does not have, through a
+ * separate clone, so the one push Cairn runs is refused. The project's own
+ * remote-tracking ref is never fetched, so its chip goes on counting the one
+ * local commit honestly. */
+function advanceUpstream(upstream: string): void {
+  const other = mkdtempSync(join(tmpdir(), "cairn-push-other-"));
+  execFileSync("git", ["clone", "-q", upstream, "."], { cwd: other });
+  execFileSync("git", ["config", "user.name", "Cairn Test"], { cwd: other });
+  execFileSync("git", ["config", "user.email", "cairn-test@example.invalid"], { cwd: other });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "Someone else's commit"], { cwd: other });
+  execFileSync("git", ["push", "-q"], { cwd: other });
+}
+
+test("a DONE card offers the push chip, and the chip's press opens the contract's pause instead of pushing", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-push-"));
+  scaffold(project);
+  const fixture = pushFixture(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
+
+  // The nudge, with the real count — and it counts in the singular, because
+  // exactly one commit is waiting.
+  const chip = win.locator(".push-chip");
+  await expect(chip).toBeVisible({ timeout: 15_000 });
+  const chipButton = chip.getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true });
+  await expect(chipButton).toBeVisible();
+  await expect(chip).not.toContainText("1 commits");
+
+  // Pressing the chip does NOT push. It opens the pause the contract requires
+  // immediately before a write to an external service: the exact target, the
+  // exact effect, and the recovery plan.
+  await chipButton.click();
+  const pause = win.locator(".push-confirm");
+  await expect(pause).toBeVisible({ timeout: 15_000 });
+  await expect(pause).toContainText(`origin — ${fixture.url}`);
+  await expect(pause).toContainText(fixture.branch);
+  await expect(pause).toContainText(fixture.subject);
+  await expect(pause).toContainText("Pushing publishes these commits. On a public repository they become publicly visible.");
+  await expect(pause).toContainText("A pushed commit can be reverted by a new commit. Publication itself cannot be recalled.");
+  // Nothing has left the machine on the first press.
+  expect(aheadCount(project)).toBe("1");
+
+  // Declining leaves everything untouched, and the nudge is still true.
+  await pause.getByRole("button", { name: "Not now" }).click();
+  await expect(pause).toHaveCount(0);
+  await expect(chipButton).toBeVisible();
+  expect(aheadCount(project)).toBe("1");
+
+  // The press on the confirmation is the owner's approval of that exact
+  // action, and it is the only press that writes.
+  await chipButton.click();
+  await expect(pause).toBeVisible({ timeout: 15_000 });
+  await pause.getByRole("button", { name: "Push", exact: true }).click();
+
+  const outcome = win.locator(".push-outcome");
+  await expect(outcome).toBeVisible({ timeout: 30_000 });
+  await expect(outcome).toContainText(`Pushed ${fixture.branch} to`);
+  // The honest outcome is honest: the commit really is on the upstream now.
+  expect(aheadCount(project)).toBe("0");
+  expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
+    .toBe(fixture.subject);
+  await app.close();
+});
+
+// The other half of "the honest outcome": a push that is refused. The outcome
+// has to say what really happened, in plain words, and the refusal has to
+// leave the project exactly as it was — Cairn runs the one push it was given
+// approval for and never a second, and never a forced one.
+test("a refused push reports the real reason and leaves the project exactly as it was", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-push-refused-"));
+  scaffold(project);
+  const fixture = pushFixture(project);
+  advanceUpstream(fixture.upstream);
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: project, encoding: "utf8" }).trim();
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
+
+  await win.locator(".push-chip").getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true }).click();
+  const pause = win.locator(".push-confirm");
+  await expect(pause).toBeVisible({ timeout: 15_000 });
+  await pause.getByRole("button", { name: "Push", exact: true }).click();
+
+  const outcome = win.locator(".push-outcome");
+  await expect(outcome).toBeVisible({ timeout: 30_000 });
+  await expect(outcome).toContainText("The remote has commits this project does not have yet. Fetch and merge or rebase locally, then try the push again.");
+  // Nothing was claimed that did not happen, and nothing was rewritten to make
+  // it happen: same commit, same one-ahead count, and the upstream still
+  // carries the other clone's work.
+  await expect(outcome).not.toContainText("Pushed");
+  expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: project, encoding: "utf8" }).trim()).toBe(head);
+  expect(aheadCount(project)).toBe("1");
+  expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
+    .toBe("Someone else's commit");
+  await app.close();
+});
+
+// The case a one-press chip would get wrong in the worst way: a run the owner
+// stopped. Nothing it intended was verified, so its card must never offer to
+// publish — even though the git fact behind the chip is true the whole time.
+test("a stopped run never evaluates the push chip, with a real local commit waiting the whole time", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-push-stopped-"));
+  scaffold(project);
+  pushFixture(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win);
+
+  const strip = win.locator(".run-strip");
+  await expect(strip).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
+  await strip.getByRole("button", { name: "Stop this task" }).click();
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator(".result-card-disposition")).toHaveText("STOPPED");
+
+  // The chip's own precondition is satisfied — the preview really would offer
+  // one commit — so an absent chip is a decision about the disposition, not an
+  // accident of an empty repository.
+  const preview = await win.evaluate((dir) => window.cairn.pushPreview(dir), project);
+  expect(preview?.ahead).toBe(1);
+  expect(aheadCount(project)).toBe("1");
+
+  // The conductor's comment on the card lands strictly after the card, so
+  // waiting for it puts this assertion well past any moment a chip could have
+  // appeared — it is absent because it was never evaluated, not because the
+  // screen was read too early.
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(1, { timeout: 30_000 });
+  await expect(win.locator(".push-chip")).toHaveCount(0);
+  await expect(win.locator(".push-confirm")).toHaveCount(0);
+  await expect(win.getByText("Push?", { exact: false })).toHaveCount(0);
+  expect(aheadCount(project)).toBe("1");
+  await app.close();
+});
