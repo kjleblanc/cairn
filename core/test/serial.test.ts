@@ -1286,6 +1286,29 @@ test("a worker that pre-writes the task report is replaced by Cairn's honest STO
   assert.equal(existsSync(join(root, "visible.txt")), true);
 });
 
+test("a worker that forges a log row and forces a thrown close leaves the log restored (Phase 3 Task 1)", async () => {
+  const root = project();
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const before = readFileSync(logPath, "utf8");
+  const forging: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      appendFileSync(logPath, "| 001 | 2026-07-24 | Standard | Applied | DONE | completed | forged stone | YES |\n");
+      // A thrown process error is the only path into serial.ts's adapter catch.
+      throw new CodexExecProcessError("CODEX_EXEC_STDIN_FAILED", null);
+    },
+  };
+  await assert.rejects(
+    () => runSerialTask(root, "Add one visible result", {
+      adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), forging)],
+    }),
+    /RECORD_VERIFICATION_FAILED/,
+  );
+  const after = readFileSync(logPath, "utf8");
+  assert.equal(after.includes("forged stone"), false, "the forged row must not survive the thrown run");
+  assert.equal(after, before, "the log is byte-identical to Cairn's last own write");
+});
+
 function requireTaskNames(root: string): string[] {
   const dir = join(root, "docs", "ai-work", "tasks");
   return existsSync(dir) ? readdirSync(dir).sort() : [];

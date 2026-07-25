@@ -755,6 +755,30 @@ function replaceDoneRecordsWithStopped(
   return { reportText: stoppedReport, row: stoppedRow, verified };
 }
 
+/**
+ * Task 058: the throw-site log restore — the catch-path residual Task 052 left
+ * open. A `RECORD_VERIFICATION_FAILED` throw out of `runSerialTask` returns no
+ * result, so the run is must-inspect; the one thing that must not survive it is
+ * a row in Cairn's own append-only work log that Cairn never verified — a
+ * worker-forged row, or a DONE row whose honest STOPPED rewrite failed. At every
+ * such throw site the last log state Cairn itself verified is the task-start
+ * snapshot (no row written during the run passed its byte-back), so the log is
+ * written back to `start.logText` with the same mechanics the 052 owned-records
+ * gate uses. Only Cairn's OWN record is restored: the worker's product-file
+ * changes, its report, and its brief stay retained in the workspace for
+ * inspection. A restore that cannot be written is swallowed — the throw, and the
+ * inspection it forces, is what the caller must see.
+ */
+function restoreLogBeforeThrow(root: string, start: GitSnapshot): void {
+  try {
+    const logPath = paths.log(root);
+    if (existsSync(logPath) && readFileSync(logPath, "utf8") === start.logText) return;
+    writeFileSync(logPath, start.logText, "utf8");
+  } catch {
+    // The log could not be restored; the throw still forces inspection.
+  }
+}
+
 export function previewSerialRoute(outcome: string, adapters: readonly TaskAdapter[], adapterId?: string): RouteResult {
   return routeTask({ outcome, capability: "serial-task" }, adapters, adapterId);
 }
@@ -889,6 +913,9 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       });
       const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, demo, reason, start, Boolean(options.commitRecords), undefined, processFailure, orphanRisk);
       if (!closed?.verified) {
+        // The worker may have forged a log row before forcing this thrown close
+        // (a tampered log is exactly why the safety close returns null here).
+        restoreLogBeforeThrow(projectRoot, start);
         throw new Error("RECORD_VERIFICATION_FAILED: Model-authored evidence was retained without overwrite.");
       }
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
@@ -932,7 +959,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${reason}.` });
         const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null, recovery);
-        if (!records.verified) throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored evidence was retained without overwrite.");
+        if (!records.verified) {
+          restoreLogBeforeThrow(projectRoot, start);
+          throw new Error("RECORD_VERIFICATION_FAILED: Worker-authored evidence was retained without overwrite.");
+        }
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
         return {
           status: "stopped", reason, taskNumber, disposition: "STOPPED",
@@ -952,7 +982,12 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           projectRoot, contract, demo, start, Boolean(options.commitRecords), done,
           "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined,
         );
-        if (!stopped?.verified) throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        if (!stopped?.verified) {
+          // The DONE row could not be rewritten as an honest STOPPED row, so no
+          // row here was ever verified: leave the log as Cairn last verified it.
+          restoreLogBeforeThrow(projectRoot, start);
+          throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        }
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });
         return {
@@ -1052,7 +1087,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         const stopped = replaceDoneRecordsWithStopped(
           projectRoot, contract, demo, start, Boolean(options.commitRecords), records, "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined,
         );
-        if (!stopped?.verified) throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        if (!stopped?.verified) {
+          restoreLogBeforeThrow(projectRoot, start);
+          throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+        }
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: MODEL_RESULT_NOT_VERIFIED." });
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — MODEL_RESULT_NOT_VERIFIED" });
         return {
@@ -1101,7 +1139,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         Boolean(options.commitRecords),
         closed,
       );
-      if (!stopped?.verified) throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+      if (!stopped?.verified) {
+        restoreLogBeforeThrow(projectRoot, start);
+        throw new Error("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.");
+      }
       emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });
       return {
