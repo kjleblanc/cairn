@@ -59,7 +59,16 @@ const REMOTE_AHEAD_PATTERN = /fetch first|non-fast-forward|\[rejected\]/;
 // the fixture recipe requires it read as "no-remote" rather than falling
 // into the "other" catch-all. Checked after auth/remote-ahead, before the
 // final "other" fallback, so it never shadows either named case.
-const NO_REMOTE_PATTERN = /No configured push destination|has no upstream branch/;
+//
+// Matches ONLY the "no remote at all" message (verified against real git:
+// `fatal: No configured push destination.`) — deliberately NOT the sibling
+// "fatal: ... has no upstream branch" message, which fires when a remote IS
+// configured but the current branch just isn't tracking it. That is a
+// different, true state and this bucket's message asserts "no remote
+// configured"; conflating the two would make the message false for the
+// untracked-branch case (repo task 073's review-fix finding). That case now
+// falls into "other", which reports git's own real wording instead.
+const NO_REMOTE_PATTERN = /No configured push destination/;
 
 function firstLine(text: string): string {
   const line = text.split(/\r?\n/).find((l) => l.trim().length > 0);
