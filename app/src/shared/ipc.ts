@@ -8,6 +8,16 @@ export type InitInput = { dir: string; name: string; what: string; who: string; 
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 export type TaskActivityEvent = { dir: string; activity: SerialActivity };
 export type TaskRoutePreview = { route: RouteResult; disclosure?: WorkerDisclosure };
+/** `pushPreview`'s local-only, network-free look at what a push would do:
+ * null when the current branch has no upstream configured (there is
+ * nothing to preview and nothing to push). */
+export type PushPreview = { remote: string; url: string; branch: string; ahead: number; subjects: string[] };
+/** `pushExecute`'s outcome from the ONE plain `git push` it ever runs — no
+ * retry, no force. `kind` on failure is fail-closed: `other` is whatever a
+ * real git error did not match one of the three named cases. */
+export type PushResult =
+  | { ok: true; summary: string }
+  | { ok: false; kind: "no-remote" | "auth" | "remote-ahead" | "other"; message: string };
 /**
  * One dispatch request, whole. It travels as a single object because every
  * part of it is load-bearing at the gate: the outcome and the owner's own
@@ -109,6 +119,8 @@ export interface CairnApi {
   conductorConversations(dir: string): Promise<ConductorConversationSummary[]>;
   conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
   onConductorDelta(cb: (event: ConductorDelta) => void): () => void;
+  pushPreview(dir: string): Promise<PushPreview | null>;
+  pushExecute(dir: string): Promise<PushResult>;
 }
 
 export interface TaskBlockConcern {

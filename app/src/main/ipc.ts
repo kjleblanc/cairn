@@ -11,12 +11,15 @@ import type {
   InitInput,
   Preflight,
   ProjectList,
+  PushPreview,
+  PushResult,
   RecentProject,
   Result,
   UpdateInfo,
 } from "../shared/ipc.js";
 import * as conductorService from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
+import { pushExecute, pushPreview } from "./push.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
 
 function toResult<T>(context: string, fn: () => T): Result<T> {
@@ -108,6 +111,13 @@ export function registerProjectIpc(): void {
     if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/|openrouter\.ai\/)/.test(url)) return;
     await shell.openExternal(url);
   });
+
+  // Task 10's push machinery: local-only preview, one honest push. This is
+  // machinery only — Task 11 builds the chip and the owner-facing
+  // confirmation that actually calls push:execute.
+  ipcMain.handle("push:preview", (_e, dir: string): PushPreview | null => pushPreview(dir));
+
+  ipcMain.handle("push:execute", (_e, dir: string): PushResult => pushExecute(dir));
 }
 
 /** Registered separately from `registerProjectIpc` for clarity, but called

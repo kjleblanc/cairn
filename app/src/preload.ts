@@ -35,6 +35,8 @@ const api: CairnApi = {
     ipcRenderer.on("conductor:delta", listener);
     return () => ipcRenderer.removeListener("conductor:delta", listener);
   },
+  pushPreview: (dir) => ipcRenderer.invoke("push:preview", dir),
+  pushExecute: (dir) => ipcRenderer.invoke("push:execute", dir),
 };
 
 contextBridge.exposeInMainWorld("cairn", api);
