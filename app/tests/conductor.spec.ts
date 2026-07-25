@@ -293,7 +293,7 @@ test("the envelope posts a DONE result card into the conversation, and the card 
   await expect(card).toContainText("Files changed (from Git, not from claims)");
   await expect(card).toContainText("docs/ai-work/LOG.md");
   // The worker's own words only ever appear under a heading that calls them claims.
-  await expect(card).toContainText("The worker's account — claims, not verified by Cairn");
+  await expect(card).toContainText("The worker's account (claims, not verified by Cairn)");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
 
   // A reload throws away every scrap of renderer state. What comes back was
@@ -578,8 +578,8 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   await expect(card.locator(".result-card-disposition")).toHaveText("STOPPED");
   await expect(card).toContainText("CANCELLED_BY_OWNER");
   await expect(card).toContainText("Task 001");
-  await expect(card).toContainText("Commit: none — retained evidence is never committed by Cairn");
-  await expect(card).toContainText("The worker's account — claims, not verified by Cairn");
+  await expect(card).toContainText("Commit: none — stopped evidence is retained for inspection, never committed by Cairn");
+  await expect(card).toContainText("The worker's account (claims, not verified by Cairn)");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
   // The card carries no DONE anywhere, and the product change really did not land.
   await expect(card).not.toContainText("DONE");
@@ -589,6 +589,41 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   // screen the send gate is already open — Task 9's commentary depends on that
   // ordering being real.
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
+  await app.close();
+});
+
+// Task 069 (review fix). Both card tests above run against a close where
+// `composed.claims` is null — the offline demo parses none, and a cancelled run
+// never gets a claims fence — so they only ever exercised the no-claims
+// fallback. This is the case the whole labeling guarantee exists for: real
+// worker claims on screen, and they must sit INSIDE the claims container,
+// under the heading that calls them claims.
+test("a worker's claims render only inside the card's claims block, never as a verified fact", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-card-claims-"));
+  scaffold(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win);
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
+
+  // The worker's own sentence and its milestone claim are on screen, and both
+  // are inside the labeled claims container — not in the verified fact list.
+  const claims = card.locator(".result-card-claims");
+  await expect(claims).toContainText("The worker's account (claims, not verified by Cairn)");
+  await expect(claims).toContainText("Added the visible result.");
+  await expect(claims).toContainText("Milestone movement, as the worker claims it: YES");
+  await expect(card.locator(".result-card-facts")).not.toContainText("Added the visible result.");
+
+  // And the verified side is Git's, in the same card: the file the worker
+  // actually created, listed under the from-Git label.
+  await expect(card.locator(".result-card-facts")).toContainText("Files changed (from Git, not from claims)");
+  await expect(card.locator(".result-card-files")).toContainText("visible.txt");
+  expect(readFileSync(join(project, "visible.txt"), "utf8")).toBe("model-authored result\n");
   await app.close();
 });
 

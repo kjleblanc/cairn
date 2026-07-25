@@ -4,7 +4,7 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteResult, SerialRunResult } from "@cairn/core";
-import { composeErrorCard, composeResultCard } from "../src/main/conductor/relay.js";
+import { cardBriefing, composeErrorCard, composeResultCard } from "../src/main/conductor/relay.js";
 import { appendTurn, conversationsDir, listConversations, newConversationId, readTurns } from "../src/main/conductor/store.js";
 
 // The card is authored from `result.composed` — the very record input Cairn
@@ -99,7 +99,11 @@ function stoppedResult(): SerialRunResult {
       protectedIntact: false,
       commit: null,
       evidenceSummary: null,
-      processFailure: null,
+      // Task 052's disclosure and the worker process's own failure. Both are
+      // Cairn's own account, and a card that dropped either would be a quieter
+      // record than the report it accompanies.
+      recordRecovery: "The worker modified the append-only work log; Cairn restored it from the task-start snapshot and recorded this stop.",
+      processFailure: { code: "CODEX_EXEC_SPAWN_FAILED", debugPath: "C:/Users/owner/.cairn-debug/005" },
       paidCallStarted: true,
     },
   };
@@ -119,6 +123,8 @@ test("a done run composes a DONE card whose files changed come from composed, ne
   assert.equal(card.evidenceSummary, "Bounded worker evidence: files_changed=1.");
   assert.deepEqual(card.claims, { summary: "Added the visible result.", milestone: "YES" });
   assert.deepEqual(card.route, { adapterLabel: "Codex Exec", provider: "OpenAI", model: "gpt-5-codex" });
+  assert.equal(card.recordRecovery, null);
+  assert.equal(card.processFailure, null);
   // The card owns its own array: mutating it can never reach back into the
   // record input the report was composed from.
   assert.notEqual(card.filesChanged as unknown, result.status === "done" ? result.composed.filesChanged : null);
@@ -134,6 +140,11 @@ test("a stopped run carries its fixed stop reason, the real protected-work findi
   assert.equal(card.errorCode, null);
   assert.equal(card.claims, null);
   assert.deepEqual(card.filesChanged, ["src/protected.ts"]);
+  // Cairn's own two disclosures reach the card, not just the report: a worker
+  // that edited Cairn's own owned records, and the process failure with the
+  // retained local debug path.
+  assert.match(card.recordRecovery ?? "", /restored it from the task-start snapshot/);
+  assert.deepEqual(card.processFailure, { code: "CODEX_EXEC_SPAWN_FAILED", debugPath: "C:/Users/owner/.cairn-debug/005" });
 });
 
 test("a connection-required close maps to a STOPPED card that claims no task, no files, and no records", () => {
@@ -174,16 +185,31 @@ test("an error card carries the fixed code and none of the raw message", () => {
   assert.equal(composeErrorCard("ENOENT: no such file or directory, open 'C:/secret/path'").errorCode, null);
 });
 
-test("the store round-trips a valid envelope turn and drops one whose card is not a result card", () => {
+test("the store round-trips a valid envelope turn and drops every envelope line whose card is not a result card", () => {
   const root = mkdtempSync(join(tmpdir(), "cairn-resultcard-"));
   const id = newConversationId(root);
   const card = composeResultCard(doneResult());
   appendTurn(root, id, { role: "envelope", card, ts: "2026-07-25T10:00:00.000Z" });
-  appendFileSync(join(conversationsDir(root), `${id}.jsonl`), `${JSON.stringify({ role: "envelope", card: { kind: "nope" } })}\n`, "utf8");
+
+  // Every bad line below carries a VALID ts, so the card guard is the only
+  // thing that can drop it — otherwise these pass for the ts-check's reason
+  // and the guard itself is never exercised. One line per clause of the guard.
+  const ts = "2026-07-25T10:00:00.500Z";
+  const bad = [
+    { role: "envelope", card: { kind: "nope" }, ts },
+    { role: "envelope", card: { ...card, disposition: "FINE" }, ts },
+    { role: "envelope", card: { ...card, filesChanged: "docs/ai-work/LOG.md" }, ts },
+    { role: "envelope", card: "a result card, honestly", ts },
+    { role: "envelope", card: null, ts },
+    { role: "envelope", ts },
+  ];
+  for (const line of bad) {
+    appendFileSync(join(conversationsDir(root), `${id}.jsonl`), `${JSON.stringify(line)}\n`, "utf8");
+  }
   appendTurn(root, id, { role: "owner", text: "and after the card", ts: "2026-07-25T10:00:01.000Z" });
 
   const turns = readTurns(root, id);
-  assert.equal(turns.length, 2);
+  assert.equal(turns.length, 2, "only the real card and the owner turn survive");
   const first = turns[0];
   assert.equal(first.role, "envelope");
   if (first.role !== "envelope") return;
@@ -191,6 +217,29 @@ test("the store round-trips a valid envelope turn and drops one whose card is no
   assert.equal(first.card.disposition, "DONE");
   assert.deepEqual(first.card.filesChanged, ["docs/ai-work/LOG.md", "visible.txt"]);
   assert.equal(turns[1].role, "owner");
+});
+
+test("the conductor reads a card as two separated parts: what Cairn verified, and what the worker claims", () => {
+  const briefing = cardBriefing(composeResultCard(doneResult()));
+  const [verified, claimed] = briefing.split("\n\n");
+
+  assert.match(verified, /^Envelope result card \(verified by Cairn's runtime, not by the conversation model\):\n/);
+  assert.match(claimed, /^The worker's account \(claims, not verified by Cairn\):\n/);
+
+  // The guarantee, stated as a test: the worker's own sentence appears ONLY
+  // under the claims label. A single JSON blob under the "verified" heading
+  // would hand the model the worker's account under Cairn's guarantee.
+  assert.ok(!verified.includes("Added the visible result."), "a claim must never sit under the verified label");
+  assert.ok(!verified.includes("claims"), "the verified part carries no claims key at all");
+  assert.ok(claimed.includes("Added the visible result."));
+  assert.ok(claimed.includes("YES"));
+  // Cairn's own verified facts stay on the verified side.
+  assert.ok(verified.includes("docs/ai-work/LOG.md"));
+  assert.ok(verified.includes("Codex Exec"));
+
+  // No claims: the record's own sentence, not an empty object.
+  const empty = cardBriefing(composeResultCard(stoppedResult()));
+  assert.ok(empty.includes("The worker returned no readable claims block."));
 });
 
 test("a conversation whose first turn is a result card previews as Result card", () => {

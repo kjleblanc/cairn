@@ -98,21 +98,33 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
               </ul>
             )}
           </li>
-          <li>Commit: {card.commit ?? "none — retained evidence is never committed by Cairn"}</li>
+          <li>Commit: {card.commit ?? "none — stopped evidence is retained for inspection, never committed by Cairn"}</li>
+          {/* Cairn's own disclosure that a worker touched Cairn's own owned
+            * records and Cairn had to recover them. It is the loudest thing a
+            * card can carry, so it is never abbreviated away. */}
+          {card.recordRecovery ? <li className="result-card-recovery">{card.recordRecovery}</li> : null}
           {card.evidenceSummary ? <li>{card.evidenceSummary}</li> : null}
+          {card.processFailure ? (
+            <li>
+              Process failure: <span className="mono">{card.processFailure.code}</span>. Raw run evidence stays on
+              the owner&apos;s own disk at: {card.processFailure.debugPath
+                ?? "unavailable (the local debug directory could not be created)"}. It is never committed to the
+              repository.
+            </li>
+          ) : null}
         </ul>
       ) : null}
 
       {card.disposition !== "ERROR" && wroteRecords ? (
         <div className="result-card-claims">
-          <p className="small muted result-card-claims-label">The worker's account — claims, not verified by Cairn</p>
+          <p className="small muted result-card-claims-label">The worker&apos;s account (claims, not verified by Cairn)</p>
           {card.claims ? (
             <>
               <p className="result-card-claims-text">{card.claims.summary}</p>
               <p className="small muted">Milestone movement, as the worker claims it: {card.claims.milestone}</p>
             </>
           ) : (
-            <p className="result-card-claims-text">No worker claims were recorded for this run.</p>
+            <p className="result-card-claims-text">The worker returned no readable claims block.</p>
           )}
         </div>
       ) : null}

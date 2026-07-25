@@ -13,6 +13,7 @@ import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, t
 import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
+import { cardBriefing } from "./relay.js";
 import type { StoredConnection } from "./keystore.js";
 import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, readTurns } from "./store.js";
 import { extractTaskBlock } from "./taskblock.js";
@@ -142,10 +143,12 @@ async function runStream(
       { role: "system", content: assembleBriefing(dir) },
       // A result card enters the prompt as SYSTEM context, labeled for what it
       // is: Cairn's runtime wrote it, the conversation model did not, and the
-      // model must not mistake it for its own earlier reply. It travels as the
-      // card's own JSON so nothing is paraphrased on the way in.
+      // model must not mistake it for its own earlier reply. `cardBriefing`
+      // carries the report's own separation — verified facts under one label,
+      // the worker's claims under another — so the model can never read a
+      // claim as something Cairn verified.
       ...history.map((turn): ChatTurnMessage => (turn.role === "envelope"
-        ? { role: "system", content: `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(turn.card)}` }
+        ? { role: "system", content: cardBriefing(turn.card) }
         : { role: turn.role === "owner" ? "user" : "assistant", content: turn.text })),
     ];
     // The owner's turn is already persisted by `send()` above, so the record

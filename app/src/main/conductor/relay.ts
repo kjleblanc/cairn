@@ -39,6 +39,8 @@ function blankCard(disposition: ResultCard["disposition"]): ResultCard {
     protectedIntact: null,
     commit: null,
     evidenceSummary: null,
+    recordRecovery: null,
+    processFailure: null,
     claims: null,
     route: null,
   };
@@ -54,11 +56,16 @@ function blankCard(disposition: ResultCard["disposition"]): ResultCard {
  *   clean-start DONE the two differ: composed carries the pre-commit sentence
  *   the report was rendered with, while `result.commit` carries the hash the
  *   commit produced afterwards. The card exists to agree with the record on
- *   disk, so it takes the record's own value. (A DONE close is only returned
- *   after the commit actually succeeded, so that sentence is never a claim
- *   about a commit that did not happen.)
+ *   disk, so it takes the record's own value. That sentence never overstates a
+ *   commit at any of the three DONE sites — not because a DONE always commits
+ *   (the dirty-start worker DONE and the offline demo both return `skipped`),
+ *   but because the card prints the reason VERBATIM, and every reason core
+ *   composes already says which of the two happened.
  * - `claims` is the WORKER's summary and milestone, carried so the renderer can
  *   show them as claims. They are never merged into a verified field.
+ * - `recordRecovery` and `processFailure` are Cairn's own disclosures, not the
+ *   worker's. The first says a worker tampered with Cairn's own owned records;
+ *   dropping either would make the card a quieter account than the report.
  *
  * The connection-required arm carries no `composed` at all — no task number, no
  * files, no protected-work finding, because none were ever computed. It maps to
@@ -81,6 +88,10 @@ export function composeResultCard(result: SerialRunResult): ResultCard {
   card.protectedIntact = composed.protectedIntact;
   card.commit = composed.commit ? composed.commit.reason : null;
   card.evidenceSummary = composed.evidenceSummary;
+  card.recordRecovery = composed.recordRecovery ?? null;
+  card.processFailure = composed.processFailure
+    ? { code: composed.processFailure.code, debugPath: composed.processFailure.debugPath }
+    : null;
   card.claims = composed.claims ? { summary: composed.claims.summary, milestone: composed.claims.milestone } : null;
   card.route = {
     adapterLabel: composed.route.adapterLabel,
@@ -103,6 +114,31 @@ export function composeErrorCard(message: string): ResultCard {
   const head = message.split(":", 1)[0]?.trim() ?? "";
   card.errorCode = head.length <= CODE_CAP && FIXED_CODE.test(head) ? head : null;
   return card;
+}
+
+/**
+ * The card as the conductor reads it, for prompt assembly.
+ *
+ * The report's own separation is carried through verbatim, in two parts under
+ * two labels: what Cairn's runtime verified, and — separately — the worker's
+ * unverified account. This is why the claims are lifted OUT of the verified
+ * object rather than left inside one JSON blob: a model reading a single object
+ * headed "verified by Cairn's runtime" would be reading the worker's own
+ * sentence under Cairn's guarantee, which is exactly the confusion the report's
+ * two-section split exists to prevent. Task 9's commentary is built on this
+ * seam, so the separation is structural, not a matter of wording.
+ *
+ * The no-claims sentence is `records.ts`'s own, so the conductor sees the same
+ * words a reader of the report sees.
+ */
+export function cardBriefing(card: ResultCard): string {
+  const { claims, ...verified } = card;
+  return [
+    `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(verified)}`,
+    `The worker's account (claims, not verified by Cairn):\n${
+      claims ? JSON.stringify(claims) : "The worker returned no readable claims block."
+    }`,
+  ].join("\n\n");
 }
 
 /**

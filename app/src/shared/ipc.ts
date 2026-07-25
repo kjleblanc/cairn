@@ -148,6 +148,16 @@ export interface ResultCard {
   protectedIntact: boolean | null;
   commit: string | null;
   evidenceSummary: string | null;
+  /**
+   * Task 052's owned-record recovery disclosure: Cairn had to restore its own
+   * append-only log, or overwrite a report path the worker pre-wrote. It says
+   * a worker tampered with Cairn's own records, so it must reach the owner —
+   * the record renders it under "Verified by Cairn" and so does the card.
+   */
+  recordRecovery: string | null;
+  /** The worker process's own failure code and the retained local debug path
+   * (null when the debug directory could not be created). */
+  processFailure: { code: string; debugPath: string | null } | null;
   claims: { summary: string; milestone: string } | null;
   route: { adapterLabel: string; provider: string; model: string } | null;
 }
