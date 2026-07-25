@@ -669,6 +669,48 @@ function composedForClose(
   };
 }
 
+/**
+ * Task 067: the two Git-derived facts the adapter-throw safety close composes
+ * its record from — or null when Git cannot answer.
+ *
+ * Both must be read BEFORE Cairn writes its own stop records: reading them
+ * afterwards would let Cairn's own log append read back as a protected-work
+ * change on a start-dirty log, which is a false record rather than a forced
+ * inspection. That puts Git reads in the one window where an unwrapped throw
+ * escapes as a raw child-process error — writing no stop record AND skipping
+ * the throw-site log restore, reopening the hole Tasks 058/059 closed. This
+ * codebase's threat model includes a worker corrupting the repository, so the
+ * failure is caught here and the caller closes through the same door every
+ * other unverifiable close uses.
+ *
+ * The protected-work question is asked in the form each site deserves: a
+ * boundary stop started no process and the offline adapter receives no root, so
+ * the cheap status-level check answers exactly what those two raise (did
+ * anything outside Cairn's own records move at all?); any other throw may follow
+ * real worker activity, where new files are expected work rather than a
+ * protection failure, so the hash-level protected-path check answers there.
+ */
+function safetyCloseFacts(
+  root: string,
+  start: GitSnapshot,
+  owned: ReadonlySet<string>,
+  demo: boolean,
+  reason: SerialStopReason,
+): { filesChanged: readonly string[]; protectedIntact: boolean } | null {
+  try {
+    return {
+      filesChanged: changedSetForRecord(root),
+      protectedIntact: demo || reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
+        ? verifyProtected(root, start, owned)
+        : verifyProtectedStartingPaths(root, start),
+    };
+  } catch {
+    // Git itself is unreadable. No honest record can be composed from it, and
+    // the caller must not let the raw error escape.
+    return null;
+  }
+}
+
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
   try {
     git(root, ["merge-base", "--is-ancestor", ancestor, descendant]);
@@ -1047,19 +1089,22 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       // The card's two Git-derived facts for this close, taken BEFORE Cairn
       // writes its own stop records — the same moment cairnWorkerRecords takes
       // them — so the retained set is the worker's evidence and the brief, not
-      // Cairn's own report and appended log row.
-      //
-      // The protected-work finding is verified here, never assumed: a boundary
-      // stop started no process and the offline adapter receives no root, so the
-      // cheap status-level check answers exactly the question those two raise
-      // (did anything outside Cairn's own records move at all?). Any other throw
-      // may follow real worker activity, where new files are expected work
-      // rather than a protection failure, so the worker lane's own hash-level
-      // protected-path verification answers it there.
-      const retainedChanges = changedSetForRecord(projectRoot);
-      const protectedIntact = demo || reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
-        ? verifyProtected(projectRoot, start, ownedSet)
-        : verifyProtectedStartingPaths(projectRoot, start);
+      // Cairn's own report and appended log row, and so Cairn's own log append
+      // can never read back as a protected-work change.
+      const facts = safetyCloseFacts(projectRoot, start, ownedSet, demo, reason);
+      if (!facts) {
+        // Git could not be read, so no honest stop record can be composed from
+        // it. Close through the same door every other unverifiable close uses:
+        // restore Cairn's OWN log — the worker may have forged a row before
+        // forcing this close — and throw, so the run is must-inspect. Letting
+        // the raw Git error escape here would skip that restore and leave a
+        // forged row standing (Tasks 058/059).
+        const restored = restoreLogBeforeThrow(projectRoot, start);
+        throw recordVerificationFailed(
+          "Git could not be read to compose this stop's record; model-authored evidence was retained without overwrite.",
+          restored,
+        );
+      }
       const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, demo, reason, start, Boolean(options.commitRecords), undefined, processFailure, orphanRisk);
       if (!closed?.verified) {
         // The worker may have forged a log row before forcing this thrown close
@@ -1075,8 +1120,8 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         commit: { status: "skipped", reason: "Stopped tasks are retained for inspection." },
         composed: composedForClose(contract, "STOPPED", reason, {
           claims: null,
-          filesChanged: retainedChanges,
-          protectedIntact,
+          filesChanged: facts.filesChanged,
+          protectedIntact: facts.protectedIntact,
           commit: null,
           evidenceSummary: null,
           processFailure: processFailure ?? null,

@@ -1640,3 +1640,53 @@ test("an adapter-throw stop composes the same paid-call truth its report renders
     );
   }
 });
+
+// Review finding on Task 066 (repo task 067). The safety close composes its
+// card facts from Git BEFORE writing its stop records — it must, or Cairn's own
+// log append would read back as a protected-work change. Git can fail in that
+// window: this codebase's threat model includes a worker corrupting the
+// repository. Unwrapped, that throw escapes as a raw child-process error, which
+// writes no stop record AND skips the throw-site log restore — reopening the
+// hole Tasks 058/059 closed, against the binding rule that after ANY thrown
+// runSerialTask, LOG.md contains exactly what Cairn last wrote.
+test("a Git failure while composing the stop record still restores the work log (repo task 067)", async () => {
+  const root = project();
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  const corrupting: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The worker forges a DONE row in Cairn's own append-only log...
+      appendFileSync(
+        logPath,
+        "| 001 | 2026-07-25 | Standard | Applied | DONE | completed | Forged by the worker. | YES |\n",
+      );
+      // ...then corrupts the Git index, so every Git read in the close window
+      // fails. Only the index file is broken: `.git` itself stays present, so
+      // the run lock still releases and the failure is precisely the one under
+      // test rather than a collapsed fixture.
+      writeFileSync(join(root, ".git", "index"), "not an index\n");
+      throw new CodexExecProcessError("CODEX_EXEC_STDIN_FAILED", null);
+    },
+  };
+
+  await assert.rejects(
+    () => runSerialTask(root, "Improve Cairn safely", {
+      adapters: [createCodexExecAdapter(
+        root, { installed: true, connected: true },
+        authorizeCodexExec(root, "Improve Cairn safely"), corrupting,
+      )],
+    }),
+    /RECORD_VERIFICATION_FAILED/,
+    "a Git failure in the close window is Cairn's own record failure, never a raw Git error",
+  );
+  assert.equal(
+    readFileSync(logPath, "utf8"),
+    beforeLog,
+    "the forged row is gone: the log is exactly what Cairn last wrote",
+  );
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false,
+    "no stop record can be composed from a Git that cannot be read");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-brief.md")), true,
+    "the brief stays retained as evidence");
+});
