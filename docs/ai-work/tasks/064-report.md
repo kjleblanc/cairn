@@ -184,6 +184,16 @@ closed, and when the run ends its own terminal line stays in the strip.
 - The strip carries a run started on the task screen too (project-keyed, as
   above). That is deliberate: the composer is closed for that run as well, and
   a closed composer with no explanation would be worse.
+- **A mid-run disconnect still hides the run from chat.** The strip renders
+  inside the connected-conversation block (`status?.connected`), so
+  disconnecting the brain while a task runs replaces the whole column —
+  strip, stop control and all — with the connect card, exactly as it already
+  did to the dispatch panel. The 063 review ledgered that minor with "strip
+  and cards land next"; this task does not close it. The run itself is
+  untouched and the run screen still governs it, one navigation away.
+  Closing it properly means deciding that a run is a project fact rather than
+  a conversation fact and rendering the strip outside that gate, with a test
+  for the disconnected layout — real work, and outside this brief.
 - Milestone movement: NO. The run is visible in the conversation, but the
   result still has to be read as a raw line or on the run screen.
 
