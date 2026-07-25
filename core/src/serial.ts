@@ -50,6 +50,16 @@ interface ClosedSerialResult {
   route: Extract<RouteResult, { status: "ready" }>;
   activities: SerialActivity[];
   commit: RecordCommit;
+  /**
+   * Task 066 (Phase 3 Task 7): the same structured truth Cairn composed its own
+   * record from, carried out of the envelope so a result card can be authored
+   * from data instead of scraped from rendered Markdown. It is ADDITIVE — no
+   * report byte depends on it — and it is not a second account of the run:
+   * `filesChanged` and `protectedIntact` are Git's answers, `commit` is the real
+   * commit result, and `claims` is the worker's own CLAIMS, never a verified
+   * fact. Only a closed run has one; the connection-required arm carries none.
+   */
+  composed: ComposedRecordInput;
 }
 export type SerialRunResult =
   | { status: "connection-required"; route: Extract<RouteResult, { status: "connection-required" }>; activities: SerialActivity[] }
@@ -297,6 +307,28 @@ interface RecordRecovery {
   overwriteReport: boolean;
 }
 
+/**
+ * Did this run's worker process actually start — is any cost for it already
+ * spent? A timeout always spent a started process; a cancel spent one only when
+ * it actually started, and a pre-spawn cancel carries a null debug path; both
+ * process-failure codes (spawn and stdin) fail before any request reaches the
+ * model; a boundary stop started nothing; and the offline lane starts no paid
+ * call at all.
+ *
+ * Task 066: the stop report's already-spent sentence and the composed record's
+ * `paidCallStarted` both read THIS one function, so Cairn can never tell a
+ * result card one thing about a run and its own report another. Moving the
+ * expression here changed no rendered byte — it is the same expression.
+ */
+function paidCallAlreadyStarted(
+  demo: boolean,
+  reason: SerialStopReason | null,
+  processFailure?: ProcessFailureNote,
+): boolean {
+  return !demo && (reason === "ADAPTER_TIMED_OUT" ||
+    (reason === "CANCELLED_BY_OWNER" && processFailure?.debugPath != null));
+}
+
 function reportText(
   contract: AdapterTaskContract,
   demo: boolean,
@@ -371,8 +403,7 @@ Disposition: **STOPPED**
   // A timeout always spent a started process; a cancel spent one only when it
   // actually started — a pre-spawn cancel carries a null debugPath and spent
   // nothing, so it earns no "already spent" sentence.
-  const paidStarted = codex && (reason === "ADAPTER_TIMED_OUT" ||
-    (reason === "CANCELLED_BY_OWNER" && processFailure?.debugPath != null));
+  const paidStarted = paidCallAlreadyStarted(demo, reason, processFailure);
   const orphanSentence = orphanRisk
     ? " The worker process could not be confirmed dead; the run lock was deliberately left in place — close the orphaned process (check your system's process list), then the next task will report the lock holder until this app restarts."
     : "";
@@ -510,6 +541,15 @@ function scanChangedPaths(root: string): string[] {
 }
 
 /**
+ * The one bounded, Git-derived change set every composed record carries — the
+ * same value and the same 100-path cap at every close site, so the result card
+ * reads one answer to "what changed" and it is always Git's, never a claim.
+ */
+function changedSetForRecord(root: string): readonly string[] {
+  return scanChangedPaths(root).slice(0, 100);
+}
+
+/**
  * Cairn authors the worker's task records from the parsed claims and its own
  * Git verification (Task 048, the inversion). The worker writes no record; this
  * writes the report (flag "wx" — never overwriting) and appends exactly one
@@ -528,14 +568,14 @@ function cairnWorkerRecords(
   commit: { status: "created" | "skipped"; reason: string } | null,
   evidence: Record<string, number> | null,
   recovery?: RecordRecovery,
-): { reportText: string; row: LogRow; verified: boolean } {
+): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
   const input: ComposedRecordInput = {
     taskNumber: contract.taskNumber,
     route: contract.route,
     disposition,
     stopReason,
     claims,
-    filesChanged: scanChangedPaths(root).slice(0, 100),
+    filesChanged: changedSetForRecord(root),
     protectedIntact: protectedValid,
     commit,
     evidenceSummary: evidence ? boundedEvidenceSummary(evidence) : null,
@@ -584,7 +624,49 @@ function cairnWorkerRecords(
     row: parseLog(root).filter((item) => item.task === pad(contract.taskNumber)).length === 1,
   };
   const verified = checks.brief && checks.report && checks.log && checks.row;
-  return { reportText: report, row, verified };
+  // The composed input travels with the records it authored: the card reads the
+  // very value this report was rendered from, so the two cannot disagree.
+  return { reportText: report, row, verified, composed: input };
+}
+
+/**
+ * Task 066: the structured truth for a close site that renders one of the legacy
+ * `reportText()` templates and therefore composes no record input of its own —
+ * the safety close, both record rewrites, and the offline demonstration lane.
+ * Nothing here is rendered: the report bytes at those sites are unchanged. Every
+ * field is required so a new close site cannot quietly inherit someone else's
+ * value; each caller passes the REAL value its own site knows.
+ */
+function composedForClose(
+  contract: AdapterTaskContract,
+  disposition: "DONE" | "STOPPED",
+  stopReason: SerialStopReason | null,
+  site: {
+    claims: WorkerClaims | null;
+    filesChanged: readonly string[];
+    protectedIntact: boolean;
+    commit: { status: "created" | "skipped"; reason: string } | null;
+    evidenceSummary: string | null;
+    processFailure: ProcessFailureNote | null;
+    paidCallStarted: boolean;
+  },
+): ComposedRecordInput {
+  return {
+    taskNumber: contract.taskNumber,
+    route: contract.route,
+    disposition,
+    stopReason,
+    claims: site.claims,
+    filesChanged: site.filesChanged,
+    protectedIntact: site.protectedIntact,
+    commit: site.commit,
+    evidenceSummary: site.evidenceSummary,
+    processFailure: site.processFailure,
+    paidCallStarted: site.paidCallStarted,
+    // Only the Task 052 owned-records gate authors a recovery line, and it
+    // closes through cairnWorkerRecords; no legacy-template site has one.
+    recordRecovery: null,
+  };
 }
 
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
@@ -962,6 +1044,22 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
               ? `The adapter stopped safely (${processFailure.code}).${processFailure.debugPath ? ` Raw run evidence: ${processFailure.debugPath}` : ""}`
               : "The adapter stopped safely.",
       });
+      // The card's two Git-derived facts for this close, taken BEFORE Cairn
+      // writes its own stop records — the same moment cairnWorkerRecords takes
+      // them — so the retained set is the worker's evidence and the brief, not
+      // Cairn's own report and appended log row.
+      //
+      // The protected-work finding is verified here, never assumed: a boundary
+      // stop started no process and the offline adapter receives no root, so the
+      // cheap status-level check answers exactly the question those two raise
+      // (did anything outside Cairn's own records move at all?). Any other throw
+      // may follow real worker activity, where new files are expected work
+      // rather than a protection failure, so the worker lane's own hash-level
+      // protected-path verification answers it there.
+      const retainedChanges = changedSetForRecord(projectRoot);
+      const protectedIntact = demo || reason === "REAL_MODEL_CALL_NOT_AUTHORIZED"
+        ? verifyProtected(projectRoot, start, ownedSet)
+        : verifyProtectedStartingPaths(projectRoot, start);
       const closed = writeSafetyRecordsWhenUnclaimed(projectRoot, contract, demo, reason, start, Boolean(options.commitRecords), undefined, processFailure, orphanRisk);
       if (!closed?.verified) {
         // The worker may have forged a log row before forcing this thrown close
@@ -975,6 +1073,17 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
         reportText: closed.reportText, row: closed.row, route, activities,
         commit: { status: "skipped", reason: "Stopped tasks are retained for inspection." },
+        composed: composedForClose(contract, "STOPPED", reason, {
+          claims: null,
+          filesChanged: retainedChanges,
+          protectedIntact,
+          commit: null,
+          evidenceSummary: null,
+          processFailure: processFailure ?? null,
+          // The same predicate the report above rendered its already-spent
+          // sentence from, not a reason-keyed restatement of it.
+          paidCallStarted: paidCallAlreadyStarted(demo, reason, processFailure),
+        }),
       };
     }
     emit(activities, options.events, {
@@ -1020,6 +1129,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
           reportText: records.reportText, row: records.row, route, activities,
           commit: { status: "skipped", reason: "Stopped evidence was retained for inspection." },
+          composed: records.composed,
         };
       };
 
@@ -1048,6 +1158,15 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
           reportText: stopped.reportText, row: stopped.row, route, activities,
           commit: { status: "skipped", reason: "Record verification failed." },
+          composed: composedForClose(contract, "STOPPED", "RECORD_VERIFICATION_FAILED", {
+            claims,
+            filesChanged: changedSetForRecord(projectRoot),
+            protectedIntact: protectedValid,
+            commit: null,
+            evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+            processFailure: null,
+            paidCallStarted: true,
+          }),
         };
       };
 
@@ -1118,6 +1237,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           status: "done", taskNumber, disposition: "DONE",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
           reportText: records.reportText, row: records.row, route, activities, commit,
+          composed: records.composed,
         };
       }
 
@@ -1153,6 +1273,15 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
           reportText: stopped.reportText, row: stopped.row, route, activities,
           commit: { status: "skipped", reason: "Record verification failed." },
+          composed: composedForClose(contract, "STOPPED", "MODEL_RESULT_NOT_VERIFIED", {
+            claims,
+            filesChanged: changedSetForRecord(projectRoot),
+            protectedIntact: protectedValid,
+            commit: null,
+            evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+            processFailure: null,
+            paidCallStarted: true,
+          }),
         };
       }
       emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result, task records, protected work, and Cairn-owned Git result were verified." });
@@ -1161,6 +1290,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         status: "done", taskNumber, disposition: "DONE",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
         reportText: records.reportText, row: records.row, route, activities, commit,
+        composed: records.composed,
       };
     }
     const resultValid = chosen.descriptor.capabilities.includes("offline-demo") && validateWorkerResult(adapterValue, contract);
@@ -1179,10 +1309,25 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
         reportText: closed.reportText, row: closed.row, route, activities,
         commit: { status: "skipped", reason: "Stopped tasks are retained for inspection." },
+        composed: composedForClose(contract, "STOPPED", stopReason, {
+          claims: null,
+          filesChanged: changedSetForRecord(projectRoot),
+          protectedIntact: protectedValid,
+          commit: null,
+          evidenceSummary: null,
+          processFailure: null,
+          paidCallStarted: false,
+        }),
       };
     }
     const closed = writeClosedRecords(projectRoot, contract, demo, "DONE", null, start, Boolean(options.commitRecords));
-    if (!closed.verified || !verifyProtected(projectRoot, start, ownedSet)) {
+    // The re-verification now runs unconditionally instead of only when the
+    // records verified: its REAL result is the protected-work finding that both
+    // this DONE close and the honest STOPPED rewrite below carry in `composed`,
+    // and a fixed `true` would be a claim Cairn never checked. The call is
+    // read-only Git and the branch it guards is unchanged.
+    const protectedIntactAtClose = verifyProtected(projectRoot, start, ownedSet);
+    if (!closed.verified || !protectedIntactAtClose) {
       // Replace the success records only when they are byte-for-byte the records
       // written above. This keeps the log and report honest without overwriting a
       // concurrent or owner-authored change.
@@ -1207,15 +1352,37 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
         reportText: stopped.reportText, row: stopped.row, route, activities,
         commit: { status: "skipped", reason: "Record verification failed." },
+        composed: composedForClose(contract, "STOPPED", "RECORD_VERIFICATION_FAILED", {
+          claims: null,
+          filesChanged: changedSetForRecord(projectRoot),
+          protectedIntact: protectedIntactAtClose,
+          commit: null,
+          evidenceSummary: null,
+          processFailure: null,
+          paidCallStarted: false,
+        }),
       };
     }
     emit(activities, options.events, { stage: "Check", state: "done", detail: "The result and three owned records were verified." });
+    // Scanned before the record commit, exactly as the worker lane's own record
+    // composer scans before its commit: the card names what this task changed,
+    // not the empty set an already-committed workspace reports afterwards.
+    const changedBeforeCommit = changedSetForRecord(projectRoot);
     const commit = recordCommit(projectRoot, taskNumber, start, owned, Boolean(options.commitRecords));
     emit(activities, options.events, { stage: "Result", state: "done", detail: "Verified offline result. The requested product change was not attempted." });
     return {
       status: "done", taskNumber, disposition: "DONE",
       briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
       reportText: closed.reportText, row: closed.row, route, activities, commit,
+      composed: composedForClose(contract, "DONE", null, {
+        claims: null,
+        filesChanged: changedBeforeCommit,
+        protectedIntact: protectedIntactAtClose,
+        commit,
+        evidenceSummary: null,
+        processFailure: null,
+        paidCallStarted: false,
+      }),
     };
   } finally {
     // The in-process guard always clears. The cross-process file lock is

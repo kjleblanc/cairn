@@ -1444,3 +1444,199 @@ test("a result echoing the outcome-only digest is refused for a details-bearing 
   assert.equal(result.reason, "INVALID_ADAPTER_RESULT");
   assert.match(readFileSync(result.reportPath, "utf8"), /INVALID_ADAPTER_RESULT/);
 });
+
+// Phase 3 Task 7: every closed run carries `composed` — the structured truth the
+// result card reads. It is the report's own data, never a second story: Git
+// answers what changed, the worker's account rides as CLAIMS, and no field is a
+// fixed phrase keyed on the disposition.
+test("a verified DONE carries the Git-derived composed record for the result card (Phase 3 Task 7)", async () => {
+  const root = project();
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          // The worker names a file it never touched. The card's file list is
+          // Git's answer to that question, never the worker's.
+          changes: ["invented-by-the-worker.txt — created"],
+          checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(
+      root, { installed: true, connected: true },
+      authorizeCodexExec(root, "Add one visible result"), fake,
+    )],
+  });
+
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.deepEqual([...result.composed.filesChanged], ["docs/ai-work/tasks/001-brief.md", "visible.txt"]);
+  assert.equal(result.composed.filesChanged.includes("invented-by-the-worker.txt"), false);
+  assert.equal(result.composed.claims?.summary, "Added the visible result.");
+  assert.equal(result.composed.disposition, "DONE");
+  assert.equal(result.composed.stopReason, null);
+  assert.equal(result.composed.protectedIntact, true);
+  assert.equal(result.composed.paidCallStarted, true);
+  assert.equal(result.composed.commit?.status, "created");
+  assert.equal(result.composed.taskNumber, 1);
+  assert.equal(result.composed.route.model, CODEX_EXEC_MODEL);
+  assert.match(result.composed.evidenceSummary ?? "", /^Bounded worker evidence: /);
+  assert.equal(result.composed.processFailure, null);
+  // The composed value is the very input the report was rendered from, so the
+  // card and the record cannot tell two different stories about one run.
+  assert.equal(result.reportText, readFileSync(result.reportPath, "utf8"));
+  assert.match(result.reportText, /- `visible\.txt`/);
+});
+
+test("perfect DONE claims compose a STOPPED card record naming the real stop reason (Phase 3 Task 7)", async () => {
+  const root = project();
+  writeFileSync(join(root, "protected.txt"), "owner original\n");
+  git(root, ["add", "--", "protected.txt"]);
+  git(root, ["commit", "-q", "-m", "protected fixture"]);
+  writeFileSync(join(root, "protected.txt"), "owner uncommitted edit\n");
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "protected.txt"), "worker overwrote the owner's edit\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Everything looks perfect.",
+          changes: ["did the thing"], checks: [{ name: "tests", result: "all pass" }],
+          howToTry: "Run it.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(
+      root, { installed: true, connected: true },
+      authorizeCodexExec(root, "Add one visible result"), fake,
+    )],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.composed.disposition, "STOPPED");
+  assert.equal(result.composed.stopReason, "PROTECTED_WORK_CHANGED");
+  assert.equal(result.composed.protectedIntact, false);
+  assert.equal(result.composed.commit, null);
+  assert.ok(result.composed.filesChanged.includes("protected.txt"));
+  // The flawless DONE claims survive as claims and nothing more.
+  assert.equal(result.composed.claims?.disposition, "DONE");
+  assert.equal(result.composed.claims?.summary, "Everything looks perfect.");
+});
+
+test("the offline demo DONE composes a card record with no paid call and the real commit (Phase 3 Task 7)", async () => {
+  const root = project();
+  const result = await runSerialTask(root, "Create a welcome page", { adapters: [createOfflineDemoAdapter()] });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.composed.paidCallStarted, false, "the offline lane starts no paid call");
+  assert.equal(result.composed.claims, null, "the offline lane parses no worker claims");
+  assert.equal(result.composed.disposition, "DONE");
+  assert.equal(result.composed.stopReason, null);
+  assert.equal(result.composed.protectedIntact, true);
+  assert.equal(result.composed.evidenceSummary, null);
+  assert.equal(result.composed.processFailure, null);
+  assert.equal(result.composed.commit?.status, "skipped");
+  assert.equal(result.composed.commit?.status, result.commit.status);
+  assert.equal(result.composed.commit?.reason, result.commit.reason);
+  assert.deepEqual([...result.composed.filesChanged], [
+    "docs/ai-work/LOG.md",
+    "docs/ai-work/tasks/001-brief.md",
+    "docs/ai-work/tasks/001-report.md",
+  ]);
+
+  // The same field follows the run's REAL commit result when one is requested.
+  const committingRoot = project();
+  const committed = await runSerialTask(committingRoot, "Create a welcome page", {
+    adapters: [createOfflineDemoAdapter()], commitRecords: true,
+  });
+  assert.equal(committed.status, "done");
+  if (committed.status !== "done") return;
+  assert.equal(committed.composed.commit?.status, "created");
+  assert.equal(committed.composed.commit?.status, committed.commit.status);
+  assert.equal(committed.composed.commit?.reason, committed.commit.reason);
+  assert.equal(committed.composed.paidCallStarted, false);
+});
+
+test("an adapter-throw stop composes the same paid-call truth its report renders (Phase 3 Task 7)", async () => {
+  async function stopWith(worker?: CodexExecProcess) {
+    const root = project();
+    const outcome = "Improve Cairn safely";
+    const result = await runSerialTask(root, outcome, {
+      adapters: [createCodexExecAdapter(
+        root, { installed: true, connected: true },
+        worker ? authorizeCodexExec(root, outcome) : undefined, worker,
+      )],
+    });
+    assert.equal(result.status, "stopped");
+    if (result.status !== "stopped") throw new Error("the run did not stop");
+    return { result, report: readFileSync(result.reportPath, "utf8") };
+  }
+
+  // No authorization: Cairn stops at the real-call boundary, so nothing started.
+  const boundary = await stopWith();
+  assert.equal(boundary.result.reason, "REAL_MODEL_CALL_NOT_AUTHORIZED");
+  assert.equal(boundary.result.composed.paidCallStarted, false);
+  assert.equal(boundary.result.composed.stopReason, "REAL_MODEL_CALL_NOT_AUTHORIZED");
+  assert.equal(boundary.result.composed.disposition, "STOPPED");
+  assert.equal(boundary.result.composed.claims, null);
+  assert.equal(boundary.result.composed.commit, null);
+  assert.equal(boundary.result.composed.protectedIntact, true);
+  assert.equal(boundary.result.composed.processFailure, null);
+  assert.deepEqual([...boundary.result.composed.filesChanged], ["docs/ai-work/tasks/001-brief.md"]);
+
+  // A timeout always spent a started process.
+  const timedOut = await stopWith({
+    kind: "fake",
+    async run() {
+      throw new CodexExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-wedged.jsonl", true);
+    },
+  });
+  assert.equal(timedOut.result.reason, "ADAPTER_TIMED_OUT");
+  assert.equal(timedOut.result.composed.paidCallStarted, true);
+  assert.equal(timedOut.result.composed.processFailure?.code, "CODEX_EXEC_TIMED_OUT");
+  assert.match(timedOut.result.composed.processFailure?.debugPath ?? "", /codex-wedged\.jsonl$/);
+
+  // A pre-spawn cancel started nothing: a null debug path, and a report that
+  // deliberately omits the already-spent sentence.
+  const preSpawn = await stopWith({
+    kind: "fake",
+    async run() { throw new CodexExecCancelledError(null, true); },
+  });
+  assert.equal(preSpawn.result.reason, "CANCELLED_BY_OWNER");
+  assert.equal(preSpawn.result.composed.paidCallStarted, false);
+
+  // A stdin failure spawned a process but delivered no request to the model.
+  const stdinFailed = await stopWith({
+    kind: "fake",
+    async run() {
+      throw new CodexExecProcessError("CODEX_EXEC_STDIN_FAILED", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\codex-run.jsonl");
+    },
+  });
+  assert.equal(stdinFailed.result.reason, "ADAPTER_FAILED");
+  assert.equal(stdinFailed.result.composed.paidCallStarted, false);
+
+  // The one invariant behind all four: the card's flag and the report's own
+  // already-spent sentence are the same statement about the same run.
+  for (const stop of [boundary, timedOut, preSpawn, stdinFailed]) {
+    assert.equal(
+      stop.result.composed.paidCallStarted,
+      /already spent/.test(stop.report),
+      `the card and the report disagree about ${stop.result.reason}`,
+    );
+  }
+});
