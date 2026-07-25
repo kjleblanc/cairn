@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pushExecute, pushPreview, remoteIsConfigured } from "../src/main/push.js";
-import type { PushPreview } from "../src/shared/ipc.js";
+import { pushExecute, pushPreview, pushRefusal, pushTargetIsWellFormed, remoteIsConfigured } from "../src/main/push.js";
+import type { PushPreview, PushResult } from "../src/shared/ipc.js";
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -138,6 +138,86 @@ test("a commit made after the preview does not ride along on the approved push",
   assert.equal(result.ok, true);
   assert.equal(git(bare, ["rev-parse", "main"]), approved!.head);
   assert.equal(git(bare, ["log", "-1", "--format=%s", "main"]), "the commit the panel listed");
+});
+
+/**
+ * Exactly what the `push:execute` handler does, minus its logging: refuse, or
+ * run. The refspec tests below drive THIS rather than `pushRefusal` alone, so
+ * that a neutered guard really would hand the target to git — which is the
+ * only way the assertions about the origin can mean anything.
+ */
+function guardedPush(dir: string, preview: PushPreview): PushResult {
+  return pushRefusal(dir, preview) ?? pushExecute(dir, preview);
+}
+
+test("a forced-update refspec is refused, and the origin is not rewound", () => {
+  // Verified against real git 2.52: `git push origin +<sha>:refs/heads/main`
+  // reports "(forced update)" and moves the origin's tip BACKWARD. That
+  // contradicts this module's own "never forced" promise and the sentence
+  // Cairn shows the owner while the push runs, so the value never reaches git.
+  const { bare, b } = makeOriginAndClones();
+  git(b, ["commit", "-q", "--allow-empty", "-m", "one"]);
+  const first = pushPreview(b)!;
+  pushExecute(b, first);
+  git(b, ["commit", "-q", "--allow-empty", "-m", "two"]);
+  const second = pushPreview(b)!;
+  pushExecute(b, second);
+  assert.equal(git(bare, ["rev-parse", "main"]), second.head);
+
+  // A rewind the origin would reject outright without the `+`.
+  const result = guardedPush(b, { ...second, head: `+${first.head}` });
+
+  assert.equal(result.ok, false);
+  assert.equal((result as { kind: string }).kind, "refused");
+  assert.equal(git(bare, ["rev-parse", "main"]), second.head);
+  assert.equal(git(bare, ["log", "-1", "--format=%s", "main"]), "two");
+});
+
+test("an empty head — which git reads as a branch deletion — is refused", () => {
+  // `git push origin :refs/heads/main` is a DELETE. The only thing that
+  // stopped the probe was the receiving repository's own denyDeleteCurrent,
+  // which protects one branch of one remote and nothing else.
+  const { bare, b } = makeOriginAndClones();
+  git(b, ["commit", "-q", "--allow-empty", "-m", "one"]);
+  const preview = pushPreview(b)!;
+  pushExecute(b, preview);
+
+  const result = guardedPush(b, { ...preview, head: "" });
+
+  assert.equal((result as { kind: string }).kind, "refused");
+  assert.equal(git(bare, ["rev-parse", "main"]), preview.head);
+});
+
+test("pushTargetIsWellFormed accepts a real preview and refuses everything else", () => {
+  const { b } = makeOriginAndClones();
+  git(b, ["commit", "-q", "--allow-empty", "-m", "one"]);
+  const preview = pushPreview(b)!;
+
+  assert.equal(pushTargetIsWellFormed(preview), true);
+  assert.equal(pushTargetIsWellFormed({ ...preview, branch: "feature/x-y.1" }), true);
+
+  for (const head of [`+${preview.head}`, "", "HEAD", "abc", "refs/heads/main", `${preview.head} `, "deadbee\nx", "ABCDEF1"]) {
+    assert.equal(pushTargetIsWellFormed({ ...preview, head }), false, `head ${JSON.stringify(head)} must be refused`);
+  }
+  for (const branch of ["", "+main", "ma:in", "ma in", "-main", "ma..in", "main.lock", "ma*in", "ma?in", "ma[in", "ma~in", "ma^in", "ma@{in", "main/", "main."]) {
+    assert.equal(pushTargetIsWellFormed({ ...preview, branch }), false, `branch ${JSON.stringify(branch)} must be refused`);
+  }
+  // A caller that sends something other than a preview is refused, not thrown at.
+  assert.equal(pushTargetIsWellFormed(null as unknown as PushPreview), false);
+  assert.equal(pushTargetIsWellFormed({} as PushPreview), false);
+});
+
+test("pushRefusal checks the target's shape before it asks git anything", () => {
+  // A malformed target costs no git call at all — and the injected exec proves
+  // it, by being ready to answer and never being asked.
+  let calls = 0;
+  const exec = (_args: string[]) => { calls += 1; return { status: 0, stdout: "origin\n", stderr: "" }; };
+  const preview: PushPreview = previewOf("origin", "main", "+abc1234");
+
+  const refusal = pushRefusal("C:/does/not/matter", preview, exec);
+
+  assert.equal((refusal as { kind: string }).kind, "refused");
+  assert.equal(calls, 0);
 });
 
 test("remoteIsConfigured accepts only names this project really has, and fails closed", () => {

@@ -70,6 +70,75 @@ export function remoteIsConfigured(dir: string, remote: string, exec: ExecFn = r
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).includes(remote);
 }
 
+/**
+ * The head the panel disclosed, as git itself writes one: a hex object name
+ * and nothing else. Anything else in this field is refspec SYNTAX reaching
+ * argv, and two shapes were verified against real git 2.52 (repo task 077's
+ * review finding):
+ *
+ * - `+<sha>` makes the push a FORCED update — the origin's tip was rewound in
+ *   a throwaway repo — contradicting this module's own "never forced" promise
+ *   and the sentence Cairn shows the owner while it runs.
+ * - `""` makes the whole refspec `:refs/heads/<branch>`, which git reads as a
+ *   branch DELETION. The probe was stopped only by the receiving repository's
+ *   `denyDeleteCurrent`, which protects one branch of one remote and nothing
+ *   else.
+ *
+ * The `--` terminator does not help: `+` is refspec syntax, not option syntax.
+ */
+const HEAD_OBJECT = /^[0-9a-f]{7,64}$/;
+
+/**
+ * A plain ref component: no refspec punctuation (`+`, `:`), no pattern or
+ * revision syntax (`*`, `?`, `[`, `~`, `^`, `@{`), no whitespace, and no
+ * leading `-` for argv to read as an option. Written as an allowlist rather
+ * than a denylist so a character nobody thought of is refused rather than
+ * waved through, and wide enough for every ordinary branch name
+ * (`main`, `feature/x-y`, `release/1.2.3`).
+ */
+const REF_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+/**
+ * Is this preview safe to interpolate into a refspec? Cairn bounds not only
+ * WHERE a push may go but WHAT it may send: both halves arrive over IPC, and
+ * neither may be inferable from a string a caller supplied.
+ *
+ * Fail-closed, and defensive about the shape itself — a caller that sends
+ * something other than a preview is refused rather than throwing.
+ */
+export function pushTargetIsWellFormed(preview: PushPreview): boolean {
+  const head = typeof preview?.head === "string" ? preview.head : "";
+  const branch = typeof preview?.branch === "string" ? preview.branch : "";
+  if (!HEAD_OBJECT.test(head)) return false;
+  if (!REF_COMPONENT.test(branch)) return false;
+  // `..` is revision-range syntax and `.lock` is git's own reserved suffix;
+  // both are made of characters the allowlist permits on their own.
+  if (branch.includes("..") || branch.endsWith(".lock")) return false;
+  if (branch.endsWith("/") || branch.endsWith(".")) return false;
+  return true;
+}
+
+/** Cairn's own plain refusal, when it will not hand this target to git. */
+const REFUSED_TARGET = "Cairn did not run this push. It was aimed at a target this project has no remote for, and Cairn only pushes to a remote the project itself has configured.";
+const REFUSED_SHAPE = "Cairn did not run this push. The commit or branch it named was not in the form Cairn sends to git, so nothing was published.";
+
+/**
+ * The whole pre-flight, in one place: the reason to refuse, or null to go
+ * ahead. Both refusals are `kind: "refused"` — Cairn declined before git ran,
+ * so the words are entirely Cairn's own and there is no git output to label.
+ * Neither names the offending value: it came from outside this process, and
+ * putting it on a screen would put words there Cairn did not choose. The
+ * handler logs it instead.
+ *
+ * Shape is checked before the remote, so a malformed target costs no git call.
+ */
+export function pushRefusal(dir: string, preview: PushPreview, exec: ExecFn = realExec(dir)): PushResult | null {
+  if (!pushTargetIsWellFormed(preview)) return { ok: false, kind: "refused", message: REFUSED_SHAPE };
+  const remote = typeof preview?.remote === "string" ? preview.remote : "";
+  if (!remoteIsConfigured(dir, remote, exec)) return { ok: false, kind: "refused", message: REFUSED_TARGET };
+  return null;
+}
+
 const AUTH_PATTERN = /Authentication failed|could not read (Username|Password)|Permission denied/;
 const REMOTE_AHEAD_PATTERN = /fetch first|non-fast-forward|\[rejected\]/;
 // Not part of the plan's named stderr regexes: a plain `git init` directory

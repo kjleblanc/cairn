@@ -1002,10 +1002,16 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
 
   const outcome = win.locator(".push-outcome");
   await expect(outcome).toContainText(`Pushed ${fixture.branch} to`, { timeout: 30_000 });
-  // The in-progress line was moved into this same region, so the whole
-  // sequence is announced. It is not asserted here: a file:// push settles in
-  // milliseconds, and a test that waited for that text would be a race. What
-  // IS asserted is that the panel no longer carries it anywhere.
+  // The panel closes behind the settled outcome.
+  //
+  // The in-progress line was moved into this same region (repo task 076) so
+  // the whole sequence is announced, and NO assertion here carries that: a
+  // file:// push settles in milliseconds, so waiting for the transient text
+  // would be a race, and the line below is taken after settle, when the panel
+  // is gone by construction and would have passed before the move as well.
+  // What proves the move is the code — `pushAnnouncement` is the region's only
+  // producer, and the panel's JSX no longer contains the string at all (repo
+  // task 077's review correction).
   await expect(win.locator(".push-confirm")).toHaveCount(0);
   // And it arrived as a change inside the region marked above, not as a new
   // region carrying a message no one hears.
@@ -1022,7 +1028,7 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
 // if it took that string on trust. It does not. This test goes around the
 // screen entirely and calls the handler directly, which is the only way to
 // reach the case: the panel's own preview can never name anything else.
-test("main refuses a push aimed at anything this project has not configured as a remote", async () => {
+test("main refuses a push aimed at anything this project has not configured, and any refspec it did not shape", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-push-bound-"));
   scaffold(project);
   const fixture = pushFixture(project);
@@ -1042,7 +1048,10 @@ test("main refuses a push aimed at anything this project has not configured as a
   }, { dir: project, url: pathToFileURL(elsewhere).href });
   expect(byUrl?.ok).toBe(false);
   if (byUrl && !byUrl.ok) {
-    expect(byUrl.kind).toBe("no-remote");
+    // `refused` — Cairn declined before git ran, so these are Cairn's own
+    // words with no git output behind them. `other` would have rendered the
+    // "ends with git's own words" label over a sentence git never produced.
+    expect(byUrl.kind).toBe("refused");
     // The refusal names no target: the string that failed the check came from
     // outside the main process and is never echoed back onto a screen.
     expect(byUrl.message).not.toContain(elsewhere);
@@ -1058,6 +1067,25 @@ test("main refuses a push aimed at anything this project has not configured as a
     return preview === null ? null : window.cairn.pushExecute(dir, { ...preview, remote: "not-a-remote" });
   }, project);
   expect(byName?.ok).toBe(false);
+  expect(aheadCount(project)).toBe("1");
+
+  // And what the push SENDS is bounded through the same handler, not only
+  // where it goes: `+` in front of the object name is what makes a push a
+  // forced update, and an empty source makes the refspec a branch deletion.
+  // Neither reaches git.
+  const forced = await win.evaluate(async (dir) => {
+    const preview = await window.cairn.pushPreview(dir);
+    return preview === null ? null : window.cairn.pushExecute(dir, { ...preview, head: `+${preview.head}` });
+  }, project);
+  expect(forced?.ok).toBe(false);
+  if (forced && !forced.ok) expect(forced.kind).toBe("refused");
+
+  const deletion = await win.evaluate(async (dir) => {
+    const preview = await window.cairn.pushPreview(dir);
+    return preview === null ? null : window.cairn.pushExecute(dir, { ...preview, head: "" });
+  }, project);
+  expect(deletion?.ok).toBe(false);
+  if (deletion && !deletion.ok) expect(deletion.kind).toBe("refused");
   expect(aheadCount(project)).toBe("1");
 
   // And the bound refuses nothing legitimate: the project's own remote, from

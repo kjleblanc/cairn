@@ -17,12 +17,24 @@ export type TaskRoutePreview = { route: RouteResult; disclosure?: WorkerDisclosu
  * moved — or a different branch checked out — between the confirmation being
  * read and approved would publish commits the panel never listed. */
 export type PushPreview = { remote: string; url: string; branch: string; ahead: number; subjects: string[]; head: string };
-/** `pushExecute`'s outcome from the ONE plain `git push` it ever runs — no
+/**
+ * `pushExecute`'s outcome from the ONE plain `git push` it ever runs — no
  * retry, no force. `kind` on failure is fail-closed: `other` is whatever a
- * real git error did not match one of the three named cases. */
+ * real git error did not match one of the named cases.
+ *
+ * `refused` means Cairn declined BEFORE running git at all, so it is the one
+ * failure whose words are entirely Cairn's own and which carries no git output
+ * to label as such. The design spec enumerated the honest outcomes it knew
+ * about — success, no remote, auth refused, remote ahead — and never
+ * contemplated a pre-flight refusal, which only became possible once the
+ * refspec was pinned from caller-supplied values (repo tasks 075-077). Adding
+ * the case is completing the spec's honesty rule rather than departing from
+ * it: `other` would lie through its "ends with git's own words" label, and
+ * `no-remote` is simply the wrong statement about a malformed refspec.
+ */
 export type PushResult =
   | { ok: true; summary: string }
-  | { ok: false; kind: "no-remote" | "auth" | "remote-ahead" | "other"; message: string };
+  | { ok: false; kind: "no-remote" | "auth" | "remote-ahead" | "other" | "refused"; message: string };
 /**
  * One dispatch request, whole. It travels as a single object because every
  * part of it is load-bearing at the gate: the outcome and the owner's own
