@@ -49,7 +49,25 @@ export function pushPreview(dir: string, exec: ExecFn = realExec(dir)): PushPrev
   const subjectsResult = exec(["log", "@{u}..HEAD", "--format=%s"]);
   const subjects = subjectsResult.stdout.split(/\r?\n/).filter((line) => line.length > 0);
 
-  return { remote, url, branch, ahead, subjects };
+  const headResult = exec(["rev-parse", "HEAD"]);
+  const head = headResult.status === 0 ? headResult.stdout.trim() : "";
+
+  return { remote, url, branch, ahead, subjects, head };
+}
+
+/**
+ * Network-free: does `dir` actually have a remote by this name? The push
+ * handler asks before running anything, because git accepts a URL wherever a
+ * remote NAME is expected — so an unchecked string reaching argv means the
+ * main process no longer bounds where a push can go (repo task 076's review
+ * finding). Fail-closed: if `git remote` itself cannot be read, the answer is
+ * no, and nothing is pushed.
+ */
+export function remoteIsConfigured(dir: string, remote: string, exec: ExecFn = realExec(dir)): boolean {
+  if (remote.length === 0) return false;
+  const result = exec(["remote"]);
+  if (result.status !== 0) return false;
+  return result.stdout.split(/\r?\n/).map((line) => line.trim()).includes(remote);
 }
 
 const AUTH_PATTERN = /Authentication failed|could not read (Username|Password)|Permission denied/;
@@ -103,19 +121,25 @@ function summarizeSuccess(stderr: string): string {
  * The owner asked for exactly one push and gets exactly one git invocation,
  * full stop; classification below only reads what that single call reported.
  *
- * `remote` and `branch` are REQUIRED, and the refspec is pinned to them
- * (`git push <remote> HEAD:<branch>`) rather than left to a bare `git push`
- * (repo task 075's review finding). A bare push is governed by the machine's
- * `push.default`: under `matching` it publishes every same-named branch —
- * commits the confirmation panel never listed — and under `current` it can
- * push to a remote branch other than the `@{u}` branch the panel named. The
- * default `simple` happens to match the disclosure, so a bare push was
- * correct on this machine; pinning makes it correct by construction on every
- * machine. Callers must pass the values from the SAME preview the owner
- * approved, never re-derived at execute time.
+ * The refspec is pinned at BOTH ends to the preview the owner approved, and
+ * the preview is taken whole so no caller can assemble a target out of pieces
+ * from different reads:
+ *
+ * - **Destination** (`remote`, `branch`), rather than a bare `git push`, whose
+ *   behaviour belongs to the machine's `push.default` (repo task 075's review
+ *   finding): under `matching` a bare push publishes every same-named branch —
+ *   commits the panel never listed — and under `current` it can push to a
+ *   remote branch other than the `@{u}` branch the panel named.
+ * - **Source** (`head`), rather than `HEAD`, which is a moving target (repo
+ *   task 076's review finding): a commit made, or a branch checked out,
+ *   between the panel being read and approved would otherwise publish under an
+ *   approval given for something else.
+ *
+ * What runs is therefore what was disclosed, on any machine and whatever the
+ * working tree has done since.
  */
-export function pushExecute(dir: string, remote: string, branch: string, exec: ExecFn = realExec(dir)): PushResult {
-  const result = exec(["push", remote, `HEAD:${branch}`]);
+export function pushExecute(dir: string, preview: PushPreview, exec: ExecFn = realExec(dir)): PushResult {
+  const result = exec(["push", preview.remote, `${preview.head}:refs/heads/${preview.branch}`]);
 
   if (result.status === 0) {
     return { ok: true, summary: summarizeSuccess(result.stderr) };

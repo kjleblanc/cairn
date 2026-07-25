@@ -1002,10 +1002,71 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
 
   const outcome = win.locator(".push-outcome");
   await expect(outcome).toContainText(`Pushed ${fixture.branch} to`, { timeout: 30_000 });
+  // The in-progress line was moved into this same region, so the whole
+  // sequence is announced. It is not asserted here: a file:// push settles in
+  // milliseconds, and a test that waited for that text would be a race. What
+  // IS asserted is that the panel no longer carries it anywhere.
+  await expect(win.locator(".push-confirm")).toHaveCount(0);
   // And it arrived as a change inside the region marked above, not as a new
   // region carrying a message no one hears.
   await expect(outcome).toHaveAttribute("data-live-region-probe", "same-node");
   // The honest outcome is honest: the commit really is on the upstream now.
+  expect(aheadCount(project)).toBe("0");
+  expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
+    .toBe(fixture.subject);
+  await app.close();
+});
+
+// Pinning the refspec put a caller-supplied string into git's argv where a
+// remote NAME goes — and git accepts a URL there, so main would bound nothing
+// if it took that string on trust. It does not. This test goes around the
+// screen entirely and calls the handler directly, which is the only way to
+// reach the case: the panel's own preview can never name anything else.
+test("main refuses a push aimed at anything this project has not configured as a remote", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-push-bound-"));
+  scaffold(project);
+  const fixture = pushFixture(project);
+  // A perfectly good push target that this project has never heard of.
+  const elsewhere = mkdtempSync(join(tmpdir(), "cairn-push-elsewhere-"));
+  execFileSync("git", ["init", "-q", "--bare", "."], { cwd: elsewhere });
+
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+
+  // The real preview, with only its remote swapped — a URL in the one field
+  // git would happily treat as a destination.
+  const byUrl = await win.evaluate(async (args) => {
+    const preview = await window.cairn.pushPreview(args.dir);
+    return preview === null ? null : window.cairn.pushExecute(args.dir, { ...preview, remote: args.url });
+  }, { dir: project, url: pathToFileURL(elsewhere).href });
+  expect(byUrl?.ok).toBe(false);
+  if (byUrl && !byUrl.ok) {
+    expect(byUrl.kind).toBe("no-remote");
+    // The refusal names no target: the string that failed the check came from
+    // outside the main process and is never echoed back onto a screen.
+    expect(byUrl.message).not.toContain(elsewhere);
+    expect(byUrl.message).toContain("Cairn did not run this push.");
+  }
+  // Nothing reached it, and the project is untouched.
+  expect(execFileSync("git", ["for-each-ref"], { cwd: elsewhere, encoding: "utf8" }).trim()).toBe("");
+  expect(aheadCount(project)).toBe("1");
+
+  // The same refusal for a plain name this project does not have.
+  const byName = await win.evaluate(async (dir) => {
+    const preview = await window.cairn.pushPreview(dir);
+    return preview === null ? null : window.cairn.pushExecute(dir, { ...preview, remote: "not-a-remote" });
+  }, project);
+  expect(byName?.ok).toBe(false);
+  expect(aheadCount(project)).toBe("1");
+
+  // And the bound refuses nothing legitimate: the project's own remote, from
+  // its own preview, still goes through the same handler and publishes.
+  const real = await win.evaluate(async (dir) => {
+    const preview = await window.cairn.pushPreview(dir);
+    return preview === null ? null : window.cairn.pushExecute(dir, preview);
+  }, project);
+  expect(real?.ok).toBe(true);
   expect(aheadCount(project)).toBe("0");
   expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
     .toBe(fixture.subject);

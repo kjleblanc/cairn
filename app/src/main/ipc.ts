@@ -19,7 +19,7 @@ import type {
 } from "../shared/ipc.js";
 import * as conductorService from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
-import { pushExecute, pushPreview } from "./push.js";
+import { pushExecute, pushPreview, remoteIsConfigured } from "./push.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
 
 function toResult<T>(context: string, fn: () => T): Result<T> {
@@ -116,12 +116,30 @@ export function registerProjectIpc(): void {
   // built the chip and the owner-facing confirmation on top of it.
   ipcMain.handle("push:preview", (_e, dir: string): PushPreview | null => pushPreview(dir));
 
-  // `remote` and `branch` ride the request because the push is pinned to
-  // exactly what the confirmation panel disclosed — they are the panel's own
-  // preview values, not anything re-derived here. Re-reading git at this point
-  // would reopen the gap the pinning closes.
-  ipcMain.handle("push:execute", (_e, dir: string, remote: string, branch: string): PushResult =>
-    pushExecute(dir, remote, branch));
+  // The preview rides the request because the push is pinned to exactly what
+  // the confirmation panel disclosed — it is the panel's own preview object,
+  // not anything re-derived here. Re-reading git at this point would reopen
+  // the gap the pinning closes.
+  //
+  // But pinning also means a caller-supplied string reaches git's argv where a
+  // remote name goes, and git accepts a URL there — so before pinning, a bare
+  // push could only ever reach the configured upstream, and after it, main
+  // would bound nothing. This handler restores that bound itself rather than
+  // trusting its one well-behaved caller: the push runs only for a remote this
+  // project has actually configured, checked locally with no network.
+  ipcMain.handle("push:execute", (_e, dir: string, preview: PushPreview): PushResult => {
+    if (!remoteIsConfigured(dir, preview.remote)) {
+      return {
+        ok: false,
+        kind: "no-remote",
+        // Names no target: the string that failed the check came from outside
+        // this process, and echoing it back onto the screen would put words
+        // there that Cairn did not choose.
+        message: "Cairn did not run this push. It was aimed at a target this project has no remote for, and Cairn only pushes to a remote the project itself has configured.",
+      };
+    }
+    return pushExecute(dir, preview);
+  });
 }
 
 /** Registered separately from `registerProjectIpc` for clarity, but called

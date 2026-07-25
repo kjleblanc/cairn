@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pushExecute, pushPreview } from "../src/main/push.js";
+import { pushExecute, pushPreview, remoteIsConfigured } from "../src/main/push.js";
+import type { PushPreview } from "../src/shared/ipc.js";
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -13,6 +14,12 @@ function git(root: string, args: string[]): string {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   }).trimEnd();
+}
+
+/** A preview shaped exactly as `pushPreview` returns one, for the tests that
+ * drive `pushExecute` through the injected exec seam instead of real git. */
+function previewOf(remote: string, branch: string, head: string): PushPreview {
+  return { remote, url: `file:///${remote}`, branch, ahead: 1, subjects: ["a commit"], head };
 }
 
 function freshDir(prefix: string): string {
@@ -58,6 +65,7 @@ test("pushPreview reports ahead count, subjects, remote, url, and branch", () =>
   assert.equal(preview?.ahead, 1);
   assert.deepEqual(preview?.subjects, ["feature: add widget"]);
   assert.equal(preview?.url, bare);
+  assert.equal(preview?.head, git(b, ["rev-parse", "HEAD"]));
 });
 
 test("pushPreview returns null when the branch has no upstream configured", () => {
@@ -90,7 +98,7 @@ test("pushExecute pushes successfully and the ahead count drops to zero", () => 
   const before = pushPreview(b);
   assert.equal(before?.ahead, 1);
 
-  const result = pushExecute(b, before!.remote, before!.branch);
+  const result = pushExecute(b, before!);
 
   assert.equal(result.ok, true);
   assert.equal(typeof (result as { summary: string }).summary, "string");
@@ -106,13 +114,50 @@ test("pushExecute runs exactly the pinned refspec it was given, once", () => {
     return { status: 0, stdout: "", stderr: "To file:///origin\n   1111111..2222222  HEAD -> main\n" };
   };
 
-  const result = pushExecute("C:/does/not/matter", "origin", "main", exec);
+  const result = pushExecute("C:/does/not/matter", previewOf("origin", "main", "abc1234"), exec);
 
   assert.equal(result.ok, true);
-  // The whole point of repo task 075's fix: what runs is the remote and branch
-  // the owner approved, spelled out, so no machine's `push.default` can widen
-  // or redirect it. And still exactly one invocation — never a retry.
-  assert.deepEqual(calls, [["push", "origin", "HEAD:main"]]);
+  // What runs is the remote, branch AND commit the owner approved, spelled out
+  // — so no machine's `push.default` can widen or redirect the destination
+  // (repo task 075) and no later commit can change the source (repo task 076).
+  // And still exactly one invocation — never a retry.
+  assert.deepEqual(calls, [["push", "origin", "abc1234:refs/heads/main"]]);
+});
+
+test("a commit made after the preview does not ride along on the approved push", () => {
+  // The other half of the window that motivated the press-time re-read: the
+  // owner approves a panel listing one commit, and HEAD moves before the push
+  // runs. Pinning the SOURCE means the approval publishes what it named.
+  const { bare, b } = makeOriginAndClones();
+  git(b, ["commit", "-q", "--allow-empty", "-m", "the commit the panel listed"]);
+  const approved = pushPreview(b);
+  git(b, ["commit", "-q", "--allow-empty", "-m", "made after the panel was read"]);
+
+  const result = pushExecute(b, approved!);
+
+  assert.equal(result.ok, true);
+  assert.equal(git(bare, ["rev-parse", "main"]), approved!.head);
+  assert.equal(git(bare, ["log", "-1", "--format=%s", "main"]), "the commit the panel listed");
+});
+
+test("remoteIsConfigured accepts only names this project really has, and fails closed", () => {
+  // git accepts a URL wherever a remote NAME is expected, so this is the check
+  // that keeps the main process bounding where a push can go once the refspec
+  // is pinned (repo task 076's review finding).
+  const { bare, b } = makeOriginAndClones();
+
+  assert.equal(remoteIsConfigured(b, "origin"), true);
+  assert.equal(remoteIsConfigured(b, "not-a-remote"), false);
+  assert.equal(remoteIsConfigured(b, ""), false);
+  // The exact shape the bound exists for: the origin's own URL is a perfectly
+  // good push target for git, and is still not a configured remote NAME.
+  assert.equal(remoteIsConfigured(b, bare), false);
+
+  const plain = freshDir("cairn-push-noremotes-");
+  git(plain, ["init", "-q", "-b", "main"]);
+  assert.equal(remoteIsConfigured(plain, "origin"), false);
+  // Unreadable `git remote` answers no rather than yes.
+  assert.equal(remoteIsConfigured(plain, "origin", () => ({ status: 128, stdout: "origin\n", stderr: "" })), false);
 });
 
 test("a push.default=matching repo publishes only the branch that was named", () => {
@@ -130,7 +175,7 @@ test("a push.default=matching repo publishes only the branch that was named", ()
   const sideOnOriginBefore = git(bare, ["rev-parse", "side"]);
 
   const preview = pushPreview(b);
-  const result = pushExecute(b, preview!.remote, preview!.branch);
+  const result = pushExecute(b, preview!);
 
   assert.equal(result.ok, true);
   assert.equal(git(bare, ["log", "-1", "--format=%s", "main"]), "main ahead");
@@ -144,7 +189,7 @@ test("a repo with no such remote reports git's own words rather than a named kin
   git(dir, ["commit", "-q", "--allow-empty", "-m", "solo commit"]);
 
   assert.equal(pushPreview(dir), null);
-  const result = pushExecute(dir, "origin", "main");
+  const result = pushExecute(dir, previewOf("origin", "main", git(dir, ["rev-parse", "HEAD"])));
 
   // Naming a remote that does not exist is a different real git failure from
   // "no push destination configured", and it lands in `other`, which reports
@@ -160,7 +205,7 @@ test("pushExecute still classifies git's no-push-destination wording as no-remot
   // fixed by the plan) and stays proven here, so it cannot rot unnoticed.
   const exec = (_args: string[]) => ({ status: 128, stdout: "", stderr: "fatal: No configured push destination." });
 
-  const result = pushExecute("C:/does/not/matter", "origin", "main", exec);
+  const result = pushExecute("C:/does/not/matter", previewOf("origin", "main", "abc1234"), exec);
 
   assert.equal(result.ok, false);
   assert.equal((result as { kind: string }).kind, "no-remote");
@@ -173,7 +218,7 @@ test("pushExecute classifies remote-ahead when the origin has commits this clone
   git(b, ["commit", "-q", "--allow-empty", "-m", "B's commit"]);
   const preview = pushPreview(b);
 
-  const result = pushExecute(b, preview!.remote, preview!.branch);
+  const result = pushExecute(b, preview!);
 
   assert.equal(result.ok, false);
   assert.equal((result as { kind: string }).kind, "remote-ahead");
@@ -187,7 +232,7 @@ test("pushExecute classifies auth failures via the injected exec seam and never 
     return { status: 128, stdout: "", stderr: "fatal: Authentication failed for 'https://example.invalid/repo.git'" };
   };
 
-  const result = pushExecute("C:/does/not/matter", "origin", "main", exec);
+  const result = pushExecute("C:/does/not/matter", previewOf("origin", "main", "abc1234"), exec);
 
   assert.equal(result.ok, false);
   assert.equal((result as { kind: string }).kind, "auth");
@@ -201,7 +246,7 @@ test("neither failure message points at a control the settled outcome does not h
     { stderr: "! [rejected] main -> main (fetch first)", kind: "remote-ahead" },
   ];
   for (const { stderr, kind } of kinds) {
-    const result = pushExecute("C:/does/not/matter", "origin", "main", () => ({ status: 1, stdout: "", stderr }));
+    const result = pushExecute("C:/does/not/matter", previewOf("origin", "main", "abc1234"), () => ({ status: 1, stdout: "", stderr }));
     assert.equal((result as { kind: string }).kind, kind);
     assert.doesNotMatch((result as { message: string }).message, /try the push again/);
     assert.match((result as { message: string }).message, /Nothing was published\./);

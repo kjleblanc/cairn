@@ -148,7 +148,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 /* The push flow. The chip is a nudge and looks like one; the confirmation is
  * the contract's pause and looks like the other cards that ask for a decision
  * before something leaves this machine. */
-.push-flow { align-self: stretch; display: flex; flex-direction: column; gap: 10px; }
+/* Spacing by sibling margin rather than flex `gap`, so the live region — which
+ * is mounted from the start and empty until it has something to say — leaves
+ * no dead space under the chip while it is still silent. */
+.push-flow { align-self: stretch; display: flex; flex-direction: column; }
+.push-flow > * + * { margin-top: 10px; }
+.push-flow > .push-outcome:empty { margin-top: 0; }
 .push-chip { display: flex; }
 .push-confirm { margin: 0; border: 1px solid var(--line); }
 /* The panel is focused when it opens, so it needs a focus ring of its own —

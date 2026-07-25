@@ -87,6 +87,12 @@ function aheadPhrase(ahead: number): string {
  * still has nothing to announce. Kept out of the render body so the live
  * region below has exactly one source. */
 function pushAnnouncement(flow: PushFlow): string | null {
+  // The in-progress line belongs in the region too, not beside it: without it
+  // there is silence between the press and the outcome of the one irreversible
+  // action on this screen, which is the stretch a listener most needs narrated.
+  if (flow.phase === "pushing") {
+    return "Pushing. Cairn runs one plain git push — never a retry, never a force.";
+  }
   if (flow.phase === "settled" && flow.result) {
     return flow.result.ok ? flow.result.summary : flow.result.message;
   }
@@ -160,9 +166,6 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
             <Pill kind="primary" disabled={flow.phase === "pushing"} onClick={onApprove}>Push</Pill>
             <Pill kind="quiet" disabled={flow.phase === "pushing"} onClick={onDecline}>Not now</Pill>
           </div>
-          {flow.phase === "pushing" ? (
-            <p className="small muted">Pushing. Cairn runs one plain git push — never a retry, never a force.</p>
-          ) : null}
         </div>
       ) : null}
 
@@ -533,16 +536,17 @@ export function Chat({ dir, onBack, onOpenRun }: {
   // screen that writes anything outside this machine. One press, one plain
   // `git push`, whatever it reports.
   //
-  // `preview` is the panel's OWN preview, handed in from the render that the
-  // owner read — not re-read here. The push is pinned to its remote and
-  // branch, so what executes is what was disclosed; re-deriving either value
-  // at this point would reopen exactly the gap the pinning closes.
+  // `preview` is the panel's OWN preview object, handed in whole from the
+  // render the owner read — not re-read here, and not taken apart. The push is
+  // pinned to its remote, its branch and its head commit, so what executes is
+  // what was disclosed; re-deriving any of them at this point would reopen
+  // exactly the gap the pinning closes.
   async function approvePush(preview: PushPreview) {
     if (pushRunning.current) return;
     pushRunning.current = true;
     setPushFlow((f) => (f !== null && f.phase === "confirm" ? { ...f, phase: "pushing" } : f));
     try {
-      const result = await cairn.pushExecute(dir, preview.remote, preview.branch);
+      const result = await cairn.pushExecute(dir, preview);
       setPushFlow((f) => (f !== null && f.phase === "pushing" ? { ...f, phase: "settled", result } : f));
     } finally {
       pushRunning.current = false;

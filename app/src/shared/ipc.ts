@@ -10,8 +10,13 @@ export type TaskActivityEvent = { dir: string; activity: SerialActivity };
 export type TaskRoutePreview = { route: RouteResult; disclosure?: WorkerDisclosure };
 /** `pushPreview`'s local-only, network-free look at what a push would do:
  * null when the current branch has no upstream configured (there is
- * nothing to preview and nothing to push). */
-export type PushPreview = { remote: string; url: string; branch: string; ahead: number; subjects: string[] };
+ * nothing to preview and nothing to push).
+ *
+ * `head` is the exact commit the preview describes. It rides along so the
+ * push can pin its SOURCE as well as its destination: without it, a HEAD that
+ * moved — or a different branch checked out — between the confirmation being
+ * read and approved would publish commits the panel never listed. */
+export type PushPreview = { remote: string; url: string; branch: string; ahead: number; subjects: string[]; head: string };
 /** `pushExecute`'s outcome from the ONE plain `git push` it ever runs — no
  * retry, no force. `kind` on failure is fail-closed: `other` is whatever a
  * real git error did not match one of the three named cases. */
@@ -120,10 +125,12 @@ export interface CairnApi {
   conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
   onConductorDelta(cb: (event: ConductorDelta) => void): () => void;
   pushPreview(dir: string): Promise<PushPreview | null>;
-  /** `remote` and `branch` come from the preview the owner actually approved,
-   * so the push is pinned to what was disclosed rather than left to the
-   * machine's `push.default`. */
-  pushExecute(dir: string, remote: string, branch: string): Promise<PushResult>;
+  /** Takes the whole preview the owner approved — not values picked out of it
+   * — so the push is pinned at both ends to exactly what was disclosed: its
+   * destination (`remote`, `branch`) rather than the machine's `push.default`,
+   * and its source (`head`) rather than wherever HEAD has since moved. Main
+   * refuses outright if `remote` is not a remote this project has configured. */
+  pushExecute(dir: string, preview: PushPreview): Promise<PushResult>;
 }
 
 export interface TaskBlockConcern {
