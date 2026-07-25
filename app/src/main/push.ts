@@ -120,7 +120,12 @@ export function pushTargetIsWellFormed(preview: PushPreview): boolean {
 
 /** Cairn's own plain refusal, when it will not hand this target to git. */
 const REFUSED_TARGET = "Cairn did not run this push. It was aimed at a target this project has no remote for, and Cairn only pushes to a remote the project itself has configured.";
-const REFUSED_SHAPE = "Cairn did not run this push. The commit or branch it named was not in the form Cairn sends to git, so nothing was published.";
+// The limit is Cairn's own, and the sentence has to say so: `REF_COMPONENT` is
+// stricter than git's `check-ref-format`, so a perfectly legal branch name — a
+// non-ASCII one, `issue#42`, `feat+x` — reaches this refusal through no fault
+// of the owner's repository. The earlier wording ("was not in the form Cairn
+// sends to git") read as though their project were malformed.
+const REFUSED_SHAPE = "Cairn did not run this push, so nothing was published. Cairn sends only a plain commit id and a branch name that starts with a letter or a number and is made of letters, numbers, dots, dashes, underscores, and slashes. A branch name git accepts can still be outside that: the limit is Cairn's, not a problem with this project.";
 
 /**
  * The whole pre-flight, in one place: the reason to refuse, or null to go

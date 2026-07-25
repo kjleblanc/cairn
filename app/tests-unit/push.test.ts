@@ -220,6 +220,29 @@ test("pushRefusal checks the target's shape before it asks git anything", () => 
   assert.equal(calls, 0);
 });
 
+test("the shape refusal says the limit is Cairn's, and still names no target", () => {
+  // `REF_COMPONENT` is STRICTER than git's own check-ref-format: `issue#42`,
+  // `feat+x` and any non-ASCII name are perfectly legal branches that Cairn
+  // will not send. The refusal used to read "was not in the form Cairn sends
+  // to git", which puts the fault on the owner's repository when the strict
+  // one is Cairn (Phase 3 Task 11's closing review). It must own that, without
+  // ever repeating the target — that string came from outside this process.
+  const preview: PushPreview = previewOf("origin", "issue#42", "abc1234");
+
+  const refusal = pushRefusal("C:/does/not/matter", preview, () => {
+    throw new Error("a malformed target must cost no git call");
+  });
+
+  assert.equal((refusal as { kind: string }).kind, "refused");
+  const message = (refusal as { message: string }).message;
+  assert.match(message, /Cairn sends only/);
+  // The set it names has to be the set the guard enforces, leading character
+  // included: `_foo` is a branch git accepts and `REF_COMPONENT` refuses.
+  assert.match(message, /starts with a letter or a number and is made of letters, numbers, dots, dashes, underscores, and slashes/);
+  assert.match(message, /nothing was published/);
+  assert.doesNotMatch(message, /issue#42|abc1234|origin/);
+});
+
 test("remoteIsConfigured accepts only names this project really has, and fails closed", () => {
   // git accepts a URL wherever a remote NAME is expected, so this is the check
   // that keeps the main process bounding where a push can go once the refspec
