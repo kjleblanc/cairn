@@ -103,6 +103,14 @@ function commentaryRequested(messages) {
   return Boolean(last) && last.role === "system" && typeof last.content === "string" && last.content.includes("result card");
 }
 
+// Repo task 080. What `commentaryRequested` reads is the ENVELOPE'S
+// INSTRUCTION, not the card — so it says a comment was asked for and nothing
+// at all about what the model was shown. Every commentary test would still
+// have passed if the card had been dropped from the prompt entirely. The raw
+// body of the last commentary request is kept here so a test can read what
+// really arrived and assert the card is in it.
+let lastCommentaryBody = null;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -137,8 +145,10 @@ export function start() {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", () => {
-        const messages = messagesOf(Buffer.concat(chunks).toString("utf8"));
+        const rawBody = Buffer.concat(chunks).toString("utf8");
+        const messages = messagesOf(rawBody);
         if (commentaryRequested(messages)) {
+          lastCommentaryBody = rawBody;
           void streamReply(res, COMMENTARY_SCRIPT);
           return;
         }
@@ -156,6 +166,10 @@ export function start() {
       resolve({
         url: `http://127.0.0.1:${port}/v1`,
         close: () => new Promise((r) => server.close(() => r())),
+        /** The raw body of the last commentary request, or null if none has
+         * arrived. Raw rather than parsed so a test reads exactly what the
+         * provider would have. */
+        lastCommentaryBody: () => lastCommentaryBody,
       });
     });
   });

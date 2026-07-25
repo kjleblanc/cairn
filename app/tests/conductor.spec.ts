@@ -85,13 +85,19 @@ test.describe.configure({ mode: "serial" });
 
 let fixtureUrl = "";
 let fixtureClose: () => Promise<void> = async () => {};
+/** The raw body of the last commentary request the fixture answered — what the
+ * provider would actually have been sent (repo task 080). */
+let lastCommentaryBody: () => string | null = () => null;
 
 test.beforeAll(async () => {
   const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
-  const fixture = (await import(fixturePath)) as { start: () => Promise<{ url: string; close: () => Promise<void> }> };
+  const fixture = (await import(fixturePath)) as {
+    start: () => Promise<{ url: string; close: () => Promise<void>; lastCommentaryBody: () => string | null }>;
+  };
   const server = await fixture.start();
   fixtureUrl = server.url;
   fixtureClose = server.close;
+  lastCommentaryBody = server.lastCommentaryBody;
 
   detachStoredConnection();
 });
@@ -743,6 +749,20 @@ test("the conductor comments on the card the envelope just posted, and the comme
     expect(last.tokens).toBe(29);
     expect(last.costUsd).toBe(0.00002);
   }
+
+  // Repo task 080. Everything above proves a comment was ASKED FOR and came
+  // back. None of it proves the model was shown the card: the fixture answers
+  // on the envelope's instruction, which is a Cairn constant, so a `service.ts`
+  // that dropped every envelope turn from the prompt would satisfy every
+  // assertion so far. So read the body the provider really received.
+  const body = lastCommentaryBody();
+  expect(body).not.toBeNull();
+  const sent = (JSON.parse(body ?? "{}") as { messages?: Array<{ content?: string }> }).messages ?? [];
+  const prompt = sent.map((message) => message.content ?? "").join("\n");
+  // The label that says who verified it, and a fact only the card carries.
+  expect(prompt).toContain("Envelope result card (verified by Cairn's runtime, not by the conversation model)");
+  expect(prompt).toContain('"disposition":"DONE"');
+  expect(prompt).toContain('"taskNumber":1');
   await app.close();
 });
 

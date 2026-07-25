@@ -32,10 +32,16 @@ export function isQuitDraining(): boolean {
   return quitDraining;
 }
 
-/** The one refusal decision `task:run` and the conductor's send gate both
- * need: quitting wins over serial-run-active when both are true, since a
- * new run session started this shows only to be cancelled a moment later
- * by the grace window would just add noise before the owner relaunches. */
+/** `task:run`'s refusal decision, and its only caller's (`tasks.ts`): quitting
+ * wins over serial-run-active when both are true, since a new run session
+ * started this shows only to be cancelled a moment later by the grace window
+ * would just add noise before the owner relaunches.
+ *
+ * The conductor's send gate does NOT come through here. `service.send` reads
+ * `isTaskRunning` and `isQuitDraining` itself and refuses in its own words,
+ * because a refusal about MESSAGING has to speak about messaging — "start the
+ * next task after relaunch" is the wrong sentence for a chat composer. Both
+ * gates read the same two flags from this module; only the wording differs. */
 export function runRefusal(alreadyRunning: boolean, quitDraining: boolean): string | null {
   if (quitDraining) return "QUIT_IN_PROGRESS: Cairn is stopping the current task and quitting. Start the next task after relaunch.";
   if (alreadyRunning) return "SERIAL_RUN_ACTIVE: One task is already running for this project.";

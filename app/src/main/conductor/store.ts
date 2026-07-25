@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { ConductorTurn, ResultCard } from "../../shared/ipc.js";
+import { cardDigest, cardMarkers, recordCardMarker } from "./cardauth.js";
 
 const IGNORE_LINE = "/.cairn/";
 
@@ -56,7 +57,15 @@ export function newConversationId(root: string): string {
   return String(max + 1).padStart(3, "0");
 }
 
+/**
+ * Appends one turn. An envelope turn is VOUCHED FOR first: its marker is
+ * recorded outside the project (see `cardauth.ts`) before the line itself is
+ * written, so a card that reaches the file is always one `readTurns` will
+ * accept. If the marker cannot be recorded this throws and nothing is written
+ * — a card whose authorship Cairn cannot later prove is not a card it posts.
+ */
 export function appendTurn(root: string, id: string, turn: ConductorTurn): void {
+  if (turn.role === "envelope") recordCardMarker(root, id, turn.ts, turn.card);
   mkdirSync(conversationsDir(root), { recursive: true });
   appendFileSync(join(conversationsDir(root), `${id}.jsonl`), `${JSON.stringify(turn)}\n`, "utf8");
 }
@@ -67,6 +76,10 @@ export function appendTurn(root: string, id: string, turn: ConductorTurn): void 
  * `filesChanged` array. Anything else is DROPPED, never coerced into a card —
  * a half-written or hand-edited line must not become a result the owner reads
  * as Cairn's own verification.
+ *
+ * Shape is half the question. WHO WROTE IT is the other half, and it is asked
+ * separately in `readTurns` — this guard would pass a worker's own perfectly
+ * shaped forgery, which is exactly the hole the marker check closes.
  */
 function isResultCard(value: unknown): value is ResultCard {
   if (typeof value !== "object" || value === null) return false;
@@ -80,6 +93,10 @@ export function readTurns(root: string, id: string): ConductorTurn[] {
   const path = join(conversationsDir(root), `${id}.jsonl`);
   if (!existsSync(path)) return [];
   const turns: ConductorTurn[] = [];
+  // Read once for the whole file: every envelope line is checked against this
+  // set, and an empty set (no marker store, no file, an unreadable one) drops
+  // every card rather than trusting any.
+  const markers = cardMarkers(root);
   for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
     if (!line.trim()) continue;
     try {
@@ -87,7 +104,12 @@ export function readTurns(root: string, id: string): ConductorTurn[] {
       if (typeof value.ts !== "string") continue;
       if ((value.role === "owner" || value.role === "cairn") && typeof value.text === "string") {
         turns.push(value);
-      } else if (value.role === "envelope" && isResultCard(value.card)) {
+      } else if (value.role === "envelope" && isResultCard(value.card)
+        && markers.has(cardDigest(root, id, value.ts, value.card))) {
+        // Shape AND authorship. What the owner reads as Cairn's own
+        // verification has to be something Cairn actually wrote: this line
+        // lives inside the project root a worker can write to, and only the
+        // marker — which lives outside it — can tell the two apart.
         turns.push(value);
       }
     } catch {

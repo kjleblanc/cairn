@@ -133,6 +133,17 @@ export function send(
   text: string,
   onDelta: (delta: ConductorDelta) => void,
 ): Result<{ conversationId: string }> {
+  // Quitting is checked FIRST, and for the same reason `commentary` checks it:
+  // inside the 8-second grace window the process is about to end, so a stream
+  // started here is paid for, killed part-way, and never persisted or seen. The
+  // owner asked for this one, so unlike a comment it is refused out loud rather
+  // than skipped silently — and their message is not written to the
+  // conversation, so nothing sits in the transcript looking sent (Task 071).
+  // Quitting wins over serial-run-active when both are true, the same order
+  // `runRefusal` uses for a run.
+  if (isQuitDraining()) {
+    return { ok: false, message: "QUIT_IN_PROGRESS: Cairn is stopping the current task and quitting. Send this after relaunch — the conversation is saved." };
+  }
   if (isTaskRunning(dir)) {
     return { ok: false, message: "SERIAL_RUN_ACTIVE: A task is already running for this project. Wait for it to finish before messaging Cairn." };
   }

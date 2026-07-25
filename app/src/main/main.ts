@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
+import { setCardMarkerDir } from "./conductor/cardauth.js";
 import { registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import { beginQuitDrain } from "./rungate.js";
 import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
@@ -42,6 +43,11 @@ export function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   setContractPath(contractPath());
+  // Result-card authorship markers live beside the stored connection, in the
+  // per-user app folder — OUTSIDE every project, where a worker running with
+  // `--sandbox workspace-write --cd <project>` cannot write. Set before any
+  // IPC is registered: until it is, `readTurns` vouches for no card at all.
+  setCardMarkerDir(app.getPath("userData"));
   registerProjectIpc();
   registerConductorIpc();
   registerTaskIpc(() => mainWindow);

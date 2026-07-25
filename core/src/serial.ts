@@ -711,6 +711,27 @@ function safetyCloseFacts(
   }
 }
 
+/**
+ * Task 080: the worker lane's protected-work answer, or null when Git cannot
+ * give one. Task 067's ledgered sibling, in Task 067's shape.
+ *
+ * This is the FIRST Git read after a worker returns, and it runs BEFORE the
+ * owned-records gate — so a row the worker forged into Cairn's own append-only
+ * log is still standing when it executes. A worker that corrupts the repository
+ * (Task 067's own recipe: write garbage over `.git/index`) and then returns a
+ * valid `completed` result makes this read throw. Unwrapped, that raw
+ * child-process error escapes `runSerialTask`, skipping the throw-site log
+ * restore, and the forged DONE row survives to earn a stone. Caught here, the
+ * caller closes through the same door every other unverifiable close uses.
+ */
+function protectedStartingPathsOrNull(root: string, start: GitSnapshot): boolean | null {
+  try {
+    return verifyProtectedStartingPaths(root, start);
+  } catch {
+    return null;
+  }
+}
+
 function isAncestor(root: string, ancestor: string, descendant: string): boolean {
   try {
     git(root, ["merge-base", "--is-ancestor", ancestor, descendant]);
@@ -1144,7 +1165,19 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEvidenceSummary(workerResult.evidence) });
       }
       const workerCompleted = workerResult?.status === "completed";
-      const protectedValid = verifyProtectedStartingPaths(projectRoot, start);
+      const protectedStarting = protectedStartingPathsOrNull(projectRoot, start);
+      if (protectedStarting === null) {
+        // Git cannot answer, so nothing below may be decided: no honest record
+        // can be composed, and a worker-forged log row may be standing right
+        // now. Restore Cairn's OWN log and throw, so the run is must-inspect
+        // (Tasks 058/059/067).
+        const restored = restoreLogBeforeThrow(projectRoot, start);
+        throw recordVerificationFailed(
+          "Git could not be read to verify protected starting work; worker-authored evidence was retained without overwrite.",
+          restored,
+        );
+      }
+      const protectedValid = protectedStarting;
       // The worker authored no record; it speaks through one cairn-claims fence.
       const claims = workerResult ? parseWorkerClaims(workerResult.claimsText) : null;
       const stopReason: SerialStopReason | null = !resultValid
@@ -1296,7 +1329,25 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       );
       if (!records.verified) return closeRecordRewrite(records);
       const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
-      const commit = commitExactPaths(projectRoot, start, expectedCommitSet, taskNumber);
+      // Task 080: `commitExactPaths` reads Git in three places that its own
+      // try/catch does not cover — the HEAD read inside that catch, and the
+      // ancestry and single-commit checks after the commit — and all three run
+      // once the DONE report and log row are written and byte-back verified. A
+      // worker that corrupts the repository makes one of them throw (a planted
+      // `post-commit` hook is enough; nothing under `.git` is visible to any
+      // check Cairn runs), and the raw error would escape `runSerialTask` with
+      // that verified DONE row standing for a run that did not finish. Same
+      // shape as `safetyCloseFacts`, same door out.
+      let commit: RecordCommit | null;
+      try {
+        commit = commitExactPaths(projectRoot, start, expectedCommitSet, taskNumber);
+      } catch {
+        const restored = restoreLogBeforeThrow(projectRoot, start);
+        throw recordVerificationFailed(
+          "Git could not be read to complete the task commit; task records were retained for inspection.",
+          restored,
+        );
+      }
       if (!commit) {
         // Any staging/commit failure: undo staging, rewrite the DONE records as
         // STOPPED (this self-check is the one surviving use), and close

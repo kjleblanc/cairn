@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
+import { conductorFile, detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
 
 // One test here dispatches with `conversationId: "conv-1"`, which since Task 8
@@ -188,6 +188,13 @@ test("a details-bearing dispatch carries the owner's own data into the confirmed
 
   // The confirmed request runs: not refused, and the worker is handed the
   // owner's data unedited.
+  //
+  // This dispatch carries a conversation id, so its result card triggers the
+  // envelope's own paid comment call. The `beforeAll` detach is what keeps that
+  // off a developer's real provider account; assert it right here, one line
+  // before the dispatch, so the protection is checked in this process rather
+  // than assumed from a hook at the top of the file (repo task 080).
+  expect(existsSync(conductorFile())).toBe(false);
   const run = await win.evaluate(
     ({ project, task, data, card }) => window.cairn.taskRun({
       dir: project, outcome: task, details: data, adapterId: "codex-exec",

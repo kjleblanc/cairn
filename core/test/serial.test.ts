@@ -1690,3 +1690,110 @@ test("a Git failure while composing the stop record still restores the work log 
   assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-brief.md")), true,
     "the brief stays retained as evidence");
 });
+
+// Phase 3 whole-branch review, Critical 2 (repo task 080). Task 067's sibling,
+// ledgered then and repaired now. The worker lane's protected-work check is the
+// FIRST Git read after a worker returns, and it runs BEFORE the owned-records
+// gate — so a worker-forged log row is still standing when it executes. The
+// same corrupt-index recipe applies here, with one difference that is the whole
+// point: this worker does not throw. It returns a valid `completed` result, so
+// the run walks the ordinary success path into a Git read that cannot answer.
+test("a Git failure while verifying protected work still restores the work log (repo task 080)", async () => {
+  const root = project();
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  const corrupting: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      // The worker forges a DONE row in Cairn's own append-only log...
+      appendFileSync(
+        logPath,
+        "| 001 | 2026-07-25 | Standard | Applied | DONE | completed | Forged by the worker. | YES |\n",
+      );
+      // ...corrupts the Git index so the protected-work check cannot read it...
+      writeFileSync(join(root, ".git", "index"), "not an index\n");
+      // ...and returns a perfectly ordinary completed result claiming DONE.
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Did the work.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => runSerialTask(root, "Improve Cairn safely", {
+      adapters: [createCodexExecAdapter(
+        root, { installed: true, connected: true },
+        authorizeCodexExec(root, "Improve Cairn safely"), corrupting,
+      )],
+    }),
+    /RECORD_VERIFICATION_FAILED/,
+    "a Git failure in the check window is Cairn's own record failure, never a raw Git error",
+  );
+  assert.equal(
+    readFileSync(logPath, "utf8"),
+    beforeLog,
+    "the forged row is gone: the log is exactly what Cairn last wrote",
+  );
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false,
+    "no record can be composed from a Git that cannot be read");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-brief.md")), true,
+    "the brief stays retained as evidence");
+});
+
+// Phase 3 whole-branch review, Important 3 (repo task 080). The same invariant
+// at the last Git reads of a DONE run: the ancestry and single-commit checks
+// that follow `git commit` run AFTER a DONE report and log row are written and
+// byte-back verified. A throw there escapes with that verified DONE row
+// standing for a run that did not finish.
+//
+// The stage is a worker-planted `post-commit` hook. Nothing under `.git` is
+// ever reported by `git status`, so the hook is invisible to every check Cairn
+// runs; it fires after the commit object exists, so Cairn's own commit succeeds
+// and every Git read after it fails.
+test("a Git failure after the task commit leaves no DONE row standing (repo task 080)", async () => {
+  const root = project();
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  const hooking: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      const hook = join(root, ".git", "hooks", "post-commit");
+      writeFileSync(hook, "#!/bin/sh\nprintf 'not a ref\\n' > .git/HEAD\n", "utf8");
+      chmodSync(hook, 0o755);
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 200, cachedInputTokens: 50, outputTokens: 80, reasoningOutputTokens: 20,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added the visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+
+  await assert.rejects(
+    () => runSerialTask(root, "Add one visible result", {
+      adapters: [createCodexExecAdapter(
+        root, { installed: true, connected: true },
+        authorizeCodexExec(root, "Add one visible result"), hooking,
+      )],
+    }),
+    /RECORD_VERIFICATION_FAILED/,
+    "a Git failure after the commit is Cairn's own record failure, never a raw Git error",
+  );
+  assert.equal(
+    readFileSync(logPath, "utf8"),
+    beforeLog,
+    "no DONE row may stand in the work log for a run that threw",
+  );
+});
