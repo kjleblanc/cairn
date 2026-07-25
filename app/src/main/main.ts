@@ -3,6 +3,7 @@ import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
 import { registerConductorIpc, registerProjectIpc } from "./ipc.js";
+import { beginQuitDrain } from "./rungate.js";
 import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
 
 if (started) app.quit();
@@ -72,6 +73,7 @@ app.on("before-quit", (event) => {
   });
   if (choice !== 0) return;
   quitting = true;
+  beginQuitDrain();
   runs.cancelAll();
   const grace = new Promise((resolve) => setTimeout(resolve, 8_000));
   void Promise.race([runs.settled(), grace]).then(() => {

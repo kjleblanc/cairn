@@ -14,23 +14,16 @@ import {
 } from "@cairn/core";
 import type { Result, RunSessionSnapshot, TaskActivityEvent } from "../shared/ipc.js";
 import { logError, plainMessage } from "./log.js";
+import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 
-const running = new Set<string>();
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
 const sessions = new Map<string, RunSessionSnapshot>();
 
-/** True while a serial task is running for `dir`. Lets other main-side
- * gates (the conductor's send gate) share this one running-set instead of
- * tracking their own. */
-export function isTaskRunning(dir: string): boolean {
-  return running.has(dir);
-}
-
 /** Quit protection: name live runs, cancel them, and await their fail-closed close. */
 export function activeTaskRuns(): { dirs: string[]; cancelAll(): void; settled(): Promise<void> } {
   return {
-    dirs: [...running],
+    dirs: runningDirs(),
     cancelAll() {
       for (const controller of controllers.values()) controller.abort();
     },
@@ -91,16 +84,17 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle("task:run", async (_event, dir: string, outcome: string, adapterId?: string, realCallConfirmed?: boolean, disclosure?: WorkerDisclosure) => {
-    if (running.has(dir)) return { ok: false, message: "SERIAL_RUN_ACTIVE: One task is already running for this project." } satisfies Result<never>;
+    const refusal = runRefusal(isTaskRunning(dir), isQuitDraining());
+    if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
     // Register the live session BEFORE the (single) detection so a reattach can
     // always find the run, then detect once and reuse those adapters for both
     // the disclosure gate and the run — a second detection would delay this
     // registration and let a fast reattach miss the running session.
     const controller = new AbortController();
-    running.add(dir);
+    markRunning(dir);
     controllers.set(dir, controller);
     sessions.set(dir, { dir, outcome, worker: realCallConfirmed === true, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
-    const cleanup = (): void => { running.delete(dir); controllers.delete(dir); sessions.delete(dir); };
+    const cleanup = (): void => { clearRunning(dir); controllers.delete(dir); sessions.delete(dir); };
     // The run-time disclosure gate follows the ROUTED adapter's own seam, not a
     // codex-pinned check: resolve the route exactly as task:route does and take
     // the expected disclosure from that adapter. A real worker adapter (codex)
@@ -150,7 +144,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         if (session) { session.phase = "closed"; session.error = plainMessage(error); }
         return { ok: false, message: plainMessage(error) };
       } finally {
-        running.delete(dir);
+        clearRunning(dir);
         controllers.delete(dir);
         settlements.delete(dir);
       }

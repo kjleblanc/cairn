@@ -7,7 +7,7 @@ import type {
   ConductorTurn,
   Result,
 } from "../../shared/ipc.js";
-import { isTaskRunning } from "../tasks.js";
+import { isTaskRunning } from "../rungate.js";
 import { logError } from "../log.js";
 import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
 import { CONSTITUTION } from "./constitution.js";
