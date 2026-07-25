@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorDelta, ConductorStatus, ConductorTurn, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
+import type { ConductorDelta, ConductorStatus, ConductorTurn, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
@@ -31,6 +31,12 @@ type Dispatch = {
   error: string | null;
 };
 
+/** The run clock, as an owner would count it: m:ss since the run started. */
+function elapsedSince(startedAt: string, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 /** Layout A: the hillside is the room. The scene fills the window; the
  * conversation floats over it on solid (never translucent) cards.
  *
@@ -40,10 +46,15 @@ type Dispatch = {
  * verbatim, and — when the routed adapter declares a real call — the six
  * facts of that call with the same confirm box the task screen uses. Nothing
  * is retyped, nothing is re-derived from a sentence, and the request that
- * runs is the one the owner just read. */
-export function Chat({ dir, onBack }: {
+ * runs is the one the owner just read.
+ *
+ * The run then stays visible here: a status strip carries its stage, its
+ * clock, a stop control, and the way to the run screen, and the composer
+ * says plainly that it is closed until the run finishes. */
+export function Chat({ dir, onBack, onOpenRun }: {
   dir: string;
   onBack: () => void;
+  onOpenRun: () => void;
 }) {
   const [status, setStatus] = useState<ConductorStatus | null>(null);
   const [stones, setStones] = useState(0);
@@ -62,6 +73,19 @@ export function Chat({ dir, onBack }: {
   const [taskBlockKey, setTaskBlockKey] = useState(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
+  // The run this project has, if any: the same main-process session the run
+  // screen reattaches to, read through the same two seams (`taskCurrent` and
+  // `onTaskActivity`) — no new IPC, and a reload loses nothing.
+  //
+  // It is keyed to the PROJECT, not to the conversation that dispatched it,
+  // because the gate it explains is keyed to the project too: main refuses
+  // every send while any task runs for this dir (rungate's SERIAL_RUN_ACTIVE),
+  // whichever conversation started it. A conversation-keyed strip would leave
+  // a closed composer unexplained, with its stop control out of reach, after
+  // "New conversation". Task 8's result cards stay conversation-keyed — those
+  // post into the conversation whose id rode the run request.
+  const [session, setSession] = useState<RunSessionSnapshot | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   // Names the dispatch a route lookup belongs to, so a slow answer for a
   // panel the owner already replaced can never land on the newer one.
   const dispatchToken = useRef(0);
@@ -99,6 +123,32 @@ export function Chat({ dir, onBack }: {
       void cairn.conductorTurns(dir, newest.id).then(setTurns);
     });
   }, [status?.connected, dir, setConvId]);
+
+  const refreshSession = useCallback(async () => {
+    setSession(await cairn.taskCurrent(dir));
+  }, [dir]);
+
+  // On mount, so a reload — or arriving from anywhere else — reattaches to a
+  // run already in flight; and on every activity, so the strip moves with it.
+  useEffect(() => { void refreshSession(); }, [refreshSession]);
+  useEffect(() => cairn.onTaskActivity((event) => {
+    if (event.dir !== dir) return;
+    void refreshSession();
+  }), [dir, refreshSession]);
+
+  const runActive = session?.phase === "running";
+  // While a run lives, the clock ticks and the snapshot is re-read once a
+  // second. The re-read is what closes the run honestly for a renderer that
+  // was reloaded mid-run and so holds no run promise of its own to await: a
+  // thrown close (RECORD_VERIFICATION_FAILED) emits no Result activity at
+  // all, and even an ordinary close is marked just AFTER the last activity
+  // goes out. Without this, such a run would show as still running forever.
+  useEffect(() => {
+    if (!runActive) return;
+    setNow(Date.now());
+    const timer = setInterval(() => { setNow(Date.now()); void refreshSession(); }, 1000);
+    return () => clearInterval(timer);
+  }, [runActive, refreshSession]);
 
   useEffect(() => cairn.onConductorDelta((event: ConductorDelta) => {
     if (event.dir !== dir) return;
@@ -163,12 +213,13 @@ export function Chat({ dir, onBack }: {
 
   // Returns whether this call actually dispatched — appended the owner turn
   // and invoked `conductorSend` — as opposed to being refused outright
-  // (empty text, or already streaming). The proposed-task card uses this to
-  // decide whether a chip may mark itself resolved: a chip must never look
-  // resolved for a message that never left the composer.
+  // (empty text, already streaming, or a task running, which main refuses at
+  // the send gate). The proposed-task card uses this to decide whether a chip
+  // may mark itself resolved: a chip must never look resolved for a message
+  // that never left the composer.
   async function send(text: string): Promise<boolean> {
     const trimmed = text.trim();
-    if (!trimmed || streaming) return false;
+    if (!trimmed || streaming || runActive) return false;
     setError(null);
     setComposer("");
     setLastOwnerText(trimmed);
@@ -251,8 +302,15 @@ export function Chat({ dir, onBack }: {
   // The paid-call pause ends here. Everything the run receives — outcome,
   // details, the confirmed disclosure — is the panel's own state, so what
   // starts is what was on screen.
+  //
+  // The token is the same guard `onCardSend` uses, for the same reason: a run
+  // takes a long time to answer, and a second dispatch opened meanwhile owns
+  // the panel now. Without it, the first run's late answer would clear or
+  // error-stamp a panel the owner is still reading.
   async function startDispatch(request: Dispatch, adapterId: string, worker: boolean) {
     if (worker && !realCallConfirmed) return;
+    const token = dispatchToken.current + 1;
+    dispatchToken.current = token;
     setDispatch({ ...request, phase: "running", error: null });
     const response = await cairn.taskRun({
       dir,
@@ -263,19 +321,29 @@ export function Chat({ dir, onBack }: {
       disclosure: request.disclosure ?? undefined,
       conversationId: conversationIdRef.current,
     });
+    if (dispatchToken.current !== token) return; // a newer dispatch owns the panel now
     if (!response.ok) { setDispatch({ ...request, phase: "confirm", error: response.message }); return; }
     if (response.value.status === "connection-required") {
       setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex Exec readiness changed. No task records or model call were created." });
       return;
     }
-    // The run's own records are on disk and its session stays readable on the
-    // task screen until it is acknowledged there; the conversation-side
-    // result relay is the next task's work.
+    // The confirmation panel's work is done: the run's own records are on
+    // disk, and the status strip below carries its terminal state until Task
+    // 8's result cards take over.
     setDispatch(null);
     setRealCallConfirmed(false);
+    void refreshSession();
   }
 
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
+  // The strip says only what the run itself said. While it runs, that is the
+  // latest stage of the four (`Route | Run | Check | Result`) — "Starting"
+  // until the first one arrives, which is a plainer truth than naming a stage
+  // the run has not reached. When it closes, it is the run's own Result line
+  // (`DONE — …` / `STOPPED — …`), or the thrown error when it never got one.
+  const latestStage = session?.activities.at(-1)?.stage ?? null;
+  const resultLine = session ? [...session.activities].reverse().find((a) => a.stage === "Result")?.detail ?? null : null;
+  const terminalLine = session?.error ?? resultLine ?? "This task closed. Its records are in this project's docs/ai-work.";
   const dispatchRoute = dispatch?.route ?? null;
   const dispatchReady = dispatchRoute !== null && dispatchRoute.status === "ready" ? dispatchRoute : null;
   // A real worker lane is anything that is not the offline demo — a
@@ -370,10 +438,32 @@ export function Chat({ dir, onBack }: {
               ) : null}
               <div ref={endRef} />
             </div>
+            {session ? (
+              <div className="run-strip" role="status" aria-label="Task run">
+                {session.phase === "running" ? (
+                  <>
+                    <span className="run-strip-stage">{latestStage ?? "Starting"}</span>
+                    <span className="run-strip-elapsed">{elapsedSince(session.startedAt, now)}</span>
+                  </>
+                ) : (
+                  <span className="run-strip-terminal">{terminalLine}</span>
+                )}
+                <span className="run-strip-outcome">{session.outcome}</span>
+                <span className="run-strip-controls">
+                  {session.phase === "running" ? (
+                    <Pill kind="quiet" onClick={() => void cairn.taskCancel(dir)}>Stop this task</Pill>
+                  ) : null}
+                  <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
+                </span>
+              </div>
+            ) : null}
+            {runActive ? (
+              <p className="small muted composer-closed">A task is running. The composer reopens when it finishes.</p>
+            ) : null}
             <div className="chat-composer">
               <textarea value={composer} onChange={(e) => setComposer(e.target.value)}
-                onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={streaming} />
-              <Pill kind="primary" onClick={() => void send(composer)} disabled={streaming || !composer.trim()}>Send</Pill>
+                onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={streaming || runActive} />
+              <Pill kind="primary" onClick={() => void send(composer)} disabled={streaming || runActive || !composer.trim()}>Send</Pill>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
               <Pill kind="quiet" onClick={() => void newConversation()}>New conversation</Pill>

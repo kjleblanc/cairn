@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
 
 // Task 026: the fake body proves the whole conductor loop offline — connect,
 // converse, the proposed-task card, offline dispatch, disk persistence, and
@@ -16,6 +17,10 @@ function scaffold(project: string): void {
     `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Conductor", what: "w", who: "me", milestone: "see it" });`,
     project,
   ]);
+  // The real-call lane commits its own records, which needs a git identity;
+  // the mock lane commits nothing and is unaffected by this.
+  execFileSync("git", ["config", "user.name", "Cairn Test"], { cwd: project });
+  execFileSync("git", ["config", "user.email", "cairn-test@example.invalid"], { cwd: project });
 }
 
 function baseEnv(project: string): { [key: string]: string } {
@@ -23,6 +28,18 @@ function baseEnv(project: string): { [key: string]: string } {
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
   env.CAIRN_MOCK = "1";
   env.CAIRN_OPEN = project;
+  return env;
+}
+
+// Task 6 (Phase 3): the two lanes meet here for the first time — the fixture
+// brain answers chat while the fake-codex PATH shim answers the run. The mock
+// adapter finishes instantly and discloses nothing, so a run that can be
+// watched, stopped, or reloaded into exists ONLY here: CAIRN_MOCK=0 plus the
+// shim, with the real disclosure confirmation in the way.
+function codexEnv(project: string, fake: { env: NodeJS.ProcessEnv }): { [key: string]: string } {
+  const env = baseEnv(project);
+  for (const [k, v] of Object.entries(fake.env)) if (v !== undefined) env[k] = v;
+  env.CAIRN_MOCK = "0";
   return env;
 }
 
@@ -58,8 +75,11 @@ async function connectToFixture(win: Page, fixtureUrl: string, model: string, ap
   await expect(card).not.toBeVisible({ timeout: 10_000 });
 }
 
+// `exact` matters from Task 6 on: a running task puts a "Stop this task"
+// button on screen, and role-name matching is substring by default, so a
+// loose "Stop" would wait on the wrong control.
 async function waitStreamDone(win: Page): Promise<void> {
-  await expect(win.getByRole("button", { name: "Stop" })).not.toBeVisible({ timeout: 15_000 });
+  await expect(win.getByRole("button", { name: "Stop", exact: true })).not.toBeVisible({ timeout: 15_000 });
 }
 
 async function sendChat(win: Page, text: string): Promise<void> {
@@ -381,5 +401,105 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   await expect(riskChip.getByRole("button", { name: "Set aside" })).toBeEnabled();
   await riskChip.getByRole("button", { name: "Set aside" }).click();
   await expect(taskCard.getByRole("button", { name: "Send to dispatch" })).toBeEnabled();
+  await app.close();
+});
+
+// Task 6 (Phase 3). Walks the whole inline path in the real-call lane: chat
+// proposes, the risk chip is set aside, the confirmation panel discloses the
+// six facts, and the confirmed run starts. From there the run has to live in
+// the conversation itself.
+async function dispatchOneRealCall(win: Page): Promise<void> {
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  // The real lane discloses, so this dispatch cannot start unread — and the
+  // card is derived by `taskRoute` from the same outcome and details the panel
+  // shows, never retyped.
+  await expect(panel).toContainText("Keep the counts 74, 477, 256 exactly.");
+  await panel.getByLabel("I confirm this one real Codex Exec call.").check();
+  await panel.getByRole("button", { name: "Start one real Codex Exec call" }).click();
+}
+
+test("a dispatched run lives in the conversation: the strip names its stage, the composer closes, and Stop lands the terminal state", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-strip-"));
+  scaffold(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win);
+
+  // The run is visible where it was started: one of the four real stages, the
+  // elapsed clock, and the two controls.
+  const strip = win.locator(".run-strip");
+  await expect(strip).toBeVisible({ timeout: 30_000 });
+  await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/, { timeout: 30_000 });
+  await expect(strip.locator(".run-strip-elapsed")).toHaveText(/^\d+:\d\d$/);
+  await expect(strip.getByRole("button", { name: "Open the run screen" })).toBeVisible();
+
+  // The composer says what is true instead of accepting a send the serial
+  // gate would refuse.
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeDisabled();
+  await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toBeVisible();
+
+  // Only a started process incurs cost, so stop it once the real exec has
+  // actually begun — same reason routing.spec waits on this marker.
+  await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
+  await strip.getByRole("button", { name: "Stop this task" }).click();
+
+  // The interim result relay (until Task 8): the conversation is not left
+  // silent — the strip carries the terminal state and the way to the records.
+  await expect(strip).toContainText("STOPPED — CANCELLED_BY_OWNER", { timeout: 30_000 });
+  await expect(strip.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
+  await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toHaveCount(0);
+
+  const report = readFileSync(join(project, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
+  expect(report).toContain("CANCELLED_BY_OWNER");
+  expect(existsSync(join(project, "visible.txt"))).toBe(false);
+
+  // The link is real: it opens the run screen on this same session.
+  await strip.getByRole("button", { name: "Open the run screen" }).click();
+  await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 15_000 });
+  await app.close();
+});
+
+test("a reload mid-run reattaches the conversation's strip and shows the finished state there", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-strip-reload-"));
+  scaffold(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win);
+
+  const strip = win.locator(".run-strip");
+  await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 30_000 });
+
+  // The run belongs to the main process. A reload throws away every scrap of
+  // renderer state that started it, so whatever comes back was reattached.
+  await win.reload();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  // Deliberately tight, and measured from a mounted screen: the next activity
+  // in this lane is roughly seven seconds away (the slow shim's finish), so a
+  // strip that waited for one instead of reading the session on mount would
+  // miss this window. Reattachment is a read, not a wait.
+  await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 5_000 });
+  await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/);
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeDisabled();
+  await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toBeVisible();
+
+  // The reattached strip carries the finish too, without the renderer that
+  // dispatched it ever seeing the run's own answer.
+  await expect(strip).toContainText("DONE —", { timeout: 30_000 });
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
+  expect(readFileSync(join(project, "visible.txt"), "utf8")).toBe("model-authored result\n");
   await app.close();
 });

@@ -115,6 +115,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .bubble-owner { align-self: flex-end; background: var(--green-soft); color: var(--green-deep); border-bottom-right-radius: 4px; }
 .bubble-cairn { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
+/* The run, living in the conversation: one compact line above the composer. */
+.run-strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg); }
+.run-strip-stage { flex-shrink: 0; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.run-strip-elapsed { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--muted); }
+.run-strip-terminal { flex-shrink: 0; font-weight: 600; }
+.run-strip-outcome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.run-strip-controls { display: flex; flex-shrink: 0; gap: 8px; }
+.composer-closed { margin: 8px 0 0; }
 .chat-composer { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
 .chat-composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; }
 .chat-composer textarea:disabled { opacity: .6; }

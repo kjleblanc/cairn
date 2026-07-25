@@ -83,7 +83,11 @@ export function App() {
       case "task": return <TaskRun dir={view.dir} demoAvailable={mock} onBack={() => void openProject(view.dir)} />;
       // Chat dispatches inline — it no longer hands an outcome to the task
       // screen to be re-typed and re-routed, so there is no prefill here.
-      case "chat": return <Chat dir={view.dir} onBack={() => void openProject(view.dir)} />;
+      // `onOpenRun` is navigation only, for the status strip's link to the
+      // run's full activity: it seeds nothing, and the run screen reattaches
+      // to the same main-process session either way.
+      case "chat": return <Chat dir={view.dir} onBack={() => void openProject(view.dir)}
+        onOpenRun={() => setView({ name: "task", dir: view.dir })} />;
       case "settings": return <Settings onBack={() => view.dir ? void openProject(view.dir) : setView({ name: "picker", startNew: false })} />;
     }
   })();
