@@ -19,8 +19,8 @@ owner's Bookshelf evaluation project (its task 004, commit 5b65dab; recorded
 here as Task 055).
 
 First visible milestone (current): one conversation on Cairn itself runs
-request → pushback → dispatch → verified DONE → honest explanation, with the
-conductor relaying only what the envelope verified.
+request → pushback → dispatch → verified DONE → honest explanation, delivered
+as the envelope's result card with the conductor's commentary.
 
 Route: the owner-approved phases live in
 `docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md`.

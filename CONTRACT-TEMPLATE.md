@@ -1,6 +1,6 @@
 # Project Contract
 
-> **What this is.** Cairn Contract v0.2.1 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.3.0 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
@@ -79,6 +79,9 @@ unless a different value clearly applies; the Lane and Draft/Final columns
 carry compatibility with existing tools. Existing rows and task files are
 history: never rewrite or delete them.
 
+In an envelope-dispatched run, Cairn's runtime authors the report and log row
+itself, from its own verification plus the worker's claims.
+
 `DONE` means the requested outcome holds and its checks completed. `STOPPED`
 means it does not. A review requested by the owner is optional advice; it may
 suggest a new task, and the completed record stands.
@@ -148,6 +151,14 @@ connection at any time, which deletes the stored credential. Every other
 boundary keeps its own pause: each worker dispatch, each paid worker call, and
 every action on the concrete-risk list still waits for that action's own
 approval.
+
+When a dispatched task finishes, the envelope itself writes the result card the
+owner sees, and the conductor then takes one short comment turn on it. That
+comment is a model call on the same cost basis as the rest of the conversation.
+
+Cairn may offer a push button when local commits are ahead of the remote; every
+push shows the exact target, effect, and recovery plan, and runs only on the
+owner's approval of that exact action.
 
 ## When a qualified person is required
 

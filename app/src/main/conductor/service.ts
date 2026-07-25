@@ -66,7 +66,7 @@ export function conductorConsentCard(baseUrl: string, model: string): ConductorC
     baseUrl,
     model,
     data: "Your messages, this project's task records (PROJECT, the work log, recent briefs and reports), a summary of recent saved changes (the branch name and latest commit titles), and project file names. Never file contents. Never credentials. Cairn keeps conversation memory in a .cairn folder inside your project, kept out of git.",
-    cost: "Pay-as-you-go on your provider account. Conversation runs without per-message approval while connected. Disconnect at any time to delete the stored key.",
+    cost: "Pay-as-you-go on your provider account. Conversation runs without per-message approval while connected. After a task Cairn dispatches from chat finishes, Cairn takes one short comment turn on the result; it bills like any other turn. Disconnect at any time to delete the stored key.",
   };
 }
 

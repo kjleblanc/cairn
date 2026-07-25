@@ -4,6 +4,74 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.3.0 — the whole task, in one conversation — 2026-07-25
+
+- Closed a record hole on the throwing path. Only the clean close verified
+  records, so a worker that forged a log row and then forced the run to throw
+  could leave that row standing. Every `RECORD_VERIFICATION_FAILED` throw now
+  restores the log Cairn last verified, reads the restore back, and says so in
+  the thrown message when the restore itself could not be written. Quitting
+  became a real gate too: while the app drains its quit grace period, a new
+  task request is refused instead of starting a worker the quit is about to
+  kill.
+- Added the owner data channel. The adapter task contract bumped to
+  `cairn-serial-task/v2` with a `details` field that carries the owner's own
+  specifics — numbers, names, exact wording — verbatim from chat into the
+  brief and the worker's prompt. The integrity digest binds outcome and
+  details together, so a tampered `details` is refused exactly as a tampered
+  outcome always was, and the paid-call authorization gate re-derives its
+  disclosure from both parts. The reason is a failure this project watched: in
+  the first milestone run the owner supplied three word counts, the proposed
+  task dropped them, and the worker invented plausible replacements rather
+  than saying it had none.
+- Moved dispatch into the conversation. A proposed task is now confirmed and
+  started where it was discussed — the paid-call confirmation and its six
+  facts are inline, the run request is one object threading all four app
+  gates, and the old navigation to a separate preview screen is deleted. The
+  run stays in view: a status strip carries its stage, clock, stop control and
+  terminal line, the composer says why it is closed, and a reload reattaches
+  to the same run rather than orphaning it.
+- Added the envelope-authored result relay. Every closed run now carries the
+  report's own structured truth — Git-derived file lists, verified
+  protected-work findings, and one shared paid-call predicate — so the card
+  and the report cannot disagree. A third conversation role posts a result
+  card for every terminal state, built from that record rather than from any
+  model, with Git-derived facts kept visibly separate from the worker's own
+  claims. The conductor then takes exactly one short comment turn on the card,
+  skipped in full when no body is connected and never started while the app is
+  quitting. A Git failure while composing the safety close's record no longer
+  escapes as a raw error: it restores Cairn's log and closes
+  `RECORD_VERIFICATION_FAILED`, so no worker-forged row survives a thrown run.
+- Added the push button and the pause in front of it. When a verified DONE
+  card sits on a project whose local commits are ahead of the remote, a chip
+  offers to publish them. Pressing the chip only opens the contract's pause:
+  Cairn re-reads git and shows the exact remote, branch, commit subjects,
+  publication effect and recovery plan, and the press there is the one
+  approval that runs one plain push — never retried, never forced. The main
+  process bounds the push independently of the screen that asked for it: git
+  accepts a URL wherever a remote name goes, so a target this project has not
+  configured as a remote is refused, and both halves of the refspec are
+  shape-checked, since a caller-supplied `+<sha>` really did force a rewind
+  and an empty head really did reach git as a branch deletion. Failures are
+  classified honestly — no remote, sign-in, remote-ahead, other — and a
+  refusal for a legal branch name says the limit is Cairn's rather than
+  blaming the project.
+- Added a second constitution for the conductor, three rules written from
+  failures this project watched happen: carry what the owner supplies into
+  the task's details verbatim and never invent values; never attribute to a
+  source a fact that source cannot contain, since the briefing holds records,
+  a git summary and file names but never file contents; and state a result
+  fact only with the card or the records in view, naming which. The contract
+  takes its one revisit of the phase. An envelope-dispatched run has Cairn's
+  runtime author the report and log row from its own verification plus the
+  worker's claims — an AI working directly under the contract still writes
+  its own, unchanged. The connected-conductor section now names the result
+  card and the conductor's one comment turn, says that turn costs like any
+  other, and names the push button while every push still waits on the
+  owner's approval of that exact action. The connect card says the same about
+  the comment turn before the owner ever connects.
+- Added no dependency.
+
 ## 0.2.1 — CI tells the truth — 2026-07-24
 
 - Fixed the root-identity gate so it compares real directories, not
