@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type { ConductorTurn } from "../../shared/ipc.js";
+import type { ConductorTurn, ResultCard } from "../../shared/ipc.js";
 
 const IGNORE_LINE = "/.cairn/";
 
@@ -61,6 +61,21 @@ export function appendTurn(root: string, id: string, turn: ConductorTurn): void 
   appendFileSync(join(conversationsDir(root), `${id}.jsonl`), `${JSON.stringify(turn)}\n`, "utf8");
 }
 
+/**
+ * An envelope line is kept only when it really carries a result card: an
+ * object whose `kind` is "result", with a known disposition and a real
+ * `filesChanged` array. Anything else is DROPPED, never coerced into a card —
+ * a half-written or hand-edited line must not become a result the owner reads
+ * as Cairn's own verification.
+ */
+function isResultCard(value: unknown): value is ResultCard {
+  if (typeof value !== "object" || value === null) return false;
+  const card = value as Partial<ResultCard>;
+  return card.kind === "result"
+    && (card.disposition === "DONE" || card.disposition === "STOPPED" || card.disposition === "ERROR")
+    && Array.isArray(card.filesChanged);
+}
+
 export function readTurns(root: string, id: string): ConductorTurn[] {
   const path = join(conversationsDir(root), `${id}.jsonl`);
   if (!existsSync(path)) return [];
@@ -69,7 +84,10 @@ export function readTurns(root: string, id: string): ConductorTurn[] {
     if (!line.trim()) continue;
     try {
       const value = JSON.parse(line) as ConductorTurn;
-      if ((value.role === "owner" || value.role === "cairn") && typeof value.text === "string" && typeof value.ts === "string") {
+      if (typeof value.ts !== "string") continue;
+      if ((value.role === "owner" || value.role === "cairn") && typeof value.text === "string") {
+        turns.push(value);
+      } else if (value.role === "envelope" && isResultCard(value.card)) {
         turns.push(value);
       }
     } catch {
@@ -92,6 +110,14 @@ export function listConversations(root: string): Array<{ id: string; startedTs: 
     .sort()
     .map((id) => {
       const turns = readTurns(root, id);
-      return { id, startedTs: turns[0]?.ts ?? "", preview: turns[0]?.text.slice(0, 80) ?? "" };
+      // The preview names what was SAID. A conversation can now begin with a
+      // result card (a run dispatched, then resumed later), which has no text
+      // at all — so the preview is the first thing owner or Cairn said, and
+      // "Result card" only when neither ever spoke.
+      const spoken = turns.find((turn) => turn.role === "owner" || turn.role === "cairn");
+      const preview = spoken && spoken.role !== "envelope"
+        ? spoken.text.slice(0, 80)
+        : turns.length > 0 ? "Result card" : "";
+      return { id, startedTs: turns[0]?.ts ?? "", preview };
     });
 }

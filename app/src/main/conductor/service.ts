@@ -140,7 +140,13 @@ async function runStream(
     const messages: ChatTurnMessage[] = [
       { role: "system", content: CONSTITUTION },
       { role: "system", content: assembleBriefing(dir) },
-      ...history.map((turn): ChatTurnMessage => ({ role: turn.role === "owner" ? "user" : "assistant", content: turn.text })),
+      // A result card enters the prompt as SYSTEM context, labeled for what it
+      // is: Cairn's runtime wrote it, the conversation model did not, and the
+      // model must not mistake it for its own earlier reply. It travels as the
+      // card's own JSON so nothing is paraphrased on the way in.
+      ...history.map((turn): ChatTurnMessage => (turn.role === "envelope"
+        ? { role: "system", content: `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(turn.card)}` }
+        : { role: turn.role === "owner" ? "user" : "assistant", content: turn.text })),
     ];
     // The owner's turn is already persisted by `send()` above, so the record
     // stays truthful either way; checked here, before any network call, so

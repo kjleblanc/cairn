@@ -263,6 +263,58 @@ test("the full loop: a proposed task with a risk chip dispatches inline and land
   await app.close();
 });
 
+// Task 8 (Phase 3), mock lane. The envelope — not the conversation model —
+// posts the result of every terminal run into the conversation that dispatched
+// it, and that card is a turn on disk, so a reload reads it back.
+test("the envelope posts a DONE result card into the conversation, and the card survives a reload", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-card-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card).toContainText("written by Cairn's runtime, not by the conversation");
+  await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
+  await expect(card).toContainText("Task 001");
+  // What changed is Git's answer, and it is labeled as Git's answer.
+  await expect(card).toContainText("Files changed (from Git, not from claims)");
+  await expect(card).toContainText("docs/ai-work/LOG.md");
+  // The worker's own words only ever appear under a heading that calls them claims.
+  await expect(card).toContainText("The worker's account — claims, not verified by Cairn");
+  await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
+
+  // A reload throws away every scrap of renderer state. What comes back was
+  // read from the conversation on disk.
+  await win.reload();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  const reloaded = win.locator(".result-card");
+  await expect(reloaded).toBeVisible({ timeout: 15_000 });
+  await expect(reloaded.locator(".result-card-disposition")).toHaveText("DONE");
+  await expect(reloaded).toContainText("docs/ai-work/tasks/001-report.md");
+
+  // And it is the envelope's own role in the conversation record — not a
+  // Cairn reply the model could have written.
+  const turns = await win.evaluate(async (dir) => {
+    const list = await window.cairn.conductorConversations(dir);
+    return window.cairn.conductorTurns(dir, list[list.length - 1].id);
+  }, project);
+  expect(turns.filter((turn) => turn.role === "envelope").length).toBe(1);
+  await app.close();
+});
+
 test("a conversation persists across a relaunch, and .cairn stays out of git", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-persist-"));
   scaffold(project);
@@ -501,6 +553,42 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // The link is real: it opens the run screen on this same session.
   await strip.getByRole("button", { name: "Open the run screen" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 15_000 });
+  await app.close();
+});
+
+// Task 8 (Phase 3), fake-codex lane. A stopped run is the case a dishonest
+// card would be worst: the worker started, the owner stopped it, and nothing
+// it intended was verified. The card must say exactly that.
+test("a stopped run posts an honest STOPPED card that names the stop code and claims no product change", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-card-stopped-"));
+  scaffold(project);
+  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await dispatchOneRealCall(win);
+
+  const strip = win.locator(".run-strip");
+  await expect(strip).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
+  await strip.getByRole("button", { name: "Stop this task" }).click();
+
+  const card = win.locator(".result-card");
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card.locator(".result-card-disposition")).toHaveText("STOPPED");
+  await expect(card).toContainText("CANCELLED_BY_OWNER");
+  await expect(card).toContainText("Task 001");
+  await expect(card).toContainText("Commit: none — retained evidence is never committed by Cairn");
+  await expect(card).toContainText("The worker's account — claims, not verified by Cairn");
+  await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
+  // The card carries no DONE anywhere, and the product change really did not land.
+  await expect(card).not.toContainText("DONE");
+  expect(existsSync(join(project, "visible.txt"))).toBe(false);
+
+  // The card arrives from the SETTLED run promise, so by the time it is on
+  // screen the send gate is already open — Task 9's commentary depends on that
+  // ordering being real.
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await app.close();
 });
 

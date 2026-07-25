@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorDelta, ConductorStatus, ConductorTurn, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
+import type { ConductorDelta, ConductorStatus, ConductorTurn, ResultCard, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
@@ -35,6 +35,96 @@ type Dispatch = {
 function elapsedSince(startedAt: string, now: number): string {
   const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/** The one fixed sentence an ERROR card carries: the run threw, so nothing
+ * about the workspace was verified and nothing may be claimed about it. */
+const ERROR_SENTENCE = "Cairn could not verify the workspace. This run needs inspection before the next task.";
+
+/**
+ * The envelope's own turn in the conversation, rendered from the card's
+ * structured fields and from nothing else. No sentence here comes from the
+ * conversation model, and none is parsed back out of a written record.
+ *
+ * The split the whole card exists to hold: everything above "the worker's
+ * account" is Cairn's own verification — Git's answer for what changed, the
+ * real protected-work finding, the real commit result — and everything under
+ * that heading is the WORKER's claim, labeled as one, never merged into the
+ * verified lines.
+ */
+function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () => void }) {
+  const code = card.disposition === "ERROR" ? card.errorCode : card.stopReason;
+  // A run with no task number wrote no records: the connection-required close
+  // ends before a task number, a brief, or a log row exists. Such a card names
+  // no files, no commit, and no route, because none were ever resolved.
+  const wroteRecords = card.taskNumber !== null;
+  const recordsPath = wroteRecords
+    ? `docs/ai-work/tasks/${String(card.taskNumber).padStart(3, "0")}-report.md`
+    : null;
+
+  return (
+    <div className="card result-card">
+      <p className="card-title">result card — written by Cairn's runtime, not by the conversation</p>
+      <p className="result-card-headline">
+        <span className={`result-card-disposition result-card-${card.disposition.toLowerCase()}`}>{card.disposition}</span>
+        {code ? <span className="result-card-code"> — {code}</span> : null}
+        {wroteRecords ? <span className="result-card-task"> — Task {String(card.taskNumber).padStart(3, "0")}</span> : null}
+      </p>
+
+      {card.disposition === "ERROR" ? (
+        <p className="result-card-sentence">{ERROR_SENTENCE}</p>
+      ) : null}
+
+      {card.disposition !== "ERROR" && !wroteRecords ? (
+        <>
+          {card.evidenceSummary ? <p className="result-card-sentence">{card.evidenceSummary}</p> : null}
+          <p className="result-card-sentence">No task records or model call were created.</p>
+        </>
+      ) : null}
+
+      {card.disposition !== "ERROR" && wroteRecords ? (
+        <ul className="result-card-facts">
+          {card.route ? <li>Route: {card.route.adapterLabel} — {card.route.provider} / {card.route.model}</li> : null}
+          {card.protectedIntact !== null ? (
+            <li>Protected starting work: {card.protectedIntact
+              ? "byte-identical"
+              : "CHANGED — the run stopped for this reason and the evidence was retained"}</li>
+          ) : null}
+          <li>
+            Files changed (from Git, not from claims):
+            {card.filesChanged.length === 0 ? " none" : (
+              <ul className="result-card-files">
+                {card.filesChanged.map((path) => <li key={path}><span className="mono">{path}</span></li>)}
+              </ul>
+            )}
+          </li>
+          <li>Commit: {card.commit ?? "none — retained evidence is never committed by Cairn"}</li>
+          {card.evidenceSummary ? <li>{card.evidenceSummary}</li> : null}
+        </ul>
+      ) : null}
+
+      {card.disposition !== "ERROR" && wroteRecords ? (
+        <div className="result-card-claims">
+          <p className="small muted result-card-claims-label">The worker's account — claims, not verified by Cairn</p>
+          {card.claims ? (
+            <>
+              <p className="result-card-claims-text">{card.claims.summary}</p>
+              <p className="small muted">Milestone movement, as the worker claims it: {card.claims.milestone}</p>
+            </>
+          ) : (
+            <p className="result-card-claims-text">No worker claims were recorded for this run.</p>
+          )}
+        </div>
+      ) : null}
+
+      <div className="row" style={{ marginTop: 12 }}>
+        <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
+      </div>
+      <p className="small mono result-card-path">
+        {recordsPath ?? "Any records this run retained are in this project's docs/ai-work."}
+      </p>
+    </div>
+  );
 }
 
 /** Layout A: the hillside is the room. The scene fills the window; the
@@ -152,6 +242,19 @@ export function Chat({ dir, onBack, onOpenRun }: {
 
   useEffect(() => cairn.onConductorDelta((event: ConductorDelta) => {
     if (event.dir !== dir) return;
+
+    // A result card is not part of any reply stream. It belongs to the ONE
+    // conversation whose id rode the run request, so it is posted only while
+    // that conversation is on screen — and it is handled before the in-flight
+    // matching below so it can never adopt an id for a stream it has nothing
+    // to do with. A card for another conversation is already on disk; opening
+    // that conversation shows it.
+    if (event.kind === "envelope") {
+      if (event.turn && conversationIdRef.current === event.conversationId) {
+        setTurns((t) => [...t, event.turn as ConductorTurn]);
+      }
+      return;
+    }
 
     const inFlight = inFlightRef.current;
     const matchesCurrent = conversationIdRef.current !== null && event.conversationId === conversationIdRef.current;
@@ -329,8 +432,8 @@ export function Chat({ dir, onBack, onOpenRun }: {
       return;
     }
     // The confirmation panel's work is done: the run's own records are on
-    // disk, and the status strip below carries its terminal state until Task
-    // 8's result cards take over.
+    // disk, the status strip below carries its terminal state, and the
+    // envelope posts its own result card into this conversation.
     setDispatch(null);
     setRealCallConfirmed(false);
     void refreshSession();
@@ -383,11 +486,13 @@ export function Chat({ dir, onBack, onOpenRun }: {
         {status?.connected ? (
           <>
             <div className="chat-messages">
-              {turns.map((turn, i) => (
+              {turns.map((turn, i) => (turn.role === "envelope" ? (
+                <ResultCardView key={i} card={turn.card} onOpenRun={onOpenRun} />
+              ) : (
                 <div key={i} className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}`}>
                   {turn.role === "owner" ? turn.text : <Md text={turn.text} />}
                 </div>
-              ))}
+              )))}
               {taskBlock ? (
                 <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
                   onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onCardSend} />

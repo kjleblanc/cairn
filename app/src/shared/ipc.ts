@@ -70,7 +70,13 @@ export interface ConductorSendRequest {
 export interface ConductorDelta {
   dir: string;
   conversationId: string;
-  kind: "delta" | "done" | "error";
+  /**
+   * "envelope" is not part of the reply stream at all: it carries a result
+   * card the envelope authored after a run settled, so a screen showing that
+   * conversation can post it without a reload. It never touches the streaming
+   * reply, and it never adopts a conversation id.
+   */
+  kind: "delta" | "done" | "error" | "envelope";
   text?: string;
   turn?: ConductorTurn;
   taskBlock?: TaskBlock | null;
@@ -117,10 +123,51 @@ export interface TaskBlock {
   details: string;
 }
 
-export interface ConductorTurn {
+/**
+ * The envelope's own account of one terminal run, built deterministically from
+ * the structured record input Cairn composed its report from — never from the
+ * conversation model, and never scraped from rendered Markdown.
+ *
+ * Every field here is either Cairn's own verification (Git-derived
+ * `filesChanged`, the real `protectedIntact` finding, the real commit result)
+ * or a fixed code. The one exception is `claims`, which is the WORKER's own
+ * account and must be rendered as a claim wherever it appears — never as
+ * verified fact.
+ *
+ * `disposition` carries a third state the runtime knows and the record files
+ * do not: ERROR, for a run that threw instead of closing. That arm has no task
+ * number, no route, and no verified facts to report — only `errorCode`.
+ */
+export interface ResultCard {
+  kind: "result";
+  disposition: "DONE" | "STOPPED" | "ERROR";
+  taskNumber: number | null;
+  stopReason: string | null;
+  errorCode: string | null;
+  filesChanged: string[];
+  protectedIntact: boolean | null;
+  commit: string | null;
+  evidenceSummary: string | null;
+  claims: { summary: string; milestone: string } | null;
+  route: { adapterLabel: string; provider: string; model: string } | null;
+}
+
+/** The two turns owner and Cairn take in the conversation itself. */
+export interface ConductorChatTurn {
   role: "owner" | "cairn";
   text: string;
   ts: string;
   tokens?: number;
   costUsd?: number;
 }
+
+/** A turn the ENVELOPE wrote. It has no text: everything it says is rendered
+ * from the card's structured fields, so no wording can drift and no model can
+ * author one. */
+export interface ConductorEnvelopeTurn {
+  role: "envelope";
+  card: ResultCard;
+  ts: string;
+}
+
+export type ConductorTurn = ConductorChatTurn | ConductorEnvelopeTurn;

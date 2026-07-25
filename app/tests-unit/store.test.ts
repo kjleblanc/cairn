@@ -8,6 +8,12 @@ import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, 
 
 const turn = (role: "owner" | "cairn", text: string) => ({ role, text, ts: "2026-07-23T12:00:00.000Z" });
 
+/** A turn is now either something said or a result card the envelope wrote.
+ * These tests are about what was said, so a card would be a visible marker
+ * rather than a silent gap. */
+const spokenTexts = (root: string, id: string): string[] =>
+  readTurns(root, id).map((item) => (item.role === "envelope" ? "(result card)" : item.text));
+
 function gitInit(root: string): void {
   execFileSync("git", ["init", "-q"], { cwd: root });
   execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
@@ -20,7 +26,7 @@ test("turns round-trip and ids increment", () => {
   assert.equal(first, "001");
   appendTurn(root, first, turn("owner", "hello"));
   appendTurn(root, first, turn("cairn", "hello back"));
-  assert.deepEqual(readTurns(root, first).map((item) => item.text), ["hello", "hello back"]);
+  assert.deepEqual(spokenTexts(root, first), ["hello", "hello back"]);
   assert.equal(newConversationId(root), "002");
   const list = listConversations(root);
   assert.equal(list.length, 1);
@@ -32,7 +38,7 @@ test("a corrupt line is skipped, not fatal", () => {
   const id = newConversationId(root);
   appendTurn(root, id, turn("owner", "good"));
   writeFileSync(join(root, ".cairn", "conversations", `${id}.jsonl`), `${JSON.stringify(turn("owner", "good"))}\n{broken\n`, "utf8");
-  assert.deepEqual(readTurns(root, id).map((item) => item.text), ["good"]);
+  assert.deepEqual(spokenTexts(root, id), ["good"]);
 });
 
 test(".git/info/exclude gains /.cairn/ exactly once", () => {

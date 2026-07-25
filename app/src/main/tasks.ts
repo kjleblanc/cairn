@@ -9,10 +9,12 @@ import {
   projectStatus,
   runSerialTask,
   type CodexExecStatus,
+  type SerialRunResult,
   type TaskAdapter,
   type WorkerDisclosure,
 } from "@cairn/core";
-import type { Result, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
+import type { ConductorDelta, Result, ResultCard, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
+import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 
@@ -132,7 +134,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       cleanup();
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
     }
-    const run = (async () => {
+    const run: Promise<Result<SerialRunResult>> = (async () => {
       try {
         const value = await runSerialTask(dir, outcome, {
           adapters: detected.adapters,
@@ -165,6 +167,43 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       }
     })();
     settlements.set(dir, run);
+    // The envelope speaks the result, for EVERY terminal state — a verified
+    // DONE, an honest STOPPED, a connection-required close, and a run that
+    // threw. The card is composed from the run's own structured record input,
+    // written into the conversation that dispatched it, and announced to a
+    // screen already showing that conversation.
+    //
+    // It chains on the SETTLED promise, not inside the closure: `run.then`
+    // runs after the closure's `finally`, so the running set is already clear
+    // and the send gate is already open by the time the card lands. A card
+    // posted from inside would arrive while the conversation still reads as
+    // blocked.
+    //
+    // Only a run that carried a conversation id has a conversation to post to;
+    // one typed on the task screen posts nothing. Nothing here depends on the
+    // run session surviving — `task:acknowledge` may have deleted it already.
+    const conversationId = request.conversationId ?? null;
+    if (conversationId !== null) {
+      const post = (build: () => ResultCard): void => {
+        try {
+          const turn = postResultCard(dir, conversationId, build());
+          const delta: ConductorDelta = { dir, conversationId, kind: "envelope", turn };
+          win()?.webContents.send("conductor:delta", delta);
+        } catch (error) {
+          // The card is an addition to a run that already closed and already
+          // wrote its own records. A failure to write it is logged and never
+          // allowed to change what the run reported.
+          logError("task:run result card", error);
+        }
+      };
+      void run.then(
+        (outcome) => post(() => (outcome.ok ? composeResultCard(outcome.value) : composeErrorCard(outcome.message))),
+        // Unreachable by construction — the closure above catches everything
+        // and returns a refusal. It is still handled, so that no terminal state
+        // can go unspoken and no rejection can escape unhandled.
+        (error: unknown) => post(() => composeErrorCard(plainMessage(error))),
+      );
+    }
     return run;
   });
 

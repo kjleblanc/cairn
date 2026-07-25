@@ -129,6 +129,21 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-composer { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
 .chat-composer textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; }
 .chat-composer textarea:disabled { opacity: .6; }
+/* The envelope's own turn: a card, not a bubble, because nothing in it was
+ * said by anyone — it is Cairn's runtime reporting what it verified. */
+.result-card { align-self: stretch; margin: 0; border: 1px solid var(--line); }
+.result-card-headline { margin: 0 0 8px; font-weight: 600; }
+.result-card-disposition { font-size: .74rem; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 999px; }
+.result-card-done { background: var(--green-soft); color: var(--green-deep); }
+.result-card-stopped { background: var(--amber-soft); color: var(--amber-deep); }
+.result-card-error { background: var(--stop-soft); color: var(--stop); }
+.result-card-sentence { margin: 0 0 8px; }
+.result-card-facts { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.result-card-files { margin: 4px 0 0; padding-left: 16px; }
+.result-card-claims { margin-top: 10px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); }
+.result-card-claims-label { margin: 0 0 2px; }
+.result-card-claims-text { margin: 0 0 4px; white-space: pre-wrap; }
+.result-card-path { margin: 8px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .task-card { align-self: stretch; margin: 0; }
 .task-card-outcome { font-weight: 600; }
 .task-card-details { margin-top: 8px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); }

@@ -3,7 +3,11 @@ import type { ConductorStatus, ConductorTurn } from "../../shared/ipc";
 import { cairn } from "../api";
 import { Pill } from "./Ui";
 
+// Only a Cairn REPLY has a token count or a cost. An envelope turn is Cairn's
+// runtime speaking, not the provider, and it carries neither — so it is not a
+// "last reply" this line can describe.
 function replyLine(turn: ConductorTurn): string | null {
+  if (turn.role !== "cairn") return null;
   if (turn.tokens === undefined && turn.costUsd === undefined) return null;
   const parts: string[] = [];
   if (turn.tokens !== undefined) parts.push(`${turn.tokens} tokens`);
