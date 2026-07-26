@@ -150,3 +150,63 @@ in the legacy 024–028 reports — not the code.
 - The contract amendment wording for the connected-conductor channel.
 - The contents of the evaluation set of vague and trapped requests.
 - The beginner's path to an API key (Phase 5 at the latest).
+
+## Amendment 2026-07-26 — Acquiring software during a task
+
+The sections above are unchanged and remain approved as written. This
+amendment records a contradiction found while scoping Phase 4, names the
+decision it forces, and places the work.
+
+**The contradiction.** The contract already grants permission to install:
+`core/assets/contract.md:113` lists "installing or updating software or
+dependencies" among the concrete risk boundaries, requiring the exact target,
+effect, likely cost, and recovery plan to be shown before the owner approves.
+The code denies the capability: `core/src/codex.ts:718` runs the worker under
+`--sandbox workspace-write`, and `network_access` appears nowhere in the
+repository. Codex's workspace-write sandbox is network-disabled unless that
+value is set, so a task requiring `npm install` does not ask and get refused —
+it fails. The rule is currently enforced by a wall rather than by a prompt,
+and no run has hit it only because every task so far has edited files that
+already existed. (Verified: the contract line, the sandbox flag, and the
+absence of `network_access`. Inferred from Codex's documented default: that
+the worker therefore has no network. A single run confirms it and should be
+done before Phase 5 builds on it.)
+
+**Three things, not one.** "Tools" covers three categories whose risk and
+whose reversibility differ:
+
+1. **Dependencies inside the workspace** — `npm install react`. The blast
+   radius is the workspace, which is already the worker's bound; the change
+   lands in the manifest and lockfile, where Git makes it visible in the
+   disclosure and revertible afterward.
+2. **Software on the owner's machine** — a global CLI, a runtime, a binary.
+   It escapes the workspace, escapes Git, and outlives the run.
+3. **Instruction packages** — skills, plugins, MCP servers. These change how
+   the conductor or a worker *behaves*, which makes an install channel a
+   distribution channel for instructions.
+
+**The decision.** Only category 1 is in scope, and the line is drawn on a
+property the envelope already tracks: whether Git can undo it. Category 2
+keeps the pattern Cairn already uses for Codex, and which Phase 4 extends to
+Claude Code — Cairn detects software the owner installed and never installs
+it. Category 3 stays out for the same reason Phase 4 pins the Agent SDK's
+`settingSources` to empty: that pin exists to stop a body inheriting the host
+machine's instructions by accident, and a deliberate door beside it would
+undo the wall.
+
+**Consent is not the mechanism.** "May I install `chalk@5.3.0`?" is not a
+question Cairn's intended user can answer. A beginner will approve every
+time, because refusing stops the work and they have no basis to judge — so
+the prompt transfers liability without transferring understanding, which is
+the pattern this project exists to replace. Everywhere else Cairn protects
+its user with structure rather than by asking them to adjudicate. The surface
+therefore follows the shape already used for dispatch: name what will be
+installed before it happens, show what actually changed after, and make the
+undo real. The owner's approval still gates the action, as the contract
+requires; it is not asked to carry the safety.
+
+**Placement: Phase 5, not Phase 4.** Phase 4 is the conductor-body seam, and
+the success criterion of its first chunk is that nothing observable changes;
+worker network access has no business inside it. Category 1 belongs with the
+beginner on-ramp, where a person who is not the owner builds something real —
+and will need a dependency by their second task.
