@@ -70,6 +70,18 @@ work; they are never downloaded or activated silently.
   other, and names the push button while every push still waits on the
   owner's approval of that exact action. The connect card says the same about
   the comment turn before the owner ever connects.
+- Said plainly what a stone counts. A stone is a DONE row whose
+  `Milestone moved?` column says YES, and in an envelope-dispatched run that
+  column carries the worker's claim — Cairn verifies records, protected paths
+  and the commit, but only the owner can see a milestone move. The mechanism
+  is unchanged and no existing record was touched: the contract now states
+  that the column is a claim rather than Cairn's verification, and the two
+  screens that show the count as a figure say the same in one plain line. A
+  claim recorded honestly is still worth recording; it is now labelled as one.
+  A result card that was copied into the conversation file also renders once
+  rather than twice — authorship already stopped a worker manufacturing a
+  card, but a byte-identical replay of a genuine one could be shown, and
+  briefed to the conductor, twice.
 - Added no dependency.
 
 ## 0.2.1 — CI tells the truth — 2026-07-24

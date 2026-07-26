@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { ProjectStatus } from "@cairn/core";
 import { Badge, Card, Pill } from "../components/Ui";
-import { Scene } from "../components/Scene";
+import { STONE_MEANING, Scene } from "../components/Scene";
 import { ProjectSwitcher } from "../components/ProjectSwitcher";
 import { pluck } from "../sound";
 
@@ -28,6 +28,11 @@ export function Dashboard({ dir, status, onStartTask, onTalkWithCairn, onSwitch,
           {canStart ? <Pill kind="primary" onClick={onStartTask}>Start a task</Pill> : null}
         </div>
       </div>
+      {/* The count is the owner's headline figure for this project, so the gloss
+          sits directly under it — and in reading order right after the scene's
+          own "Your cairn: N stones" label, which is what a screen reader
+          announces for the picture above. */}
+      <p className="small muted" style={{ marginTop: -6, marginBottom: 12 }}>{STONE_MEANING}</p>
 
       {legacyState ? (
         <div className="warning-banner"><p><strong>Legacy task state is preserved.</strong> Cairn will not parse, migrate, or delete it. Migrate it safely before starting a new task.</p></div>

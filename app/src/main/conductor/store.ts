@@ -97,6 +97,16 @@ export function readTurns(root: string, id: string): ConductorTurn[] {
   // set, and an empty set (no marker store, no file, an unreadable one) drops
   // every card rather than trusting any.
   const markers = cardMarkers(root);
+  // Digests already shown from this file. Authorship stops a card being
+  // MANUFACTURED; it cannot stop one being COPIED, because a byte-identical
+  // copy of a genuine line is genuine by every test authorship can apply — and
+  // a card shown twice misstates how many times Cairn verified something.
+  // De-duplicating here has no false positives: runs are serialised per project
+  // directory and `ts` is millisecond-resolution ISO, so Cairn can never
+  // legitimately write two envelope lines with the same digest in one
+  // conversation. Two cards that differ in any field, or in the millisecond
+  // they were written, both stand.
+  const shown = new Set<string>();
   for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
     if (!line.trim()) continue;
     try {
@@ -104,12 +114,14 @@ export function readTurns(root: string, id: string): ConductorTurn[] {
       if (typeof value.ts !== "string") continue;
       if ((value.role === "owner" || value.role === "cairn") && typeof value.text === "string") {
         turns.push(value);
-      } else if (value.role === "envelope" && isResultCard(value.card)
-        && markers.has(cardDigest(root, id, value.ts, value.card))) {
+      } else if (value.role === "envelope" && isResultCard(value.card)) {
         // Shape AND authorship. What the owner reads as Cairn's own
         // verification has to be something Cairn actually wrote: this line
         // lives inside the project root a worker can write to, and only the
         // marker — which lives outside it — can tell the two apart.
+        const digest = cardDigest(root, id, value.ts, value.card);
+        if (!markers.has(digest) || shown.has(digest)) continue;
+        shown.add(digest);
         turns.push(value);
       }
     } catch {

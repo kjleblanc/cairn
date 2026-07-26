@@ -49,6 +49,11 @@ test("a beginner completes the offline serial path through a verified honest res
 
   await win.getByRole("button", { name: "Return to project" }).click();
   await expect(win.getByText(/idle .* 0 stones/)).toBeVisible();
+  // Repo task 081: the count is kept, and what it counts is said plainly. A
+  // stone rides on the `Milestone moved?` column, which in a dispatched run
+  // carries the worker's claim — so the figure is glossed where it is read.
+  await expect(win.getByText(/A stone marks a task whose record claims the milestone moved\./)).toBeVisible();
+  await expect(win.getByText(/Cairn records that claim; it does not verify it\./)).toBeVisible();
   await expect(win.getByText(/gate quiet/i)).not.toBeVisible();
 
   expect(readdirSync(join(proj, "docs", "ai-work", "tasks")).sort()).toEqual(["001-brief.md", "001-report.md"]);

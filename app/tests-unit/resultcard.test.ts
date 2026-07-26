@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteResult, SerialRunResult } from "@cairn/core";
@@ -292,6 +292,42 @@ test("with no marker store, no card is trusted and none can be posted (repo task
   } finally {
     setCardMarkerDir(MARKER_DIR);
   }
+});
+
+// Repo task 080's disclosed residual, closed by repo task 081. Authorship
+// stopped a worker MANUFACTURING a card; it could not stop one being COPIED,
+// because a byte-identical copy of a genuine line is genuine by every test
+// authorship can apply. The copy rendered twice and reached the conductor's
+// briefing twice, which misrepresents how many times Cairn verified something.
+test("a replayed copy of a genuine card renders once, and two real cards both survive (repo task 081)", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-replayed-card-"));
+  const id = newConversationId(root);
+  const file = join(conversationsDir(root), `${id}.jsonl`);
+  appendTurn(root, id, { role: "owner", text: "run the task", ts: "2026-07-25T10:00:00.000Z" });
+  postResultCard(root, id, composeResultCard(doneResult()));
+
+  // The worker's replay: not a forgery, a photocopy. Read the line Cairn just
+  // wrote and append it again, byte for byte, so nothing about it can differ.
+  const genuineLine = readFileSync(file, "utf8").split("\n").filter((line) => line.includes("\"envelope\""))[0];
+  appendFileSync(file, `${genuineLine}\n`, "utf8");
+  appendTurn(root, id, { role: "cairn", text: "here is what that card says", ts: "2026-07-25T10:00:02.000Z" });
+
+  assert.deepEqual(
+    readTurns(root, id).map((item) => item.role),
+    ["owner", "envelope", "cairn"],
+    "a card Cairn wrote once is shown once, however many copies of its line exist",
+  );
+
+  // And the other direction, which is what makes the de-duplication safe: two
+  // cards Cairn really posted both stand. Runs are serialised per project and
+  // `ts` is millisecond-resolution, so two genuine cards never share a digest.
+  postResultCard(root, id, composeResultCard(stoppedResult()));
+  const both = readTurns(root, id).filter((item) => item.role === "envelope");
+  assert.equal(both.length, 2, "two cards Cairn really posted are two cards");
+  assert.deepEqual(
+    both.map((item) => (item.role === "envelope" ? item.card.disposition : null)),
+    ["DONE", "STOPPED"],
+  );
 });
 
 test("the conductor reads a card as two separated parts: what Cairn verified, and what the worker claims", () => {

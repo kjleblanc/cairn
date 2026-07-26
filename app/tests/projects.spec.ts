@@ -143,6 +143,9 @@ test.describe("remembered projects: load, switch, track", () => {
     const win = await app.firstWindow();
     await expect(win.getByRole("heading", { name: "Your projects" })).toBeVisible({ timeout: 30000 });
     await expect(win.getByText(/couldn't reopen/)).toBeVisible();
+    // Repo task 081: every screen that shows a stone count as a figure says
+    // what the figure counts.
+    await expect(win.getByText(/A stone marks a task whose record claims the milestone moved\./)).toBeVisible();
 
     // The broken entry is listed with its path, a plain reason, and a remove
     // button; the healthy project shows when it was last opened.

@@ -1,3 +1,17 @@
+/**
+ * What a stone actually counts, in the owner's words.
+ *
+ * A stone is a log row whose Outcome is DONE and whose `Milestone moved?`
+ * column says YES. In an envelope-dispatched run that column carries the
+ * WORKER'S claim: Cairn verifies the records, the protected paths, and the
+ * commit, but it has no way to check whether a milestone the owner named in
+ * plain language has moved — only the owner can see that. The mechanism is
+ * kept, because a claim recorded honestly is still worth recording; what
+ * changes here is that the figure is no longer presented as if Cairn had
+ * verified it. Shown wherever the count is a figure the owner reads.
+ */
+export const STONE_MEANING = "A stone marks a task whose record claims the milestone moved. Cairn records that claim; it does not verify it.";
+
 /** The log made visible: one stone per closed task on a faded hillside, a dotted trace winding up.
  * `fill` renders full-bleed (100% height, cropped to cover) instead of the Dashboard's
  * fixed-aspect strip — used by the chat screen so the scene fills the whole window. */

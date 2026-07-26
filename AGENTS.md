@@ -80,7 +80,9 @@ carry compatibility with existing tools. Existing rows and task files are
 history: never rewrite or delete them.
 
 In an envelope-dispatched run, Cairn's runtime authors the report and log row
-itself, from its own verification plus the worker's claims.
+itself, from its own verification plus the worker's claims. The `Milestone
+moved?` column is one of those claims: it carries the worker's answer, not
+Cairn's own verification that the milestone moved.
 
 `DONE` means the requested outcome holds and its checks completed. `STOPPED`
 means it does not. A review requested by the owner is optional advice; it may

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectStatus } from "@cairn/core";
 import type { RecentProject } from "../../shared/ipc";
+import { STONE_MEANING } from "../components/Scene";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 import { cairn } from "../api";
 
@@ -92,6 +93,10 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
         <button className="pill pill-quiet" onClick={onSettings}>Settings</button>
       </div>
       {note ? <p className="note-banner">{note}</p> : null}
+      {/* One gloss for the whole list, not one per row, and only when a stone
+          badge is actually on screen — a first-run owner with no projects is
+          owed no explanation of a figure they cannot see. */}
+      {recent.some((r) => r.ok) ? <p className="small muted">{STONE_MEANING}</p> : null}
       {recent.map((r) => r.ok ? (
         <button key={r.dir} className="card" style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer", font: "inherit" }}
           onClick={() => onOpen(r.dir)}>
