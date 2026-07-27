@@ -211,3 +211,99 @@ the records.
 ## Version
 
 Phase 4 closes at 0.4.0.
+
+## Amendment 2026-07-27 — What the SDK actually is
+
+Everything above is unchanged and remains approved. This amendment corrects
+five requirements that were written before anyone had read the Agent SDK's
+shipped type declarations. All of them were faithfully implemented in the
+first draft of the implementation plan, and three adversarial reviews found
+the resulting defects independently — which means the fault is here, in the
+spec, not in the plan.
+
+Every claim below was verified on 2026-07-27 against
+`@anthropic-ai/claude-agent-sdk` **0.3.220**, installed outside the
+repository and read from `sdk.d.ts` and `package.json`. Where a review
+asserted something that turned out to be false, that is recorded too: a
+confident reviewer is not evidence.
+
+**1. The options go under `options`, and the pin belongs on what `query`
+received.** The signature is
+`query({ prompt: string | AsyncIterable<SDKUserMessage>, options?: Options })`.
+The Testing section above asks for "a test asserts `settingSources` is empty
+in the composed options"; read literally, that pins a helper's return value,
+which a call site can then drop, reshape, or override with every test still
+green. **The test must capture the object actually handed to `query()` and
+assert on `params.options.settingSources`.** Pinning a helper proves nothing
+about what the SDK was told.
+
+**2. An empty tool set is `tools: []`, not `allowedTools: []`.** These read
+as synonyms and are not. The SDK documents `allowedTools` as "tool names that
+are auto-allowed without prompting for permission" and says outright: "To
+restrict which tools are available, use the `tools` option instead."
+`tools: []` is documented as "Disable all built-in tools." So
+`allowedTools: []` means *nothing is auto-approved while every built-in tool
+remains available* — Read, Write, Edit, Bash and the rest — which is the exact
+inheritance Chunk 2 forbids, wearing the appearance of the fix. One review
+proposed `disallowedTools: ["*"]`; that is also wrong, and `tools: []` is the
+documented mechanism. `canUseTool` and `permissionMode` exist and may back it
+up, but the tool roster is what this decision turns on.
+
+**3. The test seam is `pathToClaudeCodeExecutable`, and the PATH shim was
+never going to work.** The Testing section names "a fake `claude` on PATH" as
+the pattern. That protects detection, which really does spawn `claude` off
+PATH — and protects the streaming path not at all, because the SDK spawns a
+binary bundled inside its own package. As written, every end-to-end test of a
+conversation would have invoked the real Claude Code with the owner's real
+credentials, spending plan usage and potentially recursing, which is the one
+thing this spec says must never happen.
+
+The SDK provides the answer: `pathToClaudeCodeExecutable?: string` — "Path to
+the Claude Code executable. Uses the built-in executable if not specified."
+One review stated this option does not exist; it does. **Phase 4 therefore
+needs two seams, not one:** a fake `claude` on PATH for the detection probe,
+and an injected executable path for the body's own turns, reached through a
+main-process test switch in the shape `CAIRN_MOCK` already has for the worker.
+No suite may construct the real body.
+
+**4. The consent sentence has to be made true, not just written.** The consent
+line promises that conversation runs on the Claude plan already installed. The
+SDK spawns a child process, and a child that inherits an ambient
+`ANTHROPIC_API_KEY` (or a Bedrock or Vertex switch) may authenticate against a
+billed API account instead — in which case Cairn's connect card and its
+amended contract would both be telling the owner something false, and the
+owner would be paying per turn while reading that they are not.
+
+`Options.env` exists and is the lever. **The body passes an explicit `env`
+rather than inheriting the app's ambient Anthropic credentials.** The
+implementer verifies which variables actually decide the CLI's auth path and
+records what they found; if it turns out the promise cannot be guaranteed,
+the consent wording changes to match reality rather than the reality being
+left to chance. A consent sentence Cairn cannot keep is worse than a vaguer
+one it can.
+
+**5. The contract amendment is two sentences, not one.** Chunk 3 scopes the
+amendment to the comment turn's cost. The same section also says the owner
+"may revoke the connection at any time, which deletes the stored credential"
+— untrue for a body that stores none, and untrue in the direction that
+matters, since it implies a disconnect removes access it never had. Both
+sentences move together, across all four mirrors. Note also that
+`core/assets/contract.md` is generated from `CONTRACT-TEMPLATE.md` by
+`core/scripts/sync-contract.mjs`, which runs during `npm --prefix core test`:
+the template is the source, and editing the generated copy is silently undone.
+
+**Two further facts, recorded because they change the packaging chunk.** The
+SDK is ESM-only (`"type": "module"`, entry `sdk.mjs`), while the app's main
+process is bundled to CommonJS — so externalizing it is necessary but may not
+be sufficient, and the import may have to be dynamic. And `Options.cwd`
+defaults to the Electron process's working directory rather than the owner's
+project; the body sets it deliberately, because it decides both where a
+leaked tool would act and whose `.claude/` would load if the `settingSources`
+pin ever failed open.
+
+**Also settled here:** the Claude Code body supplies its own model constant
+(`claude-opus-5`), rather than inheriting the connect card's existing model
+state, which is seeded with the curated API pick. And the consent checkbox is
+body-specific: its current hardcoded label says conversation "costs money on
+my account," which is false for a plan-based body and is precisely the
+misreading Decision 3 exists to prevent.
