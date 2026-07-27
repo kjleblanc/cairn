@@ -307,3 +307,91 @@ state, which is seeded with the curated API pick. And the consent checkbox is
 body-specific: its current hardcoded label says conversation "costs money on
 my account," which is false for a plan-based body and is precisely the
 misreading Decision 3 exists to prevent.
+
+## Amendment 2026-07-27 (second) — Whose Claude Code runs
+
+The plan was rewritten against the amendment above and reviewed again through
+the same three lenses. The structure held; the details did not, and one
+finding was not a defect in either document but a fact about the SDK that
+changes a decision. Verified at 0.3.220 as before.
+
+### Decision 4 — The body runs the owner's Claude Code, not the SDK's
+
+`@anthropic-ai/claude-agent-sdk` declares `claudeCodeVersion: 2.1.220` and
+ships that binary itself, through eight platform-specific
+`optionalDependencies` (`@anthropic-ai/claude-agent-sdk-win32-x64` and its
+siblings). The `claude` on the owner's PATH is 2.1.202. Left alone, the
+conductor therefore runs a copy of Claude Code that **Cairn distributes**,
+authenticated with the owner's credentials — and three things this design
+asserts become false at once:
+
+- The consent card promises "the Claude plan already installed on this
+  computer." The plan is the owner's; the binary is not already installed,
+  because Cairn brings it.
+- Detection becomes theatre. `claude --version` certifies a binary that never
+  runs. This is precisely the reasoning the implementation plan used to
+  reject a turn-time re-detection gate, and it applies with equal force to
+  the connect-time gate, where the consent decision is actually made.
+- Decision 2's policy rationale weakens. That decision rests on the
+  distinction between a product that *offers* an account login and "a local
+  tool that notices a CLI the owner independently installed and signed into."
+  A tool that ships its own Claude Code and signs it in with the owner's
+  credentials is not the second thing.
+
+**The body therefore sets `pathToClaudeCodeExecutable` to the executable the
+detection probe resolved on PATH, and treats an unresolvable one as a body
+that cannot run.** No silent fallback to the bundled copy: a Claude Code that
+is not installed is reported as not installed, which is what the connect
+surface already promises to say. Detection and the turn then concern the same
+binary, the consent sentence becomes literally true, and Decision 2's framing
+holds without argument.
+
+This decision was the owner's to make and the owner delegated it.
+
+**One unknown, to be settled early rather than discovered late.** The
+bundled binary is a native single-file executable, and the SDK separately
+exposes `executable: 'bun' | 'deno' | 'node'` with `executableArgs` for
+running a JavaScript entry point. Whether `pathToClaudeCodeExecutable`
+accepts a Windows `.cmd` shim — which is what an npm-installed `claude` is —
+is **not verified**. A native Claude Code install provides a real `.exe` and
+is the clean case. The implementer verifies this against whatever form is
+present on the development machine, in the task that introduces the pin and
+not later; if a shim is rejected, that returns here as a design question
+rather than being worked around in code.
+
+### Three further corrections
+
+**`skills: []` is required, and its absence is not neutral.** `sdk.d.ts`
+documents the omitted default as "no SDK auto-configuration. The CLI's own
+defaults still apply, so this is **not** 'skills off.'" So `settingSources:
+[]` and `tools: []` together still leave a path by which the host machine's
+skills reach the conductor. All three are load-bearing, not one.
+
+**`env` is an allowlist, and cannot be a denylist.** The SDK documents that
+`env`, when set, "REPLACES the subprocess environment entirely — it is not
+merged with `process.env`", and that when omitted "the subprocess inherits
+`process.env`" — a sentence that names `ANTHROPIC_API_KEY` explicitly.
+Amendment item 4 above asked for "an explicit `env`"; that is now precise. The
+body composes the child's environment from a named list of what the CLI needs
+to run, and a test asserts `env` is **present** before asserting anything
+about its contents — a check that reads the value and tolerates its absence
+passes exactly when the promise is broken.
+
+**The process-tree-kill waiver is withdrawn.** The first amendment let the
+implementation plan record tree termination as an accepted gap on the grounds
+that the SDK spawns and owns the child. `sdk.d.ts` documents
+`Query.close()`: "Close the query and terminate the underlying process. This
+forcefully ends the query, cleaning up all resources including pending
+requests, MCP transports, and the CLI subprocess." The capability exists, so
+the gap is not accepted. The body holds the `Query` — not a bare async
+iterator — and calls `close()` on cancel, on inactivity, and on the absolute
+cap.
+
+### The fake lane is enforced, not conventional
+
+The Testing section asks for "the loud, enforced protection that
+`conductor-connection.ts` got." A convention that every end-to-end spec opts
+into a fixture is not that: the failure it must catch is a spec that forgets.
+The guard belongs where the SDK is actually reached — fail-closed in the
+module that imports it, not at one call site that a future second call site
+would bypass — and a test must be able to fail when it is removed.
