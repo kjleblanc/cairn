@@ -26,7 +26,8 @@ write, deployment, production effect, or valuable-data exposure.
 - one persistent desktop workspace with a multi-project rail, Chat, and a
   functional town square whose Cairn, live worker, and task thread come only
   from real active-project state;
-- one task at a time with an honest DONE or STOPPED result;
+- one task at a time per lane — up to two lanes — with an honest DONE or
+  STOPPED result;
 - deterministic routing to one connected adapter, and an honest
   connection-required result when none is connected;
 - one Codex Exec adapter that detects installed/connected readiness without
@@ -50,8 +51,13 @@ the envelope decides what counts as done.
 
 Worker execution is still deliberately serial within each project. Future
 swappable bodies and any multi-agent work require their own approved design;
-the town square's eight-villager visual cap is not a concurrency promise. The
-owner-approved route lives in
+the town square's eight-villager visual cap is not a concurrency promise.
+
+You may work a repository with up to two chats at once — each chat keeps its
+own task, its own worktree, and its own honest records, and only one lane
+lands into `main` at a time. The rules live in the contract's "Working in
+two lanes" section; the worker runtime underneath stays serial either way.
+The owner-approved route lives in
 [the conductor route spec](docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md).
 
 ## What you need

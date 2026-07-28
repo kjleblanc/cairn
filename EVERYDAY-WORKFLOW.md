@@ -1,4 +1,4 @@
-# Everyday Workflow — one task at a time
+# Everyday Workflow — one task at a time per lane
 
 Cairn has one normal path. Tell the coding agent the visible result you
 want:
@@ -23,6 +23,28 @@ Continue task NNN.
 
 The new conversation reads the saved evidence and continues. A fresh chat is a
 context tool, never a required gate.
+
+## Running a second lane
+
+You may have up to two chats working the same repository at once. Each chat
+is a lane, and the rules above apply inside each lane. A few extra habits
+keep the lanes out of each other's way:
+
+- Each lane works in its own copy of the project folder (a Git worktree —
+  the second one is created once and reused). A lane never edits the other
+  lane's copy.
+- A task number is claimed by committing its brief, so two chats never
+  write the same number. If a collision ever slips through, the later lane
+  renumbers.
+- Only one lane lands finished work into `main` at a time, followed by a
+  quick settle check, so `main` is always known-good.
+- Only one lane — or you — runs the real app or its end-to-end tests at a
+  time. They share one profile and one conductor connection, so a lane
+  waits while the other is using them.
+
+The exact rules live in the contract's "Working in two lanes" section
+(`AGENTS.md`). Saying "work as lane B" is enough — the agent reads the
+contract and follows it.
 
 ## Completion
 
