@@ -4,6 +4,25 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.4.0 — two lanes, one honest result each — 2026-07-28
+
+- Adopted the two-lane working protocol
+  (`docs/superpowers/specs/2026-07-28-cairn-two-lane-protocol-design.md`),
+  designed after the 2026-07-28 parallel-session collisions and approved by
+  the owner the same day. Two human-driven chats may now work this
+  repository at once: each lane gets its own git worktree (lane B at
+  `.lanes/b`), a task number is claimed by committing its brief,
+  `docs/ai-work/LOG.md` carries Git's union merge attribute so concurrent
+  rows both survive, landing into `main` is serial with a settle check, the
+  real app and all end-to-end tests run under a single machine-wide app
+  token, and a lane's DONE is verified in its own tree and promoted onto
+  `main` by the settle check.
+- Changed no runtime behavior. The envelope still dispatches one worker
+  task at a time; this is maintainer process, not product concurrency
+  (which remains Phase 7, explicitly late). Both load-bearing mechanisms —
+  nested worktrees and the union merge driver — were proven in a throwaway
+  repository before adoption.
+
 ## 0.3.0 — the whole task, in one conversation — 2026-07-25
 
 - Closed a record hole on the throwing path. Only the clean close verified

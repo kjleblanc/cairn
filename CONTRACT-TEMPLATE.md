@@ -1,6 +1,6 @@
 # Project Contract
 
-> **What this is.** Cairn Contract v0.3.0 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.4.0 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
@@ -21,8 +21,11 @@ product work; the owner resumes it by saying so.
 
 ## The whole workflow
 
-**One project, one task, one honest result.** Local reversible work proceeds in
+**One lane, one task, one honest result.** Local reversible work proceeds in
 one continuous conversation, pausing only immediately before a concrete risk.
+A project may run up to two lanes — two chats, each with its own task — under
+"Working in two lanes" below; everything in this contract applies within each
+lane.
 
 For each requested outcome:
 
@@ -42,14 +45,49 @@ For each requested outcome:
 A new chat is a context tool, never a gate. Work too large for one continuous
 task gets a short written plan first, then lands as serial recorded tasks.
 
+## Working in two lanes
+
+The owner may run up to two lanes — two human-driven chats working this
+repository at the same time. The serial workflow above applies inside each
+lane; these rules keep the lanes out of each other's way:
+
+- **Each lane has its own worktree.** Lane A is the main checkout. Lane B is
+  a git worktree (by convention `.lanes/b`, branch `lane/b`). A lane never
+  writes outside its own worktree, so one lane's checks can never compile
+  another lane's uncommitted work.
+- **A task number is claimed by committing the brief.** Before any other
+  work, check the working tree, `main`'s history, and every lane branch for
+  the lowest free number; write `NNN-brief.md` and commit it alone at once.
+- **The log merges itself.** `docs/ai-work/LOG.md` carries Git's union merge
+  attribute, so concurrent rows both survive a merge; the landing lane
+  confirms each row appears exactly once.
+- **Landing is serial.** One lane merges into `main` at a time, then runs
+  the settle check (build and unit tests) so `main` is proven good after
+  every landing. The other lane syncs `main` into its branch between tasks,
+  never mid-task. If both lanes claimed the same number, the later one
+  renumbers before landing.
+- **The app and its end-to-end tests are single-tenant.** The real app, any
+  Playwright suite, and the owner's own use of the app share one profile and
+  one conductor connection. A lane holds the app token — a lock directory
+  created with `mkdir`, which fails if it exists — for the whole run, and
+  waits while another lane or the owner holds it.
+- **DONE is verified in the lane's own tree.** A lane's DONE means the
+  outcome holds in its worktree on its branch; the settle check promotes
+  that claim onto `main`. Reports name the base commit the lane synced from.
+
+The product runtime stays serial: the envelope still runs one dispatched
+worker task at a time, whatever the lanes are doing. Contract changes also
+stay serial and remain the owner's decision, however many lanes are running.
+
 ## Task records are memory
 
 Records exist so a later conversation can continue without guessing.
 Verification always asks one question: does the requested visible outcome hold?
 The outcome is what gets verified; records describe the work.
 
-Use the next unused number in `docs/ai-work/tasks/` (`NNN-brief.md`,
-`NNN-report.md`).
+In a one-lane project, use the next unused number in `docs/ai-work/tasks/`
+(`NNN-brief.md`, `NNN-report.md`). With two lanes, a number is claimed by
+committing the brief — see "Working in two lanes".
 
 The brief states:
 

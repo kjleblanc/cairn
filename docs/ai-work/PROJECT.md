@@ -30,5 +30,6 @@ Out of scope for now: accounts, servers, analytics, or paid infrastructure of
 any kind; external dependencies in the public artifacts (the browser companion
 stays one self-contained file).
 
-Working rule: one serial task at a time. Reviews are optional evidence, and
+Working rule: one serial task at a time per lane; up to two lanes under the
+contract's "Working in two lanes" rules. Reviews are optional evidence, and
 real risk pauses only at the concrete action boundary.

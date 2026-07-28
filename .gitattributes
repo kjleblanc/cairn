@@ -7,3 +7,6 @@
 *.ico binary
 *.nupkg binary
 *.exe binary
+
+# Concurrent task-log appends from two lanes merge cleanly, keeping both rows.
+docs/ai-work/LOG.md merge=union
