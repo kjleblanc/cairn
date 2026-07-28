@@ -13,6 +13,18 @@ Set-Location $appDir
 $buildMarker = Join-Path $appDir ".vite\build\main.js"
 $needsBuild = -not (Test-Path $buildMarker)
 
+# `npm start` (electron-forge dev mode) overwrites .vite\build\main.js with a
+# development bundle that loads the renderer from the Vite dev server — which
+# exists only while `npm start` is running. Its timestamp is newer than the
+# sources, so the freshness check below would trust it, and a plain
+# `electron .` would open a blank window pointed at a dead localhost URL.
+# A bundle that mentions the dev server is not a production build: rebuild.
+if (-not $needsBuild) {
+  if (Select-String -Path $buildMarker -Pattern "localhost:\d{4}" -Quiet) {
+    $needsBuild = $true
+  }
+}
+
 if (-not $needsBuild) {
   $builtAt = (Get-Item $buildMarker).LastWriteTime
   $watch = @(
