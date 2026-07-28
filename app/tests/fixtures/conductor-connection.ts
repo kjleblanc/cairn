@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
  * the only edit is the `export` keyword.
  */
 export function conductorFile(): string {
+  if (process.env.CAIRN_TEST_USER_DATA) return join(process.env.CAIRN_TEST_USER_DATA, "conductor.json");
   if (process.platform === "win32") return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Cairn", "conductor.json");
   if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Cairn", "conductor.json");
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), "Cairn", "conductor.json");

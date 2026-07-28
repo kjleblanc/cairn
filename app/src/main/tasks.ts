@@ -23,6 +23,12 @@ const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
 const sessions = new Map<string, RunSessionSnapshot>();
 
+/** Read-only runtime projection for workspace and IPC assembly. IPC callers
+ * receive a structured clone; main-process callers must treat it as immutable. */
+export function currentTaskSession(dir: string): RunSessionSnapshot | null {
+  return sessions.get(dir) ?? null;
+}
+
 /** Quit protection: name live runs, cancel them, and await their fail-closed close. */
 export function activeTaskRuns(): { dirs: string[]; cancelAll(): void; settled(): Promise<void> } {
   return {
@@ -110,7 +116,18 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     const controller = new AbortController();
     markRunning(dir);
     controllers.set(dir, controller);
-    sessions.set(dir, { dir, outcome, conversationId: request.conversationId ?? null, worker: realCallConfirmed === true, startedAt: new Date().toISOString(), activities: [], phase: "running", result: null, error: null });
+    sessions.set(dir, {
+      dir,
+      outcome,
+      adapterId: request.adapterId ?? null,
+      conversationId: request.conversationId ?? null,
+      worker: realCallConfirmed === true,
+      startedAt: new Date().toISOString(),
+      activities: [],
+      phase: "running",
+      result: null,
+      error: null,
+    });
     const cleanup = (): void => { clearRunning(dir); controllers.delete(dir); sessions.delete(dir); };
     // The run-time disclosure gate follows the ROUTED adapter's own seam, not a
     // codex-pinned check: resolve the route exactly as task:route does and take

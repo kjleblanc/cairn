@@ -114,6 +114,34 @@ test.beforeEach(() => {
   rmSync(conductorFile(), { force: true });
 });
 
+test("a live reply belongs to its project and reattaches after navigation", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-reattach-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "slowstream");
+  await expect(win.getByText(/One moment/)).toBeVisible({ timeout: 10_000 });
+  const before = await win.evaluate((dir) => window.cairn.conductorCurrent(dir), project);
+  expect(before?.kind).toBe("reply");
+  expect(before?.conversationId).toBeTruthy();
+  expect(before?.text).toContain("One moment");
+
+  await win.getByRole("button", { name: "← Project home" }).click();
+  await expect(win.getByRole("heading", { name: "Conductor" })).toBeVisible();
+  const away = await win.evaluate((dir) => window.cairn.conductorCurrent(dir), project);
+  expect(away?.conversationId).toBe(before?.conversationId);
+
+  await win.getByRole("button", { name: "Talk with Cairn" }).click();
+  await expect(win.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  await expect(win.getByText(/One moment/)).toBeVisible();
+  await expect(win.getByText(/done thinking\./)).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project)).toBeNull();
+
+  await app.close();
+});
+
 test("the connect card blocks until consent, then disconnecting wipes the connection for the next launch", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-connect-"));
   scaffold(project);

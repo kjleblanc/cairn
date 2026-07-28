@@ -4,6 +4,7 @@ import type {
   ConductorConversationSummary,
   ConductorDelta,
   ConductorStatus,
+  ConductorStreamSnapshot,
   ConductorTurn,
   Result,
   ResultCard,
@@ -54,7 +55,15 @@ const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. 
  * `kind` because the refusal the next send gets has to name what is actually in
  * flight: a reply the owner started is on screen with a Stop control, and a
  * comment the envelope started is neither. */
-const controllers = new Map<string, { controller: AbortController; kind: TurnKind }>();
+type LiveStream = {
+  controller: AbortController;
+  kind: TurnKind;
+  conversationId: string;
+  startedAt: string;
+  text: string;
+};
+
+const controllers = new Map<string, LiveStream>();
 
 /** The owner-facing disclosure Cairn shows before it may act on the
  * conversation without per-message approval. Main re-derives this from the
@@ -119,6 +128,21 @@ export function turns(dir: string, id: string): ConductorTurn[] {
   return readTurns(dir, id);
 }
 
+/** Bounded visible state for renderer reattachment. The provider request,
+ * credentials, raw events, and every other project's stream remain private to
+ * the main process. */
+export function current(dir: string): ConductorStreamSnapshot | null {
+  const live = controllers.get(dir);
+  if (!live) return null;
+  return {
+    dir,
+    conversationId: live.conversationId,
+    kind: live.kind,
+    startedAt: live.startedAt,
+    text: live.text,
+  };
+}
+
 /** Aborts the in-flight stream for `dir`, if any. The stream's own catch
  * block persists the partial turn and emits the stopped delta. */
 export function stop(dir: string): void {
@@ -166,7 +190,13 @@ export function send(
   appendTurn(dir, id, { role: "owner", text, ts: new Date().toISOString() });
 
   const controller = new AbortController();
-  controllers.set(dir, { controller, kind: "reply" });
+  controllers.set(dir, {
+    controller,
+    kind: "reply",
+    conversationId: id,
+    startedAt: new Date().toISOString(),
+    text: "",
+  });
   void streamTurn(dir, id, conn, controller, onDelta, "reply");
 
   return { ok: true, value: { conversationId: id } };
@@ -215,7 +245,13 @@ export function commentary(
   if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) return;
 
   const controller = new AbortController();
-  controllers.set(dir, { controller, kind: "commentary" });
+  controllers.set(dir, {
+    controller,
+    kind: "commentary",
+    conversationId,
+    startedAt: new Date().toISOString(),
+    text: "",
+  });
   void streamTurn(dir, conversationId, conn, controller, onDelta, "commentary");
 }
 
@@ -265,6 +301,8 @@ async function streamTurn(
     for await (const event of streamChat(slot, messages, fetch, controller.signal)) {
       if (event.kind === "delta" && event.text) {
         full += event.text;
+        const live = controllers.get(dir);
+        if (live?.controller === controller) live.text = full;
         onDelta({ dir, conversationId: id, kind: "delta", text: event.text });
       } else if (event.kind === "usage") {
         tokens = (event.promptTokens ?? 0) + (event.completionTokens ?? 0);

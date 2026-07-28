@@ -29,6 +29,7 @@ function scaffold(proj: string, name: string): void {
 
 // Electron's default per-user settings folder for an app named "Cairn".
 function registryFile(): string {
+  if (process.env.CAIRN_TEST_USER_DATA) return join(process.env.CAIRN_TEST_USER_DATA, "projects.json");
   if (process.platform === "win32") {
     return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Cairn", "projects.json");
   }

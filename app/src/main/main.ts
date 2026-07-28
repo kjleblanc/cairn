@@ -9,6 +9,18 @@ import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
 
 if (started) app.quit();
 
+// Test-only userData isolation. Electron's default profile may contain the
+// owner's encrypted conductor connection and remembered projects, so an E2E
+// suite must never borrow it. The positive marker prevents an ordinary app
+// launch from being redirected by one stray environment variable.
+const testUserData = process.env.CAIRN_TEST_USER_DATA;
+if (testUserData) {
+  if (process.env.CAIRN_E2E !== "1") {
+    throw new Error("CAIRN_TEST_USER_DATA requires CAIRN_E2E=1.");
+  }
+  app.setPath("userData", path.resolve(testUserData));
+}
+
 let mainWindow: BrowserWindow | null = null;
 
 function contractPath(): string {

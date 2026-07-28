@@ -196,6 +196,8 @@ export function registerConductorIpc(): void {
       return null;
     }));
 
+  ipcMain.handle("conductor:current", (_e, dir: string) => conductorService.current(dir));
+
   ipcMain.handle("conductor:conversations", (_e, dir: string) => conductorService.conversations(dir));
 
   ipcMain.handle("conductor:turns", (_e, dir: string, id: string) => conductorService.turns(dir, id));

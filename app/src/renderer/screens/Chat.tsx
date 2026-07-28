@@ -387,15 +387,29 @@ export function Chat({ dir, onBack, onOpenRun }: {
     void cairn.projectStatus(dir).then((r) => { if (r.ok) setStones(r.value.stones); });
   }, [dir]);
 
-  // Resume the newest conversation on mount (conversations sort oldest-first).
+  // Resume the live conversation when one exists, otherwise the newest saved
+  // conversation. The stream belongs to main and to this project, not to this
+  // component's mount lifetime: switching projects may unmount Chat without
+  // cancelling a reply, and returning reattaches to its accumulated text.
   useEffect(() => {
     if (!status?.connected) return;
-    void cairn.conductorConversations(dir).then((list) => {
-      const newest = list.at(-1);
-      if (!newest) return;
-      setConvId(newest.id);
-      void cairn.conductorTurns(dir, newest.id).then(setTurns);
+    let live = true;
+    void Promise.all([cairn.conductorCurrent(dir), cairn.conductorConversations(dir)]).then(async ([stream, list]) => {
+      if (!live) return;
+      const id = stream?.conversationId ?? list.at(-1)?.id ?? null;
+      if (id === null) return;
+      const saved = await cairn.conductorTurns(dir, id);
+      if (!live) return;
+      setConvId(id);
+      setTurns(saved);
+      if (stream?.kind === "reply") {
+        inFlightRef.current = { id };
+        streamingRef.current = stream.text;
+        setStreamingText(stream.text);
+        setStreaming(true);
+      }
     });
+    return () => { live = false; };
   }, [status?.connected, dir, setConvId]);
 
   const refreshSession = useCallback(async () => {
@@ -552,16 +566,6 @@ export function Chat({ dir, onBack, onOpenRun }: {
       pushRunning.current = false;
     }
   }
-
-  // Unmounting mid-stream (e.g. navigating back to the dashboard) doesn't
-  // stop the reply on its own — main keeps running it and holds the per-dir
-  // lock until the reply finishes. `inFlightRef` is a ref, so this cleanup
-  // always reads whatever was true at the moment of unmount, never a stale
-  // render's value; stopping it here means the next screen's first send
-  // never finds the lock still held.
-  useEffect(() => () => {
-    if (inFlightRef.current) void cairn.conductorStop(dir);
-  }, [dir]);
 
   // Returns whether this call actually dispatched — appended the owner turn
   // and invoked `conductorSend` — as opposed to being refused outright

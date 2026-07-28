@@ -55,6 +55,7 @@ export type TaskRunRequest = {
 export type RunSessionSnapshot = {
   dir: string;
   outcome: string;
+  adapterId: string | null;
   conversationId: string | null;
   // true when this run is a real confirmed worker call, not the offline demo; Task 10 re-keys lane wording off adapter capabilities
   worker: boolean;
@@ -65,6 +66,16 @@ export type RunSessionSnapshot = {
   error: string | null;
 };
 export type ConductorConversationSummary = { id: string; startedTs: string; preview: string };
+export type ConductorStreamKind = "reply" | "commentary";
+export interface ConductorStreamSnapshot {
+  dir: string;
+  conversationId: string;
+  kind: ConductorStreamKind;
+  startedAt: string;
+  /** Visible assistant text accumulated so far; bounded by the conductor
+   * client's existing prompt and output limits. */
+  text: string;
+}
 
 export interface ConductorStatus {
   connected: boolean;
@@ -133,6 +144,7 @@ export interface CairnApi {
   conductorSetModel(model: string): Promise<Result<null>>;
   conductorSend(request: ConductorSendRequest): Promise<Result<{ conversationId: string }>>;
   conductorStop(dir: string): Promise<Result<null>>;
+  conductorCurrent(dir: string): Promise<ConductorStreamSnapshot | null>;
   conductorConversations(dir: string): Promise<ConductorConversationSummary[]>;
   conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
   onConductorDelta(cb: (event: ConductorDelta) => void): () => void;

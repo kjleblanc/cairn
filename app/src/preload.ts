@@ -28,6 +28,7 @@ const api: CairnApi = {
   conductorSetModel: (model) => ipcRenderer.invoke("conductor:setModel", model),
   conductorSend: (request) => ipcRenderer.invoke("conductor:send", request),
   conductorStop: (dir) => ipcRenderer.invoke("conductor:stop", dir),
+  conductorCurrent: (dir) => ipcRenderer.invoke("conductor:current", dir),
   conductorConversations: (dir) => ipcRenderer.invoke("conductor:conversations", dir),
   conductorTurns: (dir, id) => ipcRenderer.invoke("conductor:turns", dir, id),
   onConductorDelta: (callback) => {
