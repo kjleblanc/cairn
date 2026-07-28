@@ -6,6 +6,7 @@ import { Card, ErrorCard, Pill } from "./Ui";
 
 const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_KEYS_URL = "https://openrouter.ai/keys";
+const KIMI_CONSOLE_URL = "https://www.kimi.com/code/console";
 
 type Panel = "default" | "picker" | "guide";
 
@@ -21,7 +22,8 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 /** The connect flow's standing-consent card: the owner sees exactly what
  * main will re-derive and check before it ever stores a key (the dispatch-gate
  * pattern from tasks.ts) — the consent strings shown here always come from
- * `conductor:consentCard`, never a renderer-side copy.
+ * `conductor:consentCard`, never a renderer-side copy. That includes the
+ * checkbox label, so a plan-based seat never sits under "costs money".
  *
  * Task 030 made this a one-paste flow. The default panel asks for only the
  * key — the base URL and model already hold Cairn's curated pick
@@ -31,7 +33,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
  * local Ollama URL) and `guide` ("Where do I get a key?," a plain-language
  * walkthrough that never assumes a browser is already on the right page).
  * Choosing "Custom…" is the only way back to the old free-text base URL and
- * model fields. */
+ * model fields.
+ *
+ * Task 098 added the Kimi subscription seat: a curated body that carries its
+ * own base URL, with the intro line and the key guide switching to match it.
+ * Everything the OpenRouter seats show is byte-identical to before. */
 export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [panel, setPanel] = useState<Panel>("default");
   const [custom, setCustom] = useState(false);
@@ -75,7 +81,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
 
   function chooseBody(body: Body) {
     setCustom(false);
-    setBaseUrl(DEFAULT_BASE_URL);
+    setBaseUrl(body.baseUrl ?? DEFAULT_BASE_URL);
     setModel(body.id);
     setPanel("default");
   }
@@ -85,10 +91,13 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     setPanel("default");
   }
 
+  const currentBody = custom ? null : (BODIES.find((b) => b.id === model) ?? null);
+  const kimiSeat = currentBody?.baseUrl !== undefined && new URL(currentBody.baseUrl).host === "api.kimi.com";
+
   if (panel === "picker") {
     return (
       <Card title="choose a different brain">
-        <p className="small muted">Cairn talks to any OpenAI-compatible provider through OpenRouter. Pick one, or go custom.</p>
+        <p className="small muted">Cairn talks to any OpenAI-compatible provider — OpenRouter models, or your Kimi membership directly. Pick one, or go custom.</p>
         <div className="brain-list">
           {BODIES.map((body) => (
             <button key={body.id} type="button" className="brain-item" onClick={() => chooseBody(body)}>
@@ -113,6 +122,27 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   }
 
   if (panel === "guide") {
+    if (kimiSeat) {
+      return (
+        <Card title="where do I get a key?">
+          <ol className="welcome-steps">
+            <li>Open the Kimi Code Console and sign in with your Kimi account.</li>
+            <li>Click "Create API Key", give it a name, and confirm.</li>
+            <li>Copy the key right away — it is shown only once.</li>
+            <li>Paste it here.</li>
+          </ol>
+          <div className="row">
+            <Pill onClick={() => void cairn.openExternal(KIMI_CONSOLE_URL)}>Open the Kimi Code Console</Pill>
+          </div>
+          <p className="small muted" style={{ marginTop: 10 }}>
+            Conversation uses the coding quota included with your membership; your plan and its remaining quota live in the console.
+          </p>
+          <div className="row" style={{ marginTop: 14 }}>
+            <Pill kind="quiet" onClick={() => setPanel("default")}>Back</Pill>
+          </div>
+        </Card>
+      );
+    }
     return (
       <Card title="where do I get a key?">
         <ol className="welcome-steps">
@@ -134,11 +164,11 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     );
   }
 
-  const currentBody = custom ? null : (BODIES.find((b) => b.id === model) ?? null);
-
   return (
     <Card title="connect cairn's brain">
-      <p>Paste your OpenRouter key — Cairn chooses everything else, and you can change it later.</p>
+      <p>{kimiSeat
+        ? "Paste your Kimi Code key — Cairn chooses everything else, and you can change it later."
+        : "Paste your OpenRouter key — Cairn chooses everything else, and you can change it later."}</p>
       {error ? <ErrorCard message={error} /> : null}
 
       {custom ? (
@@ -171,7 +201,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
 
       <label className="row" style={{ marginTop: 14, alignItems: "flex-start" }}>
         <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-        <span>I understand what will be shared and that conversation costs money on my account</span>
+        <span>{card ? card.checkbox : "I understand what will be shared and that conversation costs money on my account"}</span>
       </label>
 
       <div className="row" style={{ marginTop: 14 }}>

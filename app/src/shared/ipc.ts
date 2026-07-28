@@ -114,6 +114,10 @@ export interface ConductorConsentCard {
   model: string;
   data: string;
   cost: string;
+  /** The consent checkbox label, derived in main alongside the rest of the
+   * card so a plan-based body never sits under a label that claims per-turn
+   * billing. The renderer renders this string; it never writes one. */
+  checkbox: string;
 }
 
 export interface ConductorConnectRequest {

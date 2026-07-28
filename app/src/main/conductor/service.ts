@@ -12,6 +12,7 @@ import type {
 import { isQuitDraining, isTaskRunning } from "../rungate.js";
 import { logError } from "../log.js";
 import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
+import { consentCardFor } from "./consent.js";
 import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
@@ -68,19 +69,14 @@ const controllers = new Map<string, LiveStream>();
 /** The owner-facing disclosure Cairn shows before it may act on the
  * conversation without per-message approval. Main re-derives this from the
  * renderer's baseUrl+model and requires an exact match before connecting —
- * the renderer's copy is never trusted on its own. */
+ * the renderer's copy is never trusted on its own. The sentences live in
+ * `consent.ts`, pure, so the unit suite pins them without booting the app. */
 export function conductorConsentCard(baseUrl: string, model: string): ConductorConsentCard {
-  return {
-    provider: new URL(baseUrl).host,
-    baseUrl,
-    model,
-    data: "Your messages, this project's task records (PROJECT, the work log, recent briefs and reports), a summary of recent saved changes (the branch name and latest commit titles), and project file names. Never file contents. Never credentials. Cairn keeps conversation memory in a .cairn folder inside your project, kept out of git.",
-    cost: "Pay-as-you-go on your provider account. Conversation runs without per-message approval while connected. After a task Cairn dispatches from chat finishes, Cairn takes one short comment turn on the result; it bills like any other turn. Disconnect at any time to delete the stored key.",
-  };
+  return consentCardFor(baseUrl, model);
 }
 
 function sameCard(a: ConductorConsentCard, b: ConductorConsentCard): boolean {
-  return a.provider === b.provider && a.baseUrl === b.baseUrl && a.model === b.model && a.data === b.data && a.cost === b.cost;
+  return a.provider === b.provider && a.baseUrl === b.baseUrl && a.model === b.model && a.data === b.data && a.cost === b.cost && a.checkbox === b.checkbox;
 }
 
 export function status(): ConductorStatus {

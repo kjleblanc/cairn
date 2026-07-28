@@ -1,16 +1,23 @@
-/** Cairn's curated list of "brains" (OpenRouter models) shown on the
- * connect card's picker. Kept small and honest on purpose: three choices
- * plus a "Custom…" escape hatch, not an exhaustive catalog.
+/** Cairn's curated list of "brains" shown on the connect card's picker. Kept
+ * small and honest on purpose: a few choices plus a "Custom…" escape hatch,
+ * not an exhaustive catalog.
  *
- * `id` is the OpenRouter model id, checked directly against the public,
- * keyless catalog (`GET https://openrouter.ai/api/v1/models`) on 2026-07-24
- * before shipping. If a later provider catalog change retires one of these
- * ids, the connect flow still works — "Custom…" always accepts any model
- * string — but the curated entry itself would need a follow-up task. */
+ * Entries without a `baseUrl` are OpenRouter model ids, checked directly
+ * against the public, keyless catalog (`GET https://openrouter.ai/api/v1/models`)
+ * on 2026-07-24 before shipping. If a later provider catalog change retires
+ * one of these ids, the connect flow still works — "Custom…" always accepts
+ * any model string — but the curated entry itself would need a follow-up
+ * task.
+ *
+ * An entry MAY carry its own `baseUrl` when the seat is not OpenRouter. The
+ * Kimi subscription entry's endpoint, fixed `kimi-for-coding` model id, key
+ * source, and membership-quota billing were verified against Kimi's Help
+ * Center and Kimi Code Docs on 2026-07-28. */
 export interface Body {
   id: string;
   name: string;
   blurb: string;
+  baseUrl?: string;
   recommended?: true;
 }
 
@@ -30,6 +37,12 @@ export const BODIES: Body[] = [
     id: "openai/gpt-5-mini",
     name: "GPT-5 Mini",
     blurb: "OpenAI's small, quick model; capable for its size and about as cheap as the others here.",
+  },
+  {
+    id: "kimi-for-coding",
+    name: "Kimi — your subscription",
+    baseUrl: "https://api.kimi.com/coding/v1",
+    blurb: "Runs on your Kimi membership's included coding quota, not pay-as-you-go. Key from the Kimi Code Console; Cairn cannot see your quota.",
   },
 ];
 
