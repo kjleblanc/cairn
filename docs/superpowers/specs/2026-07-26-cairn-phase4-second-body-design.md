@@ -395,3 +395,109 @@ into a fixture is not that: the failure it must catch is a spec that forgets.
 The guard belongs where the SDK is actually reached — fail-closed in the
 module that imports it, not at one call site that a future second call site
 would bypass — and a test must be able to fail when it is removed.
+
+## Amendment 2026-07-27 (third) — The types are not the behaviour
+
+The plan was rewritten against both amendments above and reviewed again. This
+round's findings came from reading `sdk.mjs` — the SDK's *implementation* —
+rather than `sdk.d.ts`, and three of them contradict what the previous
+amendment established from the declarations alone.
+
+**That is the finding underneath the findings.** This design has twice been
+built on the SDK's type declarations, and twice been wrong in ways that were
+invisible there: an option documented as meaningful that emits no flag, and
+two flags that exist with no counterpart in the design at all. A declared
+option is a promise about a shape, not about a behaviour. Nothing below may
+be extended by inference from types again.
+
+Verified 2026-07-27 by reading `sdk.mjs` at 0.3.220.
+
+### Correction: `skills: []` does nothing
+
+The second amendment named `skills: []` a load-bearing pin alongside
+`settingSources: []` and `tools: []`. It is not. **There is no `--skills`
+flag in `sdk.mjs` at all**; the option only ever appends `Skill(...)` entries
+to `allowedTools`, so an empty array contributes nothing and is byte-identical
+to omitting the option. Any test asserting `options.skills` deep-equals `[]`
+passes whether or not the containment exists.
+
+`--tools` and `--setting-sources=` **do** reach the CLI's argv, so those two
+pins are real. There are two load-bearing options, not three, and every claim
+this design makes about skill inheritance rests on `tools: []` alone.
+
+### Two options this design never considered, both required
+
+**`strictMcpConfig: true`.** `settingSources: []` does not gate MCP servers
+reached through project `.mcp.json`, user settings, plugins, or agent
+frontmatter. `--strict-mcp-config` is the only lever `sdk.mjs` exposes for
+that, and it is emitted only when the option is truthy. Without it the
+conductor — which has never had tools and must not acquire them — can reach
+whatever MCP servers the owner's machine happens to define.
+
+**`persistSession: false`.** `--no-session-persistence` is emitted only when
+the option is explicitly `false`. Left at its default, the CLI writes every
+conductor turn — the constitution, the whole briefing, the owner's messages,
+the replies — to a resumable transcript under the owner's
+`~/.claude/projects/`. That is a second at-rest copy of project data outside
+the `.cairn` folder the consent card names, in a location the owner was never
+told about. Either persistence is turned off, or the data sentence changes to
+say where conversation is written. Turning it off is the decision here; the
+conductor is a single-turn body and has no use for a resumable session.
+
+### Correction: the fake-lane guard was inverted
+
+The second amendment asked for a fail-closed guard. The plan implemented it as
+"throw when `CAIRN_FAKE_CLAUDE=1`", which is fail-**open**: it fires when a
+suite has remembered the switch and stands aside when a suite forgets, which
+is the only case that matters. `conductor.spec.ts`'s `baseEnv()` spreads
+`process.env` and never sets it.
+
+**The guard keys on a positive test marker, not on the fake switch.** An
+end-to-end run sets a marker the app can see; the real body refuses to be
+constructed whenever that marker is present and the fake switch is not. A
+test asserts the refusal, so deleting the guard turns a suite red.
+
+### The pins must be verified where the CLI reads them
+
+Decision 4 pins the turn to the owner's installed Claude Code — 2.1.202 on
+this machine — while the SDK composes flags for the 2.1.220 binary it ships.
+Every pin in the implementation plan asserts on the JavaScript `Options`
+object handed to `query()`, and none on the argv the CLI actually receives or
+on what the CLI does with it. So all of this design's isolation guarantees
+could be silently absent against the owner's own binary with every test green.
+
+Option-level assertions stay — they are cheap and they catch a dropped line.
+They are no longer sufficient on their own.
+
+### Therefore: the phase opens with a spike
+
+No implementation task may be written against an inference. Phase 4's first
+task is a throwaway experiment, run once, whose only product is recorded
+fact:
+
+- Does 2.1.202 accept `--tools ""` and `--setting-sources=`, or ignore them?
+  What is the observable difference in a turn's available tools?
+- Does `pathToClaudeCodeExecutable` accept a Windows `.cmd` shim? The owner's
+  install is `claude`, `claude.cmd`, `claude.ps1` with no `.exe`, so this is
+  the case that will actually be hit.
+- What argv does the CLI receive, exactly?
+- Does `--strict-mcp-config` suppress a project `.mcp.json`, and does
+  `--no-session-persistence` prevent the `~/.claude/projects/` write?
+
+**The spike makes real calls against the owner's plan, so it is the owner's
+to authorise, and the authorisation is given outside the agent loop.** A task
+that solicits and receives approval inside its own execution is not an
+approval gate. The spike task stops, hands back, and waits.
+
+Its findings amend this spec before the tasks that depend on them are
+written.
+
+### Open for the owner: redistribution
+
+`@anthropic-ai/claude-agent-sdk` ships under "© Anthropic PBC. All rights
+reserved." together with eight platform CLI binaries, and `asar: false`
+packaging would place them unarchived inside Cairn's MIT-licensed installer —
+even though Decision 4 guarantees they are never the binary that runs. This
+is a distribution question rather than a technical one, and it belongs with
+the question Decision 2 already defers: whether to ask Anthropic before
+Phase 5 puts Cairn in front of anyone who is not the owner.
