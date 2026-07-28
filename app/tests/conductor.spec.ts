@@ -1,4 +1,5 @@
-import { _electron as electron, expect, test, type Page } from "@playwright/test";
+import { _electron as electron, expect, type Page } from "@playwright/test";
+import { test } from "./fixtures/isolated-profile";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

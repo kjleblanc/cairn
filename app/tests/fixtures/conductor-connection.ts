@@ -3,11 +3,17 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 /**
- * The provider connection lives in the app's real per-user settings folder
- * (Electron resolves it through the OS; it can't be redirected from a test —
- * the same constraint projects.spec.ts documents for the projects registry),
- * so a spec that touches it has to snapshot the file and put it back
- * byte-for-byte.
+ * The provider connection lives in the app's per-user settings folder.
+ * Every spec now runs against a THROWAWAY copy of that folder — see
+ * `fixtures/isolated-profile.ts`, which sets the app's own
+ * `CAIRN_TEST_USER_DATA` seam for the whole file — so `conductorFile()`
+ * resolves there first and the owner's real connection is never read,
+ * detached, or restored by a test at all.
+ *
+ * This snapshot pair stays as the second line of defense: if a spec is
+ * ever run WITHOUT the isolated profile (a direct launch, a future config
+ * change), the detach/restore below still protects the real file, and the
+ * re-entrancy throw still fails loudly instead of deleting it.
  *
  * Ported VERBATIM from `conductor.spec.ts`'s own local helper (Phase 3 Task 9);
  * the only edit is the `export` keyword.

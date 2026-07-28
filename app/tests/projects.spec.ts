@@ -1,4 +1,5 @@
-import { _electron as electron, expect, test } from "@playwright/test";
+import { _electron as electron, expect } from "@playwright/test";
+import { test } from "./fixtures/isolated-profile";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -9,10 +10,12 @@ import { pathToFileURL } from "node:url";
 // track (the projects screen tells the truth about broken entries).
 //
 // The app's remembered-projects list is a plain JSON file in the app's settings
-// folder. Electron resolves that folder through the operating system, so it can't
-// be redirected from here. Instead, these tests snapshot the real file, seed a
-// clean list for a deterministic run, and restore the snapshot byte-for-byte in
-// afterAll — which Playwright runs even when a test fails.
+// folder. Every spec runs against a throwaway copy of that folder (see
+// fixtures/isolated-profile.ts), so `registryFile()` below resolves to the
+// throwaway file and the owner's real list is never touched. The
+// snapshot/seed/restore dance in this describe block therefore operates on the
+// throwaway file — belt and suspenders: it keeps this block deterministic even
+// if another spec one day shares the profile, and harmless if it never does.
 
 // Core is ESM and Playwright transpiles specs to CJS, so the scaffold runs in a
 // node subprocess instead of being imported here (same pattern as smoke.spec.ts).
