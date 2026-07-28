@@ -730,7 +730,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
   const terminalLine = session?.error
     ?? resultLine
     ?? (session?.result?.status === "connection-required"
-      ? "Codex's setup changed while you were deciding. Nothing was started or saved."
+      ? "No task was started, nothing was saved, and no AI was called."
       : "This task closed.");
   const dispatchRoute = dispatch?.route ?? null;
   const dispatchReady = dispatchRoute !== null && dispatchRoute.status === "ready" ? dispatchRoute : null;
