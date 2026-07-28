@@ -547,6 +547,53 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   const worker = town.locator(".town-node-worker");
   await expect(worker).toHaveCount(1);
   await expect(worker).toHaveAccessibleName(/Codex Exec worker, working on Change the page title/);
+
+  const groundBox = await town.locator(".town-square-ground").boundingBox();
+  const workerBox = await worker.boundingBox();
+  expect(groundBox).not.toBeNull();
+  expect(workerBox).not.toBeNull();
+  await win.mouse.move(workerBox!.x + workerBox!.width / 2, workerBox!.y + workerBox!.height / 2);
+  await win.mouse.down();
+  await win.mouse.move(groundBox!.x + groundBox!.width * 0.23, groundBox!.y + groundBox!.height * 0.68, { steps: 6 });
+  await win.mouse.up();
+  await expect(town.getByRole("button", { name: "Reset layout" })).toBeEnabled();
+
+  const saved = await win.evaluate((dir) => window.cairn.townLoad(dir), project);
+  expect(saved.ok).toBe(true);
+  if (!saved.ok) throw new Error(saved.message);
+  const savedPoint = saved.value.positions["worker:codex-exec"];
+  expect(savedPoint).toBeDefined();
+  expect(savedPoint!.x).toBeGreaterThanOrEqual(0);
+  expect(savedPoint!.x).toBeLessThanOrEqual(1);
+  expect(savedPoint!.y).toBeGreaterThanOrEqual(0);
+  expect(savedPoint!.y).toBeLessThanOrEqual(1);
+
+  await win.reload();
+  await expect(worker).toHaveCount(1);
+  const townBox = await town.boundingBox();
+  const townHeaderBox = await town.locator(".town-square-header").boundingBox();
+  expect(townBox).not.toBeNull();
+  expect(townHeaderBox).not.toBeNull();
+  expect(townHeaderBox!.x).toBeGreaterThanOrEqual(townBox!.x);
+  expect(townHeaderBox!.x + townHeaderBox!.width).toBeLessThanOrEqual(townBox!.x + townBox!.width + 1);
+  await expect.poll(async () => {
+    const ground = await town.locator(".town-square-ground").boundingBox();
+    const villager = await worker.boundingBox();
+    if (!ground || !villager) return false;
+    const centerX = villager.x + villager.width / 2;
+    const centerY = villager.y + villager.height / 2;
+    return Math.abs(centerX - (ground.x + ground.width * savedPoint!.x)) < 5
+      && Math.abs(centerY - (ground.y + ground.height * savedPoint!.y)) < 5;
+  }).toBe(true);
+
+  await win.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => worker.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s");
+  await town.getByRole("button", { name: "Reset layout" }).click();
+  await expect.poll(async () => {
+    const state = await win.evaluate((dir) => window.cairn.townLoad(dir), project);
+    return state.ok ? Object.keys(state.value.positions).length : -1;
+  }).toBe(0);
+
   await worker.focus();
   await win.keyboard.press("Enter");
   const workerDetail = town.getByRole("complementary", { name: "Codex Exec worker details" });

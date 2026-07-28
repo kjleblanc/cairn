@@ -124,6 +124,24 @@ test.describe("remembered projects: load, switch, track", () => {
     await win.getByRole("button", { name: "Collapse project rail" }).click();
     await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
     await win.getByRole("button", { name: "Expand project rail" }).click();
+
+    const divider = win.getByRole("separator", { name: "Resize chat and town" });
+    await expect(divider).toHaveAttribute("aria-valuenow", "620");
+    await divider.focus();
+    await win.keyboard.press("ArrowRight");
+    await expect(divider).toHaveAttribute("aria-valuenow", "644");
+    await expect.poll(async () => {
+      const state = await win.evaluate((dir) => window.cairn.townLoad(dir), projB);
+      return state.ok ? state.value.dividerWidth : -1;
+    }).toBe(644);
+
+    await win.locator(".rail-project-select", { hasText: "Alpha" }).click();
+    await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
+    await expect(divider).toHaveAttribute("aria-valuenow", "620");
+    await win.locator(".rail-project-select", { hasText: "Beta" }).click();
+    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
+    await expect(divider).toHaveAttribute("aria-valuenow", "644");
+
     await win.setViewportSize({ width: 900, height: 720 });
     await expect(win.getByRole("tab", { name: "Chat" })).toBeVisible();
     await win.getByRole("tab", { name: "Town" }).click();

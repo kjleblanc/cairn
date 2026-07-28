@@ -5,6 +5,8 @@ import type {
   ConductorStreamSnapshot,
   RecentProject,
   RunSessionSnapshot,
+  TownPoint,
+  TownPresentationState,
 } from "../../shared/ipc";
 import { cairn } from "../api";
 import { ProjectRail } from "../components/ProjectRail";
@@ -17,11 +19,8 @@ import { TaskRun } from "./TaskRun";
 type CenterView = "chat" | "dashboard" | "task";
 type NarrowTab = "chat" | "town";
 
-const DIVIDER_KEY = "cairn.workspace.chatWidth";
-
-function savedChatWidth(): number {
-  const value = Number(localStorage.getItem(DIVIDER_KEY));
-  return Number.isFinite(value) && value >= 420 && value <= 860 ? value : 620;
+function defaultTownPresentation(): TownPresentationState {
+  return { version: 1, positions: {}, dividerWidth: 620 };
 }
 
 export function Workspace({
@@ -50,10 +49,13 @@ export function Workspace({
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([initialDir]));
   const [manualExpansion, setManualExpansion] = useState<Set<string>>(() => new Set());
-  const [chatWidth, setChatWidth] = useState(savedChatWidth);
+  const [townPresentation, setTownPresentation] = useState<TownPresentationState>(defaultTownPresentation);
+  const [chatWidth, setChatWidth] = useState(620);
   const [error, setError] = useState<string | null>(null);
   const activeDirRef = useRef(activeDir);
+  const townPresentationRef = useRef(townPresentation);
   activeDirRef.current = activeDir;
+  townPresentationRef.current = townPresentation;
 
   const refreshProjects = useCallback(async () => {
     const list = await cairn.projectList();
@@ -80,7 +82,19 @@ export function Workspace({
   useEffect(() => {
     setTownTask(null);
     setTownStream(null);
+    const empty = defaultTownPresentation();
+    setTownPresentation(empty);
+    setChatWidth(empty.dividerWidth);
     void refreshActiveRuntime(activeDir);
+    void cairn.townLoad(activeDir).then((response) => {
+      if (activeDirRef.current !== activeDir) return;
+      if (!response.ok) {
+        setError(response.message);
+        return;
+      }
+      setTownPresentation(response.value);
+      setChatWidth(response.value.dividerWidth);
+    });
   }, [activeDir, refreshActiveRuntime]);
 
   useEffect(() => {
@@ -155,19 +169,40 @@ export function Workspace({
     });
   }
 
+  function persistTownPresentation(dir: string, state: TownPresentationState): void {
+    setTownPresentation(state);
+    townPresentationRef.current = state;
+    void cairn.townSave(dir, state).then((response) => {
+      if (activeDirRef.current === dir && !response.ok) setError(response.message);
+    });
+  }
+
+  function maxChatWidth(): number {
+    const width = document.querySelector<HTMLElement>(".workspace-content")?.getBoundingClientRect().width ?? 1188;
+    return Math.max(420, Math.min(860, width - 328));
+  }
+
+  function saveChatWidth(width: number, dir = activeDirRef.current): void {
+    const bounded = Math.max(420, Math.min(maxChatWidth(), width));
+    setChatWidth(bounded);
+    persistTownPresentation(dir, { ...townPresentationRef.current, dividerWidth: bounded });
+  }
+
   function beginResize(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
+    const resizeDir = activeDirRef.current;
     const startX = event.clientX;
     const startWidth = chatWidth;
+    const maximum = maxChatWidth();
     const move = (next: PointerEvent) => {
-      const width = Math.min(860, Math.max(420, startWidth + next.clientX - startX));
+      const width = Math.min(maximum, Math.max(420, startWidth + next.clientX - startX));
       setChatWidth(width);
     };
     const finish = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", finish);
-      setChatWidth((width) => {
-        localStorage.setItem(DIVIDER_KEY, String(width));
+      if (activeDirRef.current === resizeDir) setChatWidth((width) => {
+        persistTownPresentation(resizeDir, { ...townPresentationRef.current, dividerWidth: width });
         return width;
       });
     };
@@ -221,10 +256,22 @@ export function Workspace({
             {center}
           </section>
           <div className="workspace-divider" role="separator" aria-label="Resize chat and town"
-            aria-orientation="vertical" onPointerDown={beginResize} />
+            aria-orientation="vertical" aria-valuemin={420} aria-valuemax={maxChatWidth()}
+            aria-valuenow={Math.round(chatWidth)} tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              saveChatWidth(chatWidth + (event.key === "ArrowRight" ? 24 : -24));
+            }}
+            onPointerDown={beginResize} />
           <section className="workspace-town-pane" aria-label="Town square">
             <TownSquare projectName={projectStatus.facts.name || "Project"}
               task={townTask} stream={townStream}
+              positions={townPresentation.positions}
+              onPositionsChange={(positions: Record<string, TownPoint>) => {
+                const state = { ...townPresentationRef.current, positions };
+                persistTownPresentation(activeDirRef.current, state);
+              }}
               onFocusChat={focusChat}
               onOpenRun={() => {
                 setCenterView("task");

@@ -1,26 +1,32 @@
-import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
-import type { ConductorStreamSnapshot, RunSessionSnapshot } from "../../shared/ipc";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
+import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../../shared/ipc";
+import { computeTownLayout, TOWN_BOUNDS, TOWN_CENTER } from "../town/layout";
 import { townModelFromRuntime, type TownEntity, type TownRelationship } from "../town/model";
 import { TownDetail } from "./TownDetail";
 
-type Point = { x: number; y: number };
 type SelectionKey = { kind: "entity" | "relationship"; id: string };
 
-const CAIRN_POINT: Point = { x: 50, y: 43 };
-
-function entityPoints(entities: TownEntity[]): Map<string, Point> {
-  const workers = entities.filter((entity) => entity.kind === "worker");
-  const result = new Map<string, Point>([["cairn", CAIRN_POINT]]);
-  workers.forEach((worker, index) => {
-    const angle = workers.length === 1 ? 0.18 : -Math.PI / 2 + (index / workers.length) * Math.PI * 2;
-    result.set(worker.id, { x: 50 + Math.cos(angle) * 31, y: 43 + Math.sin(angle) * 26 });
-  });
-  if (entities.some((entity) => entity.kind === "overflow")) result.set("worker-overflow", { x: 20, y: 67 });
-  return result;
+function pointStyle(point: TownPoint): CSSProperties {
+  return { left: `${point.x * 100}%`, top: `${point.y * 100}%` };
 }
 
-function pointStyle(point: Point): CSSProperties {
-  return { left: `${point.x}%`, top: `${point.y}%` };
+function relationshipControlPoint(from: TownPoint, to: TownPoint): TownPoint {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const distance = Math.max(0.001, Math.hypot(dx, dy));
+  const midpoint = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  return {
+    x: Math.max(TOWN_BOUNDS.minX, Math.min(TOWN_BOUNDS.maxX, midpoint.x - (dy / distance) * 0.14)),
+    y: Math.max(TOWN_BOUNDS.minY, Math.min(TOWN_BOUNDS.maxY, midpoint.y + (dx / distance) * 0.14)),
+  };
 }
 
 function selectedItem(
@@ -38,18 +44,34 @@ export function TownSquare({
   projectName,
   task,
   stream,
+  positions,
+  onPositionsChange,
   onFocusChat,
   onOpenRun,
 }: {
   projectName: string;
   task: RunSessionSnapshot | null;
   stream: ConductorStreamSnapshot | null;
+  positions: Record<string, TownPoint>;
+  onPositionsChange: (positions: Record<string, TownPoint>) => void;
   onFocusChat: () => void;
   onOpenRun: () => void;
 }) {
   const model = useMemo(() => townModelFromRuntime(task, stream), [task, stream]);
-  const points = useMemo(() => entityPoints(model.entities), [model.entities]);
+  const automaticPoints = useMemo(() => computeTownLayout(
+    model.entities.map((entity) => ({
+      id: entity.id,
+      radius: entity.kind === "cairn" ? 0.12 : 0.105,
+      fixed: entity.kind === "cairn" ? TOWN_CENTER : positions[entity.id],
+    })),
+    model.relationships.map((relationship) => ({ source: relationship.from, target: relationship.to })),
+  ), [model.entities, model.relationships, positions]);
   const [selectedKey, setSelectedKey] = useState<SelectionKey | null>(null);
+  const [dragPoints, setDragPoints] = useState<Record<string, TownPoint>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const dragRef = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(null);
+  const groundRef = useRef<HTMLDivElement>(null);
+  const points = useMemo(() => ({ ...automaticPoints, ...dragPoints }), [automaticPoints, dragPoints]);
   const selection = selectedItem(selectedKey, model.entities, model.relationships);
 
   useEffect(() => {
@@ -67,30 +89,74 @@ export function TownSquare({
     setSelectedKey({ kind: "relationship", id: relationship.id });
   }
 
+  function pointFromClient(clientX: number, clientY: number): TownPoint {
+    const bounds = groundRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.width === 0 || bounds.height === 0) return TOWN_CENTER;
+    return {
+      x: Math.max(TOWN_BOUNDS.minX, Math.min(TOWN_BOUNDS.maxX, (clientX - bounds.left) / bounds.width)),
+      y: Math.max(TOWN_BOUNDS.minY, Math.min(TOWN_BOUNDS.maxY, (clientY - bounds.top) / bounds.height)),
+    };
+  }
+
+  function beginDrag(event: PointerEvent<HTMLButtonElement>, entity: TownEntity): void {
+    if (entity.kind !== "worker" || event.button !== 0) return;
+    event.stopPropagation();
+    const drag = { id: entity.id, startX: event.clientX, startY: event.clientY, moved: false };
+    dragRef.current = drag;
+    setDraggingId(entity.id);
+    const move = (next: globalThis.PointerEvent) => {
+      if (!drag.moved && Math.hypot(next.clientX - drag.startX, next.clientY - drag.startY) < 4) return;
+      drag.moved = true;
+      const point = pointFromClient(next.clientX, next.clientY);
+      setDragPoints((current) => ({ ...current, [drag.id]: point }));
+    };
+    const finish = (next: globalThis.PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      dragRef.current = null;
+      setDraggingId(null);
+      if (!drag.moved) return;
+      const point = pointFromClient(next.clientX, next.clientY);
+      setDragPoints({});
+      onPositionsChange({ ...positions, [drag.id]: point });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish, { once: true });
+  }
+
   const hasWorker = model.entities.some((entity) => entity.kind === "worker");
+  const hasSavedPosition = Object.keys(positions).length > 0;
 
   return (
     <section className="town-square" aria-label={`${projectName} town square`} onClick={() => setSelectedKey(null)}>
       <header className="town-square-header">
-        <div><span>Active project</span><strong>{projectName}</strong></div>
-        <p aria-live="polite">{hasWorker ? "One live worker in the square" : "No live worker in the square"}</p>
+        <div className="town-project-label"><span>Active project</span><strong>{projectName}</strong></div>
+        <div className="town-header-actions">
+          <p aria-live="polite">{hasWorker ? "One live worker in the square" : "No live worker in the square"}</p>
+          <button type="button" disabled={!hasSavedPosition}
+            onClick={(event) => {
+              event.stopPropagation();
+              setDragPoints({});
+              onPositionsChange({});
+            }}>Reset layout</button>
+        </div>
       </header>
       <div className="town-skyglow" aria-hidden="true" />
       <div className="town-grid" aria-hidden="true" />
 
-      <div className="town-square-ground" aria-label="Town ground">
+      <div ref={groundRef} className="town-square-ground" aria-label="Town ground">
         <svg className="town-threads" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           {model.relationships.map((relationship) => {
-            const from = points.get(relationship.from) ?? CAIRN_POINT;
-            const to = points.get(relationship.to) ?? CAIRN_POINT;
-            return <line key={relationship.id} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+            const from = points[relationship.from] ?? TOWN_CENTER;
+            const to = points[relationship.to] ?? TOWN_CENTER;
+            return <line key={relationship.id} x1={from.x * 100} y1={from.y * 100} x2={to.x * 100} y2={to.y * 100} />;
           })}
         </svg>
 
         {model.relationships.map((relationship) => {
-          const from = points.get(relationship.from) ?? CAIRN_POINT;
-          const to = points.get(relationship.to) ?? CAIRN_POINT;
-          const midpoint = { x: (from.x + to.x) / 2, y: Math.min(86, (from.y + to.y) / 2 + 16) };
+          const from = points[relationship.from] ?? TOWN_CENTER;
+          const to = points[relationship.to] ?? TOWN_CENTER;
+          const midpoint = relationshipControlPoint(from, to);
           return (
             <button key={relationship.id} type="button"
               className="town-thread-target" style={pointStyle(midpoint)}
@@ -104,7 +170,7 @@ export function TownSquare({
         })}
 
         {model.entities.map((entity) => {
-          const point = points.get(entity.id) ?? CAIRN_POINT;
+          const point = points[entity.id] ?? TOWN_CENTER;
           const isSelected = selectedKey?.id === entity.id;
           if (entity.kind === "cairn") {
             return (
@@ -128,6 +194,8 @@ export function TownSquare({
                 style={pointStyle(point)}
                 aria-label={`${entity.name}, working on ${entity.currentTask}`}
                 aria-pressed={isSelected}
+                data-dragging={draggingId === entity.id || undefined}
+                onPointerDown={(event) => beginDrag(event, entity)}
                 onClick={(event) => selectEntity(event, entity)}>
                 <span className="town-villager-shape" aria-hidden="true">W</span>
                 <strong>{entity.name}</strong>

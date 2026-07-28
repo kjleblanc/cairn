@@ -15,6 +15,7 @@ import type {
   PushResult,
   RecentProject,
   Result,
+  TownPresentationState,
   UpdateInfo,
 } from "../shared/ipc.js";
 import * as conductorService from "./conductor/service.js";
@@ -22,6 +23,7 @@ import { logError, plainMessage } from "./log.js";
 import { pushExecute, pushPreview, pushRefusal } from "./push.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
 import { currentTaskSession } from "./tasks.js";
+import { readTownState, writeTownState } from "./townstore.js";
 
 function toResult<T>(context: string, fn: () => T): Result<T> {
   try {
@@ -136,6 +138,18 @@ export function registerProjectIpc(): void {
     }));
 
   ipcMain.handle("project:status", (_e, dir: string) => toResult("project:status", () => projectStatus(dir)));
+
+  ipcMain.handle("town:load", (_e, dir: string) =>
+    toResult("town:load", () => {
+      projectStatus(dir);
+      return readTownState(dir);
+    }));
+
+  ipcMain.handle("town:save", (_e, dir: string, state: TownPresentationState) =>
+    toResult("town:save", () => {
+      projectStatus(dir);
+      return writeTownState(dir, state);
+    }));
 
   ipcMain.handle("app:updateCheck", async (): Promise<UpdateInfo> => {
     const current = app.getVersion();

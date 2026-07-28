@@ -21,6 +21,12 @@ export type RecentProject = {
   tasks: ProjectTaskSummary[];
 };
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
+export type TownPoint = { x: number; y: number };
+export type TownPresentationState = {
+  version: 1;
+  positions: Record<string, TownPoint>;
+  dividerWidth: number;
+};
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 export type TaskActivityEvent = { dir: string; activity: SerialActivity };
@@ -146,6 +152,8 @@ export interface CairnApi {
   projectInit(input: InitInput): Promise<Result<ProjectStatus>>;
   projectStatus(dir: string): Promise<Result<ProjectStatus>>;
   projectForget(dir: string): Promise<Result<null>>;
+  townLoad(dir: string): Promise<Result<TownPresentationState>>;
+  townSave(dir: string, state: TownPresentationState): Promise<Result<TownPresentationState>>;
   taskRoute(dir: string, outcome: string, details: string, adapterId?: string): Promise<Result<TaskRoutePreview>>;
   taskRun(request: TaskRunRequest): Promise<Result<SerialRunResult>>;
   taskCancel(dir: string): Promise<Result<null>>;
