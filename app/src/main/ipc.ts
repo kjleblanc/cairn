@@ -21,6 +21,7 @@ import * as conductorService from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
 import { pushExecute, pushPreview, pushRefusal } from "./push.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
+import { currentTaskSession } from "./tasks.js";
 
 function toResult<T>(context: string, fn: () => T): Result<T> {
   try {
@@ -45,9 +46,57 @@ export function registerProjectIpc(): void {
     const recent: RecentProject[] = recentEntries().map(({ dir, lastOpened }) => {
       try {
         const s = projectStatus(dir);
-        return { dir, ok: true, name: s.facts.name, milestone: s.facts.milestone, stones: s.stones, lastOpened };
+        const task = currentTaskSession(dir);
+        const stream = conductorService.current(dir);
+        const activity = task?.phase === "running"
+          ? "working"
+          : stream !== null
+            ? "thinking"
+            : task?.phase === "closed"
+              ? "complete"
+              : "idle";
+        const tasks: RecentProject["tasks"] = [];
+        if (task?.phase === "running") {
+          tasks.push({ id: "running", label: "Running", summary: task.outcome, state: "running" });
+        }
+        if (s.unfinished) {
+          const label = String(s.unfinished.taskNumber).padStart(3, "0");
+          tasks.push({
+            id: `unfinished-${label}`,
+            label,
+            summary: s.unfinished.briefText.match(/^Requested outcome:\s*(.+)$/mi)?.[1] ?? "Retained task evidence",
+            state: "unfinished",
+          });
+        }
+        for (const row of [...s.log].reverse().slice(0, 6)) {
+          tasks.push({
+            id: `closed-${row.task}`,
+            label: row.task,
+            summary: row.summary || row.decision,
+            state: /^DONE$/i.test(row.outcome.trim()) ? "done" : "stopped",
+          });
+        }
+        return {
+          dir,
+          ok: true,
+          name: s.facts.name,
+          milestone: s.facts.milestone,
+          stones: s.stones,
+          lastOpened,
+          activity,
+          tasks,
+        };
       } catch {
-        return { dir, ok: false, name: path.basename(dir), milestone: "", stones: 0, lastOpened };
+        return {
+          dir,
+          ok: false,
+          name: path.basename(dir),
+          milestone: "",
+          stones: 0,
+          lastOpened,
+          activity: "idle",
+          tasks: [],
+        };
       }
     });
     return { recent, autoOpen: process.env.CAIRN_OPEN ?? null };

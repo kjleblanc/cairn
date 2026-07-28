@@ -29,7 +29,7 @@ export function recentEntries(): ProjectEntry[] {
 /** Move one project to the front with a fresh time; the others keep their own times. */
 export function touchProject(dir: string): void {
   const rest = recentEntries().filter((e) => e.dir !== dir);
-  save([{ dir, lastOpened: new Date().toISOString() }, ...rest].slice(0, 8));
+  save([{ dir, lastOpened: new Date().toISOString() }, ...rest]);
 }
 
 /** Drop one entry from the app's own remembered list. Never touches the project folder itself. */

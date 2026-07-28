@@ -3,20 +3,16 @@ import type { ProjectStatus } from "@cairn/core";
 import type { Preflight } from "../shared/ipc";
 import { cairn } from "./api";
 import { ErrorCard } from "./components/Ui";
-import { Chat } from "./screens/Chat";
-import { Dashboard } from "./screens/Dashboard";
 import { Picker } from "./screens/Picker";
 import { Settings } from "./screens/Settings";
-import { TaskRun } from "./screens/TaskRun";
 import { Welcome } from "./screens/Welcome";
+import { Workspace } from "./screens/Workspace";
 
 type View =
   | { name: "loading" }
   | { name: "welcome"; preflight: Preflight; hasRecent: boolean }
   | { name: "picker"; startNew: boolean; note?: string }
-  | { name: "dashboard"; dir: string; status: ProjectStatus }
-  | { name: "task"; dir: string }
-  | { name: "chat"; dir: string }
+  | { name: "workspace"; dir: string; status: ProjectStatus }
   | { name: "settings"; dir: string | null };
 
 export function App() {
@@ -26,12 +22,12 @@ export function App() {
 
   const openProject = useCallback(async (dir: string) => {
     const response = await cairn.projectOpen(dir);
-    if (response.ok) { setError(null); setView({ name: "dashboard", dir, status: response.value }); }
+    if (response.ok) { setError(null); setView({ name: "workspace", dir, status: response.value }); }
     else setError(response.message);
   }, []);
 
-  // A governed project boots straight into chat (0.1.0's home view); the
-  // dashboard stays one click away behind chat's own back control. On
+  // A governed project boots into the persistent workspace with Chat selected.
+  // The dashboard stays inside that workspace behind chat's own back control. On
   // failure, autoOpen (an explicit CAIRN_OPEN target) surfaces the error
   // overlay, while a stale last-recent entry falls back to the picker with
   // a plain note instead of a dead end.
@@ -41,14 +37,14 @@ export function App() {
     const list = await cairn.projectList();
     if (list.autoOpen) {
       const response = await cairn.projectOpen(list.autoOpen);
-      if (response.ok) { setError(null); setView({ name: "chat", dir: list.autoOpen }); }
+      if (response.ok) { setError(null); setView({ name: "workspace", dir: list.autoOpen, status: response.value }); }
       else setError(response.message);
       return;
     }
     const last = list.recent[0];
     if (last) {
       const response = await cairn.projectOpen(last.dir);
-      if (response.ok) { setView({ name: "chat", dir: last.dir }); return; }
+      if (response.ok) { setView({ name: "workspace", dir: last.dir, status: response.value }); return; }
       setView({ name: "picker", startNew: false, note: `Cairn couldn't reopen ${last.name || "your last project"} — the folder may have moved or lost its rulebook.` });
       return;
     }
@@ -72,22 +68,13 @@ export function App() {
       case "picker": return <Picker startNew={view.startNew} note={view.note ?? null}
         onOpen={(dir) => void openProject(dir)}
         onOpenFolder={() => void pickAndOpen()}
-        onCreated={(dir, status) => setView({ name: "dashboard", dir, status })}
+        onCreated={(dir, status) => setView({ name: "workspace", dir, status })}
         onSettings={() => setView({ name: "settings", dir: null })} />;
-      case "dashboard": return <Dashboard dir={view.dir} status={view.status}
-        onStartTask={() => setView({ name: "task", dir: view.dir })}
-        onTalkWithCairn={() => setView({ name: "chat", dir: view.dir })}
-        onSwitch={() => setView({ name: "picker", startNew: false })}
-        onOpenProject={(dir) => void openProject(dir)}
+      case "workspace": return <Workspace initialDir={view.dir} initialStatus={view.status}
+        demoAvailable={mock}
+        onOpenProjects={() => setView({ name: "picker", startNew: false })}
+        onCreateProject={() => setView({ name: "picker", startNew: true })}
         onSettings={() => setView({ name: "settings", dir: view.dir })} />;
-      case "task": return <TaskRun dir={view.dir} demoAvailable={mock} onBack={() => void openProject(view.dir)} />;
-      // Chat dispatches inline — it no longer hands an outcome to the task
-      // screen to be re-typed and re-routed, so there is no prefill here.
-      // `onOpenRun` is navigation only, for the status strip's link to the
-      // run's full activity: it seeds nothing, and the run screen reattaches
-      // to the same main-process session either way.
-      case "chat": return <Chat dir={view.dir} onBack={() => void openProject(view.dir)}
-        onOpenRun={() => setView({ name: "task", dir: view.dir })} />;
       case "settings": return <Settings onBack={() => view.dir ? void openProject(view.dir) : setView({ name: "picker", startNew: false })} />;
     }
   })();

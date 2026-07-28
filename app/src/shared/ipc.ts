@@ -2,7 +2,24 @@ import type { ProjectStatus, RouteResult, SerialActivity, SerialRunResult, Worke
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required" };
-export type RecentProject = { dir: string; ok: boolean; name: string; milestone: string; stones: number; lastOpened: string };
+export type ProjectActivity = "idle" | "thinking" | "working" | "complete";
+export type ProjectTaskState = "running" | "unfinished" | "done" | "stopped";
+export type ProjectTaskSummary = {
+  id: string;
+  label: string;
+  summary: string;
+  state: ProjectTaskState;
+};
+export type RecentProject = {
+  dir: string;
+  ok: boolean;
+  name: string;
+  milestone: string;
+  stones: number;
+  lastOpened: string;
+  activity: ProjectActivity;
+  tasks: ProjectTaskSummary[];
+};
 export type ProjectList = { recent: RecentProject[]; autoOpen: string | null };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };

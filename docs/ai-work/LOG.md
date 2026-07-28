@@ -91,3 +91,4 @@
 | 089 | 2026-07-28 | Standard | Applied | DONE | completed | Created the owner-approved Cairn town-square workspace design brief, ready for serial implementation scoping. (worker claim; files verified against Git by Cair… | NO |
 | 090 | 2026-07-27 | Standard | Applied | DONE | completed | Planned the town-square workspace as five serial implementation tasks, with real runtime identities for Cairn, workers, threads, overflow, and saved presentation state | NO |
 | 091 | 2026-07-27 | Standard | Applied | DONE | completed | Conductor replies now belong to project-keyed main-process state, survive navigation, and reattach with partial text; Electron E2E tests gained an isolated userData seam | NO |
+| 092 | 2026-07-27 | Standard | Applied | DONE | completed | Governed projects now open into one responsive rail, Chat, and Cairn-only town workspace with synchronized project context and preserved dashboard, run, picker, settings, and legacy paths | NO |

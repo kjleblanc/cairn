@@ -318,10 +318,11 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
  * The run then stays visible here: a status strip carries its stage, its
  * clock, a stop control, and the way to the run screen, and the composer
  * says plainly that it is closed until the run finishes. */
-export function Chat({ dir, onBack, onOpenRun }: {
+export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
   dir: string;
   onBack: () => void;
   onOpenRun: () => void;
+  embedded?: boolean;
 }) {
   const [status, setStatus] = useState<ConductorStatus | null>(null);
   const [stones, setStones] = useState(0);
@@ -739,9 +740,9 @@ export function Chat({ dir, onBack, onOpenRun }: {
   const dispatchWorker = dispatchReady !== null && !dispatchReady.recommended.capabilities.includes("offline-demo");
 
   return (
-    <div className="chat-screen">
-      <div className="chat-scene"><Scene fill stones={stones} justAdded={false} /></div>
-      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}`}>
+    <div className={`chat-screen${embedded ? " chat-screen-embedded" : ""}`}>
+      {!embedded ? <div className="chat-scene"><Scene fill stones={stones} justAdded={false} /></div> : null}
+      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " chat-column-embedded" : ""}`}>
         <div className="row spread chat-topbar">
           <Pill kind="quiet" onClick={onBack}>← Project home</Pill>
           {status?.connected ? (

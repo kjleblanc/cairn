@@ -31,9 +31,9 @@ function contractPath(): string {
 
 export function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
-    minWidth: 900,
+    width: 1320,
+    height: 820,
+    minWidth: 760,
     minHeight: 620,
     backgroundColor: "#fbf7ee",
     webPreferences: {

@@ -117,6 +117,20 @@ test.describe("remembered projects: load, switch, track", () => {
     // Chat is the home view; the dashboard is one click away.
     const projectHome = win.getByRole("button", { name: "← Project home" });
     await expect(projectHome).toBeVisible({ timeout: 30000 });
+    const railProjects = win.locator(".rail-project-select");
+    await expect(railProjects).toHaveCount(2);
+    await expect(railProjects.nth(0)).toContainText("Beta");
+    await expect(railProjects.nth(1)).toContainText("Alpha");
+    await win.getByRole("button", { name: "Collapse project rail" }).click();
+    await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+    await win.getByRole("button", { name: "Expand project rail" }).click();
+    await win.setViewportSize({ width: 900, height: 720 });
+    await expect(win.getByRole("tab", { name: "Chat" })).toBeVisible();
+    await win.getByRole("tab", { name: "Town" }).click();
+    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
+    await win.getByRole("tab", { name: "Chat" }).click();
+    await expect(win.getByRole("region", { name: "Chat workspace" })).toBeVisible();
+    await win.setViewportSize({ width: 1320, height: 820 });
     await projectHome.click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
     await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
@@ -125,9 +139,11 @@ test.describe("remembered projects: load, switch, track", () => {
     // plus an "All projects" entry; one click lands on Alpha's dashboard.
     await win.getByRole("button", { name: "Switch project" }).click();
     await expect(win.getByRole("button", { name: "All projects" })).toBeVisible();
-    const alphaItem = win.getByRole("button", { name: /Alpha/ });
+    const alphaItem = win.locator(".switcher-item", { hasText: "Alpha" });
     await expect(alphaItem).toContainText("0 stones");
     await alphaItem.click();
+    await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
+    await win.getByRole("button", { name: "← Project home" }).click();
     await expect(win.getByRole("heading", { name: "Alpha" })).toBeVisible();
     await app.close();
   });
@@ -170,6 +186,8 @@ test.describe("remembered projects: load, switch, track", () => {
 
     // The screen is still a working picker: Beta opens from here.
     await win.getByText("Beta", { exact: true }).click();
+    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
+    await win.getByRole("button", { name: "← Project home" }).click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
     await app.close();
   });
