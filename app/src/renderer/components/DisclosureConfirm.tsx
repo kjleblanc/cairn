@@ -17,22 +17,22 @@ export function DisclosureConfirm({ disclosure, label, confirmed, onConfirmedCha
 }) {
   return (
     <>
-      <p>This confirmation applies only to this task.</p>
+      <p>You are approving this one task only.</p>
       <div className="route-facts">
         <p><span>Provider</span><strong>{disclosure.provider}</strong></p>
         <p><span>Model</span><strong>{disclosure.model}</strong></p>
         <p><span>Target project</span><strong className="mono">{disclosure.project}</strong></p>
         <p><span>Task</span><strong className="disclosure-task">{disclosure.task}</strong></p>
       </div>
-      <p><strong>Data sent or readable:</strong> {disclosure.data}</p>
-      <p><strong>Cost/quota boundary:</strong> {disclosure.quota}</p>
+      <p><strong>What gets sent or can be read:</strong> {disclosure.data}</p>
+      <p><strong>Cost or usage limit:</strong> {disclosure.quota}</p>
       <label className="row" style={{ marginTop: 12 }}>
         <input
           type="checkbox"
           checked={confirmed}
           onChange={(event) => onConfirmedChange(event.target.checked)}
         />
-        <span>{`I confirm this one real ${label} call.`}</span>
+        <span>{`I approve this one real ${label} call.`}</span>
       </label>
     </>
   );

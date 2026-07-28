@@ -48,7 +48,7 @@ export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
       <p className="task-card-outcome">{block.outcome}</p>
       {block.details ? (
         <div className="task-card-details">
-          <p className="small muted task-card-details-label">Details (sent verbatim)</p>
+          <p className="small muted task-card-details-label">Your details (sent word-for-word)</p>
           <p className="task-card-details-text">{block.details}</p>
         </div>
       ) : null}

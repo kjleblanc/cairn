@@ -62,8 +62,8 @@ type PushFlow = {
 /** The two sentences the confirmation must carry, fixed here because they are
  * the disclosure itself: what the write exposes, and what can and cannot be
  * undone afterward. */
-const PUSH_PUBLICATION = "Pushing publishes these commits. On a public repository they become publicly visible.";
-const PUSH_RECOVERY = "A pushed commit can be reverted by a new commit. Publication itself cannot be recalled.";
+const PUSH_PUBLICATION = "Pushing publishes these saved snapshots. If your project is public, anyone can see them.";
+const PUSH_RECOVERY = "You can undo a pushed snapshot with a new one, but the publishing itself can't be taken back.";
 
 /** A plain count of local commits, whatever their origin — the word "verified"
  * never appears near it, because the envelope has not verified the owner's own
@@ -91,7 +91,7 @@ function pushAnnouncement(flow: PushFlow): string | null {
   // there is silence between the press and the outcome of the one irreversible
   // action on this screen, which is the stretch a listener most needs narrated.
   if (flow.phase === "pushing") {
-    return "Pushing. Cairn runs one plain git push — never a retry, never a force.";
+    return "Pushing now — one plain git push, no retries, no forcing.";
   }
   if (flow.phase === "settled" && flow.result) {
     return flow.result.ok ? flow.result.summary : flow.result.message;
@@ -104,7 +104,7 @@ function pushAnnouncement(flow: PushFlow): string | null {
   // branch's remote, and claiming "no longer ahead of origin" would assert
   // something Cairn just stopped being able to check.
   if (flow.phase === "gone") {
-    return "This branch no longer has an upstream to push to. Nothing was pushed.";
+    return "This branch isn't linked to an online copy anymore, so nothing was pushed.";
   }
   return null;
 }
@@ -187,7 +187,7 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
               * generic sentence — but it is labeled here, so nothing in it
               * reads as Cairn's own account of what happened. */}
             {gitsOwnWords ? (
-              <p className="small muted">The sentence above ends with git&apos;s own words about this failure, quoted as git reported them.</p>
+              <p className="small muted">The line above ends with git&apos;s own error message, quoted exactly as git said it.</p>
             ) : null}
           </>
         )}
@@ -204,7 +204,7 @@ function elapsedSince(startedAt: string, now: number): string {
 
 /** The one fixed sentence an ERROR card carries: the run threw, so nothing
  * about the workspace was verified and nothing may be claimed about it. */
-const ERROR_SENTENCE = "Cairn could not verify the workspace. This run needs inspection before the next task.";
+const ERROR_SENTENCE = "Cairn couldn't check your project, so nothing here is verified. Best to look at what happened before starting the next task.";
 
 /**
  * The envelope's own turn in the conversation, rendered from the card's
@@ -229,7 +229,7 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
 
   return (
     <div className="card result-card">
-      <p className="card-title">result card — written by Cairn's runtime, not by the conversation</p>
+      <p className="card-title">result card — checked by Cairn, not written by the AI chat</p>
       <p className="result-card-headline">
         <span className={`result-card-disposition result-card-${card.disposition.toLowerCase()}`}>{card.disposition}</span>
         {code ? <span className="result-card-code"> — {code}</span> : null}
@@ -243,27 +243,27 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
       {card.disposition !== "ERROR" && !wroteRecords ? (
         <>
           {card.evidenceSummary ? <p className="result-card-sentence">{card.evidenceSummary}</p> : null}
-          <p className="result-card-sentence">No task records or model call were created.</p>
+          <p className="result-card-sentence">No task was started, nothing was saved, and no AI was called.</p>
         </>
       ) : null}
 
       {card.disposition !== "ERROR" && wroteRecords ? (
         <ul className="result-card-facts">
-          {card.route ? <li>Route: {card.route.adapterLabel} — {card.route.provider} / {card.route.model}</li> : null}
+          {card.route ? <li>Who did the work: {card.route.adapterLabel} — {card.route.provider} / {card.route.model}</li> : null}
           {card.protectedIntact !== null ? (
-            <li>Protected starting work: {card.protectedIntact
-              ? "byte-identical"
-              : "CHANGED — the run stopped for this reason and the evidence was retained"}</li>
+            <li>Your starting work: {card.protectedIntact
+              ? "untouched"
+              : "CHANGED — the task stopped because of this, and the evidence was kept"}</li>
           ) : null}
           <li>
-            Files changed (from Git, not from claims):
+            Files changed (checked with Git, not taken on faith):
             {card.filesChanged.length === 0 ? " none" : (
               <ul className="result-card-files">
                 {card.filesChanged.map((path) => <li key={path}><span className="mono">{path}</span></li>)}
               </ul>
             )}
           </li>
-          <li>Commit: {card.commit ?? "none — stopped evidence is retained for inspection, never committed by Cairn"}</li>
+          <li>Saved snapshot (commit): {card.commit ?? "none — when a task stops, Cairn keeps the evidence for you but never saves it into your project's history"}</li>
           {/* Cairn's own disclosure that a worker touched Cairn's own owned
             * records and Cairn had to recover them. It is the loudest thing a
             * card can carry, so it is never abbreviated away. */}
@@ -271,10 +271,10 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
           {card.evidenceSummary ? <li>{card.evidenceSummary}</li> : null}
           {card.processFailure ? (
             <li>
-              Process failure: <span className="mono">{card.processFailure.code}</span>. Raw run evidence stays on
-              the owner&apos;s own disk at: {card.processFailure.debugPath
-                ?? "unavailable (the local debug directory could not be created)"}. It is never committed to the
-              repository.
+              The task process failed: <span className="mono">{card.processFailure.code}</span>. The raw evidence
+              stays on your own computer at: {card.processFailure.debugPath
+                ?? "unavailable (the folder for it could not be created)"}. It is never added to your project's
+              saved history.
             </li>
           ) : null}
         </ul>
@@ -282,14 +282,14 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
 
       {card.disposition !== "ERROR" && wroteRecords ? (
         <div className="result-card-claims">
-          <p className="small muted result-card-claims-label">The worker&apos;s account (claims, not verified by Cairn)</p>
+          <p className="small muted result-card-claims-label">What the worker says it did — Cairn hasn&apos;t checked this</p>
           {card.claims ? (
             <>
               <p className="result-card-claims-text">{card.claims.summary}</p>
-              <p className="small muted">Milestone movement, as the worker claims it: {card.claims.milestone}</p>
+              <p className="small muted">The worker says the milestone moved: {card.claims.milestone}</p>
             </>
           ) : (
-            <p className="result-card-claims-text">The worker returned no readable claims block.</p>
+            <p className="result-card-claims-text">The worker didn&apos;t leave a readable summary of what it did.</p>
           )}
         </div>
       ) : null}
@@ -298,7 +298,7 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
         <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
       </div>
       <p className="small mono result-card-path">
-        {recordsPath ?? "Any records this run retained are in this project's docs/ai-work."}
+        {recordsPath ?? "Anything this run kept is in your project's docs/ai-work folder."}
       </p>
     </div>
   );
@@ -699,7 +699,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
     if (dispatchToken.current !== token) return; // a newer dispatch owns the panel now
     if (!response.ok) { setDispatch({ ...request, phase: "confirm", error: response.message }); return; }
     if (response.value.status === "connection-required") {
-      setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex Exec readiness changed. No task records or model call were created." });
+      setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex's setup changed while you were deciding. Nothing was started or saved." });
       void refreshSession(); // this close leaves a closed session too — the strip must not keep showing it as running
       return;
     }
@@ -730,7 +730,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
   const terminalLine = session?.error
     ?? resultLine
     ?? (session?.result?.status === "connection-required"
-      ? "Codex Exec readiness changed. No task records or model call were created."
+      ? "Codex's setup changed while you were deciding. Nothing was started or saved."
       : "This task closed.");
   const dispatchRoute = dispatch?.route ?? null;
   const dispatchReady = dispatchRoute !== null && dispatchRoute.status === "ready" ? dispatchRoute : null;
@@ -782,24 +782,24 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
               ) : null}
               {dispatch ? (
                 <div className="card dispatch-panel">
-                  <p className="card-title">dispatch this task</p>
+                  <p className="card-title">start this task</p>
                   <p className="dispatch-outcome">{dispatch.outcome}</p>
                   {dispatch.details ? (
                     <div className="task-card-details">
-                      <p className="small muted task-card-details-label">Details (sent verbatim)</p>
+                      <p className="small muted task-card-details-label">Your details (sent word-for-word)</p>
                       <p className="task-card-details-text">{dispatch.details}</p>
                     </div>
                   ) : null}
                   {dispatch.phase === "running" ? (
-                    <p className="small muted">Cairn is running this task. Its records land in this project's docs/ai-work.</p>
+                    <p className="small muted">Cairn is working on this. Its notes are saved in your project's docs/ai-work folder.</p>
                   ) : (
                     <>
                       {dispatch.error ? <p className="dispatch-error">{dispatch.error}</p> : null}
-                      {dispatchRoute === null && !dispatch.error ? <p className="small muted">Finding a route…</p> : null}
+                      {dispatchRoute === null && !dispatch.error ? <p className="small muted">Choosing who will do the work…</p> : null}
                       {dispatchRoute?.status === "connection-required" ? (
                         <>
                           <p>{dispatchRoute.reason}</p>
-                          <p className="small muted">Install or connect Codex yourself through official Codex controls. Cairn does not open login, read credential files, or choose another provider.</p>
+                          <p className="small muted">Install or sign in to Codex yourself through Codex's own controls. Cairn never opens a login, reads passwords, or picks a different provider.</p>
                         </>
                       ) : null}
                       {dispatchReady && dispatch.disclosure ? (
@@ -866,7 +866,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
               </div>
             ) : null}
             {runActive ? (
-              <p className="small muted composer-closed">A task is running. The composer reopens when it finishes.</p>
+              <p className="small muted composer-closed">A task is running. You can type again when it finishes.</p>
             ) : null}
             <div className="chat-composer">
               <textarea value={composer} onChange={(e) => setComposer(e.target.value)}

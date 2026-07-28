@@ -122,7 +122,7 @@ test("connected Codex requires confirmation then completes one fake-process real
   expect(mismatched.ok).toBe(false);
   expect(existsSync(fakeCodex.marker)).toBe(false);
   expect(existsSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
-  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByLabel("I approve this one real Codex Exec call.").check();
   await expect(start).toBeEnabled();
   await start.click();
   await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
@@ -234,7 +234,7 @@ test("malformed Codex JSONL fails closed without exposing raw process output", a
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
   await win.getByRole("button", { name: "Find a route" }).click();
-  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByLabel("I approve this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
   await expect(win.getByText(/Cairn stopped this task safely and authored honest STOPPED records/)).toBeVisible();
@@ -262,7 +262,7 @@ test("missing worker claims show only bounded numeric Codex event evidence", asy
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Add one bounded diagnostic");
   await win.getByRole("button", { name: "Find a route" }).click();
-  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByLabel("I approve this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
   await expect(win.getByText(/Stopped safely: WORKER_CLAIMS_MISSING/)).toBeVisible();
@@ -305,7 +305,7 @@ test("the owner can stop a running worker and gets honest CANCELLED_BY_OWNER rec
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
   await win.getByRole("button", { name: "Find a route" }).click();
-  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByLabel("I approve this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   const stop = win.getByRole("button", { name: "Stop this task" });
   await expect(stop).toBeVisible({ timeout: 15_000 });
@@ -335,7 +335,7 @@ test("navigating away and back reattaches to the running worker and its finished
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
   await win.getByRole("button", { name: "Find a route" }).click();
-  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByLabel("I approve this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 15_000 });
   // Walk away mid-run and come back: the screen must reattach, not orphan.
@@ -361,7 +361,7 @@ test("a window reload mid-run reattaches instead of losing the result", async ()
   await win.getByRole("button", { name: "Start a task" }).click();
   await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
   await win.getByRole("button", { name: "Find a route" }).click();
-  await win.getByLabel("I confirm this one real Codex Exec call.").check();
+  await win.getByLabel("I approve this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 15_000 });
   await win.reload();

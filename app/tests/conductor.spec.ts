@@ -315,14 +315,14 @@ test("the envelope posts a DONE result card into the conversation, and the card 
 
   const card = win.locator(".result-card");
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await expect(card).toContainText("written by Cairn's runtime, not by the conversation");
+  await expect(card).toContainText("checked by Cairn, not written by the AI chat");
   await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
   await expect(card).toContainText("Task 001");
   // What changed is Git's answer, and it is labeled as Git's answer.
-  await expect(card).toContainText("Files changed (from Git, not from claims)");
+  await expect(card).toContainText("Files changed (checked with Git, not taken on faith)");
   await expect(card).toContainText("docs/ai-work/LOG.md");
   // The worker's own words only ever appear under a heading that calls them claims.
-  await expect(card).toContainText("The worker's account (claims, not verified by Cairn)");
+  await expect(card).toContainText("What the worker says it did — Cairn hasn't checked this");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
 
   // A reload throws away every scrap of renderer state. What comes back was
@@ -387,7 +387,7 @@ test("a task block with details shows a details section on the card", async () =
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
   await expect(taskCard).toContainText("Change the page title");
-  await expect(taskCard).toContainText("Details (sent verbatim)");
+  await expect(taskCard).toContainText("Your details (sent word-for-word)");
   await expect(taskCard).toContainText("74, 477, 256");
   await app.close();
 });
@@ -504,7 +504,7 @@ async function dispatchOneRealCall(win: Page, beforeStart?: () => void): Promise
   // card is derived by `taskRoute` from the same outcome and details the panel
   // shows, never retyped.
   await expect(panel).toContainText("Keep the counts 74, 477, 256 exactly.");
-  await panel.getByLabel("I confirm this one real Codex Exec call.").check();
+  await panel.getByLabel("I approve this one real Codex Exec call.").check();
   beforeStart?.();
   await panel.getByRole("button", { name: "Start one real Codex Exec call" }).click();
 }
@@ -650,7 +650,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // The composer says what is true instead of accepting a send the serial
   // gate would refuse.
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeDisabled();
-  await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toBeVisible();
+  await expect(win.getByText("A task is running. You can type again when it finishes.")).toBeVisible();
 
   // Only a started process incurs cost, so stop it once the real exec has
   // actually begun — same reason routing.spec waits on this marker.
@@ -666,7 +666,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(strip.locator(".run-strip-terminal")).toContainText("CANCELLED_BY_OWNER");
   await expect(strip.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
-  await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toHaveCount(0);
+  await expect(win.getByText("A task is running. You can type again when it finishes.")).toHaveCount(0);
   await expect(town.locator(".town-node-worker")).toHaveCount(0, { timeout: 15_000 });
   await expect(town.locator(".town-thread-target")).toHaveCount(0);
 
@@ -702,8 +702,8 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   await expect(card.locator(".result-card-disposition")).toHaveText("STOPPED");
   await expect(card).toContainText("CANCELLED_BY_OWNER");
   await expect(card).toContainText("Task 001");
-  await expect(card).toContainText("Commit: none — stopped evidence is retained for inspection, never committed by Cairn");
-  await expect(card).toContainText("The worker's account (claims, not verified by Cairn)");
+  await expect(card).toContainText("Saved snapshot (commit): none — when a task stops, Cairn keeps the evidence for you but never saves it into your project's history");
+  await expect(card).toContainText("What the worker says it did — Cairn hasn't checked this");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
   // The card carries no DONE anywhere, and the product change really did not land.
   await expect(card).not.toContainText("DONE");
@@ -738,14 +738,14 @@ test("a worker's claims render only inside the card's claims block, never as a v
   // The worker's own sentence and its milestone claim are on screen, and both
   // are inside the labeled claims container — not in the verified fact list.
   const claims = card.locator(".result-card-claims");
-  await expect(claims).toContainText("The worker's account (claims, not verified by Cairn)");
+  await expect(claims).toContainText("What the worker says it did — Cairn hasn't checked this");
   await expect(claims).toContainText("Added the visible result.");
-  await expect(claims).toContainText("Milestone movement, as the worker claims it: YES");
+  await expect(claims).toContainText("The worker says the milestone moved: YES");
   await expect(card.locator(".result-card-facts")).not.toContainText("Added the visible result.");
 
   // And the verified side is Git's, in the same card: the file the worker
   // actually created, listed under the from-Git label.
-  await expect(card.locator(".result-card-facts")).toContainText("Files changed (from Git, not from claims)");
+  await expect(card.locator(".result-card-facts")).toContainText("Files changed (checked with Git, not taken on faith)");
   await expect(card.locator(".result-card-files")).toContainText("visible.txt");
   expect(readFileSync(join(project, "visible.txt"), "utf8")).toBe("model-authored result\n");
   await app.close();
@@ -774,7 +774,7 @@ test("a reload mid-run reattaches the conversation's strip and shows the finishe
   await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 5_000 });
   await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/);
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeDisabled();
-  await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toBeVisible();
+  await expect(win.getByText("A task is running. You can type again when it finishes.")).toBeVisible();
 
   // The reattached strip carries the finish too, without the renderer that
   // dispatched it ever seeing the run's own answer.
@@ -815,7 +815,7 @@ test("a run that closes connection-required says so without inventing records", 
 
   const strip = win.locator(".run-strip");
   await expect(strip).toBeVisible({ timeout: 30_000 });
-  await expect(strip).toContainText("No task records or model call were created.", { timeout: 30_000 });
+  await expect(strip).toContainText("No task was started, nothing was saved, and no AI was called.", { timeout: 30_000 });
   await expect(strip).not.toContainText("docs/ai-work");
 
   // And the claim is true on disk: no process, no records, no row.
@@ -1136,8 +1136,8 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   // The count leads the effect, so an empty-message commit missing from the
   // subject list can never make the disclosure understate what publishes.
   await expect(pause).toContainText("this push publishes 1 commit");
-  await expect(pause).toContainText("Pushing publishes these commits. On a public repository they become publicly visible.");
-  await expect(pause).toContainText("A pushed commit can be reverted by a new commit. Publication itself cannot be recalled.");
+  await expect(pause).toContainText("Pushing publishes these saved snapshots. If your project is public, anyone can see them.");
+  await expect(pause).toContainText("You can undo a pushed snapshot with a new one, but the publishing itself can't be taken back.");
   // Nothing has left the machine on the first press.
   expect(aheadCount(project)).toBe("1");
 
