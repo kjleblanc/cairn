@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { ProjectStatus } from "@cairn/core";
-import type { ConductorStatus, ProjectActivity, RecentProject } from "../../shared/ipc";
+import type {
+  ConductorStatus,
+  ConductorStreamSnapshot,
+  RecentProject,
+  RunSessionSnapshot,
+} from "../../shared/ipc";
 import { cairn } from "../api";
 import { ProjectRail } from "../components/ProjectRail";
-import { TownSquarePlaceholder } from "../components/TownSquarePlaceholder";
+import { TownSquare } from "../components/TownSquare";
 import { ErrorCard } from "../components/Ui";
 import { Chat } from "./Chat";
 import { Dashboard } from "./Dashboard";
@@ -38,6 +43,8 @@ export function Workspace({
   const [projectStatus, setProjectStatus] = useState(initialStatus);
   const [projects, setProjects] = useState<RecentProject[]>([]);
   const [conductor, setConductor] = useState<ConductorStatus | null>(null);
+  const [townTask, setTownTask] = useState<RunSessionSnapshot | null>(null);
+  const [townStream, setTownStream] = useState<ConductorStreamSnapshot | null>(null);
   const [centerView, setCenterView] = useState<CenterView>("chat");
   const [narrowTab, setNarrowTab] = useState<NarrowTab>("chat");
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -58,13 +65,30 @@ export function Workspace({
     if (response.ok) setProjectStatus(response.value);
   }, []);
 
+  const refreshActiveRuntime = useCallback(async (dir = activeDirRef.current) => {
+    const [task, stream] = await Promise.all([cairn.taskCurrent(dir), cairn.conductorCurrent(dir)]);
+    if (activeDirRef.current !== dir) return;
+    setTownTask(task);
+    setTownStream(stream);
+  }, []);
+
   useEffect(() => {
     void refreshProjects();
     void cairn.conductorStatus().then(setConductor);
   }, [refreshProjects]);
 
   useEffect(() => {
-    const refresh = () => { void refreshProjects(); void refreshActiveStatus(); };
+    setTownTask(null);
+    setTownStream(null);
+    void refreshActiveRuntime(activeDir);
+  }, [activeDir, refreshActiveRuntime]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void refreshProjects();
+      void refreshActiveStatus();
+      void refreshActiveRuntime();
+    };
     const offTask = cairn.onTaskActivity(refresh);
     const offConductor = cairn.onConductorDelta(refresh);
     const timer = window.setInterval(refresh, 2_000);
@@ -73,16 +97,13 @@ export function Workspace({
       offConductor();
       window.clearInterval(timer);
     };
-  }, [refreshActiveStatus, refreshProjects]);
+  }, [refreshActiveRuntime, refreshActiveStatus, refreshProjects]);
 
   const orderedProjects = useMemo(() => {
     const active = projects.find((project) => project.dir === activeDir);
     const rest = projects.filter((project) => project.dir !== activeDir);
     return active ? [active, ...rest] : rest;
   }, [activeDir, projects]);
-
-  const activeProject = orderedProjects.find((project) => project.dir === activeDir) ?? null;
-  const activity: ProjectActivity = activeProject?.activity ?? "idle";
 
   async function selectProject(dir: string): Promise<void> {
     if (dir === activeDir) {
@@ -202,7 +223,13 @@ export function Workspace({
           <div className="workspace-divider" role="separator" aria-label="Resize chat and town"
             aria-orientation="vertical" onPointerDown={beginResize} />
           <section className="workspace-town-pane" aria-label="Town square">
-            <TownSquarePlaceholder projectName={projectStatus.facts.name || "Project"} activity={activity} />
+            <TownSquare projectName={projectStatus.facts.name || "Project"}
+              task={townTask} stream={townStream}
+              onFocusChat={focusChat}
+              onOpenRun={() => {
+                setCenterView("task");
+                setNarrowTab("chat");
+              }} />
           </section>
         </div>
       </section>

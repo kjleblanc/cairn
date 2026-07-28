@@ -525,6 +525,12 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
+  const town = win.getByRole("region", { name: "Conductor town square" });
+  await expect(town.getByRole("button", { name: "Cairn, ready" })).toBeVisible();
+  await expect(town.locator(".town-node-worker")).toHaveCount(0);
+  await expect(town.locator(".town-thread-target")).toHaveCount(0);
+  await town.getByRole("button", { name: "Cairn, ready" }).click();
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeFocused();
   await dispatchOneRealCall(win);
 
   // The run is visible where it was started: one of the four real stages, the
@@ -534,6 +540,26 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/, { timeout: 30_000 });
   await expect(strip.locator(".run-strip-elapsed")).toHaveText(/^\d+:\d\d$/);
   await expect(strip.getByRole("button", { name: "Open the run screen" })).toBeVisible();
+
+  // The town is a projection of this exact live worker session. Native buttons
+  // give Enter and Space the same selection behavior as a pointer, and empty
+  // ground clears only the town detail.
+  const worker = town.locator(".town-node-worker");
+  await expect(worker).toHaveCount(1);
+  await expect(worker).toHaveAccessibleName(/Codex Exec worker, working on Change the page title/);
+  await worker.focus();
+  await win.keyboard.press("Enter");
+  const workerDetail = town.getByRole("complementary", { name: "Codex Exec worker details" });
+  await expect(workerDetail).toContainText("Change the page title");
+  await expect(workerDetail).toContainText("codex-exec");
+
+  const thread = town.locator(".town-thread-target");
+  await expect(thread).toHaveCount(1);
+  await thread.focus();
+  await win.keyboard.press("Space");
+  await expect(town.getByRole("complementary", { name: "Task thread details" })).toContainText("Change the page title");
+  await town.locator(".town-square-ground").click({ position: { x: 6, y: 6 } });
+  await expect(town.locator(".town-detail")).toHaveCount(0);
 
   // Task 065: mark the live region's DOM node. A live region announces a
   // content change reliably; a region that appears already holding its message
@@ -565,6 +591,8 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(strip.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByText("A task is running. The composer reopens when it finishes.")).toHaveCount(0);
+  await expect(town.locator(".town-node-worker")).toHaveCount(0, { timeout: 15_000 });
+  await expect(town.locator(".town-thread-target")).toHaveCount(0);
 
   const report = readFileSync(join(project, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("CANCELLED_BY_OWNER");

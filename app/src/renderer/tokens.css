@@ -42,6 +42,14 @@
   --town-entity: light-dark(rgb(238 249 248 / 88%), rgb(17 29 39 / 94%));
   --town-ink: light-dark(#223f43, #deebea);
   --town-muted: light-dark(#5c797b, #8ca5a7);
+  --town-line: light-dark(rgb(53 105 108 / 24%), rgb(105 186 191 / 20%));
+  --town-header: light-dark(rgb(235 246 244 / 72%), rgb(10 20 29 / 72%));
+  --town-detail: light-dark(rgb(246 252 250 / 91%), rgb(13 25 33 / 92%));
+  --town-node-hover: light-dark(rgb(255 255 255 / 42%), rgb(50 90 99 / 17%));
+  --town-node-selected: light-dark(rgb(222 246 244 / 77%), rgb(28 64 72 / 48%));
+  --town-thread: light-dark(#458d96, #71d5ea);
+  --town-thread-bg: light-dark(rgb(237 249 247 / 88%), rgb(12 30 39 / 88%));
+  --town-focus: light-dark(#166b79, #9beafb);
   --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
   --r: 22px;
   --r-sm: 14px;

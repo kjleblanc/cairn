@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/main/conductor/constitution.ts", "src/main/conductor/taskblock.ts", "src/main/conductor/context.ts", "src/main/conductor/client.ts", "src/main/conductor/cardauth.ts", "src/main/conductor/store.ts", "src/main/conductor/relay.ts", "src/main/push.ts", "src/shared/ipc.ts", "src/renderer/bodies.ts", "tests-unit/**/*.ts"]
+  "include": ["src/main/conductor/constitution.ts", "src/main/conductor/taskblock.ts", "src/main/conductor/context.ts", "src/main/conductor/client.ts", "src/main/conductor/cardauth.ts", "src/main/conductor/store.ts", "src/main/conductor/relay.ts", "src/main/push.ts", "src/shared/ipc.ts", "src/renderer/bodies.ts", "src/renderer/town/model.ts", "tests-unit/**/*.ts"]
 }
