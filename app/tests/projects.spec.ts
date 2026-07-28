@@ -212,4 +212,24 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
     await app.close();
   });
+
+  test("the remembered list is bounded: a legacy oversized file reads cheap and shrinks on the next open", async () => {
+    // Task 110: seed 30 entries — a legacy file from before the bound — with
+    // the still-healthy Beta last. The read cap keeps the boot scan inside
+    // the renderer's poll (the Task 103 wedge started past this size), and
+    // opening Beta rewrites the file at the cap: 25 entries, Beta first.
+    const ghosts: Entry[] = Array.from({ length: 29 }, (_, i) => ({
+      dir: join(root, `ghost-${String(i).padStart(2, "0")}`),
+      lastOpened: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
+    }));
+    const seeded: Entry[] = [...ghosts, { dir: projB, lastOpened: new Date(Date.UTC(2026, 0, 2)).toISOString() }];
+    writeFileSync(registryFile(), JSON.stringify({ recent: seeded }, null, 2));
+
+    const app = await electron.launch({ args: ["."], env: { ...baseEnv(), CAIRN_OPEN: projB } });
+    const win = await app.firstWindow();
+    await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => readRegistry()[0]?.dir).toBe(projB);
+    expect(readRegistry()).toHaveLength(25);
+    await app.close();
+  });
 });
