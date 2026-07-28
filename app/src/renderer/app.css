@@ -313,8 +313,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
   color: var(--town-ink); background:
-    radial-gradient(circle at 50% 45%, rgb(77 180 190 / 13%), transparent 26%),
-    linear-gradient(160deg, var(--town-sky), var(--town-ground));
+    var(--garden-scanline),
+    var(--garden-stars),
+    radial-gradient(900px 520px at 50% -18%, var(--garden-cyan-glow), transparent 62%),
+    radial-gradient(1000px 560px at 55% 115%, var(--garden-amber-glow), transparent 60%),
+    linear-gradient(160deg, var(--garden-ink), var(--garden-deep));
 }
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;

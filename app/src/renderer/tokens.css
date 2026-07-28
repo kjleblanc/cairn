@@ -50,6 +50,33 @@
   --town-thread: light-dark(#458d96, #71d5ea);
   --town-thread-bg: light-dark(rgb(237 249 247 / 88%), rgb(12 30 39 / 88%));
   --town-focus: light-dark(#166b79, #9beafb);
+  /* The garden: the immersive workspace space is NIGHT in both themes, by
+     design (like a cinema) — cards and controls keep their paired tokens
+     above it. Calm, cozy digital-space palette: deep ink, cyan hologram,
+     warm amber hearth-light, rose for the serious moments. */
+  --garden-deep: #0a0f1f;
+  --garden-ink: #101731;
+  --garden-cyan: #6fe3ff;
+  --garden-cyan-dim: rgb(111 227 255 / 35%);
+  --garden-cyan-glow: rgb(111 227 255 / 9%);
+  --garden-amber: #ffc979;
+  --garden-amber-soft: rgb(255 201 121 / 5%);
+  --garden-amber-glow: rgb(255 201 121 / 7%);
+  --garden-rose: #ff9d9d;
+  --garden-star: rgb(232 236 248 / 45%);
+  --garden-star-dim: rgb(232 236 248 / 22%);
+  --garden-scanline: repeating-linear-gradient(0deg, transparent 0 3px, rgb(111 227 255 / 2.5%) 3px 4px);
+  --garden-stars:
+    radial-gradient(1.5px 1.5px at 12% 22%, var(--garden-star) 50%, transparent 51%),
+    radial-gradient(1px 1px at 34% 8%, var(--garden-star-dim) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 58% 16%, var(--garden-star) 50%, transparent 51%),
+    radial-gradient(1px 1px at 76% 32%, var(--garden-star-dim) 50%, transparent 51%),
+    radial-gradient(1px 1px at 22% 52%, var(--garden-star-dim) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 88% 58%, var(--garden-star) 50%, transparent 51%),
+    radial-gradient(1px 1px at 46% 68%, var(--garden-star-dim) 50%, transparent 51%),
+    radial-gradient(1px 1px at 68% 78%, var(--garden-star-dim) 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 8% 82%, var(--garden-star) 50%, transparent 51%),
+    radial-gradient(1px 1px at 30% 90%, var(--garden-star-dim) 50%, transparent 51%);
   --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
   --r: 22px;
   --r-sm: 14px;
