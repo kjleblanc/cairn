@@ -437,3 +437,100 @@ depends on both.
 
 Resolved by owner direction 2026-07-28: per-dispatch worker choice with
 Cairn's recommendation is Decision 6, no longer an open question.
+
+## Amendment 2026-07-28 (spike findings) — Task 106
+
+The spike ran the same day, on this machine, against Kimi Code CLI 0.29.2
+installed at `C:\Users\KenJL\.kimi-code\bin\kimi.exe` and signed into the
+owner's membership via OAuth. Seven small real model calls were made with
+the owner's approval (two print-mode, five ACP), all in a throwaway temp
+directory; free probes (no model call) answered the rest. Everything below
+is observed fact from that run; where the docs disagreed with observation,
+observation wins and the docs are named.
+
+**1. Worker transport (Q1, Q2).** The install is a native `kimi.exe` — no
+shim, the clean spawn case. `kimi -p` takes the prompt as an argv value
+only: piped stdin is not a prompt channel (observed: the argument parser
+errors locally, no call made). The worker therefore passes the task prompt
+as one argv element; at ~4 KB against the ~32 KB Windows command-line
+limit this is safe, and a length guard belongs in the adapter. Observed
+stream-json schema (pretty-printed here, one object per line on the wire):
+
+- `{"role":"assistant","content":"…"}` — a complete assistant message
+  (whole-message buffering, as documented).
+- `{"role":"assistant","tool_calls":[{"type":"function","id":"…",
+  "function":{"name":"Bash","arguments":"{…}"}}]}` — OpenAI-style tool
+  calls.
+- `{"role":"tool","tool_call_id":"…","content":"…"}` — tool results.
+- `{"role":"meta","type":"session.resume_hint","session_id":"…",…}` — a
+  trailing informational line. **Sessions are persisted under
+  `~/.kimi-code/sessions/` for print mode too** (the Phase 4
+  `persistSession` lesson: the disclosure's data sentence must name this
+  second at-rest copy).
+- No usage/token records were observed; the evidence map carries message
+  and tool-call counts, and token fields stay absent rather than zeroed
+  (absence is honest). No explicit terminal event: the terminal state is
+  process exit, and the claims carrier is the last assistant message. Exit
+  0 on success; provider/auth failure exit codes were not observed (no
+  failure occurred) and stay unverified. Provider retry notices (0.23.5)
+  were not triggered and stay unverified. Print mode ran shell with no
+  approval (auto policy), confirming the worker's sandbox story is the
+  CLI's own static deny rules, named in the disclosure.
+
+**2. Auth probe and detection (Q3, Q6).** `kimi acp` starts and answers
+`initialize` in ~500 ms. `authenticate` takes camelCase `methodId: "login"`
+(the docs' `method_id` spelling returns -32602 — recorded correction);
+signed-in returns `result: {}`, signed-out returns error
+`-32000 "Authentication required"`. The probe wrote nothing to the real
+session store. Detection can therefore stay output-free and fast.
+`kimi provider list` prints `managed:kimi-code type=kimi models=4
+source=oauth` — **`source=oauth` distinguishes the membership sign-in from
+an API-key configuration in one structured, secret-free line**, so the
+consent and disclosure sentences can state the billing truth precisely
+(upgrade from Decision 4's floor: the floor was "Cairn cannot tell"; now it
+can, and the worker pins `kimi-code/kimi-for-coding`, observed as the
+default model alias). What an API-key configuration prints was not observed
+(no second account) — the implementation treats anything that is not
+`source=oauth` as "not the membership" and words consent accordingly.
+Bonus observed fact: `kimi login` exists as a device-code subcommand
+(non-TUI sign-in path), and `kimi doctor` validates config files.
+
+**3. The body's shell hazard (Q5) — cleared, with one correction and one
+residual.** `session/new` returns `configOptions` including `mode` with
+values `default` / `plan` / `auto` / `yolo`; plan is described by the CLI
+itself as "Read-only planning; no tool execution." Observed in plan mode:
+the model's Bash attempt produced a `session/request_permission`
+reverse-RPC naming the exact command; the client's refusal cancelled it,
+**no execution occurred**, and the model ended the turn explaining that
+state-changing tools need approval. Observed in default mode:
+`fs/read_text_file` arrives as a reverse-RPC the client can refuse — the
+tool call then fails with the client's message and the turn ends cleanly.
+So the no-shell configuration exists: plan mode plus a client that refuses
+every permission and file request, fail-closed. The residual: one observed
+Bash attempt is not proof that *every* shell path requests permission in
+plan/default mode (static allow rules could auto-approve some commands).
+The implementation pins this at the wire in tests and the body treats any
+tool execution without a prior client permission request as a containment
+breach — abort and report, never tolerate.
+
+**4. Streaming and cancel (Q5).** `session/prompt` streams word-level
+`agent_message_chunk` notifications (696 chunks for one long reply) —
+typing-as-it-thinks is fully supported. **`session/cancel` is a
+notification, not a request**: sent with an `id` it returns -32601 (the
+docs' method-coverage table is right that it exists but not how); sent as a
+notification it stops the stream immediately and the prompt resolves with
+`stopReason: "cancelled"` (observed: 8 s into a ~40 s reply). The body
+holds the session and cancels this way; process kill remains the backstop.
+
+**5. Not observed, honestly recorded.** How the constitution rides an ACP
+session (no `systemPrompt` parameter was observed on `session/new`; the
+implementation verifies whether a config option, an agent file, or a
+prompt convention carries it — pinned at the wire in tests, not inferred).
+Usage/quota introspection outside the TUI. Subagent/background-task
+behavior of print mode in practice (0.24.2's stay-alive is documented but
+was not triggered). API-key-mode provider-list output. Failure exit codes.
+
+**Consequence for sequencing.** The hazard gate in Decision 5 is passed:
+3b (the body) may be planned. Both halves now proceed against observed
+fact: 3a on print-mode stream-json with argv prompts, 3b on ACP with plan
+mode, fail-closed refusals, notification cancel, and the breach-abort rule.
