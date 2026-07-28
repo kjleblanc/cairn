@@ -2,6 +2,10 @@
 
 Date: 2026-07-28
 Status: proposed, awaiting owner approval
+Amended 2026-07-28 (same day, owner direction): Decision 6 replaced — the
+owner is asked which worker to use on every dispatch, with Cairn
+recommending the best fit for the task; the first draft's silent Codex
+default is withdrawn.
 Scope: design only. This document changes no behavior. If approved, it
 governs the Level 3 implementation plan and its serial recorded tasks.
 
@@ -234,17 +238,42 @@ amendment Phase 4 identified (the "revoke deletes the stored credential"
 sentence is false for a body that stores none) — moved across all four
 mirrors in the implementation task, not here.
 
-### Decision 6 — Routing keeps Codex as the default; the owner picks Kimi explicitly
+### Decision 6 — Every dispatch asks the owner which worker to use, and Cairn recommends the best one for the task
 
-`routeTask` sorts by priority and accepts an override, and the app already
-surfaces candidates. The Kimi adapter registers with priority below Codex
-Exec's 100, so a machine with both keeps today's default and its every
-existing string and test, while the route surface offers Kimi as a named
-candidate the owner can choose per dispatch. Rejected: priority above Codex
-(changes the default for every existing user of the current flow), and an
-owner-level settings toggle (a second mechanism where the existing override
-already works; can be revisited when a third adapter makes per-dispatch
-choice tedious).
+Owner direction, 2026-07-28 (replacing this section's first draft, which
+kept Codex as a silent default). When more than one real worker adapter is
+connected, a proposed task does not carry a default worker: the dispatch
+conversation presents the connected candidates and the owner chooses one
+before the paid-call confirmation. Choosing is not a new approval gate —
+the existing confirmation card remains the single authorization moment, now
+re-derived for the adapter the owner actually picked (the routed-adapter
+disclosure seam already does exactly this); the choice itself rides the
+existing `overrideAdapterId` mechanism.
+
+**Cairn suggests, with its reason showing.** The recommendation comes from
+the conductor reading the proposed task (outcome plus the owner's details)
+against what it knows of each connected worker, stated in plain words —
+"Codex Exec, because this task is mostly edits in one small area" — as part
+of the task proposal, so the owner sees the suggestion and its reasoning at
+the moment of choice. Three honesty rules keep the suggestion in its place:
+
+- It is a claim, not a verification: labelled as Cairn's suggestion, never
+  as a fact about which worker will do better.
+- It may only name a currently connected candidate — a suggestion for a
+  worker that cannot run is a defect, not advice.
+- With no conductor connected, there is no suggestion: the surface lists
+  candidates in priority order and says so plainly, rather than dressing a
+  sort order up as a recommendation.
+
+Adapter `priority` remains as the fallback ordering (and as the whole
+behaviour when exactly one adapter is connected — a single-candidate
+machine asks nothing and changes nothing, keeping today's flow and its
+strings byte-identical). Rejected: a silent default (the owner's call);
+a settings-level preferred worker (goes stale against per-task fit — the
+very thing the suggestion is for); and a deterministic task-classifier
+recommender (rules Cairn authors about which model suits which task would
+be guesses wearing the appearance of knowledge; the conductor's stated
+reason can at least be argued with).
 
 ## The worker adapter, concretely (3a)
 
@@ -280,8 +309,12 @@ keeps a background task pending is ended by the watchdog and closed as
 App wiring is the seam's own: `detectedAdapters` in `app/src/main/tasks.ts`
 gains the Kimi probe alongside the Codex one, each adapter constructed only
 when its detection says connected, the route preview and run gates
-unchanged. The ModelRoute surface needs no new mechanism — candidates and
-override exist.
+unchanged. The dispatch surface does gain Decision 6's piece: when the
+route returns multiple connected candidates, the proposal shows them with
+the conductor's suggestion and reason (or the plain priority-ordered list
+when no conductor is connected), and the owner's pick feeds the existing
+`overrideAdapterId`; the confirmation card then re-derives from the picked
+adapter as it already does.
 
 ## The body, concretely (3b, gated)
 
@@ -324,9 +357,17 @@ recurse into a signed-in agent.
   4 lesson), and the no-shell configuration pinned *at the ACP wire* — what
   the session was actually told — not at a helper's return value.
 - **Existing suites as pins:** the Codex E2E and unit suites pass
-  unmodified with the second adapter registered (proving priority and
-  override change nothing by default), and the connect-kimi API-seat spec
-  passes unmodified (Level 2 is untouched).
+  unmodified with the second adapter registered (proving the single-
+  candidate flow is byte-identical by default), and the connect-kimi
+  API-seat spec passes unmodified (Level 2 is untouched).
+- **The ask and the suggestion (Decision 6):** with two connected fakes,
+  the dispatch surface shows both candidates, carries the conductor's
+  suggestion and reason, and dispatches the owner's pick through
+  `overrideAdapterId` (each adapter's own disclosure on the confirmation
+  card); with one candidate, nothing is asked; with a fake-body fixture
+  absent, the list falls back to priority order with no suggestion
+  language. A unit test pins that a suggestion naming an unconnected
+  adapter is refused.
 
 ## The spike comes first, and it is the owner's to authorize
 
@@ -393,6 +434,6 @@ depends on both.
    that spends real quota? (Each is its own approval at the moment of
    action, per the contract; this question only asks whether the route
    should reach those moments.)
-3. Decision 6 keeps Codex as the default worker when both are connected.
-   If the owner would rather be asked per dispatch, or prefers Kimi as the
-   default, that is a one-line change in the implementation plan.
+
+Resolved by owner direction 2026-07-28: per-dispatch worker choice with
+Cairn's recommendation is Decision 6, no longer an open question.
