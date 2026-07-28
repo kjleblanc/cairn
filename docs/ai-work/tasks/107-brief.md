@@ -1,4 +1,9 @@
-# Task 106 — refresh the public guides for two lanes (lane B's first task)
+# Task 107 — refresh the public guides for two lanes (lane B's first task)
+
+(Renumbered from 106: this task and the parallel session's Level 3 spike
+claimed 106 within the same minute — lane A's claim (`232a9ad`) reached
+`main` first, and this lane's merge detected the double-claim exactly as
+the contract's backstop prescribes. Their record stands; this one moved.)
 
 Requested outcome: `README.md`, `EVERYDAY-WORKFLOW.md`, and
 `MAINTAINERS.md` no longer describe the project as strictly one-chat

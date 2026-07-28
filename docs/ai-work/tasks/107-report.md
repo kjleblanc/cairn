@@ -1,4 +1,8 @@
-# Task 106 report — refresh the public guides for two lanes (lane B's first task)
+# Task 107 report — refresh the public guides for two lanes (lane B's first task)
+
+(Renumbered from 106 — see the brief. The double-claim was the contract's
+backstop working as designed on its first live test: detection at merge,
+renumber by the unlanded lane, no record rewritten.)
 
 ## What actually changed
 
