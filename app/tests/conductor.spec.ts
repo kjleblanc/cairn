@@ -2,7 +2,7 @@ import { _electron as electron, expect, test, type Page } from "@playwright/test
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { conductorFile, detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
@@ -11,12 +11,13 @@ import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
 // converse, the proposed-task card, offline dispatch, disk persistence, and
 // honest failure copy — against a scripted fixture instead of a real model.
 
-function scaffold(project: string): void {
+function scaffold(project: string, name = "Conductor"): void {
   const core = pathToFileURL(join(__dirname, "..", "node_modules", "@cairn", "core", "dist", "src", "index.js")).href;
   execFileSync(process.execPath, [
     "--input-type=module", "-e",
-    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: "Conductor", what: "w", who: "me", milestone: "see it" });`,
+    `import { initProject } from ${JSON.stringify(core)}; initProject(process.argv[1], { name: process.argv[2], what: "w", who: "me", milestone: "see it" });`,
     project,
+    name,
   ]);
   // The real-call lane commits its own records, which needs a git identity;
   // the mock lane commits nothing and is unaffected by this.
@@ -85,6 +86,7 @@ test.describe.configure({ mode: "serial" });
 
 let fixtureUrl = "";
 let fixtureClose: () => Promise<void> = async () => {};
+let setFixtureCommentaryDelay: (delayMs: number) => void = () => {};
 /** The raw body of the last commentary request the fixture answered — what the
  * provider would actually have been sent (repo task 080). */
 let lastCommentaryBody: () => string | null = () => null;
@@ -92,12 +94,18 @@ let lastCommentaryBody: () => string | null = () => null;
 test.beforeAll(async () => {
   const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
   const fixture = (await import(fixturePath)) as {
-    start: () => Promise<{ url: string; close: () => Promise<void>; lastCommentaryBody: () => string | null }>;
+    start: () => Promise<{
+      url: string;
+      close: () => Promise<void>;
+      lastCommentaryBody: () => string | null;
+      setCommentaryDelay: (delayMs: number) => void;
+    }>;
   };
   const server = await fixture.start();
   fixtureUrl = server.url;
   fixtureClose = server.close;
   lastCommentaryBody = server.lastCommentaryBody;
+  setFixtureCommentaryDelay = server.setCommentaryDelay;
 
   detachStoredConnection();
 });
@@ -111,6 +119,7 @@ test.afterAll(async () => {
 // previous test in this file left behind — each scenario connects for
 // itself, so order between them never matters.
 test.beforeEach(() => {
+  setFixtureCommentaryDelay(400);
   rmSync(conductorFile(), { force: true });
 });
 
@@ -520,11 +529,18 @@ function breakFakeCodex(marker: string): void {
 
 test("a dispatched run lives in the conversation: the strip names its stage, the composer closes, and Stop lands the terminal state", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-strip-"));
+  const otherProject = mkdtempSync(join(tmpdir(), "cairn-conductor-other-"));
+  const otherName = `Other ${basename(otherProject)}`;
   scaffold(project);
-  const fakeCodex = fakeCodexEnvironment(project, true, "slow");
+  scaffold(otherProject, otherName);
+  const fakeCodex = fakeCodexEnvironment(project, true, "town");
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
+  await win.evaluate(async ({ active, other }) => {
+    await window.cairn.projectOpen(other);
+    await window.cairn.projectOpen(active);
+  }, { active: project, other: otherProject });
   const town = win.getByRole("region", { name: "Conductor town square" });
   await expect(town.getByRole("button", { name: "Cairn, ready" })).toBeVisible();
   await expect(town.locator(".town-node-worker")).toHaveCount(0);
@@ -547,6 +563,19 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   const worker = town.locator(".town-node-worker");
   await expect(worker).toHaveCount(1);
   await expect(worker).toHaveAccessibleName(/Codex Exec worker, working on Change the page title/);
+
+  await win.locator(".rail-project-select", { hasText: otherName }).click();
+  const otherTown = win.getByRole("region", { name: `${otherName} town square` });
+  await expect(otherTown).toBeVisible();
+  await expect(otherTown.locator(".town-node-worker")).toHaveCount(0);
+  const runningProject = win.locator(".rail-project-select", { has: win.locator(".rail-activity-working") });
+  await expect(runningProject).toHaveCount(1);
+  await expect(runningProject).toContainText("Conductor");
+  await expect(runningProject).toContainText("worker task running");
+  const awaySession = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
+  expect(awaySession?.phase).toBe("running");
+  await runningProject.click();
+  await expect(worker).toHaveCount(1);
 
   const groundBox = await town.locator(".town-square-ground").boundingBox();
   const workerBox = await worker.boundingBox();
@@ -877,6 +906,7 @@ test("the conductor comments on the card the envelope just posted, and the comme
 // process refused, and the owner must never be told to stop something with no
 // Stop control on screen.
 test("a message sent while the comment streams is refused, leaves no phantom turn, and is not lost", async () => {
+  setFixtureCommentaryDelay(3_000);
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-comment-busy-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });

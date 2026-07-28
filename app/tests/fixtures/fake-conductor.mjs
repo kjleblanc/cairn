@@ -57,6 +57,7 @@ const COMMENTARY_SCRIPT = {
   parts: ["The card says", " this task finished DONE", ", and the report", " is in docs/ai-work."],
   delayMs: 400,
 };
+let commentaryDelayMs = COMMENTARY_SCRIPT.delayMs;
 
 function scriptFor(content) {
   if (content.includes("garble")) {
@@ -70,6 +71,12 @@ function scriptFor(content) {
   }
   if (content.includes("slowstream")) {
     return { parts: ["One moment", ", still thinking", ", almost there", ", done thinking."], delayMs: 500 };
+  }
+  // The sibling-chip regression needs a real, observable busy interval after
+  // this exact fixture answer. Keep the owner's words intact while making the
+  // local fake's timing deterministic even under a loaded full-suite run.
+  if (content.includes("plain redirect is enough")) {
+    return { parts: ["One moment", ", checking the answer", ", done."], delayMs: 500 };
   }
   if (content.includes("title")) {
     return { parts: [`Sure, here's the plan.\n\n\`\`\`cairn-task\n${RISK_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
@@ -149,7 +156,7 @@ export function start() {
         const messages = messagesOf(rawBody);
         if (commentaryRequested(messages)) {
           lastCommentaryBody = rawBody;
-          void streamReply(res, COMMENTARY_SCRIPT);
+          void streamReply(res, { ...COMMENTARY_SCRIPT, delayMs: commentaryDelayMs });
           return;
         }
         const content = lastUserContent(messages);
@@ -170,6 +177,7 @@ export function start() {
          * arrived. Raw rather than parsed so a test reads exactly what the
          * provider would have. */
         lastCommentaryBody: () => lastCommentaryBody,
+        setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
       });
     });
   });

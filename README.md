@@ -20,6 +20,12 @@ write, deployment, production effect, or valuable-data exposure.
 
 - creating, opening, remembering, and switching projects;
 - preservation-first conversion of existing work;
+- a connected conversation conductor that reads bounded project memory,
+  questions and refines requests, dispatches through the safety envelope, and
+  comments on the envelope's verified result card;
+- one persistent desktop workspace with a multi-project rail, Chat, and a
+  functional town square whose Cairn, live worker, and task thread come only
+  from real active-project state;
 - one task at a time with an honest DONE or STOPPED result;
 - deterministic routing to one connected adapter, and an honest
   connection-required result when none is connected;
@@ -35,14 +41,17 @@ write, deployment, production effect, or valuable-data exposure.
 
 ## Where Cairn is heading
 
-Today Cairn runs one carefully protected task at a time, and the owner writes
-each task request themselves. The destination is a conductor: a model of your
-choosing that lives in the app, reads the project's records, and thinks
-through your request with you — asking the question you didn't know to ask,
-flagging the risk you couldn't see — then sends the coding work to connected
-worker AIs and reports back honestly. The deterministic safety layer described
-above stays underneath: the conductor decides what to try; the safety envelope
-decides what counts as done. The owner-approved route lives in
+Today a model of your choosing can act as Cairn's conductor in the desktop
+workspace. It reads bounded project memory, thinks through a request with you,
+raises questions and risks, sends one approved task to the connected worker,
+and comments after the deterministic envelope posts its verified result card.
+The safety layer remains authoritative: the conductor decides what to propose;
+the envelope decides what counts as done.
+
+Worker execution is still deliberately serial within each project. Future
+swappable bodies and any multi-agent work require their own approved design;
+the town square's eight-villager visual cap is not a concurrency promise. The
+owner-approved route lives in
 [the conductor route spec](docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md).
 
 ## What you need

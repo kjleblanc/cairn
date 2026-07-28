@@ -13,7 +13,7 @@ import { delimiter, join } from "node:path";
  * Ported VERBATIM from app/tests/routing.spec.ts:20-82 (Phase 3 Task 6); the
  * only edit is the `export` keyword. routing.spec.ts imports it unchanged.
  */
-export function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-claims" | "slow" = "success"): { env: NodeJS.ProcessEnv; marker: string; prompt: string } {
+export function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-claims" | "slow" | "town" = "success"): { env: NodeJS.ProcessEnv; marker: string; prompt: string } {
   const bin = mkdtempSync(join(tmpdir(), "cairn-fake-codex-"));
   const marker = join(bin, "real-exec-started.txt");
   // What the worker was actually handed. The prompt arrives on stdin, so the
@@ -57,7 +57,7 @@ process.stdin.on("end", () => {
     process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "m", type: "agent_message", text: "Done.\\n\\n\`\`\`cairn-claims\\n" + JSON.stringify({ disposition: "DONE", summary: "Added the visible result.", changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }], howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES" }) + "\\n\`\`\`" } }) + "\\n");
     process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
   };
-  setTimeout(finish, ${JSON.stringify(behavior)} === "slow" ? 8000 : 0);
+  setTimeout(finish, ${JSON.stringify(behavior === "slow" ? 8000 : behavior === "town" ? 15000 : 0)});
 });
 `;
   writeFileSync(dispatcher, dispatcherSource);

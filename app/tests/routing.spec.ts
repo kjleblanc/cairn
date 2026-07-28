@@ -29,9 +29,12 @@ function scaffold(proj: string): void {
 
 test("the active renderer and IPC expose the serial route instead of legacy workflow surfaces", () => {
   const app = readFileSync(join(__dirname, "..", "src", "renderer", "App.tsx"), "utf8");
+  const workspace = readFileSync(join(__dirname, "..", "src", "renderer", "screens", "Workspace.tsx"), "utf8");
   const ipc = readFileSync(join(__dirname, "..", "src", "shared", "ipc.ts"), "utf8");
   const chat = readFileSync(join(__dirname, "..", "src", "renderer", "screens", "Chat.tsx"), "utf8");
-  expect(app).toContain('name: "task"');
+  expect(app).toContain('name: "workspace"');
+  expect(workspace).toContain('type CenterView = "chat" | "dashboard" | "task"');
+  expect(workspace).toContain("<TaskRun");
   expect(app).not.toMatch(/Wizard|Scheduler|parallelDraft|TaskDeck|Direction/);
   // Task 5: dispatch is inline. Chat's confirmation panel mounts the SAME
   // disclosure-and-confirm block the task screen uses, so the six facts an
@@ -284,7 +287,7 @@ test("retained unmatched records stay visible without blocking a new task", asyn
   const projectHome = win.getByRole("button", { name: "← Project home" });
   await expect(projectHome).toBeVisible({ timeout: 30_000 });
   await projectHome.click();
-  await expect(win.getByText("retained task evidence")).toBeVisible();
+  await expect(win.getByText("retained task evidence", { exact: true })).toBeVisible();
   await expect(win.getByText(/without blocking a new task/)).toBeVisible();
   await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();
   await app.close();

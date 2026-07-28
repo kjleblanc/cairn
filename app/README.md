@@ -3,16 +3,24 @@
 The app and the contract share one version number, declared in
 `app/package.json`; the newest entry in `../CHANGELOG.md` states it.
 
-Cairn Desktop gives a beginner one understandable path:
+Cairn Desktop gives a beginner one understandable path inside one persistent
+workspace:
 
 ```text
-choose a project → enter a task → see the recommended route → run → check → result
+choose a project → talk with Cairn → resolve questions and risks → confirm dispatch → verified result
 ```
 
 ## What the app does
 
 - first-run instructions, new/open/recent project handling, and Project
   Conversion guidance;
+- a collapsible multi-project rail with truthful per-project activity and task
+  history, Chat as the primary surface, and responsive Chat/Town tabs;
+- a functional town square where Cairn is persistent and a worker villager and
+  task thread appear only for a real confirmed live worker run;
+- keyboard and pointer selection, non-modal live details, deterministic
+  bounded placement, drag/reset, reduced-motion behavior, and ignored
+  project-local presentation state;
 - a model-route card, compact activity view, Git protection, and honest task
   history;
 - readiness checks: whether the official Codex CLI is installed and connected,
@@ -73,7 +81,8 @@ signed, so Windows may show an unknown-publisher or SmartScreen warning.
 ```text
 npm run build --workspace core
 npm.cmd --prefix app run typecheck
+npm.cmd --prefix app run test:unit
 npm.cmd --prefix app run build:vite
 cd app
-npx --no-install playwright test
+node_modules\.bin\playwright.cmd test
 ```
