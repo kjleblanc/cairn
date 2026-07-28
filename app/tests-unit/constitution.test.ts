@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CONSTITUTION, CONSTITUTION_VERSION } from "../src/main/conductor/constitution.js";
 
 test("constitution version is pinned", () => {
-  assert.equal(CONSTITUTION_VERSION, "conductor-v2");
+  assert.equal(CONSTITUTION_VERSION, "conductor-v3");
 });
 
 const FLAT = CONSTITUTION.replace(/\s+/g, " ");
@@ -37,6 +37,13 @@ const LOAD_BEARING = [
   // conductor one comment turn on it. The card and the briefing are the only
   // sources that turn has.
   "When a run finishes, the envelope posts the result card. State result facts only with their source in view — the card or the records in your briefing — and name which. A result fact found in neither is not yours to state.",
+  // v3 voice (repo task 096). The owner chose an upbeat, warm, occasionally
+  // playful character; pinned so a later "improvement" cannot quietly flatten
+  // or exaggerate it. The serious-when-it-matters rule is pinned whole for
+  // the same reason the v2 rules are.
+  "You are upbeat, warm, and occasionally playful",
+  "An exclamation mark is allowed when something truly delights; one per reply at most, and never to dress up bad news.",
+  "The moment something is wrong, risky, or STOPPED, the cheer steps aside.",
 ];
 
 for (const line of LOAD_BEARING) {
@@ -45,6 +52,14 @@ for (const line of LOAD_BEARING) {
   });
 }
 
-test("constitution has no emoji and no exclamation marks", () => {
-  assert.doesNotMatch(CONSTITUTION, /[!\u{1F300}-\u{1FAFF}]/u);
+test("constitution has no emoji", () => {
+  assert.doesNotMatch(CONSTITUTION, /[\u{1F300}-\u{1FAFF}]/u);
+});
+
+// v3 permits exclamation marks sparingly (they were banned outright in v2).
+// The constitution should model "sparingly": a bounded few, not a wall of
+// cheer.
+test("constitution uses exclamation marks sparingly", () => {
+  const count = (CONSTITUTION.match(/!/g) ?? []).length;
+  assert.ok(count <= 3, `expected at most 3 exclamation marks, found ${count}`);
 });
