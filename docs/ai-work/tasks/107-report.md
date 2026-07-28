@@ -61,11 +61,12 @@ very task followed.
 
 - The app token remains a convention, not tooling; these docs describe
   it as a habit, which is what it is.
-- The protocol's first real landing was uneventful — the merge was
-  clean, the settle check green, no LOG conflict occurred (the parallel
-  session had no unlanded row at merge time, so the union driver was not
-  exercised by this landing; it remains proven by the Task 104 throwaway
-  test).
+- The protocol's first real landing exercised both of its new mechanisms
+  for real: the double-claim backstop fired (this task and the parallel
+  session's Level 3 spike both claimed 106; the unlanded lane — this one —
+  renumbered, per the contract), and the union driver merged this task's
+  LOG row with the parallel session's concurrently-committed 105 row, both
+  kept, no conflict. The settle check after the merge was green.
 - `PROJECT-KICKOFF.md` and `PROJECT-CONVERSION.md` were checked and
   needed no lane wording: they describe setup, not concurrent work.
 
