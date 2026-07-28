@@ -7,7 +7,9 @@ in `AGENTS.md` governs the work itself.
 
 Cairn is for complete beginners. It helps one person move one project through
 one task to one honest result, in plain language, with safety pauses only at
-real risk.
+real risk. A project may run up to two lanes — two human-driven chats, each
+with its own task — under the contract's "Working in two lanes" rules; the
+worker runtime stays serial regardless.
 
 The active product path is:
 
@@ -58,6 +60,22 @@ Contract mirrors:
 `docs/legacy/` is the non-canonical tier: pre-reset docs, records, and history,
 preserved unmodified. The pre-reset repository state is pinned at git tag
 `legacy-v3.0`.
+
+## Maintainer lanes
+
+This repository may be worked by up to two chats at once (contract v0.4.0,
+"Working in two lanes"). Maintainer-facing discipline: lane B lives in a git
+worktree (convention `.lanes/b`, branch `lane/b`), a task number is claimed
+by committing its brief, `docs/ai-work/LOG.md` carries `merge=union` in
+`.gitattributes` so concurrent rows both survive, and landing into `main` is
+serial with a settle check (root `npm test` and app typecheck). The app and
+its Playwright suites are single-tenant: one lane — or the owner — holds the
+app token at a time. A fresh lane needs one core build (or
+`node core/scripts/sync-contract.mjs`) before the mirror test can run
+standalone: `core/assets/contract.md` is a generated, gitignored artifact,
+so it does not exist in a new worktree until the build creates it. Canonical
+docs still describe every user's repository:
+guides mention lanes as a convention, never as machine-local instructions.
 
 ## Writing rules
 
