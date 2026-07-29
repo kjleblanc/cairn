@@ -26,6 +26,12 @@ import {
   createCodexExecAdapter,
   type CodexExecProcess,
 } from "../src/codex.js";
+import {
+  authorizeKimiExec,
+  createKimiExecAdapter,
+  KimiExecTimeoutError,
+  type KimiExecProcess,
+} from "../src/kimi.js";
 import { createOfflineDemoAdapter, type AdapterTaskContract, type TaskAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
 import { projectStatus } from "../src/steps.js";
@@ -136,6 +142,50 @@ test("a connected Codex Exec route records STOPPED before any real model call", 
   assert.match(log, /Codex Exec was installed and connected; Cairn stopped before the real process or model call/);
   assert.equal(result.activities.filter((activity) => activity.stage === "Run" && activity.state === "working").length, 1);
   assert.equal(result.activities.some((activity) => activity.stage === "Check"), false);
+});
+
+// Task 119 (Level 3a plan Task 4): the boundary report and the safety closes
+// brand themselves from the ROUTED adapter, not from a codex constant — a kimi
+// run that stops at the boundary or times out must not claim OpenAI.
+test("a connected Kimi route records STOPPED with Kimi-branded boundary records", async () => {
+  const root = project();
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createKimiExecAdapter(root, { installed: true, connected: true, billing: "oauth" })],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "REAL_MODEL_CALL_NOT_AUTHORIZED");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Kimi Code CLI real-call boundary report/);
+  assert.match(report, /Kimi Code CLI readiness: \*\*installed and connected\*\*/);
+  assert.match(report, /No task data was sent to Moonshot AI/);
+  assert.match(report, /real `kimi -p` process was not started/i);
+  assert.match(report, /no model was called/i);
+  assert.doesNotMatch(report, /Codex|OpenAI/);
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.match(log, /Kimi Code CLI was installed and connected; Cairn stopped before the real process or model call/);
+});
+
+test("a timed-out Kimi worker closes with Kimi-branded safety records", async () => {
+  const root = project();
+  const wedged: KimiExecProcess = {
+    kind: "fake",
+    async run() {
+      throw new KimiExecTimeoutError("inactivity", "C:\\Users\\owner\\AppData\\Local\\Cairn\\debug\\kimi-wedged.jsonl", true);
+    },
+  };
+  const result = await runSerialTask(root, "Improve Cairn safely", {
+    adapters: [createKimiExecAdapter(root, { installed: true, connected: true, billing: "oauth" }, authorizeKimiExec(root, "oauth", "Improve Cairn safely"), wedged)],
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "ADAPTER_TIMED_OUT");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(report, /Kimi Code CLI adapter report/);
+  assert.match(report, /The Kimi Code CLI route stopped with the fixed error code/);
+  assert.match(report, /KIMI_EXEC_TIMED_OUT/);
+  assert.match(report, /kimi-wedged\.jsonl/);
+  assert.doesNotMatch(report, /Codex|OpenAI/);
 });
 
 test("a process failure names its code and debug path in the stop record", async () => {

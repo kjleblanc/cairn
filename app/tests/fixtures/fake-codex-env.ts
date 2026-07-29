@@ -82,6 +82,12 @@ process.stdin.on("end", () => {
       CAIRN_FAKE_CODEX_MARKER: marker,
       CAIRN_FAKE_CODEX_PROMPT: prompt,
       LOCALAPPDATA: emptyLocalAppData,
+      // Task 119: with kimi detection now part of every real lane, the codex
+      // lane sets the positive test marker WITHOUT the fake-kimi opt-in, so
+      // core's fail-closed guard resolves every kimi command to not-found and
+      // the REAL signed-in Kimi CLI on this machine can never turn a codex
+      // spec two-candidate.
+      CAIRN_TEST_LANE: "1",
     },
   };
 }

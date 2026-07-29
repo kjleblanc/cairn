@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { conductorFile, detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
+import { fakeKimiEnvironment } from "./fixtures/fake-kimi-env";
 
 // One test here dispatches with `conversationId: "conv-1"`, which since Task 8
 // posts a result card and since Task 9 asks the conductor to comment on it —
@@ -370,5 +371,117 @@ test("a window reload mid-run reattaches instead of losing the result", async ()
   await win.getByRole("button", { name: "← Project home" }).click();
   await win.getByRole("button", { name: "Start a task" }).click();
   await expect(win.getByRole("heading", { name: "Verified real Codex Exec result" })).toBeVisible({ timeout: 30_000 });
+  await app.close();
+});
+
+// Task 119 (Level 3a plan Task 4): the kimi lane, additive and IPC-driven.
+// The renderer's dispatch strings are still codex-branded (renderer
+// generalization is plan Task 5), so this lane never click-drives a run: it
+// drives task:route / task:run directly, exactly as the details-threading
+// test above does. The lane combines the kimi fake with a NOT-connected codex
+// fake so the route has exactly one candidate (a real codex may exist on this
+// machine's PATH), and the fake env carries CAIRN_TEST_LANE + CAIRN_FAKE_KIMI
+// so no probe can ever reach the real signed-in Kimi CLI.
+test("the fake-kimi lane discloses, refuses cross-adapter confirmations, and completes DONE through the real-call path", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-kimi-real-path-"));
+  scaffold(proj);
+  const fakeKimi = fakeKimiEnvironment(proj, true);
+  const fakeCodex = fakeCodexEnvironment(proj, false);
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, ...fakeKimi.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+
+  const outcome = "Improve Cairn safely";
+  const details = "Use exactly 74, 477, 256 — do not round.";
+
+  // The routed preview names kimi as the single candidate and discloses the
+  // kimi six facts — the oauth membership wording, the named session record.
+  const preview = await win.evaluate(
+    ({ project, task, data }) => window.cairn.taskRoute(project, task, data, "kimi-exec"),
+    { project: proj, task: outcome, data: details },
+  );
+  expect(preview.ok).toBe(true);
+  if (!preview.ok || !preview.value.disclosure) throw new Error("the kimi lane must disclose its real call");
+  expect(preview.value.route.status).toBe("ready");
+  if (preview.value.route.status !== "ready") throw new Error("unreachable");
+  expect(preview.value.route.recommended.id).toBe("kimi-exec");
+  expect(preview.value.route.candidates.map((candidate) => candidate.id)).toEqual(["kimi-exec"]);
+  const disclosure = preview.value.disclosure;
+  expect(disclosure.provider).toBe("Moonshot AI");
+  expect(disclosure.model).toBe("kimi-code/kimi-for-coding");
+  expect(disclosure.task).toBe(`${outcome}\n\nDetails (verbatim):\n${details}`);
+  expect(disclosure.data).toContain("~/.kimi-code/sessions/");
+  expect(disclosure.quota).toContain("membership");
+
+  // Cross pin one: the kimi confirmation cannot dispatch codex — codex is not
+  // a connected candidate in this lane, so the override is refused and
+  // nothing spawns.
+  const wrongAdapter = await win.evaluate(
+    ({ project, task, data, card }) => window.cairn.taskRun({
+      dir: project, outcome: task, details: data, adapterId: "codex-exec",
+      realCallConfirmed: true, disclosure: card, conversationId: null,
+    }),
+    { project: proj, task: outcome, data: details, card: disclosure },
+  );
+  expect(wrongAdapter.ok).toBe(false);
+  expect(existsSync(fakeKimi.marker)).toBe(false);
+  expect(existsSync(fakeCodex.marker)).toBe(false);
+
+  // Cross pin two: a codex-shaped confirmation cannot dispatch kimi — the
+  // run-time gate re-derives the routed adapter's own card and refuses.
+  const codexShaped = {
+    provider: "OpenAI",
+    model: "gpt-5.6-sol",
+    project: proj,
+    task: `${outcome}\n\nDetails (verbatim):\n${details}`,
+    data: "codex data scope",
+    quota: "codex quota",
+  };
+  const wrongCard = await win.evaluate(
+    ({ project, task, data, card }) => window.cairn.taskRun({
+      dir: project, outcome: task, details: data, adapterId: "kimi-exec",
+      realCallConfirmed: true, disclosure: card, conversationId: null,
+    }),
+    { project: proj, task: outcome, data: details, card: codexShaped },
+  );
+  expect(wrongCard.ok).toBe(false);
+  expect(JSON.stringify(wrongCard)).toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
+  expect(existsSync(fakeKimi.marker)).toBe(false);
+
+  // The confirmed kimi request runs to DONE through the real-call path.
+  const run = await win.evaluate(
+    ({ project, task, data, card }) => window.cairn.taskRun({
+      dir: project, outcome: task, details: data, adapterId: "kimi-exec",
+      realCallConfirmed: true, disclosure: card, conversationId: null,
+    }),
+    { project: proj, task: outcome, data: details, card: disclosure },
+  );
+  expect(JSON.stringify(run)).not.toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
+  expect(run.ok).toBe(true);
+  if (run.ok) expect(run.value.status).toBe("done");
+
+  // Wire pins: the fake was really spawned (marker at spawn, not stdin end),
+  // and the argv carried the spike-observed shape with the prompt as ONE
+  // element after "-p". The `.cmd` shim truncates that element at the first
+  // newline (measured — the fixture's doc comment names the probe), so the
+  // content pin is the composed prompt's constant first line; the FULL
+  // prompt — print-mode honesty line, owner details verbatim — is pinned at
+  // the request level in core/test/kimi.test.ts.
+  expect(existsSync(fakeKimi.marker)).toBe(true);
+  const sentArgv = JSON.parse(readFileSync(fakeKimi.argv, "utf8")) as string[];
+  expect(sentArgv.slice(0, 4)).toEqual(["--output-format", "stream-json", "-m", "kimi-code/kimi-for-coding"]);
+  expect(sentArgv[4]).toBe("-p");
+  const prompt = readFileSync(fakeKimi.prompt, "utf8");
+  expect(sentArgv[5]).toBe(prompt);
+  expect(prompt).toBe("Complete exactly one Cairn task in this workspace.");
+
+  // The envelope's own records: the product file, the DONE disposition, and a
+  // clean tree.
+  expect(readFileSync(join(proj, "visible.txt"), "utf8")).toBe("model-authored result\n");
+  const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
+  expect(report).toContain("Disposition: **DONE**");
+  expect(report).toContain("Kimi Code CLI");
+  expect(report).not.toContain("Codex Exec");
+  expect(execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: proj, encoding: "utf8" })).toBe("");
   await app.close();
 });

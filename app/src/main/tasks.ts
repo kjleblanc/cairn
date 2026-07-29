@@ -1,18 +1,12 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import {
-  authorizeCodexExec,
-  codexExecConnectionReason,
-  createCodexExecAdapter,
-  createOfflineDemoAdapter,
-  detectCodexExecStatus,
   previewSerialRoute,
   projectStatus,
   runSerialTask,
-  type CodexExecStatus,
   type SerialRunResult,
-  type TaskAdapter,
   type WorkerDisclosure,
 } from "@cairn/core";
+import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
 import type { ConductorDelta, Result, ResultCard, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
 import { commentary } from "./conductor/service.js";
@@ -48,29 +42,6 @@ function sameDisclosure(actual: WorkerDisclosure | undefined, expected: WorkerDi
     actual.quota === expected.quota;
 }
 
-function adapters(mock: boolean): TaskAdapter[] {
-  return mock ? [createOfflineDemoAdapter()] : [];
-}
-
-/**
- * `authorized` names the WHOLE request the owner confirmed — outcome and
- * details together. The codex authorization gate re-derives its expected card
- * from both, so passing only the outcome here would refuse every
- * details-bearing dispatch.
- */
-async function detectedAdapters(
-  mock: boolean,
-  dir: string,
-  authorized?: { outcome: string; details: string },
-): Promise<{ adapters: TaskAdapter[]; status?: CodexExecStatus }> {
-  if (mock) return { adapters: adapters(true) };
-  const status = await detectCodexExecStatus(dir);
-  return {
-    adapters: [createCodexExecAdapter(dir, status, authorized ? authorizeCodexExec(dir, authorized.outcome, authorized.details) : undefined)],
-    status,
-  };
-}
-
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const mock = process.env.CAIRN_MOCK === "1";
 
@@ -81,7 +52,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const detected = await detectedAdapters(mock, dir);
       const route = previewSerialRoute(outcome, detected.adapters, adapterId);
       const value = route.status === "connection-required" && detected.status
-        ? { ...route, reason: codexExecConnectionReason(detected.status) }
+        ? { ...route, reason: connectionRequiredReason(detected.status) }
         : route;
       // The disclosure comes from the ROUTED adapter's own seam, not a codex-only
       // ternary: any adapter that makes a real call declares its own six facts,
@@ -168,7 +139,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           },
         });
         const safeValue = value.status === "connection-required" && detected.status
-          ? { ...value, route: { ...value.route, reason: codexExecConnectionReason(detected.status) } }
+          ? { ...value, route: { ...value.route, reason: connectionRequiredReason(detected.status) } }
           : value;
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.result = safeValue; }

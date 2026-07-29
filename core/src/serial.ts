@@ -3,6 +3,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
+import { CODEX_EXEC_ADAPTER_ID } from "./codex.js";
+import { KIMI_EXEC_ADAPTER_ID } from "./kimi.js";
 import { composeWorkerReport, composeWorkerRowSummary, type ComposedRecordInput } from "./records.js";
 import { appendLogRow, canonicalPath, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
@@ -329,6 +331,18 @@ function paidCallAlreadyStarted(
     (reason === "CANCELLED_BY_OWNER" && processFailure?.debugPath != null));
 }
 
+/**
+ * The one place a report names the CLI invocation the owner would recognize,
+ * keyed on the routed adapter id so a kimi stop never claims `codex exec`. A
+ * future third adapter adds its case here; until then its own id is the most
+ * honest string the envelope has.
+ */
+function invocationName(adapterId: string): string {
+  if (adapterId === CODEX_EXEC_ADAPTER_ID) return "codex exec";
+  if (adapterId === KIMI_EXEC_ADAPTER_ID) return "kimi -p";
+  return adapterId;
+}
+
 function reportText(
   contract: AdapterTaskContract,
   demo: boolean,
@@ -340,7 +354,13 @@ function reportText(
   orphanRisk = false,
 ): string {
   const taskNumber = contract.taskNumber;
-  const codex = !demo;
+  // Task 119: brand every non-demo record from the ROUTED adapter — the idiom
+  // `rowFor` already uses — so a kimi timeout or boundary stop never claims
+  // Codex or OpenAI. Codex output stays byte-identical (label "Codex Exec",
+  // provider "OpenAI", invocation "codex exec"); only the source changed.
+  const realCall = !demo;
+  const label = contract.route.adapterLabel;
+  const provider = contract.route.provider;
   if (disposition === "DONE") {
     return `# Task ${pad(taskNumber)} — offline serial demonstration report
 
@@ -368,21 +388,21 @@ Milestone movement: **NO**
 Disposition: **DONE**
 `;
   }
-  if (codex && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED") {
-    return `# Task ${pad(taskNumber)} — Codex Exec real-call boundary report
+  if (realCall && reason === "REAL_MODEL_CALL_NOT_AUTHORIZED") {
+    return `# Task ${pad(taskNumber)} — ${label} real-call boundary report
 
 ## Result
 
-Codex Exec readiness: **installed and connected**
+${label} readiness: **installed and connected**
 
 Requested product change: **not attempted**
 
-Cairn prepared one ephemeral, workspace-scoped Codex Exec request and stopped with the fixed code \`REAL_MODEL_CALL_NOT_AUTHORIZED\` before starting the execution process. No task data was sent to OpenAI, no model was called, and no credential value or authentication method was read, retained, or displayed.
+Cairn prepared one ephemeral, workspace-scoped ${label} request and stopped with the fixed code \`REAL_MODEL_CALL_NOT_AUTHORIZED\` before starting the execution process. No task data was sent to ${provider}, no model was called, and no credential value or authentication method was read, retained, or displayed.
 
 ## Verification
 
 - Installation and connection were represented only as booleans.
-- The real \`codex exec\` process was not started.
+- The real \`${invocationName(contract.route.adapterId)}\` process was not started.
 - Cairn did not retry, resume, continue, schedule, delegate, or choose another provider.
 - Existing work was not cleaned, reset, stashed, moved, or overwritten by Cairn.
 
@@ -395,9 +415,9 @@ Milestone movement: **NO**
 Disposition: **STOPPED**
 `;
   }
-  const title = codex ? "Codex Exec adapter report" : "offline serial demonstration report";
-  const subject = codex ? "Codex Exec route" : "serial demonstration";
-  const boundedEvidence = codex && processEvidence
+  const title = realCall ? `${label} adapter report` : "offline serial demonstration report";
+  const subject = realCall ? `${label} route` : "serial demonstration";
+  const boundedEvidence = realCall && processEvidence
     ? `\n## Bounded process evidence\n\n${boundedEvidenceSummary(processEvidence)} Cairn retained only the worker's final message (for claims verification) and these bounded counts; no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials.\n`
     : "";
   // A timeout always spent a started process; a cancel spent one only when it
@@ -413,10 +433,10 @@ Disposition: **STOPPED**
 
 Routing demonstration: **stopped**
 
-Requested product change: **${codex ? "not verified" : "not attempted"}**
+Requested product change: **${realCall ? "not verified" : "not attempted"}**
 ${boundedEvidence}
 
-The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${codex ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}${paidStarted ? " The worker process had already started before Cairn stopped it; any cost for that call is already spent." : ""}${orphanSentence}
+The ${subject} stopped with the fixed error code \`${reason}\`. Cairn did not retry and did not include raw adapter output or error text. ${realCall ? "The workspace may contain retained model-authored evidence and must be inspected before another task." : ""}${paidStarted ? " The worker process had already started before Cairn stopped it; any cost for that call is already spent." : ""}${orphanSentence}
 ${processFailure ? `\nProcess failure: \`${processFailure.code}\`. Raw run evidence stays on the owner's own disk at: ${processFailure.debugPath ?? "unavailable (the local debug directory could not be created)"}. It is never committed to the repository.\n` : ""}
 
 ## Verification
