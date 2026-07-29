@@ -1,0 +1,73 @@
+/* Task 126 — motion slice: Animal Crossing softness. Imported after app.css
+   so equal-specificity timing overrides win by cascade order. Everything here
+   is transform/opacity motion; the spring itself is the --spring token.
+   IMPORTANT: because this file wins ties with app.css's reduced-motion block,
+   every animation/transition declared here is re-killed in the media query
+   at the bottom — keep the two in sync. */
+
+/* Entrances: things arrive like they belong, not like they render. Applied
+   to elements React inserts (streaming text does not restart them). */
+@keyframes chat-arrive {
+  from { opacity: 0; transform: translateY(10px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.bubble, .result-card, .task-card, .push-chip, .run-strip {
+  animation: chat-arrive .38s var(--spring) both;
+}
+
+/* Town nodes pop into the world instead of blinking in. The static centering
+   transform is part of the keyframes so the final frame matches the rest pose. */
+@keyframes town-node-arrive {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.55); }
+  62% { opacity: 1; transform: translate(-50%, -50%) scale(1.06); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.town-node { animation: town-node-arrive .5s var(--spring) both; }
+
+/* One celebratory pop when Cairn's state changes: the state class swap
+   restarts this animation; the svg carries no other animation. */
+@keyframes town-face-pop {
+  0% { transform: scale(.82); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.town-node-ready .town-face-svg,
+.town-node-thinking .town-face-svg,
+.town-node-working .town-face-svg {
+  animation: town-face-pop .45s var(--spring);
+}
+
+/* Calmer idle life: the bob slows and shallows (overrides app.css's float),
+   and the town's lantern skyglow breathes. */
+.town-face-holo { animation: town-face-float 7.5s ease-in-out infinite; }
+@keyframes town-face-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.town-skyglow { animation: town-sky-breathe 9s ease-in-out infinite; }
+@keyframes town-sky-breathe {
+  0%, 100% { opacity: .65; }
+  50% { opacity: 1; }
+}
+
+/* Nodes settle rather than dart when the layout moves them. */
+.town-node { transition: left 460ms var(--spring), top 460ms var(--spring), background-color 160ms ease; }
+
+/* Buttons respond under the pointer. Named classes only — town nodes are
+   transform-positioned buttons and must keep their own transform. */
+.chat-composer button, .town-square-header button, .rail-action, .rail-collapse {
+  transition: transform 140ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.chat-composer button:hover:not(:disabled),
+.town-square-header button:hover:not(:disabled),
+.rail-action:hover, .rail-collapse:hover { transform: translateY(-1px); }
+.chat-composer button:active:not(:disabled),
+.town-square-header button:active:not(:disabled),
+.rail-action:active, .rail-collapse:active { transform: translateY(0) scale(.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble, .result-card, .task-card, .push-chip, .run-strip, .town-node,
+  .town-face-svg, .town-skyglow, .town-face-holo { animation: none; }
+  .town-node, .chat-composer button, .town-square-header button,
+  .rail-action, .rail-collapse { transition: none; }
+}

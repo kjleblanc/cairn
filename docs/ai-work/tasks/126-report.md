@@ -1,98 +1,78 @@
-# Task 126 report — Ask the power question first, collapse the picker
+# Task 126 report — Motion slice: Animal Crossing softness
 
 ## Requested visible outcome
 
-Owner direction after Task 124: simplify and streamline the connect process
-and model picker — options A (the card asks how you want to power Cairn
-before presuming) and B (the picker stops being a wall of text). Full brief:
-`126-brief.md` (0166612).
+Give the app gentle behavior: softer springs, entrances instead of blink-ins,
+calmer idle life, one celebratory pop on state changes, pointer-responsive
+buttons — with reduced-motion fully respected.
 
 ## What actually changed
 
-- `app/src/renderer/bodies.ts` — `Body` gains `primary?: true`; Kimi K3 and
-  the Kimi subscription seat are marked primary (the two doors), and the
-  subscription entry moves up to sit beside K3 so the primaries render in
-  array order. The doc comment records the field's meaning.
-- `app/src/renderer/components/ConnectCard.tsx` — new `start` panel is the
-  card's first screen: "How do you want to power Cairn?" with the two
-  primary doors rendered from the same Body data as the picker (via a shared
-  `BodyButton` — name, blurb, billing line, recommendation note can never
-  drift apart), plus the quiet "Choose a different brain" link. The picker
-  shows the two primaries, then a dashed "More choices (3)" toggle hiding
-  Kimi K2, DeepSeek V3.1, and GPT-5 Mini until clicked; "Custom…" and "The
-  model I want isn't listed…" stay visible without expanding, so the
-  22-call connectToFixture helper is untouched. Picker Back now returns to
-  the start screen; the toggle resets when leaving the picker flow. The
-  paste screen, consent block, checkbox, and gate keep their exact strings.
-- `app/src/renderer/app.css` — one rule: `.brain-toggle` (dashed border).
-- `app/tests-unit/bodies.test.ts` — new red-first pin: exactly two primary
-  bodies, and they are K3 and the subscription seat.
-- `app/tests/conductor.spec.ts` — the connect walk rewritten for the new
-  flow: start-screen assertions (question, both doors, both billing lines,
-  no text inputs), door choice lands on the pre-filled paste screen, picker
-  hides the three non-primaries until the toggle opens (explicit
-  `not.toContainText` pre-expand), the not-listed and guide walks re-walked,
-  Custom… path unchanged.
-- `app/tests/connect-kimi.spec.ts` — the seat is now clicked straight from
-  the start screen (one click fewer than before); all consent-wording and
-  CLI-truth assertions unchanged.
-- `docs/ai-work/tasks/126-brief.md` (restored — see below), this report,
-  `docs/ai-work/LOG.md`.
+- `app/src/renderer/motion.css` (new) — the whole slice in one file:
+  - `chat-arrive` entrance (opacity + 10px rise + slight scale, .38s spring)
+    on `.bubble`, `.result-card`, `.task-card`, `.push-chip`, `.run-strip`.
+  - `town-node-arrive` soft pop (scale .55 → 1.06 → 1, .5s) on `.town-node`,
+    keyframes including the static centering transform.
+  - `town-face-pop` (.45s) on the Cairn face svg — the state-class swap
+    restarts it, so Cairn pops once on every ready/thinking/working change.
+  - Calmer idle: face float slowed 6s → 7.5s and shallowed (overrides
+    app.css's keyframes by cascade), and the lantern `.town-skyglow` now
+    breathes over 9s.
+  - Node movement slowed to a 460ms spring settle.
+  - Pointer response on named classes only (`.chat-composer button`,
+    `.town-square-header button`, `.rail-action`, `.rail-collapse`): 1px
+    hover lift, settle-on-press. No generic `button` rules — town nodes are
+    transform-positioned buttons.
+  - A `prefers-reduced-motion` block that re-kills every animation and
+    transition this file declares (required because this file wins cascade
+    ties with app.css's own reduced-motion block — noted in a header comment).
+- `app/src/renderer/main.tsx` — imports `./motion.css` after `./app.css`.
+- `app/src/renderer/tokens.css` — `--spring` softened to
+  `cubic-bezier(.3, 1.3, .45, 1)`.
+- `docs/ai-work/LOG.md`, `docs/ai-work/tasks/126-report.md` — this record.
 
-`consent.ts` byte-identical; no IPC, core, CLI, contract, or dependency
-changes. Screenshots (untracked scratch): `design/attachments/task-126-*.png`
-— start screen, collapsed picker, expanded picker, paste screen; visually
-inspected.
+The motion CSS lives in its own file because the parallel lane held
+`app.css` uncommitted when this task began (its work has since landed
+unmodified by this lane).
 
 ## Checks run and their real results
 
-- `npm run test:unit` — 107/107 pass (106 + the red-first primary pin).
-- `npm run typecheck`, `npm run build:vite`, `npm run build:lab` — green.
-- Full Playwright E2E with the app token held
-  (`$TEMP/cairn-app-token`, taken and released): 43/43 pass (21 + 22), run
-  on a fresh build of the exact post-landing tree. Token verified released;
-  scratch screenshot spec deleted after its run.
-- A Daimon restart interrupted the first conductor-spec attempt mid-run;
-  state was re-verified (token still held, no stray Electron from this task)
-  before re-running.
-
-## Mixed-tree and double-claim disclosures (parallel lane, same checkout)
-
-- The parallel lane landed Task 125 ("one sky", 0c7b903 — including
-  `app.css` changes) while this task was mid-flight. This lane's working
-  `app.css` was verified to sit cleanly on top (diff = exactly the
-  `.brain-toggle` rule; no reversal of their styles), and every check above
-  ran against the merged tree — the same content this commit lands.
-- The same lane then claimed task number 126 a second time (f05a9d9, a
-  brief-only commit that overwrote this lane's `126-brief.md` in the
-  committed tree). Their claim is later than this lane's 0166612, and this
-  lane is landing first, so per the two-lane rule ("the later one renumbers
-  before landing") this task keeps 126 and their motion-slice task must
-  renumber to 127 before it lands; its brief content is fully preserved in
-  f05a9d9. This lane restored its own brief at `126-brief.md` with a note
-  pointing there.
-- Three electron.exe processes from a PREVIOUS day's E2E run (2026-07-28)
-  remain alive on the machine — not this task's, left for the owner's call.
-- `design/` stays untracked scratch; the parallel lane's files were never
-  staged or committed by this lane.
+- `npm.cmd run typecheck` — green.
+- `npm.cmd run test:unit` — 107/107 pass.
+- `npm.cmd run build:lab` — green.
+- Focused Electron E2E `a dispatched run lives in the conversation…` — 1/1
+  pass (7.4s), including the reduced-motion assertions and the town position
+  persistence measurement alongside the new arrive animation.
+- Isolated Electron render (app token held, then released): computed styles
+  confirm every behavior live — bubbles `chat-arrive`, nodes
+  `town-node-arrive` + 0.46s settle, face `town-face-pop`, holo 7.5s,
+  skyglow `town-sky-breathe`, send-button transitions. Under CDP-emulated
+  `prefers-reduced-motion: reduce`, all of them compute to `none`/`0s`.
+  Screenshot `design/attachments/task-126-motion.png` inspected: no visual
+  regression.
+- Two disclosed harness repairs: the first reduced-motion probe used
+  Playwright's `emulateMedia`, which does not exist on an Electron window
+  (switched to CDP `Emulation.setEmulatedMedia`); and hidden windows do not
+  tick the animation timeline, so fill-mode entrance animations held elements
+  at opacity 0 in captures (the harness now finishes document animations
+  before screenshotting — real visible windows and the Playwright E2E tick
+  normally, which the E2E's visibility assertions confirm).
+- Temporary harness files removed; app token verified free.
 
 ## How to try it
 
-Open the app on any governed project while disconnected: the card now asks
-"How do you want to power Cairn?" with Kimi K3 and your subscription as the
-two doors. "Choose a different brain" shows the two doors plus a dashed
-"More choices (3)" toggle for the rest; Custom… and the not-listed path are
-right there without expanding.
+Open the visual lab preview and watch: bubbles ease in, Cairn's face pops
+when you flip scenarios ("Cairn thinking", "Task running"), the worker pops
+into the square, the skyglow breathes, and Send lifts under the pointer.
+With system reduced-motion on, all of it is still.
 
 ## Limitations / remaining human judgment
 
-- The start screen asks the question on every fresh disconnect; remembering
-  the last seat is option D, briefed separately as the next task.
-- "More choices (3)" counts from data, but the collapsed hint line
-  ("lower prices than K3") is prose — it stays true while every non-primary
-  OpenRouter entry is cheaper than K3; a future pricier entry must reword it
-  (the billing lines remain the per-entry truth).
-- The toggle's dashed border is the only expand affordance beyond the
-  chevron; the owner's eye is the final judge of discoverability.
+- Motion feel is subjective; the spring curve and durations are a first
+  tuning the owner should judge live, not from stills.
+- Entrance animations replay if React remounts an element (e.g., project
+  switch re-renders the conversation) — noticeable but gentle.
+- Firefly twinkle in the sky was left out (the star field is a static
+  gradient layer); a future scene-life task can add it.
 
 Disposition: DONE

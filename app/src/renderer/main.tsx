@@ -2,6 +2,7 @@ import "@fontsource/quicksand/400.css";
 import "@fontsource/quicksand/600.css";
 import "./tokens.css";
 import "./app.css";
+import "./motion.css";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
