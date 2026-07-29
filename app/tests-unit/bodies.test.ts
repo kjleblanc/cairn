@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BODIES } from "../src/renderer/bodies.js";
+import { BODIES } from "../src/shared/bodies.js";
 
 test("every body has a non-empty id, and ids are unique", () => {
   for (const body of BODIES) {

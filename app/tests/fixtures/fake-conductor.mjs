@@ -118,6 +118,11 @@ function commentaryRequested(messages) {
 // really arrived and assert the card is in it.
 let lastCommentaryBody = null;
 
+// Repo task 127: the same wire honesty for ordinary replies. The custom-seat
+// note can only be proven by reading what the provider was actually sent, so
+// the raw body of the last non-commentary request is kept too.
+let lastReplyBody = null;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -165,6 +170,7 @@ export function start() {
           res.end(JSON.stringify({ error: { message: "invalid api key" } }));
           return;
         }
+        lastReplyBody = rawBody;
         void streamReply(res, scriptFor(content));
       });
     });
@@ -177,6 +183,9 @@ export function start() {
          * arrived. Raw rather than parsed so a test reads exactly what the
          * provider would have. */
         lastCommentaryBody: () => lastCommentaryBody,
+        /** The raw body of the last ordinary reply request, or null if none
+         * has arrived — same wire-honesty purpose as lastCommentaryBody. */
+        lastReplyBody: () => lastReplyBody,
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
       });
     });

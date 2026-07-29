@@ -17,6 +17,7 @@ import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
 import { cardBriefing } from "./relay.js";
+import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
 import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, readTurns } from "./store.js";
 import { extractTaskBlock } from "./taskblock.js";
@@ -266,9 +267,15 @@ async function streamTurn(
   let costUsd: number | undefined;
   try {
     const history = readTurns(dir, id);
+    // Task 127's custom-seat note goes right after the briefing, before any
+    // history: it is a code-assembled connection fact (model id + host only,
+    // both already visible to the provider), never the owner's words and
+    // never a secret. Curated seats add nothing (`null`).
+    const seatNote = connectionNoteFor(conn.baseUrl, conn.model);
     const messages: ChatTurnMessage[] = [
       { role: "system", content: CONSTITUTION },
       { role: "system", content: assembleBriefing(dir) },
+      ...(seatNote ? [{ role: "system", content: seatNote } satisfies ChatTurnMessage] : []),
       // A result card enters the prompt as SYSTEM context, labeled for what it
       // is: Cairn's runtime wrote it, the conversation model did not, and the
       // model must not mistake it for its own earlier reply. `cardBriefing`

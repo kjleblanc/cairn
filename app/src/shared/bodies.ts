@@ -2,6 +2,10 @@
  * small and honest on purpose: a few choices plus a "Custom…" escape hatch,
  * not an exhaustive catalog.
  *
+ * Lives in shared/ (moved from renderer/ in task 127) so both bundles read
+ * the one list: the renderer renders it, and main's seat note asks "is the
+ * connected seat one of these?" without a drifting copy.
+ *
  * Entries without a `baseUrl` are OpenRouter model ids, checked directly
  * against the public, keyless catalog (`GET https://openrouter.ai/api/v1/models`)
  * on 2026-07-24 before shipping; the Kimi K3 entry and its price ($3/M input,
@@ -79,3 +83,12 @@ export const RECOMMENDATION_NOTE =
   "Cairn's starting recommendation — not yet evaluated; the evaluation set will confirm or change it.";
 
 export const RECOMMENDED_BODY: Body = BODIES.find((b) => b.recommended === true) as Body;
+
+/** The base URL every curated entry without its own `baseUrl` sits behind.
+ * Shared by the connect card's default and main's seat note (task 127). */
+export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+/** The base URL a curated entry answers to — its own, or OpenRouter's. */
+export function bodyBaseUrl(body: Body): string {
+  return body.baseUrl ?? OPENROUTER_BASE_URL;
+}

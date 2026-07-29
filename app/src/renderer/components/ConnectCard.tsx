@@ -1,12 +1,34 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { ConductorConsentCard } from "../../shared/ipc";
 import { cairn } from "../api";
-import { BODIES, RECOMMENDATION_NOTE, RECOMMENDED_BODY, type Body } from "../bodies";
+import { BODIES, OPENROUTER_BASE_URL, RECOMMENDATION_NOTE, RECOMMENDED_BODY, bodyBaseUrl, type Body } from "../../shared/bodies";
 import { Card, ErrorCard, Pill } from "./Ui";
 
-const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_BASE_URL = OPENROUTER_BASE_URL;
 const OPENROUTER_KEYS_URL = "https://openrouter.ai/keys";
 const KIMI_CONSOLE_URL = "https://www.kimi.com/code/console";
+
+/** Where the last successful seat lives between visits (task 127): profile-
+ * local, and only ever `{ baseUrl, model }` — never the key. */
+const SEAT_STORAGE_KEY = "cairn-last-seat";
+
+type RememberedSeat = { baseUrl: string; model: string };
+
+/** The remembered seat, or null when anything is off — a bad or partial
+ * value is simply forgotten (the start screen shows) rather than repaired. */
+function readRememberedSeat(): RememberedSeat | null {
+  try {
+    const raw = localStorage.getItem(SEAT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<RememberedSeat>;
+    if (typeof parsed.baseUrl !== "string" || typeof parsed.model !== "string") return null;
+    if (!parsed.baseUrl.trim() || !parsed.model.trim()) return null;
+    new URL(parsed.baseUrl);
+    return { baseUrl: parsed.baseUrl, model: parsed.model };
+  } catch {
+    return null;
+  }
+}
 
 /** The exact sentence the not-listed panel asks the owner to send Cairn in
  * chat once connected — the add-a-model self-hosting loop (task 123). The
@@ -82,13 +104,24 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * toggle. Custom… and the not-listed path stay visible without expanding,
  * so the 22-call connectToFixture helper's clicks keep their meaning. The
  * consent block on the paste screen is the standing authorization and keeps
- * its exact strings. */
+ * its exact strings.
+ *
+ * Task 127 remembers the last successful seat — `{ baseUrl, model }` only,
+ * never the key — in profile-local storage, so a returning owner lands
+ * straight on the pre-filled paste screen instead of the start question.
+ * While the current seat still equals the remembered one, a muted line says
+ * so ("Cairn remembers your last choice — never your key."); changing any
+ * field makes the line leave with the match. A bad stored value is
+ * forgotten, not repaired. */
 export function ConnectCard({ onConnected }: { onConnected: () => void }) {
-  const [panel, setPanel] = useState<Panel>("start");
-  const [custom, setCustom] = useState(false);
+  const [rememberedSeat] = useState<RememberedSeat | null>(() => readRememberedSeat());
+  const [panel, setPanel] = useState<Panel>(rememberedSeat ? "default" : "start");
+  const [custom, setCustom] = useState(
+    rememberedSeat ? !BODIES.some((b) => b.id === rememberedSeat.model && bodyBaseUrl(b) === rememberedSeat.baseUrl) : false,
+  );
+  const [baseUrl, setBaseUrl] = useState(rememberedSeat?.baseUrl ?? DEFAULT_BASE_URL);
+  const [model, setModel] = useState(rememberedSeat?.model ?? RECOMMENDED_BODY.id);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
-  const [model, setModel] = useState(RECOMMENDED_BODY.id);
   const [apiKey, setApiKey] = useState("");
   const [checked, setChecked] = useState(false);
   const [card, setCard] = useState<ConductorConsentCard | null>(null);
@@ -117,6 +150,8 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     try {
       const response = await cairn.conductorConnect({ card, apiKey, consentConfirmed: true });
       if (!response.ok) { setError(response.message); return; }
+      // Remember the seat — never the key — so the next visit opens pre-filled.
+      localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ baseUrl: baseUrl.trim(), model: model.trim() }));
       onConnected();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -149,6 +184,9 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
 
   const currentBody = custom ? null : (BODIES.find((b) => b.id === model) ?? null);
   const kimiSeat = currentBody?.baseUrl !== undefined && new URL(currentBody.baseUrl).host === "api.kimi.com";
+  // The memory line stays only while the seat on screen IS the remembered
+  // one — editing a field or choosing another brain takes it away.
+  const showingMemory = rememberedSeat !== null && baseUrl === rememberedSeat.baseUrl && model === rememberedSeat.model;
 
   if (panel === "start") {
     return (
@@ -267,6 +305,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
       <p>{kimiSeat
         ? "Paste your Kimi Code key — Cairn chooses everything else, and you can change it later."
         : "Paste your OpenRouter key — Cairn chooses everything else, and you can change it later."}</p>
+      {showingMemory ? <p className="small muted">Cairn remembers your last choice — never your key.</p> : null}
       {error ? <ErrorCard message={error} /> : null}
 
       {custom ? (

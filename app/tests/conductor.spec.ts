@@ -91,6 +91,9 @@ let setFixtureCommentaryDelay: (delayMs: number) => void = () => {};
 /** The raw body of the last commentary request the fixture answered — what the
  * provider would actually have been sent (repo task 080). */
 let lastCommentaryBody: () => string | null = () => null;
+/** The raw body of the last ordinary reply the fixture answered — what the
+ * provider would actually have been sent (repo task 127). */
+let lastReplyBody: () => string | null = () => null;
 
 test.beforeAll(async () => {
   const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
@@ -99,6 +102,7 @@ test.beforeAll(async () => {
       url: string;
       close: () => Promise<void>;
       lastCommentaryBody: () => string | null;
+      lastReplyBody: () => string | null;
       setCommentaryDelay: (delayMs: number) => void;
     }>;
   };
@@ -106,6 +110,7 @@ test.beforeAll(async () => {
   fixtureUrl = server.url;
   fixtureClose = server.close;
   lastCommentaryBody = server.lastCommentaryBody;
+  lastReplyBody = server.lastReplyBody;
   setFixtureCommentaryDelay = server.setCommentaryDelay;
 
   detachStoredConnection();
@@ -159,6 +164,15 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   const win = await app.firstWindow();
 
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
+  await expect(card).toBeVisible({ timeout: 30_000 });
+
+  // A previous test's successful connect left a remembered seat in this
+  // spec-file's shared profile (task 127's memory doing its job). This test's
+  // opening walk needs a first-timer's card, so it forgets the seat — the
+  // renderer mirror of ConnectCard's SEAT_STORAGE_KEY — and reloads to
+  // remount the card, which reads the memory only at mount.
+  await win.evaluate(() => localStorage.removeItem("cairn-last-seat"));
+  await win.reload();
   await expect(card).toBeVisible({ timeout: 30_000 });
 
   // The card opens with the two-door question: Kimi K3 (recommended) and the
@@ -243,13 +257,51 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
 
   await pill.click();
   await win.getByRole("button", { name: "Disconnect" }).click();
-  await expect(win.getByText("connect cairn's brain")).toBeVisible();
+
+  // The card remembers the last seat — never the key: it re-opens straight on
+  // the paste screen with the custom fields pre-filled, the memory line
+  // showing, and the key field empty.
+  const reCard = win.locator(".card", { hasText: "connect cairn's brain" });
+  await expect(reCard).toBeVisible();
+  await expect(reCard.locator('input[type="text"]').first()).toHaveValue(fixtureUrl);
+  await expect(win.getByPlaceholder("e.g. moonshotai/kimi-k3")).toHaveValue("fixture-model");
+  await expect(reCard).toContainText("Cairn remembers your last choice — never your key.");
+  await expect(win.getByPlaceholder("Stored encrypted; shown never again")).toHaveValue("");
   await app.close();
 
+  // The memory survives a relaunch of the same profile too.
   const relaunched = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win2 = await relaunched.firstWindow();
-  await expect(win2.getByText("connect cairn's brain")).toBeVisible({ timeout: 30_000 });
+  const reCard2 = win2.locator(".card", { hasText: "connect cairn's brain" });
+  await expect(reCard2).toBeVisible({ timeout: 30_000 });
+  await expect(win2.getByPlaceholder("e.g. moonshotai/kimi-k3")).toHaveValue("fixture-model");
+  await expect(reCard2).toContainText("Cairn remembers your last choice — never your key.");
   await relaunched.close();
+});
+
+// Task 127: a custom (non-curated) seat earns one code-assembled note in the
+// conductor's prompt, offering the add-a-model task. The fixture seat is
+// custom by construction (a local URL), and the note can only be proven on
+// the wire — what the provider was actually sent, not what main claims.
+test("a custom seat is named in the prompt with one offer to add it to the picker", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-seatnote-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "hello");
+  await waitStreamDone(win);
+
+  const sent = lastReplyBody();
+  expect(sent).toBeTruthy();
+  expect(sent).toContain("Connection facts (assembled by Cairn's code, not by a model)");
+  expect(sent).toContain("fixture-model");
+  expect(sent).toContain(new URL(fixtureUrl).host);
+  expect(sent).toContain("add it to the picker as a Cairn task");
+  expect(sent).toContain("do not offer again");
+
+  await app.close();
 });
 
 // Task 5 (Phase 3) rewrote this test: dispatch is now inline. The card's
