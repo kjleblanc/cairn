@@ -51,5 +51,9 @@ export default defineConfig({
       },
     },
   },
-  server: { strictPort: false },
+  // The lab's own default port, distinct from Vite's 5173 and Kimi Work's
+  // 7100-block preview ports. A CLI `--port` still overrides this, so the
+  // preview card keeps working; strictPort stays false so an occupied 7410
+  // shifts instead of failing.
+  server: { port: 7410, strictPort: false },
 });
