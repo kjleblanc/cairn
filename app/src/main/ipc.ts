@@ -6,6 +6,8 @@ import type {
   ConductorConnectRequest,
   ConductorConsentCard,
   ConductorDelta,
+  ConductorOAuthEvent,
+  ConductorOAuthRequest,
   ConductorSendRequest,
   ConductorStatus,
   InitInput,
@@ -229,6 +231,23 @@ export function registerConductorIpc(): void {
       return { ok: false, message: plainMessage(err) };
     }
   });
+
+  ipcMain.handle("conductor:oauthBegin", (event, request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>> => {
+    try {
+      return conductorService.beginOAuth(request, (oauthEvent: ConductorOAuthEvent) => {
+        if (!event.sender.isDestroyed()) event.sender.send("conductor:oauth", oauthEvent);
+      });
+    } catch (err) {
+      logError("conductor:oauthBegin", err);
+      return Promise.resolve({ ok: false, message: plainMessage(err) });
+    }
+  });
+
+  ipcMain.handle("conductor:oauthCancel", () =>
+    toResult("conductor:oauthCancel", () => {
+      conductorService.cancelOAuth();
+      return null;
+    }));
 
   ipcMain.handle("conductor:disconnect", () =>
     toResult("conductor:disconnect", () => {

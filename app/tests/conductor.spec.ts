@@ -94,6 +94,13 @@ let lastCommentaryBody: () => string | null = () => null;
 /** The raw body of the last ordinary reply the fixture answered — what the
  * provider would actually have been sent (repo task 127). */
 let lastReplyBody: () => string | null = () => null;
+/** Task 131's fake OpenRouter: the auth URL and exchange endpoint the PKCE
+ * dance touches, plus its own verdict on whether the verifier it received
+ * hashes to the challenge it handed out. */
+let openRouterUrl = "";
+let openRouterClose: () => Promise<void> = async () => {};
+let lastOAuthExchangeBody: () => string | null = () => null;
+let oauthExchangeVerdict: () => boolean | null = () => null;
 
 test.beforeAll(async () => {
   const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
@@ -113,11 +120,27 @@ test.beforeAll(async () => {
   lastReplyBody = server.lastReplyBody;
   setFixtureCommentaryDelay = server.setCommentaryDelay;
 
+  const openRouterPath = pathToFileURL(join(__dirname, "fixtures", "fake-openrouter.mjs")).href;
+  const openRouter = (await import(openRouterPath)) as {
+    start: () => Promise<{
+      url: string;
+      close: () => Promise<void>;
+      lastExchangeBody: () => string | null;
+      exchangeVerdict: () => boolean | null;
+    }>;
+  };
+  const orServer = await openRouter.start();
+  openRouterUrl = orServer.url;
+  openRouterClose = orServer.close;
+  lastOAuthExchangeBody = orServer.lastExchangeBody;
+  oauthExchangeVerdict = orServer.exchangeVerdict;
+
   detachStoredConnection();
 });
 
 test.afterAll(async () => {
   await fixtureClose();
+  await openRouterClose();
   restoreStoredConnection();
 });
 
@@ -277,6 +300,156 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await expect(win2.getByPlaceholder("e.g. moonshotai/kimi-k3")).toHaveValue("fixture-model");
   await expect(reCard2).toContainText("Cairn remembers your last choice — never your key.");
   await relaunched.close();
+});
+
+// Task 131: "Sign in with OpenRouter" — the one-click door. The dance runs
+// in main against the fake-OpenRouter fixture (env seams point the auth page
+// and the exchange at it and skip the real browser); the test plays the
+// browser by hand: read the auth URL off the waiting card's fallback link,
+// fetch it (the fixture approves instantly and 302s back to the app's real
+// loopback listener), then follow the redirect. The fixture itself verifies
+// the PKCE binding — a green test here proves verifier↔challenge, not just
+// happy HTTP shapes. No test in this file ever touches the real OpenRouter,
+// and the OAuth-connected app is never asked to send a chat (that call would
+// go to the real openrouter.ai).
+function oauthEnv(project: string): { [key: string]: string } {
+  const env = baseEnv(project);
+  env.CAIRN_OPENROUTER_AUTH_BASE = openRouterUrl;
+  env.CAIRN_OAUTH_NO_BROWSER = "1";
+  return env;
+}
+
+test("sign in with OpenRouter lands connected, no key anywhere", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-oauth-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: oauthEnv(project) });
+  const win = await app.firstWindow();
+
+  const card = win.locator(".card", { hasText: "connect cairn's brain" });
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  // A previous test's seat memory would skip the start question — forget it
+  // for a first-timer's walk, as the connect test does.
+  await win.evaluate(() => localStorage.removeItem("cairn-last-seat"));
+  await win.reload();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+
+  // The K3 door's paste screen carries the one-click button, gated by the
+  // same consent checkbox as the paste path.
+  await card.getByRole("button", { name: /Kimi K3/ }).click();
+  await expect(card).toContainText("Paste your OpenRouter key");
+  const signIn = card.getByRole("button", { name: "Sign in with OpenRouter" });
+  await expect(signIn).toBeVisible();
+  await expect(signIn).toBeDisabled();
+  await card.locator('input[type="checkbox"]').check();
+  await expect(signIn).toBeEnabled();
+  await signIn.click();
+
+  // The waiting card names the flow and carries the fallback link — the
+  // exact URL main would have opened in the browser.
+  await expect(card).toContainText("Finish in your browser.");
+  const link = card.getByRole("link", { name: "Open the sign-in page yourself" });
+  await expect(link).toBeVisible();
+  const authUrl = await link.getAttribute("href");
+  expect(authUrl).toBeTruthy();
+  const parsed = new URL(authUrl as string);
+  expect(parsed.origin).toBe(openRouterUrl);
+  expect(parsed.pathname).toBe("/auth");
+  expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
+  expect(parsed.searchParams.get("code_challenge")).toBeTruthy();
+  const callback = new URL(parsed.searchParams.get("callback_url") as string);
+  expect(callback.hostname).toBe("127.0.0.1");
+  expect(callback.pathname).toBe("/callback");
+
+  // Play the browser: approve at the fixture, follow the redirect into the
+  // app's loopback listener, and the dance completes by itself.
+  const authResponse = await fetch(authUrl as string, { redirect: "manual" });
+  expect(authResponse.status).toBe(302);
+  const location = authResponse.headers.get("location");
+  expect(location).toBeTruthy();
+  const callbackResponse = await fetch(location as string);
+  expect(callbackResponse.status).toBe(200);
+  await expect(callbackResponse.text()).resolves.toContain("return to Cairn");
+
+  // The card closes into the connected state — the same landing as a pasted
+  // key, with the curated seat and provider named.
+  await expect(card).not.toBeVisible({ timeout: 10_000 });
+  const status = await win.evaluate(() => window.cairn.conductorStatus());
+  expect(status.connected).toBe(true);
+  expect(status.baseUrl).toBe("https://openrouter.ai/api/v1");
+  expect(status.model).toBe("moonshotai/kimi-k3");
+  expect(status.provider).toBe("openrouter.ai");
+
+  // The fixture's own verdict: the verifier in the exchange hashes to the
+  // challenge the auth URL carried — the PKCE binding held end-to-end.
+  expect(oauthExchangeVerdict()).toBe(true);
+  const exchange = JSON.parse(lastOAuthExchangeBody() as string) as Record<string, string>;
+  expect(exchange.code).toBe("fixture-auth-code");
+  expect(exchange.code_challenge_method).toBe("S256");
+
+  await app.close();
+});
+
+test("cancelling the sign-in returns to the paste screen, still disconnected, and the listener is gone", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-oauth-cancel-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: oauthEnv(project) });
+  const win = await app.firstWindow();
+
+  const card = win.locator(".card", { hasText: "connect cairn's brain" });
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await win.evaluate(() => localStorage.removeItem("cairn-last-seat"));
+  await win.reload();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+
+  await card.getByRole("button", { name: /Kimi K3/ }).click();
+  await card.locator('input[type="checkbox"]').check();
+  await card.getByRole("button", { name: "Sign in with OpenRouter" }).click();
+  await expect(card).toContainText("Finish in your browser.");
+  const authUrl = (await card.getByRole("link", { name: "Open the sign-in page yourself" }).getAttribute("href")) as string;
+
+  await card.getByRole("button", { name: "Cancel" }).click();
+  await expect(card).toContainText("Paste your OpenRouter key");
+  await expect(card.getByRole("button", { name: "Sign in with OpenRouter" })).toBeVisible();
+  const status = await win.evaluate(() => window.cairn.conductorStatus());
+  expect(status.connected).toBe(false);
+
+  // A browser that finishes late finds the loopback door closed entirely —
+  // cancel tears the listener down, so the connection itself is refused and
+  // no exchange can ever reach OpenRouter.
+  const authResponse = await fetch(authUrl, { redirect: "manual" });
+  const location = authResponse.headers.get("location") as string;
+  await expect(fetch(location)).rejects.toThrow(/fetch failed/);
+
+  await app.close();
+});
+
+test("the OAuth channel enforces the same consent gate, and OpenRouter seats only", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-oauth-gate-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: oauthEnv(project) });
+  const win = await app.firstWindow();
+  await expect(win.locator(".card", { hasText: "connect cairn's brain" })).toBeVisible({ timeout: 30_000 });
+
+  // Three refusals, proven through the real IPC surface: a doctored card, an
+  // unchecked box, and a perfectly valid card for the WRONG seat. None may
+  // open a listener or store anything.
+  const gates = await win.evaluate(async () => {
+    const real = await window.cairn.conductorConsentCard("https://openrouter.ai/api/v1", "moonshotai/kimi-k3");
+    if (!real.ok) throw new Error("consent card failed");
+    const tampered = await window.cairn.conductorOAuthBegin({ card: { ...real.value, cost: "Free, I promise." }, consentConfirmed: true });
+    const unchecked = await window.cairn.conductorOAuthBegin({ card: real.value, consentConfirmed: false });
+    const kimiCard = await window.cairn.conductorConsentCard("https://api.kimi.com/coding/v1", "kimi-for-coding");
+    if (!kimiCard.ok) throw new Error("kimi card failed");
+    const kimi = await window.cairn.conductorOAuthBegin({ card: kimiCard.value, consentConfirmed: true });
+    return { tampered, unchecked, kimi };
+  });
+  expect(gates.tampered).toEqual({ ok: false, message: "CONDUCTOR_CONNECT_NOT_AUTHORIZED" });
+  expect(gates.unchecked).toEqual({ ok: false, message: "CONDUCTOR_CONNECT_NOT_AUTHORIZED" });
+  expect(gates.kimi).toEqual({ ok: false, message: "CONDUCTOR_OAUTH_NOT_AUTHORIZED" });
+  const status = await win.evaluate(() => window.cairn.conductorStatus());
+  expect(status.connected).toBe(false);
+
+  await app.close();
 });
 
 // Task 127: a custom (non-curated) seat earns one code-assembled note in the

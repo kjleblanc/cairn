@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConductorConsentCard } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BODIES, OPENROUTER_BASE_URL, RECOMMENDATION_NOTE, RECOMMENDED_BODY, bodyBaseUrl, type Body } from "../../shared/bodies";
@@ -38,7 +38,7 @@ function readRememberedSeat(): RememberedSeat | null {
 const ADD_MODEL_REQUEST =
   "Add a model to my picker: provider/model-id — verify the id against the provider's public catalog first.";
 
-type Panel = "start" | "default" | "picker" | "guide" | "add";
+type Panel = "start" | "default" | "picker" | "guide" | "add" | "oauth";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -112,7 +112,16 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * While the current seat still equals the remembered one, a muted line says
  * so ("Cairn remembers your last choice — never your key."); changing any
  * field makes the line leave with the match. A bad stored value is
- * forgotten, not repaired. */
+ * forgotten, not repaired.
+ *
+ * Task 131 adds the one-click door: on any OpenRouter seat, a "Sign in with
+ * OpenRouter" button above the key field starts the PKCE dance in main —
+ * same consent checkbox, no key anywhere — and the card switches to an
+ * `oauth` waiting panel with a fallback link and a Cancel. The terminal
+ * event arrives over `onConductorOAuth`: done behaves exactly like a
+ * pasted-key success (seat memory, close), failed returns here with the
+ * fixed refusal. The paste path below is byte-identical and stays the
+ * universal fallback; Kimi and custom seats show no sign-in button. */
 export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [rememberedSeat] = useState<RememberedSeat | null>(() => readRememberedSeat());
   const [panel, setPanel] = useState<Panel>(rememberedSeat ? "default" : "start");
@@ -128,6 +137,12 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [oauthUrl, setOauthUrl] = useState<string | null>(null);
+  /** The OAuth event arrives outside React's flow, and the seat on screen at
+   * THAT moment is what gets remembered — so the latest values ride a ref
+   * rather than a mount-time closure. */
+  const seatRef = useRef({ baseUrl, model });
+  seatRef.current = { baseUrl, model };
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +176,43 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     }
   }
 
+  /** Task 131: one terminal event per sign-in attempt. `done` means main has
+   * already stored the minted key (it never crosses IPC), so the renderer
+   * does exactly what a pasted-key success does — remember the seat, close
+   * the card. `failed` returns to the paste screen with the fixed refusal as
+   * the error. A renderer-initiated cancel emits nothing at all. */
+  useEffect(() => {
+    return cairn.onConductorOAuth((event) => {
+      if (event.kind === "done") {
+        localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ baseUrl: seatRef.current.baseUrl.trim(), model: seatRef.current.model.trim() }));
+        onConnected();
+      } else {
+        setOauthUrl(null);
+        setError(event.message);
+        setPanel("default");
+      }
+    });
+  }, [onConnected]);
+
+  /** Begins the PKCE dance in main. The same consent gate as connect(): no
+   * checked box, no browser. Main replies with the auth URL immediately and
+   * the card switches to the waiting panel; the outcome arrives above. */
+  async function beginOAuth() {
+    if (!card || !checked || connecting) return;
+    setConnecting(true);
+    setError(null);
+    try {
+      const response = await cairn.conductorOAuthBegin({ card, consentConfirmed: true });
+      if (!response.ok) { setError(response.message); return; }
+      setOauthUrl(response.value.authUrl);
+      setPanel("oauth");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
   function chooseBody(body: Body) {
     setCustom(false);
     setBaseUrl(body.baseUrl ?? DEFAULT_BASE_URL);
@@ -184,6 +236,10 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
 
   const currentBody = custom ? null : (BODIES.find((b) => b.id === model) ?? null);
   const kimiSeat = currentBody?.baseUrl !== undefined && new URL(currentBody.baseUrl).host === "api.kimi.com";
+  /** The one-click door exists only where main would honor it: the pinned
+   * OpenRouter seat (curated OpenRouter bodies, or that exact URL typed by
+   * hand). Kimi and any other custom URL keep the paste-only path. */
+  const openRouterSeat = baseUrl.trim() === OPENROUTER_BASE_URL;
   // The memory line stays only while the seat on screen IS the remembered
   // one — editing a field or choosing another brain takes it away.
   const showingMemory = rememberedSeat !== null && baseUrl === rememberedSeat.baseUrl && model === rememberedSeat.model;
@@ -300,6 +356,26 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     );
   }
 
+  if (panel === "oauth") {
+    return (
+      <Card title="connect cairn's brain">
+        <p><strong>Finish in your browser.</strong> Cairn opened OpenRouter's sign-in page — approve it there and this card finishes by itself. Nothing is stored until you approve.</p>
+        {oauthUrl ? (
+          <p className="small muted" style={{ marginTop: 10 }}>
+            Browser didn't open?{" "}
+            <a href={oauthUrl} onClick={(e) => { e.preventDefault(); void cairn.openExternal(oauthUrl); }}>
+              Open the sign-in page yourself
+            </a>
+            .
+          </p>
+        ) : null}
+        <div className="row" style={{ marginTop: 14 }}>
+          <Pill kind="quiet" onClick={() => { void cairn.conductorOAuthCancel(); setOauthUrl(null); setPanel("default"); }}>Cancel</Pill>
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <Card title="connect cairn's brain">
       <p>{kimiSeat
@@ -322,6 +398,18 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
           Connecting with <strong>{currentBody?.name ?? model}</strong>{currentBody ? ` — ${currentBody.blurb}` : ""}
         </p>
       )}
+
+      {openRouterSeat ? (
+        <div style={{ marginTop: 14 }}>
+          <Pill kind="primary" disabled={!card || !checked || connecting} onClick={() => void beginOAuth()}>
+            {connecting ? "Opening sign-in…" : "Sign in with OpenRouter"}
+          </Pill>
+          <p className="small muted" style={{ marginTop: 6 }}>
+            The easy way — no key to find or paste. Check the consent box below, click here, and approve Cairn in your browser.
+          </p>
+          <p className="small muted" style={{ marginTop: 10 }}>…or paste a key instead:</p>
+        </div>
+      ) : null}
 
       <Field label="API key">
         <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Stored encrypted; shown never again" />

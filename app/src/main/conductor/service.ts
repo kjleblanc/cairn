@@ -1,14 +1,18 @@
+import { shell } from "electron";
 import type {
   ConductorConnectRequest,
   ConductorConsentCard,
   ConductorConversationSummary,
   ConductorDelta,
+  ConductorOAuthEvent,
+  ConductorOAuthRequest,
   ConductorStatus,
   ConductorStreamSnapshot,
   ConductorTurn,
   Result,
   ResultCard,
 } from "../../shared/ipc.js";
+import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
 import { isQuitDraining, isTaskRunning } from "../rungate.js";
 import { logError } from "../log.js";
 import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
@@ -16,6 +20,7 @@ import { consentCardFor } from "./consent.js";
 import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
+import { beginOpenRouterOAuth, createLoopbackListener, type OAuthAttempt } from "./oauth.js";
 import { cardBriefing } from "./relay.js";
 import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
@@ -23,6 +28,7 @@ import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, 
 import { extractTaskBlock } from "./taskblock.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
+const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
 const ENCRYPTION_UNAVAILABLE = "This computer cannot store the key securely, so Cairn did not save it.";
 const PROMPT_TOO_LARGE_MESSAGE =
   "This conversation has grown past what Cairn can safely send. Start a new conversation — the project records keep what matters.";
@@ -109,6 +115,86 @@ export function connect(request: ConductorConnectRequest): Result<null> {
 
 export function disconnect(): void {
   keystore.clearConnection();
+}
+
+/** One sign-in attempt at a time, app-wide — the loopback listener and the
+ * waiting card are both single-tenant by nature. */
+let liveOAuth: OAuthAttempt | null = null;
+
+const DEFAULT_OPENROUTER_AUTH_BASE = new URL(OPENROUTER_BASE_URL).origin;
+
+/** "Sign in with OpenRouter" (task 131): the SAME consent gate as connect()
+ * — re-derived card, exact field match, checked box — plus a fail-closed pin
+ * that only the curated OpenRouter seat may use this channel. The PKCE dance
+ * then runs entirely here in main: the browser opens OpenRouter's
+ * authorization page, the loopback listener takes the redirect, the exchange
+ * mints the key, and the key goes straight into the same encrypted keystore
+ * slot a pasted key would. It never crosses IPC; the renderer learns only
+ * "done" or a fixed refusal through `emit`.
+ *
+ * Test seams (both fail-closed to production values): CAIRN_OPENROUTER_AUTH_BASE
+ * points the auth page and the exchange at a local fixture, and
+ * CAIRN_OAUTH_NO_BROWSER=1 skips the real browser launch — the waiting card
+ * shows the same URL as a fallback link either way. */
+export async function beginOAuth(
+  request: ConductorOAuthRequest,
+  emit: (event: ConductorOAuthEvent) => void,
+): Promise<Result<{ authUrl: string }>> {
+  const expected = conductorConsentCard(request.card.baseUrl, request.card.model);
+  if (!sameCard(expected, request.card) || request.consentConfirmed !== true) {
+    return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+  }
+  if (request.card.baseUrl !== OPENROUTER_BASE_URL) {
+    return { ok: false, message: OAUTH_NOT_AUTHORIZED };
+  }
+  if (!keystore.encryptionAvailable()) {
+    return { ok: false, message: ENCRYPTION_UNAVAILABLE };
+  }
+  // A second begin supersedes whatever attempt was still waiting.
+  const previous = liveOAuth;
+  liveOAuth = null;
+  previous?.cancel();
+  let attempt: OAuthAttempt;
+  try {
+    attempt = await beginOpenRouterOAuth({
+      authBase: process.env.CAIRN_OPENROUTER_AUTH_BASE ?? DEFAULT_OPENROUTER_AUTH_BASE,
+      listen: createLoopbackListener,
+      fetchImpl: (url, init) => fetch(url, init),
+    });
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+  liveOAuth = attempt;
+  if (process.env.CAIRN_OAUTH_NO_BROWSER !== "1") {
+    // Best-effort: if the browser launch fails, the fallback link carries the flow.
+    void shell.openExternal(attempt.authUrl).catch(() => {});
+  }
+  attempt.waitForKey()
+    .then((key) => {
+      if (liveOAuth !== attempt) return;
+      liveOAuth = null;
+      try {
+        keystore.saveKey(request.card.baseUrl, request.card.model, key);
+        emit({ kind: "done" });
+      } catch {
+        emit({ kind: "failed", message: ENCRYPTION_UNAVAILABLE });
+      }
+    })
+    .catch((err: unknown) => {
+      if (liveOAuth !== attempt) return;
+      liveOAuth = null;
+      emit({ kind: "failed", message: err instanceof Error ? err.message : String(err) });
+    });
+  return { ok: true, value: { authUrl: attempt.authUrl } };
+}
+
+/** Renderer-initiated cancel: silent by design — the card that cancelled
+ * already knows, so no event goes back out. Clearing the slot FIRST is what
+ * keeps the attempt's own rejection from emitting a stale "failed". */
+export function cancelOAuth(): void {
+  const attempt = liveOAuth;
+  liveOAuth = null;
+  attempt?.cancel();
 }
 
 export function setModel(model: string): void {

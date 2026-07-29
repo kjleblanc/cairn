@@ -242,6 +242,11 @@ const mock: CairnApi = {
     checkbox: "I understand the lab never connects to anything.",
   })),
   conductorConnect: () => soon(ok(null)),
+  // The lab never completes a sign-in: begin shows the waiting panel (so the
+  // state is previewable) and no event ever arrives — Cancel is the way back.
+  conductorOAuthBegin: () => soon(ok({ authUrl: "https://openrouter.ai/auth?callback_url=lab-demo" })),
+  conductorOAuthCancel: () => soon(ok(null)),
+  onConductorOAuth: () => () => {},
   conductorDisconnect: () => soon(ok(null)),
   conductorSetModel: () => soon(ok(null)),
   conductorSend: (request) => {

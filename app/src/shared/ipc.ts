@@ -126,6 +126,27 @@ export interface ConductorConnectRequest {
   consentConfirmed: boolean;
 }
 
+/**
+ * "Sign in with OpenRouter" (task 131): the renderer's half of the PKCE
+ * dance. It carries NO key — that is the point. The card + consentConfirmed
+ * pass the exact same re-derivation gate as a pasted-key connect before any
+ * browser opens, and the key OpenRouter mints never crosses IPC: main stores
+ * it through the same encrypted keystore path and reports only the outcome.
+ */
+export interface ConductorOAuthRequest {
+  card: ConductorConsentCard;
+  consentConfirmed: boolean;
+}
+
+/**
+ * The terminal state of one sign-in attempt, emitted from main over the
+ * conductor:oauth channel. `done` means the key is already in the encrypted
+ * keystore. `failed` carries one of the fixed refusal strings (listener,
+ * timeout, exchange). A renderer-initiated cancel emits NOTHING — the card
+ * that cancelled already knows.
+ */
+export type ConductorOAuthEvent = { kind: "done" } | { kind: "failed"; message: string };
+
 export interface ConductorSendRequest {
   dir: string;
   conversationId: string | null;
@@ -169,6 +190,9 @@ export interface CairnApi {
   conductorStatus(): Promise<ConductorStatus>;
   conductorConsentCard(baseUrl: string, model: string): Promise<Result<ConductorConsentCard>>;
   conductorConnect(request: ConductorConnectRequest): Promise<Result<null>>;
+  conductorOAuthBegin(request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>>;
+  conductorOAuthCancel(): Promise<Result<null>>;
+  onConductorOAuth(cb: (event: ConductorOAuthEvent) => void): () => void;
   conductorDisconnect(): Promise<Result<null>>;
   conductorSetModel(model: string): Promise<Result<null>>;
   conductorSend(request: ConductorSendRequest): Promise<Result<{ conversationId: string }>>;

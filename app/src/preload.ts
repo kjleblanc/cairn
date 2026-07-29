@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CairnApi, ConductorDelta, TaskActivityEvent } from "./shared/ipc.js";
+import type { CairnApi, ConductorDelta, ConductorOAuthEvent, TaskActivityEvent } from "./shared/ipc.js";
 
 const api: CairnApi = {
   preflight: () => ipcRenderer.invoke("preflight:check"),
@@ -26,6 +26,13 @@ const api: CairnApi = {
   conductorStatus: () => ipcRenderer.invoke("conductor:status"),
   conductorConsentCard: (baseUrl, model) => ipcRenderer.invoke("conductor:consentCard", baseUrl, model),
   conductorConnect: (request) => ipcRenderer.invoke("conductor:connect", request),
+  conductorOAuthBegin: (request) => ipcRenderer.invoke("conductor:oauthBegin", request),
+  conductorOAuthCancel: () => ipcRenderer.invoke("conductor:oauthCancel"),
+  onConductorOAuth: (callback) => {
+    const listener = (_event: unknown, payload: ConductorOAuthEvent) => callback(payload);
+    ipcRenderer.on("conductor:oauth", listener);
+    return () => ipcRenderer.removeListener("conductor:oauth", listener);
+  },
   conductorDisconnect: () => ipcRenderer.invoke("conductor:disconnect"),
   conductorSetModel: (model) => ipcRenderer.invoke("conductor:setModel", model),
   conductorSend: (request) => ipcRenderer.invoke("conductor:send", request),
