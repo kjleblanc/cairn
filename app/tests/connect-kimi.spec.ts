@@ -53,14 +53,11 @@ test("the Kimi subscription seat shows plan-truth consent wording and the consol
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
 
-  // The picker lists the subscription seat alongside the OpenRouter brains,
-  // and its billing line names the membership quota in plain words.
-  await win.getByRole("button", { name: "Choose a different brain" }).click();
-  const picker = win.locator(".card", { hasText: "choose a different brain" });
-  await expect(picker).toBeVisible();
-  await expect(picker).toContainText("Kimi — your subscription");
-  await expect(picker).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
-  await picker.getByRole("button", { name: /Kimi — your subscription/ }).click();
+  // The card opens with the two doors; the subscription seat is one of them,
+  // its quota billing named in plain words before any click.
+  await expect(card).toContainText("Kimi — your subscription");
+  await expect(card).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
+  await card.getByRole("button", { name: /Kimi — your subscription/ }).click();
 
   // The seat fixes the base URL and model itself — no free-text fields — and
   // every word the owner reads is the subscription truth, derived in main.

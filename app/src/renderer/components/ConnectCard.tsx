@@ -16,7 +16,7 @@ const KIMI_CONSOLE_URL = "https://www.kimi.com/code/console";
 const ADD_MODEL_REQUEST =
   "Add a model to my picker: provider/model-id — verify the id against the provider's public catalog first.";
 
-type Panel = "default" | "picker" | "guide" | "add";
+type Panel = "start" | "default" | "picker" | "guide" | "add";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -26,6 +26,25 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </div>
   );
 }
+
+/** One curated-body row, shared by the start panel's doors and the picker so
+ * the name, blurb, billing line, and recommendation note never drift apart. */
+function BodyButton({ body, onChoose }: { body: Body; onChoose: (body: Body) => void }) {
+  return (
+    <button type="button" className="brain-item" onClick={() => onChoose(body)}>
+      <span className="brain-item-head">
+        <strong>{body.name}</strong>
+        {body.recommended ? <span className="brain-item-tag">Recommended</span> : null}
+      </span>
+      <span className="small muted">{body.blurb}</span>
+      <span className="brain-item-billing">{body.billing}</span>
+      {body.recommended ? <span className="small brain-item-note">{RECOMMENDATION_NOTE}</span> : null}
+    </button>
+  );
+}
+
+const PRIMARY_BODIES = BODIES.filter((b) => b.primary === true);
+const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
 
 /** The connect flow's standing-consent card: the owner sees exactly what
  * main will re-derive and check before it ever stores a key (the dispatch-gate
@@ -54,10 +73,20 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
  * takes any model right now and that a connected Cairn will add a model to
  * the list as a task, showing the exact sentence to send. The Kimi guide also
  * tells the CLI truth: a Kimi Code command-line sign-in can't be borrowed
- * yet, so the console key is the way today. */
+ * yet, so the console key is the way today.
+ *
+ * Task 126 asks the power question first: the card opens on a `start` panel
+ * with the two `primary` doors (Kimi K3 pay-per-use, the Kimi membership
+ * seat) rendered from the same Body data — no duplicated cost honesty — and
+ * the picker collapses its non-primary entries behind a "More choices"
+ * toggle. Custom… and the not-listed path stay visible without expanding,
+ * so the 22-call connectToFixture helper's clicks keep their meaning. The
+ * consent block on the paste screen is the standing authorization and keeps
+ * its exact strings. */
 export function ConnectCard({ onConnected }: { onConnected: () => void }) {
-  const [panel, setPanel] = useState<Panel>("default");
+  const [panel, setPanel] = useState<Panel>("start");
   const [custom, setCustom] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [model, setModel] = useState(RECOMMENDED_BODY.id);
   const [apiKey, setApiKey] = useState("");
@@ -101,11 +130,13 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     setCustom(false);
     setBaseUrl(body.baseUrl ?? DEFAULT_BASE_URL);
     setModel(body.id);
+    setMoreOpen(false);
     setPanel("default");
   }
 
   function chooseCustom() {
     setCustom(true);
+    setMoreOpen(false);
     setPanel("default");
   }
 
@@ -119,22 +150,37 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const currentBody = custom ? null : (BODIES.find((b) => b.id === model) ?? null);
   const kimiSeat = currentBody?.baseUrl !== undefined && new URL(currentBody.baseUrl).host === "api.kimi.com";
 
+  if (panel === "start") {
+    return (
+      <Card title="connect cairn's brain">
+        <p>How do you want to power Cairn?</p>
+        <div className="brain-list">
+          {PRIMARY_BODIES.map((body) => (
+            <BodyButton key={body.id} body={body} onChoose={chooseBody} />
+          ))}
+        </div>
+        <div className="row" style={{ marginTop: 14 }}>
+          <Pill kind="quiet" onClick={() => setPanel("picker")}>Choose a different brain</Pill>
+        </div>
+      </Card>
+    );
+  }
+
   if (panel === "picker") {
     return (
       <Card title="choose a different brain">
-        <p className="small muted">Cairn talks to any OpenAI-compatible provider — OpenRouter models, or your Kimi membership directly. This list is a starting point, not a fence: any model works.</p>
+        <p className="small muted">Every way to power Cairn. This list is a starting point, not a fence: any model works.</p>
         <div className="brain-list">
-          {BODIES.map((body) => (
-            <button key={body.id} type="button" className="brain-item" onClick={() => chooseBody(body)}>
-              <span className="brain-item-head">
-                <strong>{body.name}</strong>
-                {body.recommended ? <span className="brain-item-tag">Recommended</span> : null}
-              </span>
-              <span className="small muted">{body.blurb}</span>
-              <span className="brain-item-billing">{body.billing}</span>
-              {body.recommended ? <span className="small brain-item-note">{RECOMMENDATION_NOTE}</span> : null}
-            </button>
+          {PRIMARY_BODIES.map((body) => (
+            <BodyButton key={body.id} body={body} onChoose={chooseBody} />
           ))}
+          <button type="button" className="brain-item brain-toggle" onClick={() => setMoreOpen((open) => !open)}>
+            <span className="brain-item-head"><strong>{moreOpen ? "▾" : "▸"} More choices ({MORE_BODIES.length})</strong></span>
+            {moreOpen ? null : <span className="small muted">More models — same per-use billing, lower prices than K3.</span>}
+          </button>
+          {moreOpen ? MORE_BODIES.map((body) => (
+            <BodyButton key={body.id} body={body} onChoose={chooseBody} />
+          )) : null}
           <button type="button" className="brain-item" onClick={chooseCustom}>
             <span className="brain-item-head"><strong>Custom…</strong></span>
             <span className="small muted">Enter your own provider base URL and model — this is also where a local Ollama URL goes.</span>
@@ -145,7 +191,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
           </button>
         </div>
         <div className="row" style={{ marginTop: 14 }}>
-          <Pill kind="quiet" onClick={() => setPanel("default")}>Back</Pill>
+          <Pill kind="quiet" onClick={() => { setMoreOpen(false); setPanel("start"); }}>Back</Pill>
         </div>
       </Card>
     );

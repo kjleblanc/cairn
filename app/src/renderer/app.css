@@ -81,6 +81,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .brain-item-tag { background: var(--green-soft); color: var(--green-deep); border-radius: 999px; padding: 1px 10px; font-size: .74rem; font-weight: 700; }
 .brain-item-note { color: var(--green-deep); }
 .brain-item-billing { color: var(--muted); font-size: .78rem; }
+.brain-toggle { border-style: dashed; }
 .add-model-sentence { background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 14px; user-select: all; }
 .serial-map { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; margin-bottom: 10px; }
 .serial-map span { background: var(--card-solid); border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px; text-align: center; font-size: .8rem; font-weight: 600; }

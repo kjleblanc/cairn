@@ -28,3 +28,9 @@ test("every body names how it bills in plain words", () => {
     assert.ok(body.billing.length < 100, `body ${body.name}'s billing line is ${body.billing.length} chars, expected under 100`);
   }
 });
+
+test("exactly two bodies are primary — the two doors on the connect card's first screen", () => {
+  const primary = BODIES.filter((b) => b.primary === true);
+  assert.equal(primary.length, 2);
+  assert.ok(primary.every((b) => b.id === "moonshotai/kimi-k3" || b.id === "kimi-for-coding"));
+});

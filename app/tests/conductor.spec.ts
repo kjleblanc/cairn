@@ -161,24 +161,40 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
 
-  // One-paste default: no base URL or model input, and the recommended
-  // brain is already named on screen — nothing to choose before pasting a key.
+  // The card opens with the two-door question: Kimi K3 (recommended) and the
+  // Kimi membership seat — no free-text fields, nothing to configure, and
+  // both billing lines named before any click.
   await expect(card.locator('input[type="text"]')).toHaveCount(0);
+  await expect(card).toContainText("How do you want to power Cairn?");
   await expect(card).toContainText("Kimi K3");
+  await expect(card).toContainText("Recommended");
+  await expect(card).toContainText("Kimi — your subscription");
+  await expect(card).toContainText("Bills per use — key from openrouter.ai");
+  await expect(card).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
 
-  // The picker lists all five curated brains plus "Custom…" and the
-  // not-listed path, and every brain names how it bills in plain words.
+  // Choosing a door lands on the one-paste screen, pre-filled for that seat.
+  await card.getByRole("button", { name: /Kimi K3/ }).click();
+  await expect(card).toContainText("Connecting with Kimi K3");
+  await expect(card).toContainText("Paste your OpenRouter key");
+
+  // The picker shows the two primary doors, keeps the other three models
+  // hidden behind a toggle, and leaves "Custom…" and the not-listed path
+  // visible without expanding.
   await win.getByRole("button", { name: "Choose a different brain" }).click();
   const picker = win.locator(".card", { hasText: "choose a different brain" });
   await expect(picker).toBeVisible();
   await expect(picker).toContainText("Kimi K3");
-  await expect(picker).toContainText("Recommended");
+  await expect(picker).toContainText("Kimi — your subscription");
+  await expect(picker).not.toContainText("Kimi K2");
+  await expect(picker).not.toContainText("DeepSeek V3.1");
+  await expect(picker).not.toContainText("GPT-5 Mini");
+  await expect(picker.getByRole("button", { name: "Custom…" })).toBeVisible();
+
+  await picker.getByRole("button", { name: /More choices/ }).click();
   await expect(picker).toContainText("Kimi K2");
   await expect(picker).toContainText("DeepSeek V3.1");
   await expect(picker).toContainText("GPT-5 Mini");
   await expect(picker).toContainText("Bills per use — key from openrouter.ai");
-  await expect(picker).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
-  await expect(picker.getByRole("button", { name: "Custom…" })).toBeVisible();
 
   // The not-listed path names both doors — Custom… right now, a Cairn task
   // once connected — and shows the exact sentence to send, with a copy button.
@@ -191,7 +207,11 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await add.getByRole("button", { name: "Back" }).click();
   await picker.getByRole("button", { name: "Back" }).click();
 
-  // "Where do I get a key?" opens an in-card walkthrough, not a browser guess.
+  // Picker Back returns to the start screen; choosing K3 again leads back to
+  // the paste screen, where "Where do I get a key?" opens an in-card
+  // walkthrough, not a browser guess.
+  await expect(card).toContainText("How do you want to power Cairn?");
+  await card.getByRole("button", { name: /Kimi K3/ }).click();
   await win.getByRole("button", { name: "Where do I get a key?" }).click();
   const guide = win.locator(".card", { hasText: "where do I get a key?" });
   await expect(guide).toBeVisible();
