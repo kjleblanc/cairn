@@ -49,7 +49,7 @@ body {
 .concept-header h1 { margin: 0 0 10px; font-size: clamp(1.7rem, 3.2vw, 2.7rem); letter-spacing: -.03em; }
 .concept-header > p:last-child { margin: 0; color: var(--town-muted); line-height: 1.55; }
 
-.concept-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.concept-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .concept-column {
   overflow: hidden;
   border: 1px solid var(--town-line);
@@ -114,6 +114,11 @@ body {
   box-shadow: 0 0 24px var(--garden-amber-glow), inset 0 0 18px var(--garden-amber-glow);
 }
 .concept-column[data-concept="spirit"] .face-frame { border-style: dashed; }
+.concept-column[data-concept="warm"] .face-frame {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--garden-cyan) 42%, var(--garden-amber));
+  box-shadow: 0 0 24px var(--garden-cyan-glow), inset 0 0 18px var(--garden-amber-glow);
+}
 .face-svg { width: 76px; height: 76px; overflow: visible; }
 
 .concept-fill { fill: var(--garden-cyan); }
@@ -177,6 +182,16 @@ body {
   stroke-linecap: round;
   stroke-width: 2;
 }
+.warm-field { stroke: color-mix(in srgb, var(--garden-cyan) 32%, transparent); }
+.warm-field-inner { opacity: .55; }
+.warm-mask {
+  fill: color-mix(in srgb, var(--garden-cyan) 4%, transparent);
+  stroke: color-mix(in srgb, var(--garden-cyan) 20%, transparent);
+  stroke-dasharray: 2 6;
+  stroke-width: 1.2;
+}
+.warm-eye-large { stroke-width: 6; }
+.warm-mouth { stroke: color-mix(in srgb, var(--garden-cyan) 78%, var(--garden-amber)); }
 
 .concept-judgment {
   display: grid;
@@ -204,6 +219,10 @@ body {
 @keyframes concept-delight {
   0%, 100% { transform: rotate(0deg) scale(1); }
   35% { transform: rotate(-2deg) scale(1.025); }
+}
+
+@media (max-width: 980px) {
+  .concept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {

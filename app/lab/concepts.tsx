@@ -6,7 +6,7 @@ import React, { type ComponentType, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 type PoseId = "ready" | "thinking" | "working" | "done" | "stopped";
-type ConceptId = "lopsided" | "ed" | "spirit";
+type ConceptId = "lopsided" | "ed" | "spirit" | "warm";
 
 const POSES: { id: PoseId; label: string; note: string }[] = [
   { id: "ready", label: "ready", note: "baseline presence" },
@@ -43,6 +43,13 @@ const CONCEPTS: {
     essence: "Sparse interface marks almost form a face; the ring and waveform carry the emotion.",
     keep: "The most mature, digital, and native to the night garden.",
     watch: "May feel too distant if Cairn's warmth disappears.",
+  },
+  {
+    id: "warm",
+    title: "Warm interface spirit",
+    essence: "The spirit's sparse field and waveform, warmed by one larger eye and an off-center mouth mark.",
+    keep: "Digital first, but the chosen asymmetry keeps Cairn personable.",
+    watch: "The mouth needs restraint so the face does not drift back toward emoji.",
   },
 ];
 
@@ -202,10 +209,62 @@ function SpiritFace({ pose }: { pose: PoseId }) {
   );
 }
 
+function WarmSpiritFace({ pose }: { pose: PoseId }) {
+  const features: Record<PoseId, ReactNode> = {
+    ready: (
+      <>
+        <path className="spirit-eye warm-eye-large" d="M 43 42 L 43 58" />
+        <path className="spirit-eye spirit-eye-small" d="M 77 47 L 77 55" />
+        <path className="spirit-wave warm-mouth" d="M 39 75 Q 57 84 84 68" />
+      </>
+    ),
+    thinking: (
+      <>
+        <path className="spirit-eye warm-eye-large" d="M 39 40 L 48 49" />
+        <path className="spirit-eye spirit-eye-small" d="M 78 38 L 78 49" />
+        <path className="spirit-wave warm-mouth" d="M 42 76 L 51 76 M 59 72 L 67 80 M 75 73 L 84 73" />
+        <circle className="spirit-particle" cx="90" cy="28" r="2" />
+        <circle className="spirit-particle" cx="100" cy="18" r="1.4" />
+      </>
+    ),
+    working: (
+      <>
+        <path className="spirit-eye spirit-eye-heavy" d="M 34 43 L 53 50" />
+        <path className="spirit-eye spirit-eye-heavy" d="M 84 41 L 68 49" />
+        <path className="spirit-wave spirit-wave-heavy warm-mouth" d="M 42 76 L 50 70 L 60 80 L 70 71 L 81 73" />
+      </>
+    ),
+    done: (
+      <>
+        <path className="spirit-eye warm-eye-large" d="M 35 48 Q 44 38 53 48" />
+        <path className="spirit-eye spirit-eye-small" d="M 71 44 Q 78 38 86 44" />
+        <path className="spirit-wave spirit-wave-heavy warm-mouth" d="M 33 68 Q 58 95 91 60" />
+        <path className="spirit-echo" d="M 43 80 Q 61 94 82 72" />
+      </>
+    ),
+    stopped: (
+      <>
+        <path className="spirit-eye spirit-eye-heavy" d="M 38 47 L 53 47" />
+        <path className="spirit-eye spirit-eye-heavy" d="M 70 47 L 83 47" />
+        <path className="spirit-wave spirit-wave-heavy warm-mouth" d="M 44 76 L 81 76" />
+      </>
+    ),
+  };
+  return (
+    <svg className="face-svg warm-svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+      <circle className="spirit-field warm-field" cx="60" cy="60" r="43" />
+      <circle className="spirit-field spirit-field-inner warm-field-inner" cx="60" cy="60" r="31" />
+      <ellipse className="warm-mask" cx="59" cy="61" rx="38" ry="43" />
+      {features[pose]}
+    </svg>
+  );
+}
+
 const FACES: Record<ConceptId, ComponentType<{ pose: PoseId }>> = {
   lopsided: LopsidedFace,
   ed: EdFace,
   spirit: SpiritFace,
+  warm: WarmSpiritFace,
 };
 
 function ConceptBoard() {
@@ -214,7 +273,7 @@ function ConceptBoard() {
       <header className="concept-header">
         <a className="concept-back" href="/lab/index.html">← Back to the live visual lab</a>
         <p className="concept-kicker">avatar concept board · visual poses only</p>
-        <h1>Three ways Cairn could speak with a face</h1>
+        <h1>Four ways Cairn could speak with a face</h1>
         <p>
           These are lab-only concepts, not runtime claims. Compare how each language handles
           restraint, mischief, focus, delight, and the serious STOPPED moment.
@@ -222,12 +281,12 @@ function ConceptBoard() {
       </header>
 
       <section className="concept-grid" aria-label="Avatar concept comparison">
-        {CONCEPTS.map((concept) => {
+        {CONCEPTS.map((concept, index) => {
           const Face = FACES[concept.id];
           return (
             <article className="concept-column" data-concept={concept.id} key={concept.id}>
               <header className="concept-title">
-                <p className="concept-number">concept {concept.id === "lopsided" ? "01" : concept.id === "ed" ? "02" : "03"}</p>
+                <p className="concept-number">concept {String(index + 1).padStart(2, "0")}</p>
                 <h2>{concept.title}</h2>
                 <p>{concept.essence}</p>
               </header>
