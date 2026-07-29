@@ -1,0 +1,62 @@
+/* Look-board overrides and additions on top of the shared concept-board
+   styles (concepts.css). Lab-only; nothing here feeds the shipped bundle. */
+
+.look-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1080px) { .look-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .look-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.concept-column[data-direction="vibrant"] {
+  box-shadow: 0 24px 70px color-mix(in srgb, #3ef2c8 10%, transparent);
+}
+.concept-column[data-direction="festival"] {
+  box-shadow: 0 24px 70px color-mix(in srgb, #ffd27a 10%, transparent);
+}
+.concept-column[data-direction="calm"] {
+  box-shadow: 0 24px 70px color-mix(in srgb, #8fd8e8 7%, transparent);
+}
+
+.look-scene-frame { display: block; line-height: 0; border-bottom: 1px solid var(--town-line); }
+.look-scene { display: block; width: 100%; height: auto; }
+.look-glow { filter: blur(6px); }
+.look-thread { opacity: .8; }
+.look-name {
+  font: 600 10px "Quicksand", ui-rounded, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: .06em;
+  text-anchor: middle;
+}
+.look-button-text {
+  font: 700 7.5px "Segoe UI", system-ui, sans-serif;
+  letter-spacing: .08em;
+  text-anchor: middle;
+  text-transform: uppercase;
+}
+
+.look-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  padding: 12px 18px 4px;
+}
+.look-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--town-muted);
+  font: 600 .64rem var(--mono);
+  letter-spacing: .04em;
+}
+.look-swatch i {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgb(255 255 255 / 22%);
+  border-radius: 5px;
+}
+
+.look-motion {
+  margin: 0;
+  padding: 8px 18px 12px;
+  color: var(--town-muted);
+  font-size: .74rem;
+  line-height: 1.45;
+}
+.look-motion strong { color: var(--garden-face-shine); font-weight: 600; }

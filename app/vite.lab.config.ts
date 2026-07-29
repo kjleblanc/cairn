@@ -47,6 +47,7 @@ export default defineConfig({
       input: {
         main: "lab/index.html",
         concepts: "lab/concepts.html",
+        lookboard: "lab/lookboard.html",
       },
     },
   },

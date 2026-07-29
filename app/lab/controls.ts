@@ -40,5 +40,11 @@ export function mountControls(): void {
   concepts.textContent = "Avatar concepts";
   concepts.title = "compare three Cairn face directions";
   panel.appendChild(concepts);
+  const lookboard = document.createElement("a");
+  lookboard.className = "lab-controls-button lab-controls-link";
+  lookboard.href = "/lab/lookboard.html";
+  lookboard.textContent = "Look board";
+  lookboard.title = "compare three unified scene directions";
+  panel.appendChild(lookboard);
   document.body.appendChild(panel);
 }
