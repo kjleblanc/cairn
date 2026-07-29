@@ -45,10 +45,8 @@ function TownFace({ kind, state = "ready" }: { kind: "cairn" | "worker"; state?:
   const pose = isCairn ? state : "working";
   return (
     <span className={`town-face town-face-${kind}`} aria-hidden="true">
-      <span className="town-face-orbit" />
       <span className="town-face-holo">
         <svg className="town-face-svg" viewBox="0 0 100 100" focusable="false">
-          <circle className="town-face-field" cx="50" cy="50" r="26" />
           {pose === "ready" && (
             <>
               <path className="town-face-eye town-face-eye-blink town-face-eye-large" d="M 36 35 L 36 48" />

@@ -377,26 +377,16 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: relative; z-index: 1; width: 78px; height: 78px; display: block; margin-bottom: 4px;
 }
 .town-face-worker { width: 68px; height: 68px; }
-.town-face-orbit {
-  position: absolute; inset: -7px; border: 1px dashed var(--garden-cyan-dim); border-radius: 50%;
-  pointer-events: none; animation: town-orbit-spin 14s linear infinite;
-}
-.town-face-worker .town-face-orbit { border-color: var(--garden-worker-pad); opacity: .55; animation-duration: 10s; }
 .town-face-holo {
-  position: absolute; inset: 0; display: block; padding: 5px; border: 1.5px solid var(--garden-cyan-dim);
-  border-radius: 50%; background: var(--garden-scanline), var(--garden-ink);
-  box-shadow: 0 0 24px var(--garden-cyan-glow), inset 0 0 16px var(--garden-cyan-glow);
+  position: absolute; inset: 0; display: block;
+  filter: drop-shadow(0 0 9px var(--garden-cyan-glow)) drop-shadow(0 0 3px var(--garden-cyan-dim));
   animation: town-face-float 6s ease-in-out infinite;
 }
 .town-face-worker .town-face-holo {
-  border-color: var(--garden-worker-pad); animation-delay: -2s;
-  box-shadow: 0 0 22px var(--garden-amber-glow), inset 0 0 16px var(--garden-amber-glow);
+  animation-delay: -2s;
+  filter: drop-shadow(0 0 9px var(--garden-amber-glow)) drop-shadow(0 0 3px var(--garden-worker-pad));
 }
-.town-face-svg { display: block; width: 100%; height: 100%; }
-.town-face-field {
-  fill: var(--garden-cyan-glow); stroke: var(--garden-cyan-dim); stroke-width: 1; stroke-dasharray: 2 4;
-}
-.town-face-worker .town-face-field { fill: var(--garden-amber-glow); stroke: var(--garden-worker-pad); }
+.town-face-svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .town-face-eye { fill: none; stroke: var(--garden-cyan); stroke-linecap: round; stroke-width: 3.2; }
 .town-face-worker .town-face-eye { stroke: var(--garden-amber); }
 .town-face-eye-small { stroke-width: 2.6; opacity: .75; }
@@ -479,9 +469,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-overflow-list li { display: flex; justify-content: space-between; gap: 10px; }
 .town-overflow-list span { color: var(--town-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-@keyframes town-orbit-spin {
-  to { transform: rotate(360deg); }
-}
 @keyframes town-face-float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
@@ -505,7 +492,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 @media (prefers-reduced-motion: reduce) {
   .town-node, .town-thread-target, .town-face-thought { transition: none; }
-  .town-face-orbit, .town-face-holo, .town-face-eye-blink, .town-face-thought circle,
+  .town-face-holo, .town-face-eye-blink, .town-face-thought circle,
   .town-worker-pad span, .town-node-working .town-node-status i { animation: none; }
 }
 
