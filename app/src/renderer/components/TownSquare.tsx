@@ -40,37 +40,42 @@ function selectedItem(
     : relationships.find((relationship) => relationship.id === key.id) ?? null;
 }
 
-function TownFace({ kind }: { kind: "cairn" | "worker" }) {
+function TownFace({ kind, state = "ready" }: { kind: "cairn" | "worker"; state?: "ready" | "thinking" | "working" }) {
   const isCairn = kind === "cairn";
+  const pose = isCairn ? state : "working";
   return (
     <span className={`town-face town-face-${kind}`} aria-hidden="true">
       <span className="town-face-orbit" />
       <span className="town-face-holo">
         <svg className="town-face-svg" viewBox="0 0 100 100" focusable="false">
-          <circle className="town-face-skin" cx="50" cy="52" r="34" />
-          {isCairn ? (
+          <circle className="town-face-field" cx="50" cy="50" r="26" />
+          {pose === "ready" && (
             <>
-              <ellipse className="town-face-eye town-face-eye-blink" cx="37" cy="47" rx="4.5" ry="6" />
-              <ellipse className="town-face-eye town-face-eye-blink" cx="61" cy="47" rx="4.5" ry="6" />
-              <circle className="town-face-eye-shine" cx="35.5" cy="45" r="1.5" />
-              <circle className="town-face-eye-shine" cx="59.5" cy="45" r="1.5" />
-              <circle className="town-face-blush" cx="29" cy="57" r="4" />
-              <circle className="town-face-blush" cx="69" cy="57" r="4" />
-              <path className="town-face-mouth" d="M 44 63 Q 50 66 56 63" />
-              <g className="town-face-thought">
-                <circle cx="78" cy="26" r="2.2" />
-                <circle cx="85" cy="18" r="1.7" />
-                <circle cx="91" cy="10" r="1.3" />
-              </g>
+              <path className="town-face-eye town-face-eye-blink town-face-eye-large" d="M 36 35 L 36 48" />
+              <path className="town-face-eye town-face-eye-blink town-face-eye-small" d="M 64 39 L 64 46" />
+              <path className="town-face-mouth" d="M 33 63 Q 48 70 70 57" />
             </>
-          ) : (
+          )}
+          {pose === "thinking" && (
             <>
-              <ellipse className="town-face-worker-eye" cx="38" cy="50" rx="4.5" ry="5.5" />
-              <ellipse className="town-face-worker-eye" cx="62" cy="50" rx="4.5" ry="5.5" />
-              <path className="town-face-worker-brow" d="M 32 42 L 44 45" />
-              <path className="town-face-worker-brow" d="M 68 42 L 56 45" />
-              <path className="town-face-worker-mouth" d="M 45 64 Q 50 66 55 64" />
+              <path className="town-face-eye town-face-eye-blink town-face-eye-large" d="M 33 33 L 40 41" />
+              <path className="town-face-eye town-face-eye-blink town-face-eye-small" d="M 65 32 L 65 41" />
+              <path className="town-face-mouth" d="M 35 63 L 43 63 M 49 60 L 56 67 M 63 61 L 70 61" />
             </>
+          )}
+          {pose === "working" && (
+            <>
+              <path className="town-face-eye town-face-eye-heavy" d="M 28 36 L 44 42" />
+              <path className="town-face-eye town-face-eye-heavy" d="M 70 34 L 57 41" />
+              <path className="town-face-mouth town-face-mouth-heavy" d="M 35 63 L 42 58 L 50 67 L 58 59 L 68 61" />
+            </>
+          )}
+          {isCairn && (
+            <g className="town-face-thought">
+              <circle cx="78" cy="26" r="2.2" />
+              <circle cx="85" cy="18" r="1.7" />
+              <circle cx="91" cy="10" r="1.3" />
+            </g>
           )}
         </svg>
       </span>
@@ -218,7 +223,7 @@ export function TownSquare({
                 aria-label={`Cairn, ${entity.state}`}
                 aria-pressed={isSelected}
                 onClick={(event) => selectEntity(event, entity)}>
-                <TownFace kind="cairn" />
+                <TownFace kind="cairn" state={entity.state} />
                 <strong>Cairn</strong>
                 <span className="town-node-status">{entity.state}</span>
               </button>

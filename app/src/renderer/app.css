@@ -393,21 +393,24 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   box-shadow: 0 0 22px var(--garden-amber-glow), inset 0 0 16px var(--garden-amber-glow);
 }
 .town-face-svg { display: block; width: 100%; height: 100%; }
-.town-face-skin { fill: var(--garden-face-cairn); }
-.town-face-worker .town-face-skin { fill: var(--garden-face-worker); }
-.town-face-eye, .town-face-worker-eye { fill: var(--garden-face-ink); }
-.town-face-worker-eye, .town-face-worker-brow, .town-face-worker-mouth { fill: var(--garden-face-worker-ink); }
+.town-face-field {
+  fill: var(--garden-cyan-glow); stroke: var(--garden-cyan-dim); stroke-width: 1; stroke-dasharray: 2 4;
+}
+.town-face-worker .town-face-field { fill: var(--garden-amber-glow); stroke: var(--garden-worker-pad); }
+.town-face-eye { fill: none; stroke: var(--garden-cyan); stroke-linecap: round; stroke-width: 3.2; }
+.town-face-worker .town-face-eye { stroke: var(--garden-amber); }
+.town-face-eye-small { stroke-width: 2.6; opacity: .75; }
+.town-face-eye-large { stroke-width: 3.8; }
+.town-face-eye-heavy { stroke-width: 3.6; }
 .town-face-eye-blink {
   transform-box: fill-box; transform-origin: center; animation: town-face-blink 5.2s ease-in-out infinite;
 }
-.town-face-eye-shine { fill: var(--garden-face-shine); }
-.town-face-blush { fill: var(--garden-face-blush); }
-.town-face-mouth, .town-face-worker-mouth, .town-face-worker-brow {
-  fill: none; stroke-linecap: round; stroke-width: 2.5;
+.town-face-mouth {
+  fill: none; stroke: color-mix(in srgb, var(--garden-cyan) 78%, var(--garden-amber));
+  stroke-linecap: round; stroke-linejoin: round; stroke-width: 3;
 }
-.town-face-mouth { stroke: var(--garden-face-ink); }
-.town-face-worker-mouth, .town-face-worker-brow { stroke: var(--garden-face-worker-ink); }
-.town-face-worker-brow { stroke-width: 2.4; }
+.town-face-worker .town-face-mouth { stroke: var(--garden-amber); }
+.town-face-mouth-heavy { stroke-width: 3.4; }
 .town-face-thought { fill: var(--garden-cyan); opacity: 0; transition: opacity 180ms ease; }
 .town-node-thinking .town-face-thought, .town-node-working .town-face-thought { opacity: 1; }
 .town-face-thought circle { animation: town-face-thought 1.8s ease-in-out infinite; }
