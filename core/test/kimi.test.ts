@@ -4,6 +4,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import {
+  authorizeKimiExec,
+  createKimiExecAdapter,
   createSystemKimiAcpProbe,
   createSystemKimiExecProcess,
   createSystemKimiProviderProbe,
@@ -11,16 +13,29 @@ import {
   isKimiExecCancelledError,
   isKimiExecTimeoutError,
   KIMI_EXEC_ABSOLUTE_MS,
+  KIMI_EXEC_ADAPTER_ID,
+  KIMI_EXEC_DATA_SCOPE,
   KIMI_EXEC_INACTIVITY_MS,
+  KIMI_EXEC_MODEL,
   KIMI_EXEC_PROMPT_MAX_CHARS,
+  KIMI_EXEC_PROVIDER,
+  KIMI_EXEC_QUOTA_GENERIC,
+  KIMI_EXEC_QUOTA_OAUTH,
+  KimiExecModelCallBoundaryError,
   KimiExecProcessError,
   kimiExecConnectionReason,
+  kimiExecDisclosure,
   kimiExecStatusText,
   type KimiAcpProbe,
+  type KimiExecProcess,
+  type KimiExecProcessResult,
+  type KimiExecRequest,
   type KimiProviderProbe,
   type KimiStatusProbe,
   type KimiStatusProbeResult,
 } from "../src/kimi.js";
+import { createCodexExecAdapter, REAL_MODEL_CALL_NOT_AUTHORIZED } from "../src/codex.js";
+import { routeTask, type AdapterTaskContract } from "../src/routing.js";
 
 const SECRET_SENTINEL = "sk-secret-kimi-account-detail";
 
@@ -711,4 +726,255 @@ test("raw stdout and stderr stream to redacted kimi-* debug copies outside the p
     assert.match(contents, /provider stderr with sk-\[redacted\] inside/);
     assert.doesNotMatch(contents, new RegExp(token));
   });
+});
+
+// ---------------------------------------------------------------------------
+// Plan Task 3 — disclosure, authorization, the adapter factory. These tests
+// never spawn: the process seam is an injected kind:"fake" runner, and the
+// pins are on the request handed to it and the bytes the owner confirms.
+// ---------------------------------------------------------------------------
+
+function kimiContract(details = ""): AdapterTaskContract {
+  return {
+    version: "cairn-serial-task/v2",
+    taskNumber: 33,
+    requestedOutcome: "Add one visible result",
+    details,
+    requestedOutcomeSha256: "f".repeat(64),
+    supportedOutcome: "Prepare one fake Kimi exec request.",
+    lane: "Standard",
+    route: {
+      adapterId: KIMI_EXEC_ADAPTER_ID,
+      adapterLabel: "Kimi Code CLI",
+      provider: KIMI_EXEC_PROVIDER,
+      model: KIMI_EXEC_MODEL,
+      reason: "Kimi Code CLI is installed and signed in.",
+    },
+    ownedRecords: ["docs/ai-work/tasks/033-brief.md", "docs/ai-work/tasks/033-report.md", "docs/ai-work/LOG.md"],
+    protectedGit: { head: "a".repeat(40), dirty: false, staged: false },
+    checks: ["Stop before a real model call."],
+    stopConditions: ["A real process would start."],
+  };
+}
+
+function fakeKimiProcess(result: KimiExecProcessResult, requests?: KimiExecRequest[]): KimiExecProcess {
+  return {
+    kind: "fake",
+    async run(request) {
+      requests?.push(request);
+      return result;
+    },
+  };
+}
+
+const KIMI_CONNECTED_OAUTH = { installed: true, connected: true, billing: "oauth" as const };
+
+test("the Kimi adapter descriptor names provider, model, and priority 90", () => {
+  const workspace = join(tmpdir(), "cairn-kimi-descriptor-ws");
+  const adapter = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH);
+  assert.deepEqual(adapter.descriptor, {
+    id: "kimi-exec",
+    label: "Kimi Code CLI",
+    provider: "Moonshot AI",
+    model: "kimi-code/kimi-for-coding",
+    connected: true,
+    capabilities: ["serial-task"],
+    priority: 90,
+  });
+  const disconnected = createKimiExecAdapter(workspace, { installed: true, connected: false, billing: "unknown" });
+  assert.equal(disconnected.descriptor.connected, false);
+});
+
+test("the disclosure byte-pins both billing wordings and binds outcome plus details", () => {
+  const workspace = join(tmpdir(), "cairn-kimi-disclosure-ws");
+  const oauth = kimiExecDisclosure(workspace, "oauth", "Add one visible result", "Word counts: 74");
+  assert.deepEqual(oauth, {
+    provider: KIMI_EXEC_PROVIDER,
+    model: KIMI_EXEC_MODEL,
+    project: workspace,
+    task: "Add one visible result\n\nDetails (verbatim):\nWord counts: 74",
+    data: KIMI_EXEC_DATA_SCOPE,
+    quota: KIMI_EXEC_QUOTA_OAUTH,
+  });
+  // The membership wording is the spike's source=oauth truth.
+  assert.match(oauth.quota, /membership this CLI is signed into/);
+  assert.match(oauth.quota, /Exactly one ephemeral Kimi Code CLI process/);
+  assert.match(oauth.quota, /no retry, resume/);
+  assert.match(oauth.quota, /cannot see the remaining quota/);
+
+  // Anything not observed as source=oauth gets the honest generic floor.
+  for (const billing of ["other", "unknown"] as const) {
+    const generic = kimiExecDisclosure(workspace, billing, "Add one visible result");
+    assert.equal(generic.quota, KIMI_EXEC_QUOTA_GENERIC);
+    assert.equal(generic.task, "Add one visible result", "no details, no details block");
+    assert.match(generic.quota, /the account this CLI is signed into/);
+    assert.match(generic.quota, /cannot tell which billing applies/);
+    assert.doesNotMatch(generic.quota, /membership/);
+  }
+
+  // The data scope names the second at-rest copy the spike observed.
+  assert.match(KIMI_EXEC_DATA_SCOPE, /~\/\.kimi-code\/sessions\//);
+  assert.match(KIMI_EXEC_DATA_SCOPE, /static deny rules/);
+  // The adapter's own seam re-derives the same card from its status.
+  const adapter = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH);
+  assert.deepEqual(adapter.disclosure?.("Add one visible result", "Word counts: 74"), oauth);
+});
+
+test("the adapter stops before a real call without an authorization, with the shared boundary code", async () => {
+  const workspace = join(tmpdir(), "cairn-kimi-boundary-ws");
+  let calls = 0;
+  const fake: KimiExecProcess = {
+    kind: "fake",
+    async run() {
+      calls += 1;
+      throw new Error("must not run");
+    },
+  };
+  const adapter = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH, undefined, fake);
+  await assert.rejects(
+    () => adapter.run(kimiContract()),
+    (error: unknown) => error instanceof KimiExecModelCallBoundaryError &&
+      error.code === REAL_MODEL_CALL_NOT_AUTHORIZED,
+  );
+  assert.equal(calls, 0, "no process was started");
+});
+
+test("authorization refuses mismatched outcome, details, or billing", async () => {
+  const workspace = join(tmpdir(), "cairn-kimi-mismatch-ws");
+  let calls = 0;
+  const fake: KimiExecProcess = {
+    kind: "fake",
+    async run() {
+      calls += 1;
+      throw new Error("must not run");
+    },
+  };
+
+  // A different outcome.
+  const wrongOutcome = createKimiExecAdapter(
+    workspace, KIMI_CONNECTED_OAUTH,
+    authorizeKimiExec(workspace, "oauth", "A different task"), fake,
+  );
+  await assert.rejects(() => wrongOutcome.run(kimiContract()), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+
+  // An outcome-only confirmation cannot dispatch a details-bearing contract.
+  const outcomeOnly = createKimiExecAdapter(
+    workspace, KIMI_CONNECTED_OAUTH,
+    authorizeKimiExec(workspace, "oauth", "Add one visible result"), fake,
+  );
+  await assert.rejects(() => outcomeOnly.run(kimiContract("Word counts: 74")), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+
+  // A card confirmed under one billing wording cannot run under another:
+  // what ran is what the owner read.
+  const wrongBilling = createKimiExecAdapter(
+    workspace, { installed: true, connected: true, billing: "other" },
+    authorizeKimiExec(workspace, "oauth", "Add one visible result"), fake,
+  );
+  await assert.rejects(() => wrongBilling.run(kimiContract()), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+
+  assert.equal(calls, 0, "no process was started for any mismatch");
+});
+
+test("one authorized fake verifies the request at the seam and translates the result", async () => {
+  const workspace = join(tmpdir(), "cairn-kimi-authorized-ws");
+  const requests: KimiExecRequest[] = [];
+  const fake = fakeKimiProcess({
+    exitCode: 0,
+    terminalEvent: "process-exit",
+    agentMessageCount: 2,
+    toolCallCount: 3,
+    failedToolItemCount: 1,
+    finalMessage: "Done.\n\n```cairn-claims\n{ \"disposition\": \"DONE\" }\n```",
+  }, requests);
+  const adapter = createKimiExecAdapter(
+    workspace, KIMI_CONNECTED_OAUTH,
+    authorizeKimiExec(workspace, "oauth", "Add one visible result", "Word counts: 74"),
+    fake,
+  );
+  const result = await adapter.run(kimiContract("Word counts: 74"));
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].command, process.platform === "win32" ? "kimi.exe" : "kimi");
+  assert.equal(requests[0].cwd, workspace);
+  // The prompt is NOT in args: it rides separately and is appended at spawn.
+  assert.deepEqual(requests[0].args, ["--output-format", "stream-json", "-m", "kimi-code/kimi-for-coding"]);
+  assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);
+  const prompt = requests[0].prompt;
+  assert.match(prompt, /You are running as Kimi Code CLI in print mode\./);
+  assert.match(prompt, /Requested visible outcome: Add one visible result/);
+  assert.match(prompt, /Details from the owner \(use verbatim, do not restate\):/);
+  assert.match(prompt, /Word counts: 74/);
+  // The spec's sharpened lines: the CLI has subagents and background tasks,
+  // and one serial call means one.
+  assert.match(prompt, /[Dd]o not (start|use|spawn)[^\n]*subagents?[^\n]*background tasks?|subagents? or background tasks?/);
+  assert.match(prompt, /Work serially\. Do not delegate/);
+  // The codex apply_patch line is gone; the claims fence and the record
+  // rules are unchanged.
+  assert.doesNotMatch(prompt, /apply_patch/);
+  assert.match(prompt, /exactly one fenced block labeled cairn-claims/);
+  assert.match(prompt, /Do not write any file under docs\/ai-work/);
+  assert.match(prompt, /Do not run git add, git commit, or otherwise modify \.git/);
+  assert.match(prompt, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
+
+  assert.deepEqual(result, {
+    kind: "worker-result/v1",
+    taskNumber: 33,
+    requestedOutcomeSha256: "f".repeat(64),
+    status: "completed",
+    claimsText: "Done.\n\n```cairn-claims\n{ \"disposition\": \"DONE\" }\n```",
+    evidence: {
+      exitCode: 0,
+      agentMessageCount: 2,
+      toolCallCount: 3,
+      failedToolItemCount: 1,
+    },
+  });
+});
+
+test("run() translates non-zero exit, missing final message, and terminal error as failed", async () => {
+  const workspace = join(tmpdir(), "cairn-kimi-failed-ws");
+  const authorization = authorizeKimiExec(workspace, "oauth", "Add one visible result");
+  const base = {
+    agentMessageCount: 1,
+    toolCallCount: 0,
+    failedToolItemCount: 0,
+  };
+  const cases: { name: string; result: KimiExecProcessResult }[] = [
+    { name: "non-zero exit", result: { ...base, exitCode: 1, terminalEvent: "process-exit", finalMessage: "some message" } },
+    { name: "missing final message", result: { ...base, exitCode: 0, terminalEvent: "process-exit", finalMessage: null } },
+    // A malformed line was seen: the stream was not fully understood, so an
+    // exit-0 run with a retained message is still not a completion.
+    { name: "terminal error", result: { ...base, exitCode: 0, terminalEvent: "error", finalMessage: "some message" } },
+  ];
+  for (const { name, result: processResult } of cases) {
+    const adapter = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH, authorization, fakeKimiProcess(processResult));
+    const translated = await adapter.run(kimiContract());
+    assert.equal(translated.status, "failed", name);
+  }
+});
+
+test("routeTask sorts codex (100) before kimi (90) and honors an override to kimi", () => {
+  const workspace = join(tmpdir(), "cairn-kimi-routing-ws");
+  const codex = createCodexExecAdapter(workspace, { installed: true, connected: true });
+  const kimi = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH);
+  const request = { outcome: "Add one visible result", capability: "serial-task" as const };
+
+  const sorted = routeTask(request, [kimi, codex]);
+  assert.equal(sorted.status, "ready");
+  if (sorted.status !== "ready") return;
+  assert.equal(sorted.recommended.id, "codex-exec", "priority is fallback ordering: codex first");
+  assert.deepEqual(sorted.candidates.map((candidate) => candidate.id), ["codex-exec", "kimi-exec"]);
+
+  // Decision 6: with two candidates the owner always chooses; the choice
+  // rides the existing override mechanism.
+  const overridden = routeTask(request, [kimi, codex], "kimi-exec");
+  assert.equal(overridden.status, "ready");
+  if (overridden.status !== "ready") return;
+  assert.equal(overridden.recommended.id, "kimi-exec");
+
+  // Single-candidate behavior is unchanged: kimi alone routes to kimi.
+  const alone = routeTask(request, [kimi]);
+  assert.equal(alone.status, "ready");
+  if (alone.status !== "ready") return;
+  assert.equal(alone.recommended.id, "kimi-exec");
 });

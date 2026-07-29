@@ -3,7 +3,15 @@ import { accessSync, appendFileSync, existsSync, mkdirSync, statSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, relative, resolve } from "node:path";
 import { canonicalPath } from "./files.js";
-import { WorkerProcessError } from "./routing.js";
+import { REAL_MODEL_CALL_NOT_AUTHORIZED } from "./codex.js";
+import {
+  WorkerBoundaryError,
+  WorkerProcessError,
+  type AdapterTaskContract,
+  type TaskAdapter,
+  type WorkerDisclosure,
+  type WorkerRunResult,
+} from "./routing.js";
 
 export type KimiBilling = "oauth" | "other" | "unknown";
 
@@ -720,6 +728,210 @@ export function createSystemKimiExecProcess(options?: KimiExecProcessOptions): K
           resolveRun({ ...result, exitCode: typeof code === "number" ? code : -1 });
         });
       });
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The adapter (Level 3a plan Task 3): disclosure, authorization, and the
+// factory — byte-for-byte the codex pattern, with the billing truth the
+// spike's `source=oauth` line lets us tell.
+// ---------------------------------------------------------------------------
+
+export const KIMI_EXEC_PROVIDER = "Moonshot AI" as const;
+export const KIMI_EXEC_MODEL = "kimi-code/kimi-for-coding" as const;
+export const KIMI_EXEC_ADAPTER_ID = "kimi-exec" as const;
+// The data sentence names the second at-rest copy the spike observed: print
+// mode persists sessions under ~/.kimi-code/sessions/, beside the project
+// files. It also names the sandbox story honestly: print mode runs shell
+// under the CLI's own auto permission policy with its static deny rules.
+export const KIMI_EXEC_DATA_SCOPE = "The task instructions, AGENTS.md, the generated task brief, and any file inside the selected project that Kimi chooses to read. Kimi runs shell commands under its own auto permission policy with its static deny rules, and writes a session record under ~/.kimi-code/sessions/." as const;
+// Selected by the observed billing: `source=oauth` is the membership sign-in.
+export const KIMI_EXEC_QUOTA_OAUTH = "Exactly one ephemeral Kimi Code CLI process for one task; no retry, resume, continuation, scheduling, delegation, or parallel run. The task runs on the Kimi membership this CLI is signed into; membership plan rate limits apply, and Cairn cannot see the remaining quota." as const;
+// Anything not observed as source=oauth: the honest floor. The CLI may be on
+// a metered API key, and a consent sentence Cairn cannot keep is worse than
+// a vaguer one it can.
+export const KIMI_EXEC_QUOTA_GENERIC = "Exactly one ephemeral Kimi Code CLI process for one task; no retry, resume, continuation, scheduling, delegation, or parallel run. The task runs on the account this CLI is signed into; Cairn cannot tell which billing applies and cannot see the remaining quota." as const;
+
+export interface KimiExecDisclosure {
+  provider: typeof KIMI_EXEC_PROVIDER;
+  model: typeof KIMI_EXEC_MODEL;
+  project: string;
+  task: string;
+  data: typeof KIMI_EXEC_DATA_SCOPE;
+  quota: typeof KIMI_EXEC_QUOTA_OAUTH | typeof KIMI_EXEC_QUOTA_GENERIC;
+}
+
+export interface KimiExecAuthorization extends KimiExecDisclosure {
+  approved: true;
+}
+
+/**
+ * The card the owner reads before a real call. `task` carries BOTH parts of
+ * the request — the outcome and the owner's own details, verbatim — and
+ * `quota` is selected by the observed billing, because the owner confirms
+ * these exact bytes and the gate below re-derives them.
+ */
+export function kimiExecDisclosure(
+  workspaceRoot: string,
+  billing: KimiBilling,
+  requestedOutcome: string,
+  details = "",
+): KimiExecDisclosure {
+  const outcome = requestedOutcome.trim();
+  const supplied = details.trim();
+  return Object.freeze({
+    provider: KIMI_EXEC_PROVIDER,
+    model: KIMI_EXEC_MODEL,
+    project: resolve(workspaceRoot),
+    task: supplied ? `${outcome}\n\nDetails (verbatim):\n${supplied}` : outcome,
+    data: KIMI_EXEC_DATA_SCOPE,
+    quota: billing === "oauth" ? KIMI_EXEC_QUOTA_OAUTH : KIMI_EXEC_QUOTA_GENERIC,
+  });
+}
+
+export function authorizeKimiExec(
+  workspaceRoot: string,
+  billing: KimiBilling,
+  requestedOutcome: string,
+  details = "",
+): KimiExecAuthorization {
+  return Object.freeze({ ...kimiExecDisclosure(workspaceRoot, billing, requestedOutcome, details), approved: true as const });
+}
+
+/** The kimi specialization of the real-call boundary error, carrying the
+ * SAME code as codex so the envelope's stop-reason mapping is unchanged. */
+export class KimiExecModelCallBoundaryError extends WorkerBoundaryError {
+  readonly code = REAL_MODEL_CALL_NOT_AUTHORIZED;
+
+  constructor() {
+    super(`${REAL_MODEL_CALL_NOT_AUTHORIZED}: Cairn stopped before starting Kimi Code CLI.`);
+    this.name = "KimiExecModelCallBoundaryError";
+  }
+}
+
+export function isKimiExecModelCallBoundaryError(value: unknown): value is KimiExecModelCallBoundaryError {
+  return value instanceof KimiExecModelCallBoundaryError;
+}
+
+function kimiTaskPrompt(contract: AdapterTaskContract): string {
+  const padded = String(contract.taskNumber).padStart(3, "0");
+  // The owner's own numbers, names, and wording go to the worker unedited.
+  const details = contract.details.trim();
+  return [
+    "Complete exactly one Cairn task in this workspace.",
+    "You are running as Kimi Code CLI in print mode.",
+    "Read and follow AGENTS.md and the existing task brief before editing.",
+    `Task number: ${padded}`,
+    `Requested visible outcome: ${contract.requestedOutcome}`,
+    ...(details ? ["Details from the owner (use verbatim, do not restate):", details] : []),
+    `Requested outcome SHA-256: ${contract.requestedOutcomeSha256}`,
+    "Cairn already created this task's brief. Do not create another brief or start another task.",
+    "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
+    "Implement the requested outcome and run proportionate checks.",
+    // Task 048 (the inversion): the worker no longer authors any record. It
+    // does product work and speaks through one claims fence; Cairn writes the
+    // report and log row itself from those claims and its own Git verification.
+    "Do not write any file under docs/ai-work. Cairn authors the task report and log row itself, from your claims block and its own Git verification.",
+    "End your final message with exactly one fenced block labeled cairn-claims containing only JSON with exactly these keys, for example:",
+    "```cairn-claims",
+    "{ \"disposition\": \"DONE\", \"summary\": \"<one line>\", \"changes\": [\"<what changed and why>\"], \"checks\": [{ \"name\": \"<check you ran>\", \"result\": \"<its real result>\" }], \"howToTry\": \"<safe local steps>\", \"limitations\": \"<what still needs human judgment>\", \"milestone\": \"NO\" }",
+    "```",
+    "Use disposition DONE only when the outcome truly holds and your checks passed; otherwise STOPPED. milestone is YES, NO, or UNCLEAR.",
+    "If the requested outcome is already satisfied, do not invent a product change. Verify the existing behavior and say so in your claims, with milestone NO and the honest disposition.",
+    "Do not run git add, git commit, or otherwise modify .git. Leave every task change unstaged; after verification, Cairn owns the exact-path local commit.",
+    "Do not install or update dependencies, use external services, publish, deploy, or cross another concrete risk boundary.",
+    // Sharpened for this CLI (spec): it HAS subagents and background tasks,
+    // and print mode stays alive while either is pending — one serial call
+    // means one, in words the model cannot read as negotiable.
+    "Do not start subagents or background tasks. One serial call means one: finish the task in this process and let it exit.",
+    "Work serially. Do not delegate, schedule, retry, resume, continue into another session, or start another task.",
+    "Protect all existing Git work and stop at every concrete risk boundary.",
+  ].join("\n");
+}
+
+export function prepareKimiExecRequest(workspaceRoot: string, contract: AdapterTaskContract): KimiExecRequest {
+  const cwd = resolve(workspaceRoot);
+  // The prompt is NOT an arg here: it rides the request separately and is
+  // appended at spawn behind the 24,000-char guard. No session continuation
+  // flags: one call, no resume — exactly the one-process quota promise.
+  const args = Object.freeze(["--output-format", "stream-json", "-m", KIMI_EXEC_MODEL]);
+  return Object.freeze({
+    command: process.platform === "win32" ? "kimi.exe" : "kimi",
+    args,
+    cwd,
+    prompt: kimiTaskPrompt(contract),
+  });
+}
+
+function kimiAuthorizationMatches(
+  workspaceRoot: string,
+  billing: KimiBilling,
+  contract: AdapterTaskContract,
+  authorization: KimiExecAuthorization | undefined,
+): boolean {
+  if (!authorization || authorization.approved !== true) return false;
+  // The expected card is recomputed from BOTH parts of this contract under
+  // THIS adapter's billing: a card confirmed for another outcome, other
+  // details, or another billing wording cannot dispatch this request.
+  const expected = kimiExecDisclosure(workspaceRoot, billing, contract.requestedOutcome, contract.details);
+  return authorization.provider === expected.provider &&
+    authorization.model === expected.model &&
+    authorization.project === expected.project &&
+    authorization.task === expected.task &&
+    authorization.data === expected.data &&
+    authorization.quota === expected.quota;
+}
+
+export function createKimiExecAdapter(
+  workspaceRoot: string,
+  status: KimiExecStatus,
+  authorization?: KimiExecAuthorization,
+  processRunner: KimiExecProcess = createSystemKimiExecProcess(),
+): TaskAdapter {
+  const cwd = resolve(workspaceRoot);
+  const connected = status.installed && status.connected;
+  return {
+    descriptor: {
+      id: KIMI_EXEC_ADAPTER_ID,
+      label: "Kimi Code CLI",
+      provider: KIMI_EXEC_PROVIDER,
+      model: KIMI_EXEC_MODEL,
+      connected,
+      capabilities: ["serial-task"],
+      // Fallback ordering only (below Codex Exec's 100): with two candidates
+      // the owner always chooses — priority never silently picks (Decision 6).
+      priority: 90,
+    },
+    disclosure(outcome: string, details: string): WorkerDisclosure {
+      return kimiExecDisclosure(cwd, status.billing, outcome, details);
+    },
+    async run(contract, signal): Promise<WorkerRunResult> {
+      const request = prepareKimiExecRequest(cwd, contract);
+      if (!kimiAuthorizationMatches(cwd, status.billing, contract, authorization)) {
+        throw new KimiExecModelCallBoundaryError();
+      }
+      const result = await processRunner.run(request, signal);
+      // Translate the bounded process evidence into the universal result:
+      // completed iff exit 0, the stream was fully understood (no malformed
+      // line), and a final assistant message exists to carry the claims.
+      const runStatus: WorkerRunResult["status"] =
+        result.exitCode === 0 && result.terminalEvent === "process-exit" && result.finalMessage !== null
+          ? "completed"
+          : "failed";
+      return {
+        kind: "worker-result/v1",
+        taskNumber: contract.taskNumber,
+        requestedOutcomeSha256: contract.requestedOutcomeSha256,
+        status: runStatus,
+        claimsText: result.finalMessage,
+        evidence: {
+          exitCode: result.exitCode,
+          agentMessageCount: result.agentMessageCount,
+          toolCallCount: result.toolCallCount,
+          failedToolItemCount: result.failedToolItemCount,
+        },
+      };
     },
   };
 }
