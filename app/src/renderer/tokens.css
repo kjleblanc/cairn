@@ -22,46 +22,47 @@
   --stone-a: light-dark(#d6d1c5, #4a5162);
   --stone-b: light-dark(#c4beb0, #3d4453);
   --trail: light-dark(#a49c8c, #6a7284);
-  --workspace-bg: light-dark(#e8edf0, #0d1119);
-  --workspace-divider: light-dark(#d8e0e3, #151d29);
-  --rail-bg: light-dark(#17232a, #0b1018);
-  --rail-panel: light-dark(#20343d, #131e2a);
-  --rail-hover: light-dark(#29414a, #182533);
-  --rail-avatar: light-dark(#2a3c43, #1b2935);
-  --rail-line: light-dark(#31464e, #202d3a);
-  --rail-heading: #edf6f5;
-  --rail-ink: #c5d3d4;
-  --rail-muted: #82979c;
-  --neon: #71d5ea;
-  --neon-soft: #3d8292;
-  --neon-warm: #e2b66f;
+  --workspace-bg: light-dark(#e8edf0, #221b38);
+  --workspace-divider: light-dark(#d8e0e3, #2c2344);
+  --rail-bg: light-dark(#17232a, #1d1730);
+  --rail-panel: light-dark(#20343d, #282040);
+  --rail-hover: light-dark(#29414a, #322a4e);
+  --rail-avatar: light-dark(#2a3c43, #342a52);
+  --rail-line: light-dark(#31464e, #3c3158);
+  --rail-heading: #f5ecf5;
+  --rail-ink: #d8cfe0;
+  --rail-muted: #9a90ac;
+  --neon: #ff9d86;
+  --neon-soft: #a86a58;
+  --neon-warm: #ffd27a;
   --neon-green: #8ed3a0;
-  --town-sky: light-dark(#dce9ec, #111a26);
-  --town-ground: light-dark(#c7d6cf, #15211f);
-  --town-grid: light-dark(rgb(48 100 105 / 35%), rgb(89 189 196 / 24%));
-  --town-entity: light-dark(rgb(238 249 248 / 88%), rgb(17 29 39 / 94%));
-  --town-ink: light-dark(#223f43, #deebea);
-  --town-muted: light-dark(#5c797b, #8ca5a7);
-  --town-line: light-dark(rgb(53 105 108 / 24%), rgb(105 186 191 / 20%));
-  --town-header: light-dark(rgb(235 246 244 / 72%), rgb(10 20 29 / 72%));
-  --town-detail: light-dark(rgb(246 252 250 / 91%), rgb(13 25 33 / 92%));
-  --town-node-hover: light-dark(rgb(255 255 255 / 42%), rgb(50 90 99 / 17%));
-  --town-node-selected: light-dark(rgb(222 246 244 / 77%), rgb(28 64 72 / 48%));
-  --town-thread: light-dark(#458d96, #71d5ea);
-  --town-thread-bg: light-dark(rgb(237 249 247 / 88%), rgb(12 30 39 / 88%));
-  --town-focus: light-dark(#166b79, #9beafb);
+  --town-sky: light-dark(#dce9ec, #241d3d);
+  --town-ground: light-dark(#c7d6cf, #2c2344);
+  --town-grid: light-dark(transparent, transparent);
+  --town-entity: light-dark(rgb(238 249 248 / 88%), rgb(38 30 63 / 94%));
+  --town-ink: light-dark(#223f43, #f2e7d8);
+  --town-muted: light-dark(#5c797b, #b0a4be);
+  --town-line: light-dark(rgb(53 105 108 / 24%), rgb(255 210 122 / 20%));
+  --town-header: light-dark(rgb(235 246 244 / 72%), rgb(31 24 56 / 72%));
+  --town-detail: light-dark(rgb(246 252 250 / 91%), rgb(36 28 61 / 90%));
+  --town-node-hover: light-dark(rgb(255 255 255 / 42%), rgb(255 210 122 / 10%));
+  --town-node-selected: light-dark(rgb(222 246 244 / 77%), rgb(92 74 138 / 45%));
+  --town-thread: light-dark(#458d96, #ffd9a0);
+  --town-thread-bg: light-dark(rgb(237 249 247 / 88%), rgb(38 30 63 / 88%));
+  --town-focus: light-dark(#166b79, #ffd27a);
   /* The garden: the immersive workspace space is NIGHT in both themes, by
      design (like a cinema) — cards and controls keep their paired tokens
-     above it. Calm, cozy digital-space palette: deep ink, cyan hologram,
-     warm amber hearth-light, rose for the serious moments. */
-  --garden-deep: #0a0f1f;
-  --garden-ink: #101731;
-  --garden-cyan: #6fe3ff;
-  --garden-cyan-dim: rgb(111 227 255 / 35%);
-  --garden-cyan-glow: rgb(111 227 255 / 9%);
-  --garden-amber: #ffc979;
-  --garden-amber-soft: rgb(255 201 121 / 5%);
-  --garden-amber-glow: rgb(255 201 121 / 7%);
+     above it. Soft festival palette (owner-chosen, Task 123): dusk lavender
+     ground, warm firefly light, coral Cairn, lantern-amber hearth-light,
+     rose for the serious moments. Scanlines retired to transparent. */
+  --garden-deep: #1e1736;
+  --garden-ink: #332852;
+  --garden-cyan: #ff8f7a;
+  --garden-cyan-dim: rgb(255 143 122 / 35%);
+  --garden-cyan-glow: rgb(255 143 122 / 9%);
+  --garden-amber: #ffd27a;
+  --garden-amber-soft: rgb(255 210 122 / 5%);
+  --garden-amber-glow: rgb(255 210 122 / 7%);
   --garden-rose: #ff9d9d;
   --garden-face-cairn: #ffe9d6;
   --garden-face-worker: #dff3ff;
@@ -69,12 +70,12 @@
   --garden-face-worker-ink: #1d2b45;
   --garden-face-blush: rgb(255 179 167 / 55%);
   --garden-face-shine: #ffffff;
-  --garden-worker-pad: rgb(255 201 121 / 28%);
-  --garden-worker-pad-dim: rgb(255 201 121 / 14%);
-  --garden-worker-pad-floor: radial-gradient(circle, rgb(255 201 121 / 12%), transparent 68%);
-  --garden-star: rgb(232 236 248 / 45%);
-  --garden-star-dim: rgb(232 236 248 / 22%);
-  --garden-scanline: repeating-linear-gradient(0deg, transparent 0 3px, rgb(111 227 255 / 2.5%) 3px 4px);
+  --garden-worker-pad: rgb(255 210 122 / 30%);
+  --garden-worker-pad-dim: rgb(255 210 122 / 15%);
+  --garden-worker-pad-floor: radial-gradient(circle, rgb(255 210 122 / 12%), transparent 68%);
+  --garden-star: rgb(255 233 168 / 55%);
+  --garden-star-dim: rgb(255 233 168 / 25%);
+  --garden-scanline: linear-gradient(transparent, transparent);
   --garden-stars:
     radial-gradient(1.5px 1.5px at 12% 22%, var(--garden-star) 50%, transparent 51%),
     radial-gradient(1px 1px at 34% 8%, var(--garden-star-dim) 50%, transparent 51%),
