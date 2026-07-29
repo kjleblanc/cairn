@@ -43,7 +43,12 @@ export default defineConfig({
   plugins: [labAtRoot, react()],
   build: {
     outDir: ".vite/lab",
-    rollupOptions: { input: "lab/index.html" },
+    rollupOptions: {
+      input: {
+        main: "lab/index.html",
+        concepts: "lab/concepts.html",
+      },
+    },
   },
   server: { strictPort: false },
 });

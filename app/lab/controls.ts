@@ -34,5 +34,11 @@ export function mountControls(): void {
     });
     panel.appendChild(button);
   }
+  const concepts = document.createElement("a");
+  concepts.className = "lab-controls-button lab-controls-link";
+  concepts.href = "/lab/concepts.html";
+  concepts.textContent = "Avatar concepts";
+  concepts.title = "compare three Cairn face directions";
+  panel.appendChild(concepts);
   document.body.appendChild(panel);
 }
