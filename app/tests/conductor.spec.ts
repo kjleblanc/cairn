@@ -544,6 +544,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   }, { active: project, other: otherProject });
   const town = win.getByRole("region", { name: "Conductor town square" });
   await expect(town.getByRole("button", { name: "Cairn, ready" })).toBeVisible();
+  await expect(town.locator(".town-face-cairn")).toHaveCount(1);
   await expect(town.locator(".town-node-worker")).toHaveCount(0);
   await expect(town.locator(".town-thread-target")).toHaveCount(0);
   await town.getByRole("button", { name: "Cairn, ready" }).click();
@@ -564,6 +565,8 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   const worker = town.locator(".town-node-worker");
   await expect(worker).toHaveCount(1);
   await expect(worker).toHaveAccessibleName(/Codex Exec worker, working on Change the page title/);
+  await expect(worker.locator(".town-face-worker")).toHaveCount(1);
+  await expect(worker.locator(".town-worker-pad")).toHaveCount(1);
 
   await win.locator(".rail-project-select", { hasText: otherName }).click();
   const otherTown = win.getByRole("region", { name: `${otherName} town square` });
@@ -618,6 +621,8 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
 
   await win.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(() => worker.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s");
+  await expect.poll(() => worker.locator(".town-face-holo").evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
+  await expect.poll(() => worker.locator(".town-worker-pad span").first().evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
   await town.getByRole("button", { name: "Reset layout" }).click();
   await expect.poll(async () => {
     const state = await win.evaluate((dir) => window.cairn.townLoad(dir), project);
@@ -669,6 +674,8 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByText("A task is running. You can type again when it finishes.")).toHaveCount(0);
   await expect(town.locator(".town-node-worker")).toHaveCount(0, { timeout: 15_000 });
+  await expect(town.locator(".town-face-worker")).toHaveCount(0);
+  await expect(town.locator(".town-worker-pad")).toHaveCount(0);
   await expect(town.locator(".town-thread-target")).toHaveCount(0);
 
   const report = readFileSync(join(project, "docs", "ai-work", "tasks", "001-report.md"), "utf8");

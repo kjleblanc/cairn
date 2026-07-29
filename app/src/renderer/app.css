@@ -365,43 +365,69 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-node-worker { cursor: grab; }
 .town-node-worker[data-dragging="true"] { cursor: grabbing; transition: none; }
 .town-node strong {
-  width: 100%; overflow: hidden; font-size: .76rem; letter-spacing: .02em; text-align: center;
-  text-overflow: ellipsis; white-space: nowrap;
+  position: relative; z-index: 1; width: 100%; overflow: hidden; font-size: .76rem; letter-spacing: .02em;
+  text-align: center; text-overflow: ellipsis; white-space: nowrap;
 }
 .town-node-status {
-  display: flex; align-items: center; gap: 5px; color: var(--town-muted);
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 5px; color: var(--town-muted);
   font: 600 .62rem var(--mono); letter-spacing: .06em; text-transform: uppercase;
 }
 .town-node-status i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 2px; background: var(--neon-warm); }
-.town-cairn-orbit {
-  position: absolute; width: 112px; height: 58px; border: 1px solid var(--neon-soft); border-radius: 50%;
-  transform: rotate(-14deg); box-shadow: 0 0 24px rgb(91 218 255 / 8%);
+.town-face {
+  position: relative; z-index: 1; width: 78px; height: 78px; display: block; margin-bottom: 4px;
 }
-.town-cairn-orbit {
-  pointer-events: none;
+.town-face-worker { width: 68px; height: 68px; }
+.town-face-orbit {
+  position: absolute; inset: -7px; border: 1px dashed var(--garden-cyan-dim); border-radius: 50%;
+  pointer-events: none; animation: town-orbit-spin 14s linear infinite;
 }
-.town-cairn-core {
-  position: relative; width: 62px; height: 68px; display: grid; place-items: center; margin-bottom: 6px;
-  border: 1px solid var(--neon); border-radius: 44% 44% 54% 54%;
-  background: var(--town-entity); color: var(--neon); font: 700 1.45rem var(--mono);
-  box-shadow: inset 0 0 28px rgb(91 218 255 / 12%), 0 0 32px rgb(91 218 255 / 8%);
+.town-face-worker .town-face-orbit { border-color: var(--garden-worker-pad); opacity: .55; animation-duration: 10s; }
+.town-face-holo {
+  position: absolute; inset: 0; display: block; padding: 5px; border: 1.5px solid var(--garden-cyan-dim);
+  border-radius: 50%; background: var(--garden-scanline), var(--garden-ink);
+  box-shadow: 0 0 24px var(--garden-cyan-glow), inset 0 0 16px var(--garden-cyan-glow);
+  animation: town-face-float 6s ease-in-out infinite;
 }
-.town-node-thinking .town-cairn-core { border-style: dashed; }
-.town-node-working .town-cairn-core { border-color: var(--neon-warm); color: var(--neon-warm); }
-.town-node-thinking .town-cairn-orbit { animation: town-think 2.4s ease-in-out infinite; }
+.town-face-worker .town-face-holo {
+  border-color: var(--garden-worker-pad); animation-delay: -2s;
+  box-shadow: 0 0 22px var(--garden-amber-glow), inset 0 0 16px var(--garden-amber-glow);
+}
+.town-face-svg { display: block; width: 100%; height: 100%; }
+.town-face-skin { fill: var(--garden-face-cairn); }
+.town-face-worker .town-face-skin { fill: var(--garden-face-worker); }
+.town-face-eye, .town-face-worker-eye { fill: var(--garden-face-ink); }
+.town-face-worker-eye, .town-face-worker-brow, .town-face-worker-mouth { fill: var(--garden-face-worker-ink); }
+.town-face-eye-blink {
+  transform-box: fill-box; transform-origin: center; animation: town-face-blink 5.2s ease-in-out infinite;
+}
+.town-face-eye-shine { fill: var(--garden-face-shine); }
+.town-face-blush { fill: var(--garden-face-blush); }
+.town-face-mouth, .town-face-worker-mouth, .town-face-worker-brow {
+  fill: none; stroke-linecap: round; stroke-width: 2.5;
+}
+.town-face-mouth { stroke: var(--garden-face-ink); }
+.town-face-worker-mouth, .town-face-worker-brow { stroke: var(--garden-face-worker-ink); }
+.town-face-worker-brow { stroke-width: 2.4; }
+.town-face-thought { fill: var(--garden-cyan); opacity: 0; transition: opacity 180ms ease; }
+.town-node-thinking .town-face-thought, .town-node-working .town-face-thought { opacity: 1; }
+.town-face-thought circle { animation: town-face-thought 1.8s ease-in-out infinite; }
+.town-face-thought circle:nth-child(2) { animation-delay: .3s; opacity: .65; }
+.town-face-thought circle:nth-child(3) { animation-delay: .6s; opacity: .4; }
 .town-node-working .town-node-status i { animation: town-working 1.5s ease-in-out infinite; }
-.town-villager-shape {
-  position: relative; width: 58px; height: 62px; display: grid; place-items: center; margin-bottom: 5px;
-  border: 1px solid var(--neon-warm); border-radius: 48% 48% 38% 38%;
-  background: var(--town-entity); color: var(--neon-warm); font: 700 1rem var(--mono);
-  box-shadow: inset 0 0 22px rgb(226 182 111 / 10%), 0 0 24px rgb(226 182 111 / 9%);
+.town-worker-pad {
+  position: absolute; z-index: 0; left: 50%; top: 42px; width: 112px; height: 112px;
+  transform: translate(-50%, -50%); pointer-events: none;
 }
-.town-villager-shape::before, .town-villager-shape::after {
-  content: ""; position: absolute; top: -6px; width: 13px; height: 16px;
-  border: 1px solid var(--neon-warm); background: var(--town-entity); transform: rotate(28deg);
+.town-worker-pad::before {
+  content: ""; position: absolute; inset: 24px; border-radius: 50%; background: var(--garden-worker-pad-floor);
 }
-.town-villager-shape::before { left: 5px; border-radius: 80% 10% 30%; }
-.town-villager-shape::after { right: 5px; border-radius: 10% 80% 30%; transform: rotate(-28deg); }
+.town-worker-pad span {
+  position: absolute; inset: 0; border: 1px solid var(--garden-worker-pad); border-radius: 50%;
+  animation: town-pad-breathe 5s ease-in-out infinite;
+}
+.town-worker-pad span + span {
+  inset: 20px; border-style: dashed; border-color: var(--garden-worker-pad-dim); animation-delay: -2s;
+}
 .town-overflow-shape {
   width: 64px; height: 48px; display: grid; place-items: center; border: 1px solid var(--neon-soft);
   border-radius: 50% 50% 30% 30%; background: var(--town-entity); color: var(--neon); font: 700 .9rem var(--mono);
@@ -450,9 +476,24 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-overflow-list li { display: flex; justify-content: space-between; gap: 10px; }
 .town-overflow-list span { color: var(--town-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-@keyframes town-think {
-  0%, 100% { transform: rotate(-14deg) scale(1); opacity: .72; }
-  50% { transform: rotate(3deg) scale(1.04); opacity: 1; }
+@keyframes town-orbit-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes town-face-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes town-face-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(.12); }
+}
+@keyframes town-face-thought {
+  0%, 100% { opacity: .22; }
+  50% { opacity: 1; }
+}
+@keyframes town-pad-breathe {
+  0%, 100% { opacity: .35; transform: scale(1); }
+  50% { opacity: .9; transform: scale(1.025); }
 }
 @keyframes town-working {
   0%, 100% { opacity: .5; }
@@ -460,8 +501,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .town-node, .town-thread-target { transition: none; }
-  .town-node-thinking .town-cairn-orbit, .town-node-working .town-node-status i { animation: none; }
+  .town-node, .town-thread-target, .town-face-thought { transition: none; }
+  .town-face-orbit, .town-face-holo, .town-face-eye-blink, .town-face-thought circle,
+  .town-worker-pad span, .town-node-working .town-node-status i { animation: none; }
 }
 
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }

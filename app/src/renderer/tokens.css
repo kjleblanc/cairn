@@ -63,6 +63,15 @@
   --garden-amber-soft: rgb(255 201 121 / 5%);
   --garden-amber-glow: rgb(255 201 121 / 7%);
   --garden-rose: #ff9d9d;
+  --garden-face-cairn: #ffe9d6;
+  --garden-face-worker: #dff3ff;
+  --garden-face-ink: #2b2340;
+  --garden-face-worker-ink: #1d2b45;
+  --garden-face-blush: rgb(255 179 167 / 55%);
+  --garden-face-shine: #ffffff;
+  --garden-worker-pad: rgb(255 201 121 / 28%);
+  --garden-worker-pad-dim: rgb(255 201 121 / 14%);
+  --garden-worker-pad-floor: radial-gradient(circle, rgb(255 201 121 / 12%), transparent 68%);
   --garden-star: rgb(232 236 248 / 45%);
   --garden-star-dim: rgb(232 236 248 / 22%);
   --garden-scanline: repeating-linear-gradient(0deg, transparent 0 3px, rgb(111 227 255 / 2.5%) 3px 4px);

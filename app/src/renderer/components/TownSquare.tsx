@@ -40,6 +40,44 @@ function selectedItem(
     : relationships.find((relationship) => relationship.id === key.id) ?? null;
 }
 
+function TownFace({ kind }: { kind: "cairn" | "worker" }) {
+  const isCairn = kind === "cairn";
+  return (
+    <span className={`town-face town-face-${kind}`} aria-hidden="true">
+      <span className="town-face-orbit" />
+      <span className="town-face-holo">
+        <svg className="town-face-svg" viewBox="0 0 100 100" focusable="false">
+          <circle className="town-face-skin" cx="50" cy="52" r="34" />
+          {isCairn ? (
+            <>
+              <ellipse className="town-face-eye town-face-eye-blink" cx="37" cy="47" rx="4.5" ry="6" />
+              <ellipse className="town-face-eye town-face-eye-blink" cx="61" cy="47" rx="4.5" ry="6" />
+              <circle className="town-face-eye-shine" cx="35.5" cy="45" r="1.5" />
+              <circle className="town-face-eye-shine" cx="59.5" cy="45" r="1.5" />
+              <circle className="town-face-blush" cx="29" cy="57" r="4" />
+              <circle className="town-face-blush" cx="69" cy="57" r="4" />
+              <path className="town-face-mouth" d="M 44 63 Q 50 66 56 63" />
+              <g className="town-face-thought">
+                <circle cx="78" cy="26" r="2.2" />
+                <circle cx="85" cy="18" r="1.7" />
+                <circle cx="91" cy="10" r="1.3" />
+              </g>
+            </>
+          ) : (
+            <>
+              <ellipse className="town-face-worker-eye" cx="38" cy="50" rx="4.5" ry="5.5" />
+              <ellipse className="town-face-worker-eye" cx="62" cy="50" rx="4.5" ry="5.5" />
+              <path className="town-face-worker-brow" d="M 32 42 L 44 45" />
+              <path className="town-face-worker-brow" d="M 68 42 L 56 45" />
+              <path className="town-face-worker-mouth" d="M 45 64 Q 50 66 55 64" />
+            </>
+          )}
+        </svg>
+      </span>
+    </span>
+  );
+}
+
 export function TownSquare({
   projectName,
   task,
@@ -180,8 +218,7 @@ export function TownSquare({
                 aria-label={`Cairn, ${entity.state}`}
                 aria-pressed={isSelected}
                 onClick={(event) => selectEntity(event, entity)}>
-                <span className="town-cairn-orbit" aria-hidden="true" />
-                <span className="town-cairn-core" aria-hidden="true">C</span>
+                <TownFace kind="cairn" />
                 <strong>Cairn</strong>
                 <span className="town-node-status">{entity.state}</span>
               </button>
@@ -197,7 +234,8 @@ export function TownSquare({
                 data-dragging={draggingId === entity.id || undefined}
                 onPointerDown={(event) => beginDrag(event, entity)}
                 onClick={(event) => selectEntity(event, entity)}>
-                <span className="town-villager-shape" aria-hidden="true">W</span>
+                <span className="town-worker-pad" aria-hidden="true"><span /><span /></span>
+                <TownFace kind="worker" />
                 <strong>{entity.name}</strong>
                 <span className="town-node-status"><i aria-hidden="true" /> working</span>
               </button>
