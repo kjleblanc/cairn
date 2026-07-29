@@ -65,9 +65,23 @@
 .town-square-header button:active:not(:disabled),
 .rail-action:active, .rail-collapse:active { transform: translateY(0) scale(.97); }
 
+/* Overlays rise out of the world; the world dims behind them, never swaps.
+   The card's rise keeps a touch of spring overshoot so it lands, not loads. */
+@keyframes overlay-rise {
+  from { opacity: 0; transform: translateY(26px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.overlay-card { animation: overlay-rise .42s var(--spring) both; }
+@keyframes overlay-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.overlay-scrim { animation: overlay-scrim-in .28s ease-out both; }
+
 @media (prefers-reduced-motion: reduce) {
   .bubble, .result-card, .task-card, .push-chip, .run-strip, .town-node,
-  .town-face-svg, .town-skyglow, .town-face-holo { animation: none; }
+  .town-face-svg, .town-skyglow, .town-face-holo,
+  .overlay-card, .overlay-scrim { animation: none; }
   .town-node, .chat-composer button, .town-square-header button,
   .rail-action, .rail-collapse { transition: none; }
 }
