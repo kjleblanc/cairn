@@ -1,5 +1,35 @@
-import { defineConfig } from "vite";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+const labIndexPath = fileURLToPath(new URL("./lab/index.html", import.meta.url));
+
+/**
+ * Kimi Work's preview card opens the site root. Serve the lab there too,
+ * with its script made absolute so relative lab imports keep resolving.
+ */
+const labAtRoot: Plugin = {
+  name: "cairn-lab-at-root",
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      const path = (req.url ?? "/").split("?")[0];
+      if (path !== "/" && path !== "/index.html") {
+        next();
+        return;
+      }
+      const source = readFileSync(labIndexPath, "utf8")
+        .replace('src="./main.tsx"', 'src="/lab/main.tsx"');
+      server.transformIndexHtml(req.url ?? "/", source)
+        .then((html) => {
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.end(html);
+        })
+        .catch(next);
+    });
+  },
+};
 
 /**
  * The visual lab's dev config: the real renderer code, served to a plain
@@ -10,7 +40,7 @@ import react from "@vitejs/plugin-react";
  */
 export default defineConfig({
   base: "./",
-  plugins: [react()],
+  plugins: [labAtRoot, react()],
   build: {
     outDir: ".vite/lab",
     rollupOptions: { input: "lab/index.html" },
