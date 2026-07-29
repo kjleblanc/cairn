@@ -1,7 +1,9 @@
-import { spawn } from "node:child_process";
-import { accessSync, existsSync, statSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { accessSync, appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, relative, resolve } from "node:path";
 import { canonicalPath } from "./files.js";
+import { WorkerProcessError } from "./routing.js";
 
 export type KimiBilling = "oauth" | "other" | "unknown";
 
@@ -307,4 +309,417 @@ export function kimiExecConnectionReason(status: KimiExecStatus): string {
   if (!status.installed) return "Kimi Code CLI is not installed, so no Kimi model route is available.";
   if (!status.connected) return "Kimi Code CLI is installed but not signed in, so no Kimi model route is available.";
   return "Kimi Code CLI is installed, signed in, and supports this serial task.";
+}
+
+// ---------------------------------------------------------------------------
+// The exec process (Level 3a plan Task 2). Built only from the Task 106
+// spike's observed facts: `-p` takes the prompt as one argv value (stdin is
+// not a prompt channel), stream-json emits whole-message assistant lines,
+// OpenAI-style tool_calls, role:tool results, and a trailing role:meta line;
+// no usage/token records exist; the terminal state is process exit.
+// ---------------------------------------------------------------------------
+
+export interface KimiExecRequest {
+  command: "kimi" | "kimi.exe";
+  args: readonly string[];
+  cwd: string;
+  /** The composed task prompt. Separate from args and appended at spawn as
+   * one `-p` argv element, behind the length guard below. */
+  prompt: string;
+}
+
+/** The observed terminal state is process exit — there is no terminal event
+ * in the stream. `"error"` means a malformed line was seen. */
+export type KimiExecTerminalEvent = "process-exit" | "error";
+
+export interface KimiExecProcessResult {
+  exitCode: number;
+  terminalEvent: KimiExecTerminalEvent;
+  agentMessageCount: number;
+  toolCallCount: number;
+  failedToolItemCount: number;
+  finalMessage: string | null;
+}
+
+export interface KimiExecProcess {
+  kind: "system" | "fake";
+  run(request: KimiExecRequest, signal?: AbortSignal): Promise<KimiExecProcessResult>;
+}
+
+export const KIMI_EXEC_INACTIVITY_MS = 600_000;
+export const KIMI_EXEC_ABSOLUTE_MS = 3_600_000;
+/** Comfortably under the ~32 KB Windows command-line limit; measured on the
+ * composed prompt at run time, before spawn. */
+export const KIMI_EXEC_PROMPT_MAX_CHARS = 24_000;
+
+export type KimiExecProcessFailureCode = "KIMI_EXEC_SPAWN_FAILED" | "KIMI_PROMPT_TOO_LONG";
+
+/** The kimi specialization of `WorkerProcessError` (failure "process"). A
+ * prompt-guard refusal is killed-by-construction: nothing ever spawned. */
+export class KimiExecProcessError extends WorkerProcessError {
+  constructor(code: KimiExecProcessFailureCode, debugPath: string | null) {
+    super("process", code, debugPath);
+    this.name = "KimiExecProcessError";
+  }
+}
+
+export function isKimiExecProcessError(value: unknown): value is KimiExecProcessError {
+  return value instanceof KimiExecProcessError;
+}
+
+export type KimiExecTimeoutKind = "inactivity" | "absolute";
+
+/** Print mode can linger by design (background tasks keep it alive since
+ * 0.24.2), so the absolute cap is load-bearing. The kimi specialization of
+ * `WorkerProcessError` (failure "timeout"). */
+export class KimiExecTimeoutError extends WorkerProcessError {
+  constructor(
+    readonly timeoutKind: KimiExecTimeoutKind,
+    debugPath: string | null,
+    killConfirmed: boolean,
+  ) {
+    super("timeout", "KIMI_EXEC_TIMED_OUT", debugPath, killConfirmed);
+    this.name = "KimiExecTimeoutError";
+  }
+}
+
+export function isKimiExecTimeoutError(value: unknown): value is KimiExecTimeoutError {
+  return value instanceof KimiExecTimeoutError;
+}
+
+/** The owner pressed stop. The kimi specialization of `WorkerProcessError`
+ * (failure "cancelled"). */
+export class KimiExecCancelledError extends WorkerProcessError {
+  constructor(debugPath: string | null, killConfirmed: boolean) {
+    super("cancelled", "KIMI_EXEC_CANCELLED", debugPath, killConfirmed);
+    this.name = "KimiExecCancelledError";
+  }
+}
+
+export function isKimiExecCancelledError(value: unknown): value is KimiExecCancelledError {
+  return value instanceof KimiExecCancelledError;
+}
+
+export interface KimiExecProcessOptions {
+  inactivityMs?: number;
+  absoluteMs?: number;
+}
+
+/** On Windows the child may be a cmd.exe shim chain; killing only the shim
+ * orphans the real kimi process, so the whole tree goes. */
+function killKimiProcessTree(child: ChildProcess): void {
+  if (child.pid === undefined) return;
+  if (process.platform === "win32") {
+    const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+    const taskkill = resolve(systemRoot, "System32", "taskkill.exe");
+    try {
+      const killer = spawn(existsSync(taskkill) ? taskkill : "taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      killer.once("error", () => { try { child.kill(); } catch { /* already gone */ } });
+      killer.unref();
+    } catch {
+      try { child.kill(); } catch { /* already gone */ }
+    }
+  } else {
+    // The child leads its own process group (spawned detached on POSIX), so a
+    // negative PID SIGKILLs the whole group. If the group send fails, fall
+    // back to a direct SIGKILL of the child.
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+}
+
+/** Local diagnostic copies live outside every project, so Git never sees them. */
+function kimiDebugDirectory(): string | null {
+  const localAppData = process.env.LOCALAPPDATA;
+  const base = localAppData && isAbsolute(localAppData)
+    ? resolve(localAppData, "Cairn", "debug")
+    : resolve(tmpdir(), "cairn-debug");
+  try {
+    mkdirSync(base, { recursive: true });
+    return base;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort redaction of credential-shaped tokens before anything reaches disk. */
+function redactTokens(text: string): string {
+  return text
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}/g, "sk-[redacted]")
+    .replace(/(\bBearer\s+)[A-Za-z0-9._-]+/gi, "$1[redacted]");
+}
+
+interface KimiStreamEvidence {
+  terminalEvent?: KimiExecTerminalEvent;
+  agentMessageCount?: number;
+  toolCallCount?: number;
+  failedToolItemCount?: number;
+  finalMessage?: string | null;
+}
+
+/**
+ * The conservative failed-tool rule, documented per the plan: print-mode
+ * failure marking was NOT observed in the spike, so a tool result counts as
+ * failed only when its content is an explicit failure shape — a JSON object
+ * carrying `status:"failed"` or `isError:true`. Plain text that merely looks
+ * like an error ("Error: ...", a non-zero exit report) never counts: guessing
+ * from text would turn ordinary tool output into failures.
+ */
+function conservativeToolFailure(content: unknown): boolean {
+  let value: unknown = content;
+  if (typeof content === "string") {
+    try {
+      value = JSON.parse(content);
+    } catch {
+      return false;
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.status === "failed" || record.isError === true;
+}
+
+/** One observed stream-json line → bounded evidence, or null when the line is
+ * informational only (role:"meta" and unrecognized shapes). */
+function streamJsonEvidence(line: string): KimiStreamEvidence | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return { terminalEvent: "error" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { terminalEvent: "error" };
+  const record = value as Record<string, unknown>;
+  if (record.role === "assistant") {
+    const evidence: KimiStreamEvidence = {};
+    if (typeof record.content === "string") {
+      // A complete assistant message (whole-message buffering): it counts one
+      // and becomes the final message — last wins, since the claims carrier
+      // is the last assistant message.
+      evidence.agentMessageCount = 1;
+      evidence.finalMessage = record.content.length <= 262_144 ? record.content : null;
+    }
+    if (Array.isArray(record.tool_calls)) {
+      evidence.toolCallCount = record.tool_calls.length;
+    }
+    return evidence;
+  }
+  if (record.role === "tool") {
+    // The matching call was already counted on the assistant line; a result
+    // adds nothing numeric except the conservative failure count above.
+    return { failedToolItemCount: conservativeToolFailure(record.content) ? 1 : 0 };
+  }
+  // role:"meta" and anything unrecognized: ignored for results. The raw line
+  // is already retained in the debug copy.
+  return null;
+}
+
+/** Starts one process and retains only terminal state plus numeric evidence. */
+export function createSystemKimiExecProcess(options?: KimiExecProcessOptions): KimiExecProcess {
+  return {
+    kind: "system",
+    run(request, signal) {
+      return new Promise((resolveRun, rejectRun) => {
+        if (signal?.aborted) {
+          // Pre-spawn cancel: nothing ever started, so the kill is confirmed
+          // by construction — there is no child to orphan.
+          rejectRun(new KimiExecCancelledError(null, true));
+          return;
+        }
+        if (request.prompt.length > KIMI_EXEC_PROMPT_MAX_CHARS) {
+          // The prompt rides one argv element against the ~32 KB Windows
+          // command-line limit; refuse before spawn, killed-by-construction.
+          rejectRun(new KimiExecProcessError("KIMI_PROMPT_TOO_LONG", null));
+          return;
+        }
+        const kimiCommand = resolveKimiCommand(request.cwd);
+        if (!kimiCommand) {
+          rejectRun(new KimiExecProcessError("KIMI_EXEC_SPAWN_FAILED", null));
+          return;
+        }
+        const shim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(kimiCommand);
+        const launch = shim ? shimPrefix(kimiCommand) : { command: kimiCommand, args: [] as string[] };
+        const child = spawn(launch.command, [...launch.args, ...request.args, "-p", request.prompt], {
+          cwd: request.cwd,
+          // The prompt is argv-only (spike: stdin is not a prompt channel), so
+          // stdin stays closed — there is no stdin-write failure class here.
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+          // POSIX only: lead a new process group so killKimiProcessTree can
+          // SIGKILL the whole group. On win32 taskkill /T already reaches the
+          // shim's children.
+          ...(process.platform === "win32" ? {} : { detached: true }),
+        });
+        const debugDirectory = kimiDebugDirectory();
+        const debugStamp = `kimi-${new Date().toISOString().replace(/[:.]/g, "-")}-${child.pid ?? "0"}`;
+        const debugPath = debugDirectory ? resolve(debugDirectory, `${debugStamp}.jsonl`) : null;
+        const debugStderrPath = debugDirectory ? resolve(debugDirectory, `${debugStamp}.stderr.log`) : null;
+        const debugWrite = (file: string | null, text: string): void => {
+          if (!file) return;
+          try {
+            appendFileSync(file, redactTokens(text), "utf8");
+          } catch {
+            // Local diagnostics must never break the run.
+          }
+        };
+        let settled = false;
+        const inactivityMs = options?.inactivityMs ?? KIMI_EXEC_INACTIVITY_MS;
+        const absoluteMs = options?.absoluteMs ?? KIMI_EXEC_ABSOLUTE_MS;
+        let timedOut: KimiExecTimeoutKind | null = null;
+        let cancelled = false;
+        let forceSettle: NodeJS.Timeout | undefined;
+        // If even the tree kill cannot make the child close, settle anyway.
+        const armForceSettle = (reject: () => void): NodeJS.Timeout => setTimeout(() => {
+          if (settled) return;
+          clearWatchdog();
+          settled = true;
+          // A surviving grandchild holding these pipes open must never keep
+          // the event loop (and this run) alive after the watchdog or an
+          // abort fired.
+          child.stdout.destroy();
+          child.stderr.destroy();
+          reject();
+        }, 5_000);
+        const fireTimeout = (kind: KimiExecTimeoutKind): void => {
+          if (settled || timedOut || cancelled) return;
+          timedOut = kind;
+          killKimiProcessTree(child);
+          // Force-settle: the kill fired but the child never closed, so a live
+          // orphan may still be writing — the kill is NOT confirmed.
+          forceSettle = armForceSettle(() => rejectRun(new KimiExecTimeoutError(kind, debugPath, false)));
+        };
+        const onAbort = (): void => {
+          if (settled || cancelled || timedOut) return;
+          cancelled = true;
+          killKimiProcessTree(child);
+          // Force-settle: the kill fired but the child never closed, so a live
+          // orphan may still be writing — the kill is NOT confirmed.
+          forceSettle = armForceSettle(() => rejectRun(new KimiExecCancelledError(debugPath, false)));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        const absoluteTimer = setTimeout(() => fireTimeout("absolute"), absoluteMs);
+        let inactivityTimer = setTimeout(() => fireTimeout("inactivity"), inactivityMs);
+        const sawActivity = (): void => {
+          clearTimeout(inactivityTimer);
+          if (!timedOut) inactivityTimer = setTimeout(() => fireTimeout("inactivity"), inactivityMs);
+        };
+        const clearWatchdog = (): void => {
+          clearTimeout(absoluteTimer);
+          clearTimeout(inactivityTimer);
+          if (forceSettle) clearTimeout(forceSettle);
+          signal?.removeEventListener("abort", onAbort);
+        };
+        let stdout = "";
+        let skippingOversizedLine = false;
+        let result: KimiExecProcessResult = {
+          exitCode: -1,
+          terminalEvent: "process-exit",
+          agentMessageCount: 0,
+          toolCallCount: 0,
+          failedToolItemCount: 0,
+          finalMessage: null,
+        };
+        // A dropped line is an overwrite-to-null event: the dropped line may
+        // have been the true final assistant message; a partial view must not
+        // let an earlier message masquerade as final. A later fully-visible
+        // message may still legitimately overwrite this.
+        const clearFinalMessageForDroppedLine = (): void => {
+          if (result.terminalEvent === "error") return;
+          result = { ...result, finalMessage: null };
+        };
+        const applyEvidence = (evidence: KimiStreamEvidence | null): void => {
+          if (!evidence) return;
+          if (result.terminalEvent === "error") return;
+          const {
+            agentMessageCount = 0,
+            toolCallCount = 0,
+            failedToolItemCount = 0,
+            finalMessage,
+            ...terminal
+          } = evidence;
+          result = {
+            ...result,
+            ...terminal,
+            agentMessageCount: result.agentMessageCount + agentMessageCount,
+            toolCallCount: result.toolCallCount + toolCallCount,
+            failedToolItemCount: result.failedToolItemCount + failedToolItemCount,
+            finalMessage: finalMessage !== undefined ? finalMessage : result.finalMessage,
+          };
+        };
+        const fail = (code: KimiExecProcessFailureCode): void => {
+          if (settled || timedOut || cancelled) return;
+          clearWatchdog();
+          settled = true;
+          rejectRun(new KimiExecProcessError(code, debugPath));
+        };
+        child.once("error", () => fail("KIMI_EXEC_SPAWN_FAILED"));
+        child.stdout.on("data", (chunk: Buffer) => {
+          sawActivity();
+          const text = chunk.toString("utf8");
+          debugWrite(debugPath, text);
+          stdout += text;
+          const parts = stdout.split(/\r?\n/);
+          stdout = parts.pop() ?? "";
+          for (const line of parts) {
+            if (skippingOversizedLine) {
+              // The head of this line was dropped below; skip its tail too.
+              skippingOversizedLine = false;
+              clearFinalMessageForDroppedLine();
+              continue;
+            }
+            if (!line.trim()) continue;
+            applyEvidence(streamJsonEvidence(line));
+          }
+          if (stdout.length > 1_048_576) {
+            // An oversized line already streamed to the debug file in full;
+            // drop it from the parse buffer instead of killing the run.
+            skippingOversizedLine = true;
+            stdout = "";
+            clearFinalMessageForDroppedLine();
+          }
+        });
+        // Stream stderr to the owner's local debug copy while keeping provider,
+        // account, and credential-adjacent diagnostics out of Cairn results and logs.
+        child.stderr.on("data", (chunk: Buffer) => {
+          sawActivity();
+          debugWrite(debugStderrPath, chunk.toString("utf8"));
+        });
+        child.once("close", (code) => {
+          clearWatchdog();
+          if (cancelled) {
+            if (settled) return;
+            settled = true;
+            // The child closed after the kill: the kill is confirmed.
+            rejectRun(new KimiExecCancelledError(debugPath, true));
+            return;
+          }
+          if (timedOut) {
+            if (settled) return;
+            settled = true;
+            // The child closed after the kill: the kill is confirmed.
+            rejectRun(new KimiExecTimeoutError(timedOut, debugPath, true));
+            return;
+          }
+          if (settled) return;
+          if (stdout.trim() && !skippingOversizedLine) {
+            applyEvidence(streamJsonEvidence(stdout));
+          } else if (skippingOversizedLine) {
+            // The close-time flush is skipping a flagged partial line rather
+            // than parsing it; the dropped line may have been the true final
+            // assistant message.
+            clearFinalMessageForDroppedLine();
+          }
+          settled = true;
+          resolveRun({ ...result, exitCode: typeof code === "number" ? code : -1 });
+        });
+      });
+    },
+  };
 }

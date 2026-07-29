@@ -1,14 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import {
+  createSystemKimiAcpProbe,
+  createSystemKimiExecProcess,
+  createSystemKimiProviderProbe,
   detectKimiExecStatus,
+  isKimiExecCancelledError,
+  isKimiExecTimeoutError,
+  KIMI_EXEC_ABSOLUTE_MS,
+  KIMI_EXEC_INACTIVITY_MS,
+  KIMI_EXEC_PROMPT_MAX_CHARS,
+  KimiExecProcessError,
   kimiExecConnectionReason,
   kimiExecStatusText,
-  createSystemKimiAcpProbe,
-  createSystemKimiProviderProbe,
   type KimiAcpProbe,
   type KimiProviderProbe,
   type KimiStatusProbe,
@@ -293,4 +300,415 @@ test("the test-lane guard refuses the real binary without the fake switch", asyn
   } finally {
     fake.restore();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Plan Task 2 — the exec process: argv prompt, stream-json parse, watchdogs.
+// Every fixture below is built ONLY from the lines the Task 106 spike
+// observed: whole-message assistant lines, OpenAI-style tool_calls, role:tool
+// results, and a trailing role:meta session.resume_hint. No usage/token
+// records were observed, so the result shape carries none.
+// ---------------------------------------------------------------------------
+
+const PONG_TRANSCRIPT = [
+  JSON.stringify({ role: "assistant", content: "PONG" }),
+  JSON.stringify({ role: "meta", type: "session.resume_hint", session_id: "spike-observed-shape" }),
+].join("\n") + "\n";
+
+const ECHO_TOOL_TRANSCRIPT = [
+  JSON.stringify({
+    role: "assistant",
+    tool_calls: [{ type: "function", id: "call_1", function: { name: "Bash", arguments: "{\"command\":\"echo hello\"}" } }],
+  }),
+  JSON.stringify({ role: "tool", tool_call_id: "call_1", content: "hello\n" }),
+  JSON.stringify({ role: "assistant", content: "The echo printed hello." }),
+  JSON.stringify({ role: "meta", type: "session.resume_hint", session_id: "spike-observed-shape" }),
+].join("\n") + "\n";
+
+interface FakeKimiExec {
+  bin: string;
+  home: string;
+  localAppData: string;
+  argvLog: string;
+}
+
+/** A hermetic fake `kimi` for exec tests: records the argv it received to
+ * CAIRN_FAKE_KIMI_ARGV_LOG, emits the given stdout body and stderr text, and
+ * exits with the given code. `body: null` wedges the child (silent forever or
+ * chattering forever) for watchdog tests. */
+function fakeKimiExecInstall(
+  body: string | null,
+  options: { stderr?: string; exitCode?: number; chatter?: boolean } = {},
+): FakeKimiExec {
+  const bin = mkdtempSync(join(tmpdir(), "cairn-kimi-exec-bin-"));
+  const home = mkdtempSync(join(tmpdir(), "cairn-kimi-exec-home-"));
+  const localAppData = mkdtempSync(join(tmpdir(), "cairn-kimi-exec-lad-"));
+  const argvLog = join(bin, "argv.json");
+  const dispatcher = join(bin, "dispatcher.cjs");
+  const lines = [
+    `require("node:fs").writeFileSync(process.env.CAIRN_FAKE_KIMI_ARGV_LOG, JSON.stringify(process.argv.slice(2)));`,
+  ];
+  if (body === null) {
+    // A wedged CLI: never exits on its own. "chatter" keeps stdout active so
+    // only the absolute cap can fire; otherwise it goes silent so only the
+    // inactivity timer can.
+    if (options.chatter) {
+      lines.push(
+        `setInterval(() => {`,
+        `  process.stdout.write(JSON.stringify({ role: "assistant", content: "still going" }) + "\\n");`,
+        `}, 50);`,
+      );
+    } else {
+      lines.push(`setInterval(() => {}, 1000);`);
+    }
+  } else {
+    if (options.stderr) lines.push(`process.stderr.write(${JSON.stringify(options.stderr)});`);
+    lines.push(
+      `process.stdout.write(${JSON.stringify(body)});`,
+      `process.exit(${options.exitCode ?? 0});`,
+    );
+  }
+  writeFileSync(dispatcher, lines.join("\n") + "\n", "utf8");
+  const command = join(bin, process.platform === "win32" ? "kimi.cmd" : "kimi");
+  writeFileSync(command, process.platform === "win32"
+    ? `@echo off\r\n"${process.execPath}" "${dispatcher}" %*\r\n`
+    : `#!${process.execPath}\nrequire(${JSON.stringify(dispatcher)});\n`, "utf8");
+  if (process.platform !== "win32") chmodSync(command, 0o755);
+  return { bin, home, localAppData, argvLog };
+}
+
+/** PATH carries only the fake bin; the home is empty so the ~/.kimi-code/bin
+ * fallback can never escape to the real signed-in CLI on this machine;
+ * LOCALAPPDATA is a temp dir so debug copies stay hermetic. */
+function withFakeKimiExec<T>(fake: FakeKimiExec, run: () => Promise<T>): Promise<T> {
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const homeKeys = process.platform === "win32" ? ["USERPROFILE", "HOME"] : ["HOME"];
+  const previousPath = process.env[pathKey];
+  const previousHomes = homeKeys.map((key) => process.env[key]);
+  const previousLocalAppData = process.env.LOCALAPPDATA;
+  const previousArgvLog = process.env.CAIRN_FAKE_KIMI_ARGV_LOG;
+  process.env[pathKey] = process.platform === "win32"
+    // System32 only, so a bare `cmd.exe` shim launch resolves even when the
+    // parent shell never set ComSpec — without inheriting a user PATH that
+    // could carry the real signed-in CLI as a fallback.
+    ? [fake.bin, join(process.env.SystemRoot ?? "C:\\Windows", "System32")].join(delimiter)
+    : fake.bin;
+  for (const key of homeKeys) process.env[key] = fake.home;
+  process.env.LOCALAPPDATA = fake.localAppData;
+  process.env.CAIRN_FAKE_KIMI_ARGV_LOG = fake.argvLog;
+  return run().finally(() => {
+    if (previousPath === undefined) delete process.env[pathKey];
+    else process.env[pathKey] = previousPath;
+    homeKeys.forEach((key, index) => {
+      if (previousHomes[index] === undefined) delete process.env[key];
+      else process.env[key] = previousHomes[index];
+    });
+    if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = previousLocalAppData;
+    if (previousArgvLog === undefined) delete process.env.CAIRN_FAKE_KIMI_ARGV_LOG;
+    else process.env.CAIRN_FAKE_KIMI_ARGV_LOG = previousArgvLog;
+  });
+}
+
+function execWorkspace(): string {
+  // A real directory: Windows refuses to spawn into a nonexistent cwd.
+  return mkdtempSync(join(tmpdir(), "cairn-kimi-exec-ws-"));
+}
+
+const EXEC_ARGS = ["--output-format", "stream-json", "-m", "kimi-code/kimi-for-coding"] as const;
+
+test("watchdog and prompt-guard constants match the plan", () => {
+  assert.equal(KIMI_EXEC_INACTIVITY_MS, 600_000);
+  assert.equal(KIMI_EXEC_ABSOLUTE_MS, 3_600_000);
+  assert.equal(KIMI_EXEC_PROMPT_MAX_CHARS, 24_000);
+});
+
+test("a clean finish parses the PONG transcript into observed fields only", async () => {
+  const fake = fakeKimiExecInstall(PONG_TRANSCRIPT);
+  await withFakeKimiExec(fake, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS,
+      cwd: execWorkspace(),
+      prompt: "Reply with exactly PONG.",
+    });
+    assert.deepEqual(result, {
+      exitCode: 0,
+      terminalEvent: "process-exit",
+      agentMessageCount: 1,
+      toolCallCount: 0,
+      failedToolItemCount: 0,
+      finalMessage: "PONG",
+    });
+    // No token fields were observed in the stream, so none exist — not even
+    // zeroed (absence is honest).
+    assert.deepEqual(Object.keys(result).sort(), [
+      "agentMessageCount", "exitCode", "failedToolItemCount", "finalMessage", "terminalEvent", "toolCallCount",
+    ]);
+  });
+});
+
+test("the spike's echo-tool sequence counts calls, not results, and keeps the last message", async () => {
+  const fake = fakeKimiExecInstall(ECHO_TOOL_TRANSCRIPT);
+  await withFakeKimiExec(fake, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS,
+      cwd: execWorkspace(),
+      prompt: "Run echo hello and tell me what it printed.",
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.terminalEvent, "process-exit");
+    // Two assistant lines: the tool_calls line counts its calls, the content
+    // line counts one message and becomes the final message.
+    assert.equal(result.agentMessageCount, 1);
+    assert.equal(result.toolCallCount, 1);
+    assert.equal(result.failedToolItemCount, 0);
+    assert.equal(result.finalMessage, "The echo printed hello.");
+  });
+});
+
+test("a failed tool counts only on an explicit failure shape, never on error-looking text", async () => {
+  // Print-mode failure marking was NOT observed in the spike, so the count is
+  // deliberately conservative: only a tool result whose content parses as a
+  // JSON object carrying status:"failed" or isError:true counts. Plain text
+  // that merely looks like an error must not.
+  const explicit = [
+    JSON.stringify({ role: "assistant", tool_calls: [{ type: "function", id: "c1", function: { name: "Bash", arguments: "{}" } }] }),
+    JSON.stringify({ role: "tool", tool_call_id: "c1", content: "{\"status\":\"failed\",\"error\":\"command not found\"}" }),
+    JSON.stringify({ role: "assistant", content: "The command was not found." }),
+  ].join("\n") + "\n";
+  const fakeExplicit = fakeKimiExecInstall(explicit);
+  await withFakeKimiExec(fakeExplicit, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.failedToolItemCount, 1);
+    assert.equal(result.toolCallCount, 1);
+  });
+
+  const errorLooking = [
+    JSON.stringify({ role: "assistant", tool_calls: [{ type: "function", id: "c1", function: { name: "Bash", arguments: "{}" } }] }),
+    JSON.stringify({ role: "tool", tool_call_id: "c1", content: "Error: command failed with exit code 1" }),
+    JSON.stringify({ role: "assistant", content: "The output mentioned an error." }),
+  ].join("\n") + "\n";
+  const fakeText = fakeKimiExecInstall(errorLooking);
+  await withFakeKimiExec(fakeText, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.failedToolItemCount, 0, "error-looking plain text is not an observed failure shape");
+  });
+});
+
+test("a malformed line marks the terminal event an error and freezes later evidence", async () => {
+  const body = [
+    JSON.stringify({ role: "assistant", content: "before the breakage" }),
+    "this is not json",
+    JSON.stringify({ role: "assistant", content: "after the breakage" }),
+  ].join("\n") + "\n";
+  const fake = fakeKimiExecInstall(body);
+  await withFakeKimiExec(fake, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.terminalEvent, "error");
+    assert.equal(result.finalMessage, "before the breakage");
+    assert.equal(result.agentMessageCount, 1, "evidence after the malformed line is frozen");
+  });
+});
+
+test("an oversized line is dropped and nulls the final message; a later valid one recovers it", async () => {
+  const giant = JSON.stringify({ role: "assistant", content: "x".repeat(2 * 1024 * 1024) }) + "\n";
+  const first = JSON.stringify({ role: "assistant", content: "first small valid message" }) + "\n";
+  const fakeDropped = fakeKimiExecInstall(first + giant);
+  await withFakeKimiExec(fakeDropped, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.exitCode, 0, "an oversized line must not kill the run");
+    assert.equal(result.terminalEvent, "process-exit");
+    assert.equal(result.finalMessage, null, "the dropped line may have been the true final message");
+  });
+
+  const recovered = JSON.stringify({ role: "assistant", content: "recovered final" }) + "\n";
+  const fakeRecovered = fakeKimiExecInstall(giant + recovered);
+  await withFakeKimiExec(fakeRecovered, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.finalMessage, "recovered final", "a message genuinely later than the dropped line still wins");
+  });
+});
+
+test("a non-zero exit code is preserved, and a missing final message stays null", async () => {
+  const failing = fakeKimiExecInstall(PONG_TRANSCRIPT, { exitCode: 3 });
+  await withFakeKimiExec(failing, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.finalMessage, "PONG");
+  });
+
+  const noMessage = fakeKimiExecInstall(
+    JSON.stringify({ role: "meta", type: "session.resume_hint", session_id: "x" }) + "\n",
+  );
+  await withFakeKimiExec(noMessage, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.terminalEvent, "process-exit");
+    assert.equal(result.finalMessage, null);
+    assert.equal(result.agentMessageCount, 0);
+  });
+});
+
+test("the fake child receives -p with the prompt appended after the args (wire pin)", async () => {
+  const fake = fakeKimiExecInstall(PONG_TRANSCRIPT);
+  await withFakeKimiExec(fake, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS,
+      cwd: execWorkspace(),
+      prompt: "Reply with exactly PONG.",
+    });
+    assert.equal(result.exitCode, 0);
+    // The argv the child actually received, never a helper's return value:
+    // the composed prompt rides ONE argv element, and the wire carries the
+    // observed print-mode flags and pinned model.
+    assert.deepEqual(JSON.parse(readFileSync(fake.argvLog, "utf8")), [
+      "--output-format", "stream-json", "-m", "kimi-code/kimi-for-coding",
+      "-p", "Reply with exactly PONG.",
+    ]);
+  });
+});
+
+test("a prompt past 24,000 chars is refused before spawn", async () => {
+  const fake = fakeKimiExecInstall(PONG_TRANSCRIPT);
+  await withFakeKimiExec(fake, async () => {
+    await assert.rejects(
+      () => createSystemKimiExecProcess().run({
+        command: process.platform === "win32" ? "kimi.exe" : "kimi",
+        args: EXEC_ARGS,
+        cwd: execWorkspace(),
+        prompt: "x".repeat(24_001),
+      }),
+      (error: unknown) => error instanceof KimiExecProcessError &&
+        error.code === "KIMI_PROMPT_TOO_LONG" &&
+        error.failure === "process" &&
+        error.killConfirmed === true,
+    );
+    assert.equal(existsSync(fake.argvLog), false, "the fake child never ran");
+  });
+});
+
+test("an unresolvable kimi command rejects with a precise spawn code", async () => {
+  const emptyBin = mkdtempSync(join(tmpdir(), "cairn-kimi-spawnfail-bin-"));
+  const fake: FakeKimiExec = {
+    bin: emptyBin,
+    home: mkdtempSync(join(tmpdir(), "cairn-kimi-spawnfail-home-")),
+    localAppData: mkdtempSync(join(tmpdir(), "cairn-kimi-spawnfail-lad-")),
+    argvLog: join(emptyBin, "argv.json"),
+  };
+  await withFakeKimiExec(fake, async () => {
+    await assert.rejects(
+      () => createSystemKimiExecProcess().run({
+        command: process.platform === "win32" ? "kimi.exe" : "kimi",
+        args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+      }),
+      (error: unknown) => error instanceof KimiExecProcessError &&
+        error.code === "KIMI_EXEC_SPAWN_FAILED" && error.debugPath === null,
+    );
+  });
+});
+
+test("a silent kimi child is killed by the inactivity timer with a precise rejection", async () => {
+  const fake = fakeKimiExecInstall(null);
+  await withFakeKimiExec(fake, async () => {
+    const started = Date.now();
+    await assert.rejects(
+      () => createSystemKimiExecProcess({ inactivityMs: 400, absoluteMs: 60_000 }).run({
+        command: process.platform === "win32" ? "kimi.exe" : "kimi",
+        args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+      }),
+      (error: unknown) => isKimiExecTimeoutError(error) &&
+        error.code === "KIMI_EXEC_TIMED_OUT" && error.timeoutKind === "inactivity",
+    );
+    assert.ok(Date.now() - started < 30_000, "the run must settle promptly after the kill, not hang");
+  });
+});
+
+test("a chattering kimi child is killed by the absolute cap", async () => {
+  const fake = fakeKimiExecInstall(null, { chatter: true });
+  await withFakeKimiExec(fake, async () => {
+    await assert.rejects(
+      () => createSystemKimiExecProcess({ inactivityMs: 60_000, absoluteMs: 500 }).run({
+        command: process.platform === "win32" ? "kimi.exe" : "kimi",
+        args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+      }),
+      (error: unknown) => isKimiExecTimeoutError(error) && error.timeoutKind === "absolute",
+    );
+  });
+});
+
+test("a pre-aborted signal cancels before spawn, kill confirmed by construction", async () => {
+  const fake = fakeKimiExecInstall(PONG_TRANSCRIPT);
+  await withFakeKimiExec(fake, async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      () => createSystemKimiExecProcess().run({
+        command: process.platform === "win32" ? "kimi.exe" : "kimi",
+        args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+      }, controller.signal),
+      (error: unknown) => isKimiExecCancelledError(error) &&
+        error.code === "KIMI_EXEC_CANCELLED" && error.killConfirmed === true,
+    );
+    assert.equal(existsSync(fake.argvLog), false, "the fake child never ran");
+  });
+});
+
+test("aborting mid-run kills the kimi child and rejects as cancelled", async () => {
+  const fake = fakeKimiExecInstall(null);
+  await withFakeKimiExec(fake, async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 200);
+    await assert.rejects(
+      () => createSystemKimiExecProcess({ inactivityMs: 60_000, absoluteMs: 60_000 }).run({
+        command: process.platform === "win32" ? "kimi.exe" : "kimi",
+        args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+      }, controller.signal),
+      (error: unknown) => isKimiExecCancelledError(error) && error.code === "KIMI_EXEC_CANCELLED",
+    );
+  });
+});
+
+test("raw stdout and stderr stream to redacted kimi-* debug copies outside the project", async () => {
+  const token = "sk-kimi-debug-must-be-redacted";
+  const fake = fakeKimiExecInstall(PONG_TRANSCRIPT, { stderr: `provider stderr with ${token} inside\n` });
+  await withFakeKimiExec(fake, async () => {
+    const result = await createSystemKimiExecProcess().run({
+      command: process.platform === "win32" ? "kimi.exe" : "kimi",
+      args: EXEC_ARGS, cwd: execWorkspace(), prompt: "bounded fake request",
+    });
+    assert.equal(result.terminalEvent, "process-exit");
+    const debugDir = join(fake.localAppData, "Cairn", "debug");
+    const files = readdirSync(debugDir);
+    assert.ok(files.some((name) => /^kimi-.*\.jsonl$/.test(name)), `expected a kimi-*.jsonl copy, saw ${files}`);
+    assert.ok(files.some((name) => /^kimi-.*\.stderr\.log$/.test(name)), `expected a kimi-*.stderr.log copy, saw ${files}`);
+    const contents = files.map((name) => readFileSync(join(debugDir, name), "utf8")).join("\n---\n");
+    // The meta line is ignored for results but retained in the debug copy.
+    assert.match(contents, /session\.resume_hint/);
+    assert.match(contents, /provider stderr with sk-\[redacted\] inside/);
+    assert.doesNotMatch(contents, new RegExp(token));
+  });
 });
