@@ -1,70 +1,43 @@
-# Task 123 brief — Pin Kimi K3, clarify the picker, open the add-a-model path
-
-Implements the owner decisions recorded in
-`docs/ai-work/HANDOFF-model-picker.md` (2026-07-29).
+# Task 123 brief — Port the Soft festival palette into the tokens
 
 ## Requested visible outcome
 
-The connect card's model picker becomes calm and clear for a beginner:
-
-1. **Kimi K3 is the recommended brain.** A new curated entry
-   `moonshotai/kimi-k3` ("Kimi K3") carries `recommended: true`; Kimi K2
-   stays in the list without the pin. Verified in this task against
-   OpenRouter's keyless catalog: K3 is $3/M input, $15/M output — about 5×
-   K2 ($0.57/$2.30) — so K3's blurb says a long chat costs dimes, and K2's
-   "a few cents" sentence never transfers. `RECOMMENDATION_NOTE` is
-   untouched ("not yet evaluated…").
-2. **Every entry says how it bills, in plain words.** Each picker row gets a
-   short billing line: per-use keys ("Bills per use — key from
-   openrouter.ai") versus the membership seat ("Uses your membership's
-   coding quota — key from the Kimi Code Console"). No jargon.
-3. **The picker stays open, and says so.** DeepSeek V3.1 and GPT-5 Mini stay
-   (the confusion was presentation, not the entries). A new first-class
-   picker item, "The model I want isn't listed…", opens a small panel
-   telling the truth: Custom… accepts any provider/model right now, and once
-   connected the owner can tell Cairn in chat to add the model to the list —
-   showing the exact sentence to send, with a copy button. (No dispatch from
-   the card itself: the card only shows when no conductor is connected.)
-4. **The Kimi seat tells the CLI truth.** The subscription seat's key guide
-   gains one plain line: a Kimi Code command-line sign-in on this computer
-   can't be borrowed by Cairn yet, so the console key is the way today
-   (allowed interim improvement per the handoff; no credential paths are
-   read, ever).
-5. The custom-model placeholder moves to `e.g. moonshotai/kimi-k3`.
+The owner picked Direction 02, Soft festival, from the look board. Port that
+direction into `app/src/renderer/tokens.css` — the one token file the shipped
+app and the lab share — so the whole environment re-colors: dusk lavender
+night ground, warm firefly stars, coral Cairn, lantern-amber worker and
+highlights, cream-on-lavender town text, and the scanlines and perspective
+grid retired to invisible through their tokens. The app should read as the
+Soft festival panel did: warm dusk, characters carrying the color.
 
 ## Boundary of intent
 
-- Files in scope: `app/src/renderer/bodies.ts`,
-  `app/src/renderer/components/ConnectCard.tsx`, `app/src/renderer/app.css`
-  (billing-line style only), the pinned tests
-  (`app/tests/conductor.spec.ts`, `app/tests/connect-kimi.spec.ts`,
-  `app/tests-unit/bodies.test.ts` if a field becomes required), plus task
-  records.
-- `app/src/main/conductor/consent.ts` stays byte-identical: the kimi/API
-  split is by host and already honest; K3 is an OpenRouter seat.
-- No behavior changes to the connect flow's gates (consent re-derivation,
-  checkbox, one-paste default). No dependency, core, CLI, or contract
-  changes. No credential reading or CLI detection.
-- The parallel lane's in-flight untracked files (`app/lab/lookboard.*`,
-  `design/`) are not touched, staged, or committed.
-- consent.test.ts's `moonshotai/kimi-k2` fixtures are arbitrary ids, not
-  recommendation pins — verified, left alone.
+- **Only `app/src/renderer/tokens.css` changes** (plus task records). The
+  other lane currently holds uncommitted work in `app/src/renderer/app.css`
+  (connect-card styles), so this task deliberately touches no shared CSS file;
+  structural scene work (hills, removing the now-invisible grid element, the
+  worker's sky-blue stroke which lives as a token *reference* in app.css) is
+  deferred to the unification slice after that lane lands.
+- Token names stay; values change. No behavior, layout, motion, IPC, core,
+  CLI, contract, or dependency changes. Light-theme sides of `light-dark()`
+  tokens stay as they are; the night garden is dark in both themes by design.
+- The scanline and grid retire at the token level (transparent values), which
+  is honest and reversible; their structural removal is unification-slice
+  work.
 
 ## Checks that will show the outcome holds
 
-- `npm run test:unit` and `npm run typecheck` green in `app/`.
-- `npm run build:vite` and `npm run build:lab` green.
-- Full Playwright E2E green with the app token held
-  (`mkdir "$TEMP/cairn-app-token"`), including the updated conductor and
-  connect-kimi specs asserting: K3 pinned and named on the default card,
-  every billing line visible, the not-listed path renders and copies, the
-  Kimi seat's CLI-truth line, and the new placeholder.
-- Red-first where pins change.
+- Typecheck green; desktop unit tests green; lab build green.
+- Focused town-square E2E green (no color assertions, but presence, reduced
+  motion, and disappearance must keep passing).
+- Isolated Electron render (app token held and released): screenshots of the
+  town ready and working states plus a full-app view, visually inspected for
+  the festival read — dusk lavender ground, warm fireflies, coral Cairn,
+  lantern worker, no scanlines, no grid.
 
 ## DONE and STOPPED
 
-- DONE: the five picker entries render with billing lines, K3 carries the
-  recommendation, the not-listed panel and CLI-truth line read plain, all
-  checks above pass.
-- STOPPED: checks fail, or clarity cannot be kept without breaking a pinned
-  consent/honesty string.
+- DONE: the app and lab render the Soft festival palette through tokens only;
+  all checks pass; the other lane's uncommitted files are byte-identical.
+- STOPPED: checks fail, the palette is unreadable, or the task cannot stay
+  out of the files the other lane holds.
