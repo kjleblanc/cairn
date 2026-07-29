@@ -58,7 +58,7 @@ async function connectToFixture(win: Page, fixtureUrl: string, model: string, ap
   await win.getByRole("button", { name: "Choose a different brain" }).click();
   await win.getByRole("button", { name: "Custom…" }).click();
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
-  await win.getByPlaceholder("e.g. moonshotai/kimi-k2").fill(model);
+  await win.getByPlaceholder("e.g. moonshotai/kimi-k3").fill(model);
   await win.getByPlaceholder("Stored encrypted; shown never again").fill(apiKey);
   const connectButton = win.getByRole("button", { name: "Connect" });
   await expect(connectButton).toBeDisabled(); // blocks until the checkbox is checked, even with every field filled
@@ -164,16 +164,31 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   // One-paste default: no base URL or model input, and the recommended
   // brain is already named on screen — nothing to choose before pasting a key.
   await expect(card.locator('input[type="text"]')).toHaveCount(0);
-  await expect(card).toContainText("Kimi K2");
+  await expect(card).toContainText("Kimi K3");
 
-  // The picker lists all three curated brains plus "Custom…".
+  // The picker lists all five curated brains plus "Custom…" and the
+  // not-listed path, and every brain names how it bills in plain words.
   await win.getByRole("button", { name: "Choose a different brain" }).click();
   const picker = win.locator(".card", { hasText: "choose a different brain" });
   await expect(picker).toBeVisible();
+  await expect(picker).toContainText("Kimi K3");
+  await expect(picker).toContainText("Recommended");
   await expect(picker).toContainText("Kimi K2");
   await expect(picker).toContainText("DeepSeek V3.1");
   await expect(picker).toContainText("GPT-5 Mini");
+  await expect(picker).toContainText("Bills per use — key from openrouter.ai");
+  await expect(picker).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
   await expect(picker.getByRole("button", { name: "Custom…" })).toBeVisible();
+
+  // The not-listed path names both doors — Custom… right now, a Cairn task
+  // once connected — and shows the exact sentence to send, with a copy button.
+  await picker.getByRole("button", { name: /The model I want isn't listed/ }).click();
+  const add = win.locator(".card", { hasText: "the model I want isn't listed" });
+  await expect(add).toBeVisible();
+  await expect(add).toContainText("Add a model to my picker: provider/model-id");
+  await add.getByRole("button", { name: "Copy the sentence" }).click();
+  await expect(add.getByRole("button", { name: "Copied ✓" })).toBeVisible();
+  await add.getByRole("button", { name: "Back" }).click();
   await picker.getByRole("button", { name: "Back" }).click();
 
   // "Where do I get a key?" opens an in-card walkthrough, not a browser guess.
@@ -190,7 +205,7 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await win.getByRole("button", { name: "Choose a different brain" }).click();
   await win.getByRole("button", { name: "Custom…" }).click();
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
-  await win.getByPlaceholder("e.g. moonshotai/kimi-k2").fill("fixture-model");
+  await win.getByPlaceholder("e.g. moonshotai/kimi-k3").fill("fixture-model");
   await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-test-key");
   await expect(win.getByText(/What may flow/)).toBeVisible();
 

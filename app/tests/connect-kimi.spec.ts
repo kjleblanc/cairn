@@ -53,11 +53,13 @@ test("the Kimi subscription seat shows plan-truth consent wording and the consol
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
 
-  // The picker lists the subscription seat alongside the OpenRouter brains.
+  // The picker lists the subscription seat alongside the OpenRouter brains,
+  // and its billing line names the membership quota in plain words.
   await win.getByRole("button", { name: "Choose a different brain" }).click();
   const picker = win.locator(".card", { hasText: "choose a different brain" });
   await expect(picker).toBeVisible();
   await expect(picker).toContainText("Kimi — your subscription");
+  await expect(picker).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
   await picker.getByRole("button", { name: /Kimi — your subscription/ }).click();
 
   // The seat fixes the base URL and model itself — no free-text fields — and
@@ -70,12 +72,14 @@ test("the Kimi subscription seat shows plan-truth consent wording and the consol
   await expect(card).not.toContainText("Pay-as-you-go");
   await expect(card).not.toContainText("costs money on my account");
 
-  // The key guide points at the real console, in plain words.
+  // The key guide points at the real console, in plain words — and tells the
+  // truth about a Kimi Code command-line sign-in: Cairn can't borrow it yet.
   await win.getByRole("button", { name: "Where do I get a key?" }).click();
   const guide = win.locator(".card", { hasText: "where do I get a key?" });
   await expect(guide).toBeVisible();
   await expect(guide).toContainText("Open the Kimi Code Console and sign in with your Kimi account.");
   await expect(guide).toContainText("shown only once");
+  await expect(guide).toContainText("Cairn can't borrow that sign-in yet");
   await expect(guide.getByRole("button", { name: "Open the Kimi Code Console" })).toBeVisible();
   await guide.getByRole("button", { name: "Back" }).click();
 

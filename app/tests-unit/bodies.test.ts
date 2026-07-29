@@ -21,3 +21,10 @@ test("every blurb is non-empty and under 140 characters", () => {
     assert.ok(body.blurb.length < 140, `body ${body.name}'s blurb is ${body.blurb.length} chars, expected under 140`);
   }
 });
+
+test("every body names how it bills in plain words", () => {
+  for (const body of BODIES) {
+    assert.ok(body.billing.trim().length > 0, `body ${body.name} has an empty billing line`);
+    assert.ok(body.billing.length < 100, `body ${body.name}'s billing line is ${body.billing.length} chars, expected under 100`);
+  }
+});

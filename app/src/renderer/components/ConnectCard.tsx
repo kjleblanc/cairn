@@ -8,7 +8,15 @@ const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_KEYS_URL = "https://openrouter.ai/keys";
 const KIMI_CONSOLE_URL = "https://www.kimi.com/code/console";
 
-type Panel = "default" | "picker" | "guide";
+/** The exact sentence the not-listed panel asks the owner to send Cairn in
+ * chat once connected — the add-a-model self-hosting loop (task 123). The
+ * owner replaces provider/model-id with the real id; the dispatched task
+ * verifies it against the provider's public catalog, exactly as the existing
+ * curated entries were. */
+const ADD_MODEL_REQUEST =
+  "Add a model to my picker: provider/model-id — verify the id against the provider's public catalog first.";
+
+type Panel = "default" | "picker" | "guide" | "add";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -37,7 +45,16 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
  *
  * Task 098 added the Kimi subscription seat: a curated body that carries its
  * own base URL, with the intro line and the key guide switching to match it.
- * Everything the OpenRouter seats show is byte-identical to before. */
+ * Everything the OpenRouter seats show is byte-identical to before.
+ *
+ * Task 123 pinned Kimi K3 as the recommended brain and made the picker's
+ * openness explicit: every curated entry shows a plain `billing` line (per-use
+ * key versus membership quota), and a fourth panel — `add`, reached from the
+ * picker's "The model I want isn't listed…" — tells the owner that Custom…
+ * takes any model right now and that a connected Cairn will add a model to
+ * the list as a task, showing the exact sentence to send. The Kimi guide also
+ * tells the CLI truth: a Kimi Code command-line sign-in can't be borrowed
+ * yet, so the console key is the way today. */
 export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [panel, setPanel] = useState<Panel>("default");
   const [custom, setCustom] = useState(false);
@@ -48,6 +65,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [card, setCard] = useState<ConductorConsentCard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,13 +109,20 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     setPanel("default");
   }
 
+  function copyAddModelRequest() {
+    navigator.clipboard.writeText(ADD_MODEL_REQUEST).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    }).catch(() => setCopied(false)); // clipboard unavailable: the sentence stays on screen to select by hand
+  }
+
   const currentBody = custom ? null : (BODIES.find((b) => b.id === model) ?? null);
   const kimiSeat = currentBody?.baseUrl !== undefined && new URL(currentBody.baseUrl).host === "api.kimi.com";
 
   if (panel === "picker") {
     return (
       <Card title="choose a different brain">
-        <p className="small muted">Cairn talks to any OpenAI-compatible provider — OpenRouter models, or your Kimi membership directly. Pick one, or go custom.</p>
+        <p className="small muted">Cairn talks to any OpenAI-compatible provider — OpenRouter models, or your Kimi membership directly. This list is a starting point, not a fence: any model works.</p>
         <div className="brain-list">
           {BODIES.map((body) => (
             <button key={body.id} type="button" className="brain-item" onClick={() => chooseBody(body)}>
@@ -106,6 +131,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
                 {body.recommended ? <span className="brain-item-tag">Recommended</span> : null}
               </span>
               <span className="small muted">{body.blurb}</span>
+              <span className="brain-item-billing">{body.billing}</span>
               {body.recommended ? <span className="small brain-item-note">{RECOMMENDATION_NOTE}</span> : null}
             </button>
           ))}
@@ -113,9 +139,32 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
             <span className="brain-item-head"><strong>Custom…</strong></span>
             <span className="small muted">Enter your own provider base URL and model — this is also where a local Ollama URL goes.</span>
           </button>
+          <button type="button" className="brain-item" onClick={() => setPanel("add")}>
+            <span className="brain-item-head"><strong>The model I want isn't listed…</strong></span>
+            <span className="small muted">Use any model right now with the custom option, or have Cairn add it to this list once you're connected.</span>
+          </button>
         </div>
         <div className="row" style={{ marginTop: 14 }}>
           <Pill kind="quiet" onClick={() => setPanel("default")}>Back</Pill>
+        </div>
+      </Card>
+    );
+  }
+
+  if (panel === "add") {
+    return (
+      <Card title="the model I want isn't listed">
+        <p><strong>Use it right now.</strong> Back on the picker, choose Custom… — it accepts any provider and any model id, including a local Ollama URL.</p>
+        <p><strong>Add it to the list for good.</strong> Once Cairn is connected, say this in chat (put the model's real id in place of provider/model-id):</p>
+        <p className="small add-model-sentence">{ADD_MODEL_REQUEST}</p>
+        <div className="row">
+          <Pill onClick={copyAddModelRequest}>{copied ? "Copied ✓" : "Copy the sentence"}</Pill>
+        </div>
+        <p className="small muted" style={{ marginTop: 10 }}>
+          Cairn will start a task that checks the id against the provider's public list and adds it here — the same way every entry on the picker was added.
+        </p>
+        <div className="row" style={{ marginTop: 14 }}>
+          <Pill kind="quiet" onClick={() => setPanel("picker")}>Back</Pill>
         </div>
       </Card>
     );
@@ -136,6 +185,9 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
           </div>
           <p className="small muted" style={{ marginTop: 10 }}>
             Conversation uses the coding quota included with your membership; your plan and its remaining quota live in the console.
+          </p>
+          <p className="small muted" style={{ marginTop: 10 }}>
+            Already signed into the Kimi Code command-line tool on this computer? Cairn can't borrow that sign-in yet — the console key above is the way today.
           </p>
           <div className="row" style={{ marginTop: 14 }}>
             <Pill kind="quiet" onClick={() => setPanel("default")}>Back</Pill>
@@ -177,7 +229,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
             <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </Field>
           <Field label="Model">
-            <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. moonshotai/kimi-k2" />
+            <input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. moonshotai/kimi-k3" />
           </Field>
         </>
       ) : (
