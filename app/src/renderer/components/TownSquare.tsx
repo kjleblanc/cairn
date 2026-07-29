@@ -183,7 +183,6 @@ export function TownSquare({
         </div>
       </header>
       <div className="town-skyglow" aria-hidden="true" />
-      <div className="town-grid" aria-hidden="true" />
 
       <div ref={groundRef} className="town-square-ground" aria-label="Town ground">
         <svg className="town-threads" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">

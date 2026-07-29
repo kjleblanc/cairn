@@ -195,13 +195,21 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 .workspace-shell {
   position: fixed; inset: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr);
-  background: var(--workspace-bg); overflow: hidden;
+  overflow: hidden;
+  /* One sky: the whole workspace is the festival dusk; rail, chat, and town
+     are places inside it, not pages beside it. */
+  background:
+    var(--garden-stars),
+    radial-gradient(900px 520px at 50% -18%, var(--garden-cyan-glow), transparent 62%),
+    radial-gradient(1000px 560px at 55% 115%, var(--garden-amber-glow), transparent 60%),
+    linear-gradient(160deg, var(--garden-ink), var(--garden-deep));
 }
 .workspace-shell.workspace-rail-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
 .project-rail {
   position: relative; z-index: 4; min-width: 0; display: flex; flex-direction: column;
-  background: var(--rail-bg); color: var(--rail-ink); border-right: 1px solid var(--rail-line);
-  box-shadow: 12px 0 40px rgb(3 8 18 / 18%); overflow: hidden;
+  background: linear-gradient(180deg, rgb(22 16 42 / 72%), rgb(22 16 42 / 48%));
+  backdrop-filter: blur(14px);
+  color: var(--rail-ink); border-right: 1px solid var(--rail-line); overflow: hidden;
 }
 .rail-identity {
   min-height: 74px; display: flex; align-items: center; gap: 10px; padding: 12px;
@@ -299,27 +307,22 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   grid-template-columns: minmax(420px, min(var(--chat-width), calc(100% - 328px))) 8px minmax(320px, 1fr);
 }
 .workspace-chat-pane, .workspace-town-pane { min-width: 0; min-height: 0; overflow: hidden; }
-.workspace-chat-pane { background: var(--card-solid); }
-.workspace-divider { position: relative; cursor: col-resize; background: var(--workspace-divider); touch-action: none; }
-.workspace-divider::after { content: ""; position: absolute; inset: 0 2px; background: transparent; }
-.workspace-divider:hover::after, .workspace-divider:focus-visible::after { background: var(--neon-soft); }
+.workspace-divider { position: relative; cursor: col-resize; background: transparent; touch-action: none; }
+.workspace-divider::after { content: ""; position: absolute; inset: 0 3px; background: transparent; border-radius: 3px; }
+.workspace-divider:hover::after, .workspace-divider:focus-visible::after { background: rgb(255 210 122 / 35%); }
 .workspace-scroll { height: 100%; overflow-y: auto; padding: 24px; }
 .workspace-scroll > div { width: min(860px, 100%); margin-inline: auto; }
-.chat-screen-embedded { position: relative; inset: auto; height: 100%; background: var(--card-solid); }
+.chat-screen-embedded { position: relative; inset: auto; height: 100%; background: transparent; }
 .chat-column.chat-column-embedded {
   width: 100%; height: 100%; max-height: none; margin: 0; border-radius: 0; padding: 16px 18px 14px;
-  box-shadow: none; background: var(--card-solid);
+  box-shadow: none;
 }
 .chat-column-static.chat-column-embedded { height: 100%; max-height: none; overflow-y: auto; margin: 0; }
 
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
-  color: var(--town-ink); background:
-    var(--garden-scanline),
-    var(--garden-stars),
-    radial-gradient(900px 520px at 50% -18%, var(--garden-cyan-glow), transparent 62%),
-    radial-gradient(1000px 560px at 55% 115%, var(--garden-amber-glow), transparent 60%),
-    linear-gradient(160deg, var(--garden-ink), var(--garden-deep));
+  /* The sky is the workspace shell's; the town is a clearing inside it. */
+  color: var(--town-ink); background: transparent;
 }
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;
@@ -340,12 +343,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-square-header button:hover:not(:disabled) { border-color: var(--neon-soft); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
-.town-skyglow { position: absolute; inset: 8% 12% auto; height: 38%; border-radius: 50%; filter: blur(40px); background: rgb(81 212 255 / 8%); }
-.town-grid {
-  position: absolute; inset: 48% -12% -20%; opacity: .32; transform: perspective(520px) rotateX(62deg);
-  background-image: linear-gradient(var(--town-grid) 1px, transparent 1px), linear-gradient(90deg, var(--town-grid) 1px, transparent 1px);
-  background-size: 42px 42px;
-}
+.town-skyglow { position: absolute; inset: 8% 12% auto; height: 38%; border-radius: 50%; filter: blur(40px); background: rgb(255 210 122 / 6%); }
 .town-square-ground { position: absolute; z-index: 2; inset: 62px 0 142px; }
 .town-threads { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .town-threads line {

@@ -1,15 +1,15 @@
 :root {
   color-scheme: light dark;
-  --bg: light-dark(#fbf7ee, #1b1e26);
-  --sky: light-dark(#edf4fa, #141721);
-  --cloud: light-dark(#dcebf7, #232a3a);
+  --bg: light-dark(#fbf7ee, #251e40);
+  --sky: light-dark(#edf4fa, #1e1736);
+  --cloud: light-dark(#dcebf7, #2c2347);
   --hill-back: light-dark(#eaf3de, #202a22);
   --hill-front: light-dark(#d9e8c4, #263427);
-  --card: light-dark(rgb(255 255 255 / 74%), rgb(38 42 54 / 74%));
-  --card-solid: light-dark(#ffffff, #262a36);
+  --card: light-dark(rgb(255 255 255 / 74%), rgb(52 40 84 / 62%));
+  --card-solid: light-dark(#ffffff, #2c2347);
   --ink: light-dark(#44423c, #e6e2d8);
   --muted: light-dark(#8a8375, #a09a8d);
-  --line: light-dark(#eae4d6, #333947);
+  --line: light-dark(#eae4d6, #453a66);
   --green: light-dark(#7fae62, #9ec98a);
   --green-ink: light-dark(#ffffff, #16241b);
   --green-deep: light-dark(#3f5c31, #cfe4c2);
@@ -22,13 +22,11 @@
   --stone-a: light-dark(#d6d1c5, #4a5162);
   --stone-b: light-dark(#c4beb0, #3d4453);
   --trail: light-dark(#a49c8c, #6a7284);
-  --workspace-bg: light-dark(#e8edf0, #221b38);
-  --workspace-divider: light-dark(#d8e0e3, #2c2344);
   --rail-bg: light-dark(#17232a, #1d1730);
   --rail-panel: light-dark(#20343d, #282040);
   --rail-hover: light-dark(#29414a, #322a4e);
   --rail-avatar: light-dark(#2a3c43, #342a52);
-  --rail-line: light-dark(#31464e, #3c3158);
+  --rail-line: light-dark(#31464e, rgb(255 210 122 / 16%));
   --rail-heading: #f5ecf5;
   --rail-ink: #d8cfe0;
   --rail-muted: #9a90ac;
@@ -38,7 +36,6 @@
   --neon-green: #8ed3a0;
   --town-sky: light-dark(#dce9ec, #241d3d);
   --town-ground: light-dark(#c7d6cf, #2c2344);
-  --town-grid: light-dark(transparent, transparent);
   --town-entity: light-dark(rgb(238 249 248 / 88%), rgb(38 30 63 / 94%));
   --town-ink: light-dark(#223f43, #f2e7d8);
   --town-muted: light-dark(#5c797b, #b0a4be);
