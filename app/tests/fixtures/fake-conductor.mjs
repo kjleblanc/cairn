@@ -59,6 +59,31 @@ const COMMENTARY_SCRIPT = {
 };
 let commentaryDelayMs = COMMENTARY_SCRIPT.delayMs;
 
+// The comment-busy test's deterministic window (task 137's flake fix): while
+// held, a commentary stream pauses after its last content part until
+// releaseCommentary() — the refusal window cannot elapse under load, however
+// slow the machine. The gate is armed per stream, so a release that lands
+// before the stream reaches the gate simply lets it pass.
+let commentaryHeld = false;
+let commentaryGate = null;
+
+function holdCommentary() {
+  commentaryHeld = true;
+}
+
+function releaseCommentary() {
+  commentaryHeld = false;
+  if (commentaryGate !== null) {
+    commentaryGate();
+    commentaryGate = null;
+  }
+}
+
+function commentaryGatePoint() {
+  if (!commentaryHeld) return Promise.resolve();
+  return new Promise((resolve) => { commentaryGate = resolve; });
+}
+
 function scriptFor(content) {
   if (content.includes("garble")) {
     return { parts: [`Here's the plan.\n\n\`\`\`cairn-task\n${GARBLED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
@@ -131,7 +156,7 @@ function sse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function streamReply(res, script) {
+async function streamReply(res, script, beforeDone) {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
@@ -142,6 +167,7 @@ async function streamReply(res, script) {
     sse(res, { choices: [{ delta: { content: part } }] });
     await sleep(delayMs);
   }
+  if (beforeDone) await beforeDone();
   sse(res, { usage: { prompt_tokens: 20, completion_tokens: 9, cost: 0.00002 } });
   res.write("data: [DONE]\n\n");
   res.end();
@@ -161,7 +187,7 @@ export function start() {
         const messages = messagesOf(rawBody);
         if (commentaryRequested(messages)) {
           lastCommentaryBody = rawBody;
-          void streamReply(res, { ...COMMENTARY_SCRIPT, delayMs: commentaryDelayMs });
+          void streamReply(res, { ...COMMENTARY_SCRIPT, delayMs: commentaryDelayMs }, commentaryGatePoint);
           return;
         }
         const content = lastUserContent(messages);
@@ -187,6 +213,8 @@ export function start() {
          * has arrived — same wire-honesty purpose as lastCommentaryBody. */
         lastReplyBody: () => lastReplyBody,
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
+        holdCommentary,
+        releaseCommentary,
       });
     });
   });

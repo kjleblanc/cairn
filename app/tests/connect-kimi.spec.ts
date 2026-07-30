@@ -59,26 +59,21 @@ test("the Kimi subscription seat shows plan-truth consent wording and the consol
   await expect(card).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
   await card.getByRole("button", { name: /Kimi — your subscription/ }).click();
 
-  // The seat fixes the base URL and model itself — no free-text fields — and
-  // every word the owner reads is the subscription truth, derived in main.
+  // The seat's screen IS the three-step key path (task 137): no fields to
+  // configure, no separate guide screen — console button, create-and-copy,
+  // paste field — and every other word is the subscription truth, derived
+  // in main.
   await expect(card.locator('input[type="text"]')).toHaveCount(0);
-  await expect(card).toContainText("Paste your Kimi Code key");
-  await expect(card).toContainText("Connecting with Kimi — your subscription");
+  await expect(card).toContainText("Kimi — your subscription");
+  await expect(card.getByRole("button", { name: "Open the Kimi Code Console" })).toBeVisible();
+  await expect(card).toContainText("Create a key and copy it — it's shown only once.");
+  await expect(card).toContainText("Paste it here:");
+  await expect(card.locator('input[type="password"]')).toHaveCount(1);
+  await expect(card).toContainText("Cairn can't borrow");
   await expect(card).toContainText("Kimi membership's included coding quota");
   await expect(card).toContainText("uses my Kimi membership's quota, which Cairn cannot see");
   await expect(card).not.toContainText("Pay-as-you-go");
   await expect(card).not.toContainText("costs money on my account");
-
-  // The key guide points at the real console, in plain words — and tells the
-  // truth about a Kimi Code command-line sign-in: Cairn can't borrow it yet.
-  await win.getByRole("button", { name: "Where do I get a key?" }).click();
-  const guide = win.locator(".card", { hasText: "where do I get a key?" });
-  await expect(guide).toBeVisible();
-  await expect(guide).toContainText("Open the Kimi Code Console and sign in with your Kimi account.");
-  await expect(guide).toContainText("shown only once");
-  await expect(guide).toContainText("Cairn can't borrow that sign-in yet");
-  await expect(guide.getByRole("button", { name: "Open the Kimi Code Console" })).toBeVisible();
-  await guide.getByRole("button", { name: "Back" }).click();
 
   // Connect stays blocked until consent is checked — unchanged gate, no call.
   await expect(win.getByRole("button", { name: "Connect" })).toBeDisabled();

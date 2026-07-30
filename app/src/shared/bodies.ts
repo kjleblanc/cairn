@@ -20,9 +20,10 @@
  * Center and Kimi Code Docs on 2026-07-28.
  *
  * Every entry carries a `billing` line naming how it bills in plain words —
- * per-use key versus membership quota — so the picker never makes a beginner
- * guess. Keep blurbs honest about cost: K3 runs about 5× K2, so "a long
- * chat costs a few cents" belongs to K2 and must not be copied upward.
+ * one-click sign-in or key for the per-use seats (sign-in arrived in task
+ * 131), membership quota for the Kimi seat — so the picker never makes a
+ * beginner guess. Keep blurbs honest about cost: K3 runs about 5× K2, so "a
+ * long chat costs a few cents" belongs to K2 and must not be copied upward.
  *
  * Entries marked `primary` are the two doors on the connect card's first
  * screen (task 126): the recommended per-use seat and the membership seat.
@@ -44,7 +45,7 @@ export const BODIES: Body[] = [
     id: "moonshotai/kimi-k3",
     name: "Kimi K3",
     blurb: "Kimi's newest model; a long chat usually costs a few dimes — about five times K2's price.",
-    billing: "Bills per use — key from openrouter.ai",
+    billing: "Bills per use — sign in or paste a key",
     recommended: true,
     primary: true,
   },
@@ -60,19 +61,19 @@ export const BODIES: Body[] = [
     id: "moonshotai/kimi-k2",
     name: "Kimi K2",
     blurb: "Well-rounded and steady for everyday conversation; a long chat usually costs a few cents.",
-    billing: "Bills per use — key from openrouter.ai",
+    billing: "Bills per use — sign in or paste a key",
   },
   {
     id: "deepseek/deepseek-chat-v3.1",
     name: "DeepSeek V3.1",
     blurb: "Strong at reasoning and code, priced lower than Kimi K2; a long chat usually costs a couple of cents.",
-    billing: "Bills per use — key from openrouter.ai",
+    billing: "Bills per use — sign in or paste a key",
   },
   {
     id: "openai/gpt-5-mini",
     name: "GPT-5 Mini",
     blurb: "OpenAI's small, quick model; capable for its size and about as cheap as the others here.",
-    billing: "Bills per use — key from openrouter.ai",
+    billing: "Bills per use — sign in or paste a key",
   },
 ];
 

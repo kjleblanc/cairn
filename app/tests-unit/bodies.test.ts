@@ -29,6 +29,17 @@ test("every body names how it bills in plain words", () => {
   }
 });
 
+// Task 137: since task 131 the OpenRouter doors offer one-click sign-in, so
+// a billing line that says only "key from openrouter.ai" undersells the easy
+// path — every OpenRouter seat's line names the choice.
+test("every OpenRouter body's billing line names the sign-in choice", () => {
+  const openRouterBodies = BODIES.filter((b) => b.baseUrl === undefined);
+  assert.ok(openRouterBodies.length > 0);
+  for (const body of openRouterBodies) {
+    assert.ok(body.billing.includes("sign in"), `body ${body.name}'s billing line does not name sign-in: ${body.billing}`);
+  }
+});
+
 test("exactly two bodies are primary — the two doors on the connect card's first screen", () => {
   const primary = BODIES.filter((b) => b.primary === true);
   assert.equal(primary.length, 2);

@@ -38,7 +38,7 @@ function readRememberedSeat(): RememberedSeat | null {
 const ADD_MODEL_REQUEST =
   "Add a model to my picker: provider/model-id — verify the id against the provider's public catalog first.";
 
-type Panel = "start" | "default" | "picker" | "guide" | "add" | "oauth";
+type Panel = "start" | "default" | "picker" | "add" | "oauth";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -121,7 +121,18 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * event arrives over `onConductorOAuth`: done behaves exactly like a
  * pasted-key success (seat memory, close), failed returns here with the
  * fixed refusal. The paste path below is byte-identical and stays the
- * universal fallback; Kimi and custom seats show no sign-in button. */
+ * universal fallback; Kimi and custom seats show no sign-in button.
+ *
+ * Task 137 puts the card on a diet and makes sign-in the whole default path
+ * for OpenRouter seats: body name, the consent block, the checkbox, one
+ * button. The key path collapses behind a "Use a key instead" toggle that
+ * opens three short inline steps (console button, create-and-copy, paste
+ * field); the Kimi seat shows its three steps directly, and the separate
+ * "Where do I get a key?" guide panel is gone — the steps live where
+ * they're needed. The duplicated intro and "Connecting with X — blurb"
+ * lines are removed; the consent strings and the key field's placeholder
+ * stay byte-identical, and a remembered seat still opens with the key path
+ * expanded (task 127's pre-filled reconnect). */
 export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [rememberedSeat] = useState<RememberedSeat | null>(() => readRememberedSeat());
   const [panel, setPanel] = useState<Panel>(rememberedSeat ? "default" : "start");
@@ -138,6 +149,10 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   const [connecting, setConnecting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
+  /** Task 137: whether the OpenRouter key path is expanded. A remembered
+   * seat opens it — the returning owner's reconnect stays one pre-filled
+   * paste (task 127) — while a fresh door choice leads with sign-in. */
+  const [keyPathOpen, setKeyPathOpen] = useState(rememberedSeat !== null);
   /** The OAuth event arrives outside React's flow, and the seat on screen at
    * THAT moment is what gets remembered — so the latest values ride a ref
    * rather than a mount-time closure. */
@@ -218,6 +233,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     setBaseUrl(body.baseUrl ?? DEFAULT_BASE_URL);
     setModel(body.id);
     setMoreOpen(false);
+    setKeyPathOpen(false);
     setPanel("default");
   }
 
@@ -310,52 +326,6 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     );
   }
 
-  if (panel === "guide") {
-    if (kimiSeat) {
-      return (
-        <Card title="where do I get a key?">
-          <ol className="welcome-steps">
-            <li>Open the Kimi Code Console and sign in with your Kimi account.</li>
-            <li>Click "Create API Key", give it a name, and confirm.</li>
-            <li>Copy the key right away — it is shown only once.</li>
-            <li>Paste it here.</li>
-          </ol>
-          <div className="row">
-            <Pill onClick={() => void cairn.openExternal(KIMI_CONSOLE_URL)}>Open the Kimi Code Console</Pill>
-          </div>
-          <p className="small muted" style={{ marginTop: 10 }}>
-            Conversation uses the coding quota included with your membership; your plan and its remaining quota live in the console.
-          </p>
-          <p className="small muted" style={{ marginTop: 10 }}>
-            Already signed into the Kimi Code command-line tool on this computer? Cairn can't borrow that sign-in yet — the console key above is the way today.
-          </p>
-          <div className="row" style={{ marginTop: 14 }}>
-            <Pill kind="quiet" onClick={() => setPanel("default")}>Back</Pill>
-          </div>
-        </Card>
-      );
-    }
-    return (
-      <Card title="where do I get a key?">
-        <ol className="welcome-steps">
-          <li>Create a free account at openrouter.ai.</li>
-          <li>Add a few dollars of credit to the account.</li>
-          <li>Open the Keys page and create a new key.</li>
-          <li>Copy it and paste it here.</li>
-        </ol>
-        <div className="row">
-          <Pill onClick={() => void cairn.openExternal(OPENROUTER_KEYS_URL)}>Open openrouter.ai/keys</Pill>
-        </div>
-        <p className="small muted" style={{ marginTop: 10 }}>
-          A long conversation usually costs a few cents; you can see prices per model on OpenRouter.
-        </p>
-        <div className="row" style={{ marginTop: 14 }}>
-          <Pill kind="quiet" onClick={() => setPanel("default")}>Back</Pill>
-        </div>
-      </Card>
-    );
-  }
-
   if (panel === "oauth") {
     return (
       <Card title="connect cairn's brain">
@@ -376,14 +346,37 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     );
   }
 
+  // Task 137's quiet card: every screen says only what the next click needs.
+  // The consent block and checkbox stay fully visible above every action —
+  // they ARE the standing authorization — but everything around them is one
+  // short line or a three-step list. Shared pieces keep the flavors honest:
+  const keyInput = (
+    <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Stored encrypted; shown never again" />
+  );
+  const consentBlock = card ? (
+    <div style={{ marginTop: 14 }}>
+      <p className="small"><strong>What may flow:</strong> {card.data}</p>
+      <p className="small"><strong>Cost:</strong> {card.cost}</p>
+    </div>
+  ) : (
+    <p className="small muted" style={{ marginTop: 14 }}>Enter a provider base URL to see what Cairn will share.</p>
+  );
+  const checkboxRow = (
+    <label className="row" style={{ marginTop: 14, alignItems: "flex-start" }}>
+      <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+      <span>{card ? card.checkbox : "I understand what will be shared and that conversation costs money on my account"}</span>
+    </label>
+  );
+  const connectRow = (
+    <div className="row" style={{ marginTop: 14 }}>
+      <Pill kind="primary" disabled={!card || !checked || !model.trim() || !apiKey.trim() || connecting} onClick={() => void connect()}>
+        {connecting ? "Connecting…" : "Connect"}
+      </Pill>
+    </div>
+  );
+
   return (
     <Card title="connect cairn's brain">
-      <p>{kimiSeat
-        ? "Paste your Kimi Code key — Cairn chooses everything else, and you can change it later."
-        : "Paste your OpenRouter key — Cairn chooses everything else, and you can change it later."}</p>
-      {showingMemory ? <p className="small muted">Cairn remembers your last choice — never your key.</p> : null}
-      {error ? <ErrorCard message={error} /> : null}
-
       {custom ? (
         <>
           <Field label="Provider base URL">
@@ -394,50 +387,67 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
           </Field>
         </>
       ) : (
-        <p className="small muted" style={{ marginTop: 10 }}>
-          Connecting with <strong>{currentBody?.name ?? model}</strong>{currentBody ? ` — ${currentBody.blurb}` : ""}
-        </p>
+        <p style={{ marginTop: 10, marginBottom: 0 }}><strong>{currentBody?.name ?? model}</strong></p>
       )}
+      {showingMemory ? <p className="small muted">Cairn remembers your last choice — never your key.</p> : null}
+      {error ? <ErrorCard message={error} /> : null}
 
-      {openRouterSeat ? (
-        <div style={{ marginTop: 14 }}>
-          <Pill kind="primary" disabled={!card || !checked || connecting} onClick={() => void beginOAuth()}>
-            {connecting ? "Opening sign-in…" : "Sign in with OpenRouter"}
-          </Pill>
-          <p className="small muted" style={{ marginTop: 6 }}>
-            The easy way — no key to find or paste. Check the consent box below, click here, and approve Cairn in your browser.
+      {kimiSeat ? (
+        <>
+          <ol className="welcome-steps" style={{ marginTop: 10 }}>
+            <li><Pill onClick={() => void cairn.openExternal(KIMI_CONSOLE_URL)}>Open the Kimi Code Console</Pill></li>
+            <li>Create a key and copy it — it's shown only once.</li>
+            <li>Paste it here:</li>
+          </ol>
+          {keyInput}
+          <p className="small muted" style={{ marginTop: 10 }}>
+            Signed into the Kimi command-line tool? Cairn can't borrow it yet — the console key is the way.
           </p>
-          <p className="small muted" style={{ marginTop: 10 }}>…or paste a key instead:</p>
-        </div>
+          {consentBlock}
+          {checkboxRow}
+          {connectRow}
+        </>
       ) : null}
 
-      <Field label="API key">
-        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Stored encrypted; shown never again" />
-      </Field>
+      {custom ? (
+        <>
+          <Field label="API key">{keyInput}</Field>
+          {consentBlock}
+          {checkboxRow}
+          {connectRow}
+        </>
+      ) : null}
 
-      {card ? (
-        <div style={{ marginTop: 14 }}>
-          <p className="small"><strong>What may flow:</strong> {card.data}</p>
-          <p className="small"><strong>Cost:</strong> {card.cost}</p>
-        </div>
-      ) : (
-        <p className="small muted" style={{ marginTop: 14 }}>Enter a provider base URL to see what Cairn will share.</p>
-      )}
-
-      <label className="row" style={{ marginTop: 14, alignItems: "flex-start" }}>
-        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-        <span>{card ? card.checkbox : "I understand what will be shared and that conversation costs money on my account"}</span>
-      </label>
-
-      <div className="row" style={{ marginTop: 14 }}>
-        <Pill kind="primary" disabled={!card || !checked || !model.trim() || !apiKey.trim() || connecting} onClick={() => void connect()}>
-          {connecting ? "Connecting…" : "Connect"}
-        </Pill>
-      </div>
+      {openRouterSeat && !custom ? (
+        <>
+          {consentBlock}
+          {checkboxRow}
+          <div className="row" style={{ marginTop: 14 }}>
+            <Pill kind="primary" disabled={!card || !checked || connecting} onClick={() => void beginOAuth()}>
+              {connecting ? "Opening sign-in…" : "Sign in with OpenRouter"}
+            </Pill>
+          </div>
+          <p className="small muted" style={{ marginTop: 6 }}>No key needed — approve Cairn in your browser.</p>
+          <div className="row" style={{ marginTop: 10 }}>
+            <Pill kind="quiet" onClick={() => setKeyPathOpen((open) => !open)}>{keyPathOpen ? "Hide the key path" : "Use a key instead"}</Pill>
+          </div>
+          {keyPathOpen ? (
+            <div style={{ marginTop: 10 }}>
+              <p className="small muted">A key needs a free openrouter.ai account with a few dollars of credit.</p>
+              <ol className="welcome-steps" style={{ marginTop: 6 }}>
+                <li><Pill onClick={() => void cairn.openExternal(OPENROUTER_KEYS_URL)}>Open openrouter.ai/keys</Pill></li>
+                <li>Create a key and copy it.</li>
+                <li>Paste it here:</li>
+              </ol>
+              {keyInput}
+              {connectRow}
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <div className="row" style={{ marginTop: 14 }}>
         <Pill kind="quiet" onClick={() => setPanel("picker")}>Choose a different brain</Pill>
-        <Pill kind="quiet" onClick={() => setPanel("guide")}>Where do I get a key?</Pill>
       </div>
     </Card>
   );

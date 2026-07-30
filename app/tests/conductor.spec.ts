@@ -88,6 +88,10 @@ test.describe.configure({ mode: "serial" });
 let fixtureUrl = "";
 let fixtureClose: () => Promise<void> = async () => {};
 let setFixtureCommentaryDelay: (delayMs: number) => void = () => {};
+/** Task 137's deterministic commentary window: while held, the fixture's
+ * commentary stream pauses before its usage frame until released. */
+let holdFixtureCommentary: () => void = () => {};
+let releaseFixtureCommentary: () => void = () => {};
 /** The raw body of the last commentary request the fixture answered — what the
  * provider would actually have been sent (repo task 080). */
 let lastCommentaryBody: () => string | null = () => null;
@@ -111,6 +115,8 @@ test.beforeAll(async () => {
       lastCommentaryBody: () => string | null;
       lastReplyBody: () => string | null;
       setCommentaryDelay: (delayMs: number) => void;
+      holdCommentary: () => void;
+      releaseCommentary: () => void;
     }>;
   };
   const server = await fixture.start();
@@ -119,6 +125,8 @@ test.beforeAll(async () => {
   lastCommentaryBody = server.lastCommentaryBody;
   lastReplyBody = server.lastReplyBody;
   setFixtureCommentaryDelay = server.setCommentaryDelay;
+  holdFixtureCommentary = server.holdCommentary;
+  releaseFixtureCommentary = server.releaseCommentary;
 
   const openRouterPath = pathToFileURL(join(__dirname, "fixtures", "fake-openrouter.mjs")).href;
   const openRouter = (await import(openRouterPath)) as {
@@ -148,6 +156,7 @@ test.afterAll(async () => {
 // previous test in this file left behind — each scenario connects for
 // itself, so order between them never matters.
 test.beforeEach(() => {
+  releaseFixtureCommentary(); // a crashed test must never leave the gate held for the next one
   setFixtureCommentaryDelay(400);
   rmSync(conductorFile(), { force: true });
 });
@@ -206,13 +215,27 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await expect(card).toContainText("Kimi K3");
   await expect(card).toContainText("Recommended");
   await expect(card).toContainText("Kimi — your subscription");
-  await expect(card).toContainText("Bills per use — key from openrouter.ai");
+  await expect(card).toContainText("Bills per use — sign in or paste a key");
   await expect(card).toContainText("Uses your membership's coding quota — key from the Kimi Code Console");
 
-  // Choosing a door lands on the one-paste screen, pre-filled for that seat.
+  // Choosing the K3 door lands on the quiet sign-in screen (task 137):
+  // consent, one checkbox, one button — the key path tucked behind a toggle,
+  // the password field nowhere until asked for.
   await card.getByRole("button", { name: /Kimi K3/ }).click();
-  await expect(card).toContainText("Connecting with Kimi K3");
-  await expect(card).toContainText("Paste your OpenRouter key");
+  const firstSignIn = card.getByRole("button", { name: "Sign in with OpenRouter" });
+  await expect(firstSignIn).toBeVisible();
+  await expect(firstSignIn).toBeDisabled();
+  await expect(card.locator('input[type="password"]')).toHaveCount(0);
+  await expect(card).not.toContainText("Paste your OpenRouter key");
+
+  // The toggle opens the key path as three short inline steps — the guide
+  // lives here now, not on its own screen.
+  await card.getByRole("button", { name: "Use a key instead" }).click();
+  await expect(card.getByRole("button", { name: "Open openrouter.ai/keys" })).toBeVisible();
+  await expect(card).toContainText("a few dollars of credit");
+  await expect(card).toContainText("Create a key and copy it.");
+  await expect(card).toContainText("Paste it here:");
+  await expect(card.locator('input[type="password"]')).toHaveCount(1);
 
   // The picker shows the two primary doors, keeps the other three models
   // hidden behind a toggle, and leaves "Custom…" and the not-listed path
@@ -231,7 +254,7 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await expect(picker).toContainText("Kimi K2");
   await expect(picker).toContainText("DeepSeek V3.1");
   await expect(picker).toContainText("GPT-5 Mini");
-  await expect(picker).toContainText("Bills per use — key from openrouter.ai");
+  await expect(picker).toContainText("Bills per use — sign in or paste a key");
 
   // The not-listed path names both doors — Custom… right now, a Cairn task
   // once connected — and shows the exact sentence to send, with a copy button.
@@ -244,18 +267,13 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await add.getByRole("button", { name: "Back" }).click();
   await picker.getByRole("button", { name: "Back" }).click();
 
-  // Picker Back returns to the start screen; choosing K3 again leads back to
-  // the paste screen, where "Where do I get a key?" opens an in-card
-  // walkthrough, not a browser guess.
+  // Picker Back returns to the start screen; choosing K3 again lands back on
+  // the sign-in screen with the key path closed. The separate "Where do I
+  // get a key?" screen is gone (task 137).
   await expect(card).toContainText("How do you want to power Cairn?");
   await card.getByRole("button", { name: /Kimi K3/ }).click();
-  await win.getByRole("button", { name: "Where do I get a key?" }).click();
-  const guide = win.locator(".card", { hasText: "where do I get a key?" });
-  await expect(guide).toBeVisible();
-  await expect(guide).toContainText("Create a free account at openrouter.ai.");
-  await expect(guide).toContainText("Add a few dollars of credit");
-  await expect(guide.getByRole("button", { name: "Open openrouter.ai/keys" })).toBeVisible();
-  await guide.getByRole("button", { name: "Back" }).click();
+  await expect(card.getByRole("button", { name: "Where do I get a key?" })).toHaveCount(0);
+  await expect(card.locator('input[type="password"]')).toHaveCount(0);
 
   // "Custom…" reveals the advanced fields — the only way to reach the
   // fixture's local URL, since it isn't one of the curated brains.
@@ -333,10 +351,10 @@ test("sign in with OpenRouter lands connected, no key anywhere", async () => {
   await win.reload();
   await expect(card).toBeVisible({ timeout: 30_000 });
 
-  // The K3 door's paste screen carries the one-click button, gated by the
-  // same consent checkbox as the paste path.
+  // The K3 door's quiet screen carries the one-click button, gated by the
+  // same consent checkbox as the paste path (task 137: sign-in first, the
+  // key path behind a toggle).
   await card.getByRole("button", { name: /Kimi K3/ }).click();
-  await expect(card).toContainText("Paste your OpenRouter key");
   const signIn = card.getByRole("button", { name: "Sign in with OpenRouter" });
   await expect(signIn).toBeVisible();
   await expect(signIn).toBeDisabled();
@@ -408,8 +426,9 @@ test("cancelling the sign-in returns to the paste screen, still disconnected, an
   const authUrl = (await card.getByRole("link", { name: "Open the sign-in page yourself" }).getAttribute("href")) as string;
 
   await card.getByRole("button", { name: "Cancel" }).click();
-  await expect(card).toContainText("Paste your OpenRouter key");
+  // Back on the quiet screen: the sign-in button, the key path still closed.
   await expect(card.getByRole("button", { name: "Sign in with OpenRouter" })).toBeVisible();
+  await expect(card.locator('input[type="password"]')).toHaveCount(0);
   const status = await win.evaluate(() => window.cairn.conductorStatus());
   expect(status.connected).toBe(false);
 
@@ -736,8 +755,16 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   await questionChip.getByPlaceholder("Your answer").fill("No, a plain redirect is enough.");
   await questionChip.getByRole("button", { name: "Answer" }).click();
 
-  await expect(riskChip.getByRole("button", { name: "Set aside" })).toBeDisabled();
-  await expect(riskChip.getByText("Wait for Cairn to finish answering.")).toBeVisible();
+  // The locked state is transient — it ends the moment the answer's stream
+  // finishes. Two sequential expects can straddle that end under load (the
+  // first-run flake seen in tasks 131/137), so the pin is ONE locator, one
+  // atomic observation per poll: a risk chip that both says the lock and
+  // has its button disabled.
+  await expect(
+    riskChip
+      .filter({ hasText: "Wait for Cairn to finish answering." })
+      .locator('button:has-text("Set aside")[disabled]'),
+  ).toBeVisible();
 
   await waitStreamDone(win);
   await expect(riskChip.getByRole("button", { name: "Set aside" })).toBeEnabled();
@@ -1174,7 +1201,12 @@ test("the conductor comments on the card the envelope just posted, and the comme
 // process refused, and the owner must never be told to stop something with no
 // Stop control on screen.
 test("a message sent while the comment streams is refused, leaves no phantom turn, and is not lost", async () => {
-  setFixtureCommentaryDelay(3_000);
+  // Task 137's flake fix: the old 3s-per-chunk delay made the refusal window
+  // LONG but still bounded — under load the comment could finish before the
+  // message went out, and the refusal never happened. Holding the fixture's
+  // stream at its gate makes the window unbounded and deterministic; the
+  // release below lets the comment land for the second half.
+  holdFixtureCommentary();
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-comment-busy-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
@@ -1213,7 +1245,9 @@ test("a message sent while the comment streams is refused, leaves no phantom tur
   await expect(refusal).not.toContainText("stop it first");
   await expect(win.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
 
-  // Nothing was lost either: the comment lands, and the message goes through.
+  // Nothing was lost either: release the held comment so it lands, and the
+  // message goes through.
+  releaseFixtureCommentary();
   await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(1, { timeout: 30_000 });
   await refusal.getByRole("button", { name: "Try again" }).click();
   await waitStreamDone(win);
