@@ -4,16 +4,26 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 const labIndexPath = fileURLToPath(new URL("./lab/index.html", import.meta.url));
+const labShotsPath = fileURLToPath(new URL("./lab/shots.html", import.meta.url));
 
 /**
  * Kimi Work's preview card opens the site root. Serve the lab there too,
  * with its script made absolute so relative lab imports keep resolving.
+ * The review-shots viewer is served at the short "/shots.html"; its generated
+ * content (manifest + images) lives untracked in app/shots/, which matches
+ * the URL space exactly.
  */
 const labAtRoot: Plugin = {
   name: "cairn-lab-at-root",
   configureServer(server) {
     server.middlewares.use((req, res, next) => {
       const path = (req.url ?? "/").split("?")[0];
+      if (path === "/shots.html") {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.end(readFileSync(labShotsPath, "utf8"));
+        return;
+      }
       if (path !== "/" && path !== "/index.html") {
         next();
         return;
@@ -48,6 +58,7 @@ export default defineConfig({
         main: "lab/index.html",
         concepts: "lab/concepts.html",
         lookboard: "lab/lookboard.html",
+        shots: "lab/shots.html",
       },
     },
   },
