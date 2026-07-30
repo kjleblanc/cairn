@@ -1,49 +1,43 @@
-# Task 134 brief: a shots page in the lab — see UI changes without opening the app
+# Task 134 brief: N-lane protocol design — from two lanes to however many
 
 **Lane:** A (main checkout)
 
 ## Requested visible outcome
 
-The owner's words: "How about we just have you screenshot and show me changes
-instead since it's mainly ui/layout work" — and the chat image-gallery cards
-failed twice (rendered as raw code blocks, owner's screenshots as evidence).
-So the review surface moves into the product's own lab: a **shots page**
-served by the lab dev server where each UI task gets an entry — captioned
-before/after (or after-only) screenshots — viewable at
-`http://localhost:7100/shots.html` (or the lab's own port 7410).
+A design spec at
+`docs/superpowers/specs/2026-07-30-cairn-n-lane-protocol-design.md`, written
+in the same style as the two-lane spec it extends
+(`2026-07-28-cairn-two-lane-protocol-design.md`): where the need comes from,
+what the two-week evidence says about each of the six existing mechanisms,
+the proposed decisions for N lanes, what stays serial, what is deliberately
+not built, trade-offs, and open questions for the owner.
 
-This is the first entry of a durable routine: every future UI task drops its
-settled screenshots into `app/lab/shots/` with a manifest row, and the owner
-reviews them on this page instead of opening the app.
+The spec must cover: task-number claiming at 3+ lanes (keep or replace
+claim-by-commit), the worktree convention for N lanes, landing-queue rules at
+N lanes (including "main checkout must be between tasks so the settle check
+never compiles uncommitted work"), the app token as the true serializer, a
+definition of "lane" that already fits a future phone conversation (a lane is
+a human-driven conversation, not a device), and how recurring automations
+(like the docs-review cron) relate to lanes (they are not lanes; they write
+only to their designated directories).
 
 ## Boundary of intent
 
-- **Lab-only.** Nothing in the shipped Electron bundle changes; the page is a
-  sibling of `concepts.html` and `lookboard.html`. `build:lab` gains one
-  rollup input, nothing else.
-- **Generated content stays untracked.** `app/lab/shots/` (images + manifest)
-  is gitignored like `design/` — the tracked files are the page itself, the
-  gitignore line, the lab config input, and the task records.
-- **The lab root keeps rendering the app mock** exactly as today; the shots
-  page is a separate path.
-- AI decision (recorded here per contract v0.5.0): the page is a static
-  viewer reading a tiny `manifest.json` — no framework, matching the lab's
-  plain-HTML siblings.
-- The other lanes' work is never staged or touched.
+- One new spec file plus task records. No contract edit, no code, no fixture
+  change — adoption follows owner approval, as with v0.4.0.
+- E2E parallelism (proving the conductor fixture safe for two processes)
+  stays deferred; the spec names it as the real work without doing it.
+- The mobile bridge itself is Task 135's subject; this spec only makes the
+  lane model ready for it.
 
-## Checks (exact commands; outputs cited in the report)
+## Checks that show the outcome holds
 
-- `cd app && npm.cmd run typecheck` — green.
-- `cd app && npm.cmd run build:lab` — green and emits `shots.html`.
-- `cd app && npm.cmd run lab` (temporary, then stopped): `curl` returns HTTP
-  200 for `/shots.html`, for the manifest, and for each referenced image.
-- An isolated screenshot of the rendered shots page (Playwright against the
-  dev server) inspected by me, saved untracked under `design/attachments/`.
+- The spec file exists and addresses every topic listed above.
+- Every claim about past collisions is checkable against LOG.md rows.
+- The diff touches only the spec and task records.
 
-## DONE / STOPPED
+## DONE / STOPPED here
 
-- **DONE:** the shots page renders the Task 130 overlay screenshots as its
-  first entry over the lab server; all checks green; commit contains only the
-  page, config, gitignore, and records.
-- **STOPPED:** the page cannot be added without touching shipped code or
-  tracking generated images.
+- **DONE:** the spec is complete per above and presented with a plain summary.
+- **STOPPED:** the evidence contradicts expansion (e.g., the two-lane pilot
+  shows failures this spec can't honestly resolve) — say so instead.
