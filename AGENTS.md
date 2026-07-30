@@ -1,6 +1,6 @@
 # Project Contract
 
-> **What this is.** Cairn Contract v0.4.0 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.5.0 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
@@ -14,10 +14,14 @@ PROJECT NAME: Cairn
 WHAT WE ARE BUILDING: Cairn, an AI conductor with a desktop app, portable contract, and swappable worker adapters, so people with zero coding experience can build real software safely
 WHO WILL USE IT: complete beginners — and Cairn's own maintainers, starting now
 CURRENT MILESTONE: one conversation on Cairn itself runs request -> pushback -> dispatch -> verified DONE -> honest explanation, delivered as the envelope's result card with the conductor's commentary
+EVIDENCE LEVEL: Verified
 ```
 
 `ACTIVE` means work may proceed. `PAUSED` means the owner has explicitly frozen
-product work; the owner resumes it by saying so.
+product work; the owner resumes it by saying so. `ARCHIVED` means the owner has
+set the project aside: its records stay as evidence and no work proceeds until
+the owner reactivates it. The evidence level is chosen under "Evidence levels"
+below.
 
 ## The whole workflow
 
@@ -44,6 +48,18 @@ For each requested outcome:
 
 A new chat is a context tool, never a gate. Work too large for one continuous
 task gets a short written plan first, then lands as serial recorded tasks.
+
+## Who decides what
+
+Every decision is one of two kinds, and the AI says which kind it is when
+asking:
+
+- **Owner decisions** — how the product looks and feels, what gets built and
+  in what order, risk, money, and anything that leaves the machine. The AI
+  brings these to the owner with something to look at, never code to read.
+- **AI decisions** — implementation detail: formats, libraries, structure,
+  algorithms. The AI decides these itself, records the choice in the task
+  report, and explains it in plain language.
 
 ## Working in two lanes
 
@@ -83,7 +99,14 @@ stay serial and remain the owner's decision, however many lanes are running.
 
 Records exist so a later conversation can continue without guessing.
 Verification always asks one question: does the requested visible outcome hold?
-The outcome is what gets verified; records describe the work.
+The outcome is what gets verified; records describe the work. When only human
+judgment can answer — feel, taste, whether it is fun — the task stops, puts the
+result on the owner's screen with exact safe steps, and waits; that task's DONE
+carries the owner's confirmation. When a check's result depends on machine
+state the AI cannot observe — other running applications, thermals, the
+network — the brief names that precondition and the owner confirms it
+immediately before the check; the AI never closes the owner's applications
+itself.
 
 In a one-lane project, use the next unused number in `docs/ai-work/tasks/`
 (`NNN-brief.md`, `NNN-report.md`). With two lanes, a number is claimed by
@@ -100,7 +123,9 @@ The brief states:
 The report states:
 
 - what actually changed, naming every file touched;
-- checks run and their real results;
+- checks run and their real results, naming each check's exact command and
+  where its output can be seen, so a later conversation — or the owner — can
+  re-run the decisive one;
 - how to try it;
 - limitations or remaining human judgment; and
 - `Disposition: DONE` or `Disposition: STOPPED — [reason]`.
@@ -122,9 +147,40 @@ itself, from its own verification plus the worker's claims. The `Milestone
 moved?` column is one of those claims: it carries the worker's answer, not
 Cairn's own verification that the milestone moved.
 
+The `CURRENT MILESTONE` fact changes only inside a task whose report names the
+evidence that moved it, in the same commit as that task's records — never
+edited in on its own. Whether a milestone truly moved is the owner's call; the
+log column stays a claim, as stated above.
+
 `DONE` means the requested outcome holds and its checks completed. `STOPPED`
 means it does not. A review requested by the owner is optional advice; it may
 suggest a new task, and the completed record stands.
+
+## Evidence levels
+
+Machinery matches demonstrated risk. Each project declares one level in its
+project facts:
+
+- **Core** — this contract's own records: briefs, reports, the log, and the
+  risk pauses. The default; right for most projects.
+- **Verified** — Core plus executable "done when" checks the report cites, an
+  orientation path for new chats, and short decision records for choices that
+  outlive a task. Right for long-lived projects with repeated AI handoffs.
+- **Forensic** — Verified plus custody and audit machinery: receipts, hashes,
+  hooks. Right for dirty-tree, multi-agent, or provenance-sensitive work.
+
+Start at the lightest level that solves the real risk. Add machinery to close
+a demonstrated failure, never preventively.
+
+## One template, many projects
+
+`CONTRACT-TEMPLATE.md` in Cairn's repository holds the canonical text; every
+project's `AGENTS.md` is a deliberate copy at a declared version. A project's
+own contract is law in that project even when it is older than the template:
+an AI working there follows the local version and mentions the drift, never
+silently applying a newer one. Adopting a newer version is an explicit task in
+that project. A periodic review across projects — for example a scheduled
+documentation review — is how drift gets noticed.
 
 ## Repair inside the same task
 

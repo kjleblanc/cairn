@@ -9,3 +9,4 @@ app/resources/contract.md
 app/test-results/
 app/dist-unit/
 .lanes/
+docs-review/staged/
