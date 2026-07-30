@@ -63,7 +63,7 @@ preserved unmodified. The pre-reset repository state is pinned at git tag
 
 ## Maintainer lanes
 
-This repository may be worked by up to two chats at once (contract v0.4.0,
+This repository may be worked by up to two chats at once (contract v0.5.0,
 "Working in two lanes"). Maintainer-facing discipline: lane B lives in a git
 worktree (convention `.lanes/b`, branch `lane/b`), a task number is claimed
 by committing its brief, `docs/ai-work/LOG.md` carries `merge=union` in

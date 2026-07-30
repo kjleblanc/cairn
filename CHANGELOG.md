@@ -4,6 +4,63 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.5.0 — what seven projects taught — 2026-07-29
+
+- Applied the owner-approved contract evolution from Task 132's proposal
+  (`docs/ai-work/proposals/2026-07-29-contract-evolution.md`), drafted from a
+  read-only review of the documentation of every project on the owner's
+  machine (Cairn, delve, SpecDeck, RunWithFriends, cairn-eval, cairn-test,
+  and the pre-reset Workflow Docs kit). The review's headline finding was
+  contract drift: four incompatible contract versions were in play, two of
+  them retired. Eight changes, all in the contract and its mirrors; no
+  runtime behavior changed.
+- Added "Who decides what": every decision is classified as an owner
+  decision (experience, scope, order, risk, money, anything external —
+  brought to the owner with something to look at, never code to read) or an
+  AI decision (implementation detail — decided, recorded in the report,
+  explained plainly). From delve's working agreement.
+- Strengthened milestone honesty: the `CURRENT MILESTONE` fact may change
+  only inside a task whose report names the evidence that moved it, in the
+  same commit as that task's records — never edited in on its own. The log's
+  `Milestone moved?` column stays a labelled claim, as 0.3.0 made it. From
+  delve's ratchet, without its always-on test: the delegated call was that
+  Cairn has not had delve's demonstrated failure, and the evidence-levels
+  section below says machinery closes a demonstrated failure, never
+  preventively.
+- Made evidence reachable: a report's checks now name each check's exact
+  command and where its output can be seen, so a later conversation — or the
+  owner — can re-run the decisive one. From delve's notary principle, kept
+  light for chat-driven work.
+- Added "Evidence levels": each project declares Core (this contract's own
+  records), Verified (executable done-when checks, an orientation path,
+  short decision records), or Forensic (custody and audit machinery) in its
+  project facts, starting at the lightest level that solves the real risk.
+  From the pre-reset kit's Core/Verified/Forensic table. Cairn itself
+  declares Verified — it already keeps specs, receipts-style reports, and
+  decision docs.
+- Added "One template, many projects": `CONTRACT-TEMPLATE.md` here is
+  canonical, every project's `AGENTS.md` is a deliberate copy at a declared
+  version, a project's local contract is law there even when stale (the AI
+  flags drift, never silently upgrades), adopting a newer version is an
+  explicit task, and a periodic cross-project docs review is how drift gets
+  noticed. Added `ARCHIVED` beside `ACTIVE`/`PAUSED`: a set-aside project
+  keeps its records and takes no work until reactivated.
+- Added measurement preconditions: when a check depends on machine state the
+  AI cannot observe (other applications, thermals, network), the brief names
+  it and the owner confirms immediately before the check; the AI never
+  closes the owner's applications. Generalized from delve's GPU quiet
+  window, which a controlled A/B proved necessary.
+- Made human-judgment checks first-class: when only the owner's judgment can
+  settle whether an outcome holds, the task stops, puts the result on the
+  owner's screen with exact safe steps, and its DONE carries the owner's
+  confirmation. From delve's feel-arbiter rule and SpecDeck's
+  user-as-runtime-verifier model.
+- The four judgment calls the owner delegated: no mechanized milestone
+  ratchet for Cairn (records-rule only), Cairn declares Verified,
+  `docs-review/staged/` is gitignored (regenerable copies; the reports and
+  notes stay tracked), and no proposal items were struck.
+- Added no dependency.
+
 ## 0.4.0 — two lanes, one honest result each — 2026-07-28
 
 - Adopted the two-lane working protocol

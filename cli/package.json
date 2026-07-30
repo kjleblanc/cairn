@@ -1,12 +1,18 @@
 {
   "name": "cairn-cli",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Cairn — one serial task route for people who do not code",
   "license": "MIT",
   "type": "module",
-  "bin": { "cairn": "dist/src/index.js" },
-  "files": ["dist/src"],
-  "engines": { "node": ">=18" },
+  "bin": {
+    "cairn": "dist/src/index.js"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "node scripts/clean-dist.mjs && tsc",
     "test": "npm run build && node --test dist/test/ui.test.js dist/test/task.test.js",
