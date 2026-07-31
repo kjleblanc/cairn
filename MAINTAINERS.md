@@ -63,12 +63,14 @@ preserved unmodified. The pre-reset repository state is pinned at git tag
 
 ## Maintainer lanes
 
-This repository may be worked by up to two chats at once (contract v0.5.0,
-"Working in two lanes"). Maintainer-facing discipline: lane B lives in a git
-worktree (convention `.lanes/b`, branch `lane/b`), a task number is claimed
-by committing its brief, `docs/ai-work/LOG.md` carries `merge=union` in
-`.gitattributes` so concurrent rows both survive, and landing into `main` is
-serial with a settle check (root `npm test` and app typecheck). The app and
+This repository may be worked by a small number of chats at once — three
+lanes by default (contract v0.6.0, "Working in lanes"). Maintainer-facing
+discipline: lane B lives in a git worktree (convention `.lanes/b`, branch
+`lane/b`), a task number is claimed by committing its brief after checking
+that no brief file already carries the number, `docs/ai-work/LOG.md` carries
+`merge=union` in `.gitattributes` so concurrent rows both survive, and
+landing into `main` is serial with a settle check (root `npm test` and app
+typecheck) that runs only when the main tree is between tasks. The app and
 its Playwright suites are single-tenant: one lane — or the owner — holds the
 app token at a time. A fresh lane needs one core build (or
 `node core/scripts/sync-contract.mjs`) before the mirror test can run
