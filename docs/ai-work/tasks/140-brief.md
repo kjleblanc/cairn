@@ -1,50 +1,53 @@
-# Task 140 brief: world palette board — Animal Crossing world, GitS characters
+# Task 140 brief: contract v0.6.0 — lanes, not two lanes
 
-**Lane:** A (main checkout)
+**Lane:** B (`.lanes/b`)
 
 ## Requested visible outcome
 
-The owner's read of the current state: "an improvement… still a bit too
-'digital' or 'techy'. More 'animal crossing' with a color palette and vibe of
-ghost in the shell." The current festival-dusk world is still a neon night
-scene. This task explores the *environment* direction the same way the
-lookboard (Task 122) and chat mockup (Task 136) did: a **lab-only board**
-painting the same town scene — sky, meadow, Cairn and worker faces, a chat
-card, a button, a thread — under three de-digitized directions:
+The contract's "Working in two lanes" becomes **"Working in lanes"** at
+version **0.6.0**, applying the owner-delegated decisions on the Task 138
+spec (`docs/superpowers/specs/2026-07-30-cairn-n-lane-protocol-design.md`):
 
-1. **Meadow morning** — full Animal Crossing daylight: soft blue sky,
-   rolling green hills, cream paper surfaces; GitS saturation lives on the
-   characters (teal Cairn, coral-magenta worker).
-2. **Golden hour** — warm peach-gold sky and amber-green meadow; the middle
-   step between daylight and today's dusk.
-3. **Lantern dusk** — the current night kept, but de-neoned: warmer indigo,
-   paper-lantern light, softer labels, glow dialed down.
+1. A lane is **one human-driven conversation**, whatever device it speaks
+   from; **three lanes by default**, more only by owner amendment.
+2. Claim hardening in the contract text: before writing, list
+   `docs/ai-work/tasks/` — **a number is taken if its brief file exists,
+   committed or not.**
+3. Landing etiquette: **main must be between tasks to receive a landing**;
+   first ready, first landed; waiters re-sync before attempting.
+4. The single-tenant surface is **the profile, not the device** (app token
+   generalizes to the future phone).
+5. New rule: **an automation is not a lane** — it claims no number, writes
+   only in its designated directory, and lanes treat that directory as
+   automation-owned.
+6. A fresh worktree needs its own dependency install and build before tests
+   run (one parenthetical, also in MAINTAINERS.md).
+7. The Task 138 spec's status becomes "accepted" with the three questions
+   answered inline (cap three; hardening in contract; phone counts as a lane
+   only when it works the repo).
 
-Captured onto the Review shots page for the owner to judge by screenshot.
+Applied to: `AGENTS.md`, `CONTRACT-TEMPLATE.md`, the `cairn.html` embed,
+`MAINTAINERS.md` (section reference + parenthetical), the three package files
+and locks (0.6.0), and `CHANGELOG.md` (0.6.0 entry naming the delegated
+decisions).
 
 ## Boundary of intent
 
-- **Lab-only.** New `lab/worldboard.html` + script + styles, one more
-  `build:lab` input, untracked shots content. No renderer or token changes —
-  the winning direction gets ported into `tokens.css` as a later task.
-- The faces reuse the real `TownFace` SVG paths (copied into the mock,
-  throwaway) so what is judged is color and world, not new marks.
-- AI decision (recorded per v0.5.0): plain React + inline per-direction
-  palettes, matching the lookboard's structure.
-- The other lane's work is never staged or touched.
+- Contract text and its mirrors, the changelog, version strings, the spec
+  status block, MAINTAINERS.md, and task records. No runtime behavior change.
+- The mobile spec (Task 139) is adopted separately in Task 141.
+- No other project touched.
 
-## Checks (exact commands; outputs cited in the report)
+## Checks that show the outcome holds
 
-- `cd app && npm.cmd run typecheck` — green.
-- `cd app && npm.cmd run build:lab` — green, emits the new page.
-- `cd app && npm.cmd run lab` (temporary, then stopped): `curl` HTTP 200 for
-  the board path.
-- Playwright-driven Electron captures (temporary harness, deleted after):
-  one settled frame per direction, inspected by me, copied to `app/shots/`
-  with a manifest entry; manifest re-verified by curl.
+- `grep "0.5.0"` clean in the four live text carriers; 0.6.0 present.
+- All seven decisions visible in the new lane section or the spec status.
+- App unit suite and core suite green; diff limited to the named files plus
+  task records.
 
-## DONE / STOPPED
+## DONE / STOPPED here
 
-- **DONE:** the shots page shows a Task 140 entry with the three directions;
-  checks green; commit contains only the lab page, config input, and records.
-- **STOPPED:** the board cannot be produced without touching shipped code.
+- **DONE:** v0.6.0 text live in every mirror, changelog entry written, tests
+  green, owner gets a plain summary.
+- **STOPPED:** a mirror can't carry the new text without runtime change, or
+  the amendment contradicts evidence from the pilot — say so instead.
