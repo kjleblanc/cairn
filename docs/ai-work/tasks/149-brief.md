@@ -1,4 +1,9 @@
-# Task 148 brief — the cast, take two: personalized stroke faces per model
+# Task 149 brief — the cast, take two: personalized stroke faces per model
+
+(Renumbered from 148 after the Cairn envelope's stopped Codex Exec worker
+run claimed 148 concurrently — the earlier claim keeps the number. Its
+retained evidence is untouched; see the 149 report for the full account.)
+
 
 ## Requested visible outcome
 
