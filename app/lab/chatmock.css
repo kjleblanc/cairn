@@ -1,0 +1,139 @@
+/* Chat-in-the-scene mockup (Task 136). Throwaway prototype styling for the
+   three conversation treatments — the picked one gets rebuilt in the shell. */
+
+.chatmock-stage {
+  position: fixed; inset: 0; overflow: hidden;
+  /* The same festival dusk the workspace shell carries. */
+  background:
+    var(--garden-stars),
+    radial-gradient(900px 520px at 50% -18%, var(--garden-cyan-glow), transparent 62%),
+    radial-gradient(1000px 560px at 55% 115%, var(--garden-amber-glow), transparent 60%),
+    linear-gradient(160deg, var(--garden-ink), var(--garden-deep));
+}
+.chatmock-town { position: absolute; inset: 0; }
+
+/* Shared dialog dressing. */
+.chatmock-dialog-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px 6px; color: var(--town-ink);
+}
+.chatmock-dialog-head strong { font-size: .95rem; }
+.chatmock-dialog-head button {
+  border: 0; background: transparent; color: var(--muted); font: inherit;
+  font-size: .78rem; cursor: pointer; border-radius: 8px; padding: 3px 8px;
+}
+.chatmock-dialog-head button:hover { background: var(--card); color: var(--ink); }
+.chatmock-dialog-body {
+  display: flex; flex-direction: column; gap: 10px; overflow-y: auto;
+  padding: 6px 14px 10px;
+}
+.chatmock-composer { padding: 0 14px 12px; margin-top: 0; }
+.chatmock-mini-face {
+  display: inline-grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 50%; color: var(--garden-cyan); font-size: 1rem;
+  border: 1px solid var(--neon-soft); background: var(--rail-panel);
+}
+.chatmock-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A — villager bubble: a dialog with a tail, anchored beside Cairn's node
+   (Cairn stands at 50%, 43% of the ground). */
+.chatmock-bubble-dialog {
+  position: absolute; z-index: 8; left: calc(50% + 96px); top: 12%;
+  width: min(400px, 38%); max-height: 62%; display: flex; flex-direction: column;
+  background: var(--card-solid); border-radius: 22px;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 30%);
+  animation: chatmock-rise .42s var(--spring) both;
+}
+.chatmock-bubble-dialog::before {
+  content: ""; position: absolute; left: -14px; bottom: 34px;
+  border: 10px solid transparent; border-right-color: var(--card-solid);
+  border-left: 0;
+}
+.chatmock-bubble-chip {
+  position: absolute; z-index: 8; left: calc(50% + 84px); top: 30%;
+  max-width: 250px; padding: 9px 16px; border: 0; border-radius: 18px 18px 18px 4px;
+  background: var(--card-solid); color: var(--ink); font: inherit; font-size: .84rem;
+  text-align: left; cursor: pointer; box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
+  animation: chatmock-bob 5s ease-in-out infinite;
+}
+
+/* B — rising drawer: the conversation comes up from the bottom of the scene. */
+.chatmock-drawer {
+  position: absolute; z-index: 8; inset: auto 3% 3%; max-height: 46%;
+  display: flex; flex-direction: column;
+  background: var(--card-solid); border-radius: 24px 24px 18px 18px;
+  box-shadow: 0 -14px 50px rgb(0 0 0 / 28%);
+  animation: chatmock-drawer-up .46s var(--spring) both;
+}
+.chatmock-drawer-body { flex-direction: column; }
+.chatmock-drawer-bar {
+  position: absolute; z-index: 8; inset: auto 3% 3%; display: flex; align-items: center;
+  gap: 10px; padding: 9px 16px; border: 0; border-radius: 999px;
+  background: var(--card-solid); color: var(--muted); font: inherit; font-size: .84rem;
+  cursor: pointer; box-shadow: 0 -8px 30px rgb(0 0 0 / 22%);
+  animation: chatmock-rise .42s var(--spring) both;
+}
+.chatmock-drawer-bar .chatmock-chip-text { flex: 1; text-align: left; }
+
+/* C — side companion: floats in from the left over a gently dimmed scene. */
+.chatmock-companion-dim {
+  position: absolute; inset: 0; z-index: 7;
+  background: rgb(13 9 31 / 34%);
+  animation: overlay-scrim-in .28s ease-out both;
+}
+.chatmock-companion {
+  position: absolute; z-index: 8; left: 14px; top: 66px; bottom: 14px;
+  width: min(380px, 42%); display: flex; flex-direction: column;
+  background: var(--card-solid); border-radius: 22px;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 32%);
+  animation: chatmock-slide-in .44s var(--spring) both;
+}
+.chatmock-companion .chatmock-dialog-body { flex: 1; }
+.chatmock-companion-tab {
+  position: absolute; z-index: 8; left: 0; top: 38%; display: flex; flex-direction: column;
+  align-items: center; gap: 6px; padding: 14px 9px; border: 0;
+  border-radius: 0 16px 16px 0; background: var(--card-solid); color: var(--muted);
+  font: 600 .72rem var(--mono); cursor: pointer; box-shadow: 6px 0 24px rgb(0 0 0 / 22%);
+  animation: chatmock-slide-in .44s var(--spring) both;
+}
+
+@keyframes chatmock-rise {
+  from { opacity: 0; transform: translateY(16px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes chatmock-drawer-up {
+  from { opacity: 0; transform: translateY(64px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes chatmock-slide-in {
+  from { opacity: 0; transform: translateX(-32px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes chatmock-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Lab chrome: dashed amber on purpose — never mistakable for app UI. */
+.chatmock-chrome {
+  position: fixed; z-index: 50; top: 12px; left: 12px; display: flex; align-items: center;
+  gap: 6px; padding: 7px 10px; border: 1px dashed var(--neon-warm); border-radius: 12px;
+  background: rgb(22 16 42 / 82%); backdrop-filter: blur(8px);
+}
+.chatmock-chrome-tag {
+  font: 700 .66rem var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--neon-warm); margin-right: 2px;
+}
+.chatmock-chrome button {
+  border: 0; border-radius: 9px; padding: 5px 10px; background: transparent;
+  color: var(--rail-muted); font: inherit; font-size: .76rem; cursor: pointer;
+}
+.chatmock-chrome button:hover { color: var(--rail-heading); background: var(--rail-panel); }
+.chatmock-chrome button.active { background: var(--rail-panel); color: var(--neon); }
+.chatmock-chrome-state { border-left: 1px solid var(--rail-line); border-radius: 0 9px 9px 0 !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chatmock-bubble-dialog, .chatmock-bubble-chip, .chatmock-drawer,
+  .chatmock-drawer-bar, .chatmock-companion, .chatmock-companion-tab,
+  .chatmock-companion-dim { animation: none; }
+}

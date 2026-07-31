@@ -59,6 +59,7 @@ export default defineConfig({
         concepts: "lab/concepts.html",
         lookboard: "lab/lookboard.html",
         shots: "lab/shots.html",
+        chatmock: "lab/chatmock.html",
       },
     },
   },
