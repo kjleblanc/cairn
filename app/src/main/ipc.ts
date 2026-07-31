@@ -21,6 +21,8 @@ import type {
   UpdateInfo,
 } from "../shared/ipc.js";
 import * as conductorService from "./conductor/service.js";
+import { emitBridgeSync } from "./bridge/hub.js";
+import { phoneBridgePairBegin, phoneBridgeRevokeDevice, phoneBridgeState } from "./bridge/runtime.js";
 import { logError, plainMessage } from "./log.js";
 import { pushExecute, pushPreview, pushRefusal } from "./push.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
@@ -225,7 +227,9 @@ export function registerConductorIpc(): void {
 
   ipcMain.handle("conductor:connect", (_e, request: ConductorConnectRequest): Result<null> => {
     try {
-      return conductorService.connect(request);
+      const result = conductorService.connect(request);
+      if (result.ok) emitBridgeSync(); // the phone's status line changes with the connection
+      return result;
     } catch (err) {
       logError("conductor:connect", err);
       return { ok: false, message: plainMessage(err) };
@@ -235,6 +239,7 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:oauthBegin", (event, request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>> => {
     try {
       return conductorService.beginOAuth(request, (oauthEvent: ConductorOAuthEvent) => {
+        if (oauthEvent.kind === "done") emitBridgeSync(); // a completed sign-in changes the phone's status line
         if (!event.sender.isDestroyed()) event.sender.send("conductor:oauth", oauthEvent);
       });
     } catch (err) {
@@ -252,12 +257,14 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:disconnect", () =>
     toResult("conductor:disconnect", () => {
       conductorService.disconnect();
+      emitBridgeSync();
       return null;
     }));
 
   ipcMain.handle("conductor:setModel", (_e, model: string) =>
     toResult("conductor:setModel", () => {
       conductorService.setModel(model);
+      emitBridgeSync();
       return null;
     }));
 
@@ -265,6 +272,7 @@ export function registerConductorIpc(): void {
     try {
       return conductorService.send(request.dir, request.conversationId, request.text, (delta: ConductorDelta) => {
         event.sender.send("conductor:delta", delta);
+        emitBridgeSync(); // the same delta is what a watching phone refreshes on
       });
     } catch (err) {
       logError("conductor:send", err);
@@ -283,4 +291,28 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:conversations", (_e, dir: string) => conductorService.conversations(dir));
 
   ipcMain.handle("conductor:turns", (_e, dir: string, id: string) => conductorService.turns(dir, id));
+}
+
+/** Task 143: the desktop's side of the phone bridge — the settings surface
+ * asks for state and pairing codes here; the phone itself never touches
+ * IPC (it talks to the bridge's HTTP listener, which calls the same
+ * service functions above). */
+export function registerBridgeIpc(): void {
+  ipcMain.handle("bridge:state", () => phoneBridgeState());
+
+  ipcMain.handle("bridge:pairBegin", () => {
+    try {
+      return phoneBridgePairBegin();
+    } catch (err) {
+      logError("bridge:pairBegin", err);
+      return { ok: false, message: plainMessage(err) };
+    }
+  });
+
+  ipcMain.handle("bridge:revokeDevice", (_e, id: string) =>
+    toResult("bridge:revokeDevice", () => {
+      const result = phoneBridgeRevokeDevice(id);
+      if (!result.ok) throw new Error(result.message);
+      return null;
+    }));
 }

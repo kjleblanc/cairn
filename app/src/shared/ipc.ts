@@ -208,6 +208,9 @@ export interface CairnApi {
    * and its source (`head`) rather than wherever HEAD has since moved. Main
    * refuses outright if `remote` is not a remote this project has configured. */
   pushExecute(dir: string, preview: PushPreview): Promise<PushResult>;
+  phoneBridgeState(): Promise<PhoneBridgeState>;
+  phoneBridgePairBegin(): Promise<Result<PairingOffer>>;
+  phoneBridgeRevokeDevice(id: string): Promise<Result<null>>;
 }
 
 export interface TaskBlockConcern {
@@ -280,3 +283,39 @@ export interface ConductorEnvelopeTurn {
 }
 
 export type ConductorTurn = ConductorChatTurn | ConductorEnvelopeTurn;
+
+/**
+ * Task 143: the phone bridge ("pair and read" — decisions 1, 2, and 5 of
+ * the accepted mobile groundwork design).
+ *
+ * The disclosure sentence below is the exact one the spec fixes for the
+ * desktop pairing screen — the honest v1 trade-off, in the open. It is a
+ * shared constant so the renderer shows this and only this wording.
+ */
+export const BRIDGE_PAIRING_DISCLOSURE =
+  "Traffic stays inside your home Wi-Fi and is not encrypted in v1; don't pair on a network you don't control.";
+
+export interface BridgeDeviceInfo {
+  id: string;
+  name: string;
+  firstPaired: string;
+  lastSeen: string;
+}
+
+/** What the desktop settings surface shows: whether the LAN listener is
+ * up, why not when it isn't (a plain sentence, never a stack), the address
+ * the phone should open, and the paired-device list. Tokens never appear. */
+export interface PhoneBridgeState {
+  running: boolean;
+  reason: string | null;
+  url: string | null;
+  devices: BridgeDeviceInfo[];
+}
+
+/** The desktop's half of pairing: a short-lived single-use code and the
+ * address to type it at. */
+export interface PairingOffer {
+  code: string;
+  url: string;
+  expiresAt: string;
+}

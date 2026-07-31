@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { UpdateInfo } from "../../shared/ipc";
+import { PairPhone } from "../components/PairPhone";
 import { Card, Pill } from "../components/Ui";
 import { cairn } from "../api";
 
@@ -46,6 +47,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
           <Pill kind={sound ? "primary" : "soft"} onClick={toggleSound}>{sound ? "On" : "Off"}</Pill>
         </div>
       </Card>
+      <PairPhone />
       <Card title="about">
         <div className="row spread">
           <p>Cairn Desktop{update ? ` v${update.current}` : ""}</p>

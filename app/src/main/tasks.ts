@@ -7,6 +7,7 @@ import {
   type WorkerDisclosure,
 } from "@cairn/core";
 import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
+import { emitBridgeSync } from "./bridge/hub.js";
 import type { ConductorDelta, Result, ResultCard, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
 import { commentary } from "./conductor/service.js";
@@ -180,6 +181,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           const turn = postResultCard(dir, conversationId, card);
           const delta: ConductorDelta = { dir, conversationId, kind: "envelope", turn };
           win()?.webContents.send("conductor:delta", delta);
+          emitBridgeSync(); // a watching phone refreshes on the card too
           posted = card;
         } catch (error) {
           // The card is an addition to a run that already closed and already
@@ -197,7 +199,10 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         // all — there would be nothing above for the comment to be about.
         if (posted === null) return;
         try {
-          commentary(dir, conversationId, posted, (delta) => { win()?.webContents.send("conductor:delta", delta); });
+          commentary(dir, conversationId, posted, (delta) => {
+            win()?.webContents.send("conductor:delta", delta);
+            emitBridgeSync(); // the commentary stream is visible on the phone
+          });
         } catch (error) {
           logError("task:run commentary", error);
         }

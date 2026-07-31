@@ -2,8 +2,9 @@ import { app, BrowserWindow, dialog } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
+import { startPhoneBridge, stopPhoneBridge } from "./bridge/runtime.js";
 import { setCardMarkerDir } from "./conductor/cardauth.js";
-import { registerConductorIpc, registerProjectIpc } from "./ipc.js";
+import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import { beginQuitDrain } from "./rungate.js";
 import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
 
@@ -97,7 +98,13 @@ function bootstrap(): void {
     setCardMarkerDir(app.getPath("userData"));
     registerProjectIpc();
     registerConductorIpc();
+    registerBridgeIpc();
     registerTaskIpc(() => mainWindow);
+    // The phone bridge (Task 143): one LAN listener serving the owner's
+    // paired phone. It starts with the app and stops at quit; if it cannot
+    // start (no home-network address, ports in use) the settings surface
+    // says so honestly and the rest of the app is unaffected.
+    void startPhoneBridge();
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -106,6 +113,10 @@ function bootstrap(): void {
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
+  });
+
+  app.on("will-quit", () => {
+    void stopPhoneBridge();
   });
 
   app.on("before-quit", (event) => {

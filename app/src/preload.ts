@@ -47,6 +47,9 @@ const api: CairnApi = {
   },
   pushPreview: (dir) => ipcRenderer.invoke("push:preview", dir),
   pushExecute: (dir, preview) => ipcRenderer.invoke("push:execute", dir, preview),
+  phoneBridgeState: () => ipcRenderer.invoke("bridge:state"),
+  phoneBridgePairBegin: () => ipcRenderer.invoke("bridge:pairBegin"),
+  phoneBridgeRevokeDevice: (id) => ipcRenderer.invoke("bridge:revokeDevice", id),
 };
 
 contextBridge.exposeInMainWorld("cairn", api);
