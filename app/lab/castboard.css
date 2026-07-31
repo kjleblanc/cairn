@@ -1,0 +1,88 @@
+/* Cast board (Task 147). Throwaway board styling — the picked direction
+   gets ported into the real town properly. */
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; background: #efe9dc; color: #4a3f30;
+  font-family: "Quicksand", ui-rounded, "Segoe UI", system-ui, sans-serif;
+  padding: 40px 22px 80px;
+}
+.cb-board { width: min(1120px, 100%); margin: 0 auto; }
+.cb-board h1 { margin: 0 0 6px; font-size: 1.6rem; letter-spacing: -.01em; }
+.cb-sub { margin: 0 0 26px; color: #8a7a63; font-size: .92rem; max-width: 74ch; }
+
+.cb-notes {
+  margin: 0 0 40px; padding: 20px 24px; border-radius: 18px;
+  background: #faf5ea; box-shadow: 0 8px 26px rgb(74 63 48 / 12%);
+}
+.cb-notes h2 { margin: 0 0 10px; font-size: 1.08rem; }
+.cb-note { margin: 0 0 8px; font-size: .9rem; color: #6d5f4b; max-width: 84ch; }
+.cb-note em { color: #97856b; font-style: normal; }
+.cb-note-dim { margin-top: 12px; color: #97856b; font-size: .84rem; }
+
+.cb-direction { margin: 0 0 48px; }
+
+.cb-scene {
+  position: relative; height: 420px; border-radius: 22px; overflow: hidden;
+  box-shadow: 0 16px 44px rgb(74 63 48 / 18%);
+}
+.cb-hills { position: absolute; inset: auto 0 0; width: 100%; height: 48%; display: block; }
+
+.cb-sun {
+  position: absolute; width: 58px; height: 58px; border-radius: 50%;
+  background: #fff8dc; box-shadow: 0 0 34px rgb(255 240 180 / 85%);
+}
+.cb-sun-low { width: 72px; height: 72px; background: #ffdf9e; box-shadow: 0 0 44px rgb(255 210 140 / 80%); }
+.cb-cloud {
+  position: absolute; width: 92px; height: 30px; border-radius: 999px;
+  background: rgb(255 255 255 / 92%);
+}
+.cb-cloud::before, .cb-cloud::after {
+  content: ""; position: absolute; border-radius: 50%; background: inherit;
+}
+.cb-cloud::before { width: 40px; height: 40px; left: 14px; top: -18px; }
+.cb-cloud::after { width: 28px; height: 28px; right: 16px; top: -12px; }
+.cb-cloud-small { transform: scale(.66); opacity: .85; }
+.cb-firefly {
+  position: absolute; width: 5px; height: 5px; border-radius: 50%;
+  background: #ffd98a; box-shadow: 0 0 10px #ffd98a; opacity: .9;
+}
+
+.cb-cast-row {
+  position: absolute; inset: auto 0 8% 0;
+  display: flex; justify-content: space-evenly; align-items: flex-end;
+  padding: 0 3%;
+}
+.cb-villager { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.cb-tag {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 5px 14px; border-radius: 999px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 14%); white-space: nowrap;
+}
+.cb-tag strong { font-size: .8rem; letter-spacing: .02em; }
+.cb-tag span { font-size: .64rem; opacity: .72; letter-spacing: .05em; }
+
+.cb-town-strip {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 14px 6px 0; padding: 10px 16px; border-radius: 14px;
+  background: #faf5ea; box-shadow: 0 4px 16px rgb(74 63 48 / 10%);
+}
+.cb-town-label { font-size: .76rem; color: #97856b; letter-spacing: .03em; }
+.cb-town-chip {
+  display: inline-flex; padding: 4px; border-radius: 12px; background: #fff;
+  box-shadow: 0 2px 8px rgb(74 63 48 / 10%);
+}
+
+.cb-meta { padding: 16px 6px 0; }
+.cb-meta h2 { margin: 0 0 6px; font-size: 1.2rem; }
+.cb-essence { margin: 0 0 10px; color: #6d5f4b; font-size: .94rem; max-width: 80ch; }
+.cb-kw { margin: 0 0 6px; color: #8a7a63; font-size: .86rem; max-width: 80ch; }
+.cb-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.cb-chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px 4px 5px;
+  border-radius: 999px; background: #fff; font-size: .76rem; color: #6d5f4b;
+  box-shadow: 0 2px 8px rgb(74 63 48 / 10%);
+}
+.cb-chip i {
+  width: 18px; height: 18px; border-radius: 50%; display: inline-block;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 10%);
+}
