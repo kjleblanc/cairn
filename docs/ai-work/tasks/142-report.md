@@ -1,11 +1,13 @@
-# Task 139 report: mobile groundwork design — Cairn in your pocket, on home Wi-Fi
+# Task 142 report: mobile groundwork design — Cairn in your pocket, on home Wi-Fi
 
-**Lane:** B (`.lanes/b`) · **Base synced from:** main @ f32edab
+**Lane:** B · **Renumbered from 139 → 142** (lane A's later 139 claim landed first) (`.lanes/b`) · **Base synced from:** main @ f32edab
 
 ## What changed
 
-- `docs/ai-work/tasks/139-brief.md` — brief, committed alone first (3143e37)
-  to claim the number.
+- `docs/ai-work/tasks/142-brief.md` — brief, committed alone first (3143e37)
+  as 139, renumbered to 142 on 2026-07-31: lane A had double-claimed 139
+  (lab port, 82e1031) and already landed it on main, so this task — the
+  earlier claim — takes the next free number and the miss is recorded here.
 - `docs/superpowers/specs/2026-07-30-cairn-mobile-groundwork-design.md` — the
   spec: a LAN HTTP/WebSocket seam inside the existing main process (no new
   framework dependency), code-based pairing with a revocable device list, a

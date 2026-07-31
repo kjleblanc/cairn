@@ -4,7 +4,7 @@
 
 ## Requested visible outcome
 
-The Task 139 mobile spec
+The Task 142 mobile spec
 (`docs/superpowers/specs/2026-07-30-cairn-mobile-groundwork-design.md`) is
 adopted as the agreed direction, with the four owner-delegated decisions
 recorded:

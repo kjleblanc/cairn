@@ -43,7 +43,7 @@ in `cairn.html`; the CHANGELOG 0.6.0 entry is the plain-language summary.
 
 ## Limitations / remaining human judgment
 
-- The mobile spec (Task 139) is adopted separately in Task 141 — this task
+- The mobile spec (Task 142) is adopted separately in Task 141 — this task
   changed lane rules only.
 - Landing into `main` waits for lane A to be between tasks, per the very
   etiquette this amendment writes down.

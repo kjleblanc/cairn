@@ -27,7 +27,7 @@ only to their designated directories).
   change — adoption follows owner approval, as with v0.4.0.
 - E2E parallelism (proving the conductor fixture safe for two processes)
   stays deferred; the spec names it as the real work without doing it.
-- The mobile bridge itself is Task 139's subject; this spec only makes the
+- The mobile bridge itself is Task 142's subject; this spec only makes the
   lane model ready for it.
 
 ## Checks that show the outcome holds

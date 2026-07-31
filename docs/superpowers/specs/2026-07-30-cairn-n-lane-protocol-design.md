@@ -9,7 +9,7 @@ open questions; the answers are recorded in the final section.
 
 The two-lane protocol has run for two weeks (2026-07-28 → today) under real
 load, and the load is growing in two directions at once: the owner now keeps
-more parallel conversations going, and the mobile groundwork (Task 139's
+more parallel conversations going, and the mobile groundwork (Task 142's
 subject) will add a conversation that is physically never at the machine.
 This spec answers one question: what does the protocol look like when "two"
 stops being the number?
@@ -106,7 +106,7 @@ processes) is still deferred and still the real price of parallel E2E.
 
 What the mobile groundwork changes is the *device*, not the tenancy: a phone
 conversation reaches the **same** app, profile, and conductor connection
-through the bridge (Task 139), so it lives under the same token semantics as
+through the bridge (Task 142), so it lives under the same token semantics as
 the desktop. The rule generalizes from "the app" to **"the single-tenant
 surface is the profile, not the device."**
 
@@ -149,7 +149,7 @@ however many lanes are running.
 ## What this deliberately does not build
 
 No E2E-parallelism proof, no lock daemon, no claims registry, no number
-pools, no code, no mobile client (Task 139), no contract edit. Adoption needs
+pools, no code, no mobile client (Task 142), no contract edit. Adoption needs
 exactly: the owner-approved amendment of the lane section in `AGENTS.md` and
 its mirrors, one parenthetical about worktree onboarding, the automation
 rule, and — when a third lane is actually wanted — one `git worktree add` and
@@ -166,7 +166,7 @@ two setup commands.
   lane-A task; the alternative — settling in a throwaway tree — buys speed
   with a second settle environment to keep honest.
 - Defining a lane as a conversation means the mobile bridge inherits the
-  whole protocol before it exists; if Task 139's bridge never ships, this
+  whole protocol before it exists; if Task 142's bridge never ships, this
   costs one inert sentence.
 
 ## Open questions — answered 2026-07-31 (owner-delegated)

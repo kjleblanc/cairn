@@ -1,7 +1,7 @@
 # Cairn Mobile Groundwork — Design
 
 **Status:** accepted 2026-07-31 (Task 141); originally proposed 2026-07-30
-(Task 139). Sits on top of the Task 138 lane model, adopted as contract
+(Task 142). Sits on top of the Task 138 lane model, adopted as contract
 v0.6.0 in Task 140. The owner delegated the four open questions; the answers
 are recorded in the final section.
 

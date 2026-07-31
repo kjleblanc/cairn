@@ -35,7 +35,7 @@ decisions).
 
 - Contract text and its mirrors, the changelog, version strings, the spec
   status block, MAINTAINERS.md, and task records. No runtime behavior change.
-- The mobile spec (Task 139) is adopted separately in Task 141.
+- The mobile spec (Task 142) is adopted separately in Task 141.
 - No other project touched.
 
 ## Checks that show the outcome holds
