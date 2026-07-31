@@ -27,17 +27,19 @@ export const PHONE_PAGE = `<!doctype html>
 <style>
   :root {
     color-scheme: light dark;
-    --bg: light-dark(#fbf7ee, #251e40);
-    --card: light-dark(#ffffff, #2c2347);
-    --ink: light-dark(#44423c, #e6e2d8);
-    --muted: light-dark(#8a8375, #a09a8d);
-    --line: light-dark(#eae4d6, #453a66);
+    --bg: light-dark(#fbf7ee, #2c2842);
+    --card: light-dark(#ffffff, #fffaf0);
+    --ink: light-dark(#44423c, #f4ead9);
+    --card-ink: light-dark(#44423c, #54452f);
+    --card-muted: light-dark(#8a8375, #97856b);
+    --muted: light-dark(#8a8375, #aaa0bc);
+    --line: light-dark(#eae4d6, #5a5278);
     --green: light-dark(#7fae62, #9ec98a);
     --green-soft: light-dark(#e9f1e0, #26331f);
-    --amber: light-dark(#b08a45, #d8b57c);
-    --amber-soft: light-dark(#f7eeda, #37301f);
-    --stop: light-dark(#a96e63, #d8a49a);
-    --stop-soft: light-dark(#f6e9e6, #3a2a27);
+    --amber: light-dark(#b08a45, #f2b95c);
+    --amber-soft: light-dark(#f7eeda, #3d3018);
+    --stop: light-dark(#a96e63, #ff9e8a);
+    --stop-soft: light-dark(#f6e9e6, #432c26);
   }
   * { box-sizing: border-box; }
   body {
@@ -57,37 +59,37 @@ export const PHONE_PAGE = `<!doctype html>
   main { max-width: 640px; margin: 0 auto; padding: 14px 14px 40px; }
   .card {
     background: var(--card); border: 1px solid var(--line);
-    border-radius: 22px; padding: 16px; margin: 12px 0;
+    border-radius: 22px; padding: 16px; margin: 12px 0; color: var(--card-ink);
   }
   .card-title {
     margin: 0 0 8px; font-size: 12px; letter-spacing: .12em;
-    text-transform: lowercase; color: var(--muted);
+    text-transform: lowercase; color: var(--card-muted);
   }
   .bubble {
     border-radius: 18px; padding: 10px 14px; margin: 8px 0;
     white-space: pre-wrap; word-wrap: break-word; max-width: 92%;
   }
   .bubble-owner { background: var(--green-soft); margin-left: auto; }
-  .bubble-cairn { background: var(--card); border: 1px solid var(--line); }
-  .bubble .who { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-  .bubble .when, .turn-when { font-size: 11px; color: var(--muted); }
+  .bubble-cairn { background: var(--card); border: 1px solid var(--line); color: var(--card-ink); }
+  .bubble .who { display: block; font-size: 11px; color: var(--card-muted); margin-bottom: 2px; }
+  .bubble .when, .turn-when { font-size: 11px; color: var(--card-muted); }
   .streaming { border-style: dashed; }
   .result-disposition { font-weight: 700; }
   .result-done { color: var(--green); }
   .result-stopped, .result-error { color: var(--stop); }
   .fact-list { margin: 8px 0 0; padding-left: 18px; font-size: 14px; }
   .claims { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 14px; }
-  .muted { color: var(--muted); }
+  .muted { color: var(--card-muted); }
   .small { font-size: 13px; }
   input, button {
     font: inherit; border-radius: 14px; border: 1px solid var(--line);
-    padding: 10px 14px; background: var(--card); color: var(--ink);
+    padding: 10px 14px; background: var(--card); color: var(--card-ink);
   }
   input { width: 100%; margin: 6px 0; }
   input.code { font-size: 24px; letter-spacing: .3em; text-align: center; }
   button { cursor: pointer; }
   button.primary { background: var(--green); border-color: var(--green); color: #fff; font-weight: 700; }
-  button.quiet { background: transparent; border-color: transparent; color: var(--muted); }
+  button.quiet { background: transparent; border-color: transparent; color: var(--card-muted); }
   .error-line { color: var(--stop); }
   .footer-note { text-align: center; margin-top: 24px; }
 </style>
