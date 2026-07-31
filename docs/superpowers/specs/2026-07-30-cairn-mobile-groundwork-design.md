@@ -1,7 +1,9 @@
 # Cairn Mobile Groundwork — Design
 
-**Status:** proposal for owner decision, 2026-07-30 (Task 139). Sits on top of
-the Task 138 lane model. No code changes until the owner approves.
+**Status:** accepted 2026-07-31 (Task 141); originally proposed 2026-07-30
+(Task 139). Sits on top of the Task 138 lane model, adopted as contract
+v0.6.0 in Task 140. The owner delegated the four open questions; the answers
+are recorded in the final section.
 
 ## Where this comes from
 
@@ -173,12 +175,24 @@ comfortably) and a cloud tunnel (third party, account, scope).
   approval features slightly; the alternative is two divergent trust
   surfaces, which is how remote-approval tools get scary.
 
-## Open questions for the owner
+## Open questions — answered 2026-07-31 (owner-delegated)
 
 1. The PROJECT.md scope bend (one LAN listener, no cloud/accounts) — accept,
-  or is even that too much server for Cairn's taste?
+   or is even that too much server for Cairn's taste?
+   **Answer: accept.** The bend is the entire point of the mobile
+   groundwork; it is recorded openly in PROJECT.md with the stop-alternative
+   preserved in this spec.
 2. Plain-HTTP-on-Wi-Fi with the pairing-screen disclosure, acceptable for
    v1 — or is encryption a v1 requirement even at the cost of the self-signed
    UX?
+   **Answer: plain HTTP with disclosure for v1.** Self-signed TLS teaches
+   the click-past-warnings habit Cairn exists to prevent, and the overlay
+   phase brings real encryption; the pairing screen carries the disclosure
+   sentence.
 3. Default port preference (fixed-and-printable vs. ephemeral-and-QR-only)?
+   **Answer: fixed and printable**, with an honest "already in use" fallback
+   — a stable QR the owner can print beats a fresh one per session.
 4. Does the phone lane count against the lane cap (Task 138, question 3)?
+   **Answer: it counts only when it works the repository** — pure phone
+   conversation is no lane; claiming task numbers from any device is. (Now
+   contract text at v0.6.0.)
