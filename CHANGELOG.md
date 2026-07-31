@@ -4,6 +4,41 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.6.0 — lanes, not two lanes — 2026-07-31
+
+- Expanded the two-lane protocol into an N-lane protocol, applying the
+  owner-delegated decisions on the Task 138 spec
+  (`docs/superpowers/specs/2026-07-30-cairn-n-lane-protocol-design.md`),
+  itself built from the pilot's evidence: four task-number double-claims in
+  two weeks (123/124, both 126/127 pairs, and the 2026-07-30 134 overwrite),
+  each recovered by the protocol's own renumber rule; union merge perfect;
+  app token and worktrees held throughout.
+- A lane is now defined as one human-driven conversation working the
+  repository, whatever device it speaks from — the definition the mobile
+  groundwork (Task 139's spec) builds on. Three lanes by default; more only
+  by owner amendment. The delegated call: the cap is an attention budget,
+  not a mechanism limit.
+- Hardened task-number claiming in the contract text: before writing, list
+  `docs/ai-work/tasks/` — a number is taken if its brief file exists,
+  committed or not. The 134 overwrite happened because a lane wrote before
+  checking; the rule now lives where every lane reads it, not in maintainer
+  lore (the second delegated call).
+- Landing gained its queue etiquette: `main` must be between tasks to
+  receive a landing, since the settle check runs in the main checkout and
+  proves nothing over uncommitted work; first ready, first landed; waiters
+  re-sync before attempting.
+- The single-tenant surface is the profile, not the device — the app token
+  rule now covers a future phone conversation reaching the same app through
+  the bridge.
+- New rule: an automation is not a lane. It claims no task number, writes
+  only inside its designated directory, and lanes treat that directory as
+  automation-owned — stated now that the project runs a weekly docs-review
+  cron.
+- Noted that a fresh worktree needs its own dependency install and build
+  before tests run (Task 133's operational lesson).
+- Changed no runtime behavior; the envelope still dispatches one worker task
+  at a time however many lanes run. Added no dependency.
+
 ## 0.5.0 — what seven projects taught — 2026-07-29
 
 - Applied the owner-approved contract evolution from Task 132's proposal

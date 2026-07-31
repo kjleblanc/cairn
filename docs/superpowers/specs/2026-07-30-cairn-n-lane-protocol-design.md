@@ -1,8 +1,9 @@
 # Cairn N-Lane Working Protocol — Design
 
-**Status:** proposal for owner decision, 2026-07-30 (Task 138). Extends, and
-where it says so replaces, `2026-07-28-cairn-two-lane-protocol-design.md`.
-No contract text changes until the owner approves an amendment.
+**Status:** accepted 2026-07-31 as contract v0.6.0 (Task 140); originally
+proposed 2026-07-30 (Task 138). Extends, and where it says so replaces,
+`2026-07-28-cairn-two-lane-protocol-design.md`. The owner delegated the three
+open questions; the answers are recorded in the final section.
 
 ## Where this comes from
 
@@ -168,12 +169,20 @@ two setup commands.
   whole protocol before it exists; if Task 139's bridge never ships, this
   costs one inert sentence.
 
-## Open questions for the owner
+## Open questions — answered 2026-07-31 (owner-delegated)
 
 1. Three as the default cap — or straight to "as many as the worktrees
    survive," with attention as the only governor?
+   **Answer: three by default.** The cap is an attention budget; raising it
+   is one owner sentence, which keeps the default honest.
 2. Should the claim-time hardening ("a number is taken if its brief file
    exists, committed or not") go into the contract text, or is it maintainer
    lore for MAINTAINERS.md?
+   **Answer: the contract text.** The 134 overwrite proved lanes skip lore;
+   the rule lives where every lane reads at task start. (MAINTAINERS.md
+   carries it too.)
 3. When the mobile lane exists, does it count against the lane cap, or does
    the phone get a standing exemption as "the owner, remote"?
+   **Answer: it counts — but only when it works the repository.** Pure
+   conversation from the phone is no lane at all; claiming task numbers from
+   any device makes that conversation a lane under the cap.
