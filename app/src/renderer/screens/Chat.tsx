@@ -318,11 +318,12 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
  * The run then stays visible here: a status strip carries its stage, its
  * clock, a stop control, and the way to the run screen, and the composer
  * says plainly that it is closed until the run finishes. */
-export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
+export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0 }: {
   dir: string;
   onBack: () => void;
   onOpenRun: () => void;
   embedded?: boolean;
+  focusSignal?: number;
 }) {
   const [status, setStatus] = useState<ConductorStatus | null>(null);
   const [stones, setStones] = useState(0);
@@ -331,6 +332,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [composer, setComposer] = useState("");
+  // Villager bubble (Task 146): tucked, the dialog collapses to a one-line
+  // chip floating by Cairn's node.
+  const [tucked, setTucked] = useState(false);
   const [lastOwnerText, setLastOwnerText] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The current proposed-task card, if the most recent reply with a task
@@ -366,6 +370,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
   const dispatchToken = useRef(0);
   const streamingRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   // Mirrors `conversationId` for synchronous reads inside the delta handler
   // (a `useEffect` closure over React state can be stale between renders).
   const conversationIdRef = useRef<string | null>(null);
@@ -378,6 +383,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
     conversationIdRef.current = id;
     setConversationId(id);
   }, []);
+
+  // Villager bubble (Task 146): an explicit "talk" intent from the shell —
+  // the rail, Cairn's node, or the dashboard's Talk button — untucks the
+  // dialog and focuses the composer.
+  useEffect(() => {
+    if (!focusSignal) return;
+    setTucked(false);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }, [focusSignal]);
 
   const refreshStatus = useCallback(async () => {
     setStatus(await cairn.conductorStatus());
@@ -739,16 +753,19 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
   // change here.
   const dispatchWorker = dispatchReady !== null && !dispatchReady.recommended.capabilities.includes("offline-demo");
 
-  return (
-    <div className={`chat-screen${embedded ? " chat-screen-embedded" : ""}`}>
-      {!embedded ? <div className="chat-scene"><Scene fill stones={stones} justAdded={false} /></div> : null}
-      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " chat-column-embedded" : ""}`}>
+  const column = (
+      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " chat-column-villager" : ""}`}
+        role={embedded ? "dialog" : undefined} aria-label={embedded ? "Conversation with Cairn" : undefined}>
         <div className="row spread chat-topbar">
           <Pill kind="quiet" onClick={onBack}>← Project home</Pill>
           {status?.connected ? (
             <BodyPill status={status} lastReply={lastReply}
               onModelSaved={(model) => setStatus((s) => (s ? { ...s, model } : s))}
               onDisconnected={() => { void newConversation(); void refreshStatus(); }} />
+          ) : null}
+          {embedded ? (
+            <button type="button" className="chat-tuck" onClick={() => setTucked(true)}
+              aria-label="Tuck the conversation away">tuck away ↘</button>
           ) : null}
         </div>
 
@@ -869,7 +886,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
               <p className="small muted composer-closed">A task is running. You can type again when it finishes.</p>
             ) : null}
             <div className="chat-composer">
-              <textarea value={composer} onChange={(e) => setComposer(e.target.value)}
+              <textarea ref={composerRef} value={composer} onChange={(e) => setComposer(e.target.value)}
                 onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={streaming || runActive} />
               <Pill kind="primary" onClick={() => void send(composer)} disabled={streaming || runActive || !composer.trim()}>Send</Pill>
             </div>
@@ -879,6 +896,30 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false }: {
           </>
         ) : null}
       </div>
+  );
+
+  if (!embedded) {
+    return (
+      <div className="chat-screen">
+        <div className="chat-scene"><Scene fill stones={stones} justAdded={false} /></div>
+        {column}
+      </div>
+    );
+  }
+
+  /* The villager bubble (Task 146): the conversation is a tailed dialog
+     anchored beside Cairn's node — or, tucked, a one-line chip floating by
+     him carrying his last line. The overlay root is click-transparent so the
+     town stays alive around the dialog. */
+  return (
+    <div className="chat-villager-root">
+      {tucked ? (
+        <button type="button" className="chat-villager-chip"
+          onClick={() => { setTucked(false); window.requestAnimationFrame(() => composerRef.current?.focus()); }}
+          aria-label="Open the conversation with Cairn">
+          <span className="chat-villager-chip-text">{lastReply?.role === "cairn" ? lastReply.text : "Talk with Cairn"}</span>
+        </button>
+      ) : column}
     </div>
   );
 }

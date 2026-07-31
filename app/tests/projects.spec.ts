@@ -128,29 +128,38 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
     await win.getByRole("button", { name: "Expand project rail" }).click();
 
-    const divider = win.getByRole("separator", { name: "Resize chat and town" });
-    await expect(divider).toHaveAttribute("aria-valuenow", "620");
-    await divider.focus();
-    await win.keyboard.press("ArrowRight");
-    await expect(divider).toHaveAttribute("aria-valuenow", "644");
-    await expect.poll(async () => {
-      const state = await win.evaluate((dir) => window.cairn.townLoad(dir), projB);
-      return state.ok ? state.value.dividerWidth : -1;
-    }).toBe(644);
+    // The villager bubble (Task 146): no divider, no tabs — the conversation
+    // is a tailed dialog anchored to Cairn inside the town, at any width.
+    const dialog = win.getByRole("dialog", { name: "Conversation with Cairn" });
+    await expect(dialog).toBeVisible();
+    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
 
     await win.locator(".rail-project-select", { hasText: "Alpha" }).click();
     await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
-    await expect(divider).toHaveAttribute("aria-valuenow", "620");
+    await expect(dialog).toBeVisible();
     await win.locator(".rail-project-select", { hasText: "Beta" }).click();
     await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
-    await expect(divider).toHaveAttribute("aria-valuenow", "644");
 
+    // Narrow or wide, the bubble stays in the world; the Chat/Town tabs are gone.
     await win.setViewportSize({ width: 900, height: 720 });
-    await expect(win.getByRole("tab", { name: "Chat" })).toBeVisible();
-    await win.getByRole("tab", { name: "Town" }).click();
+    await expect(win.getByRole("tab", { name: "Chat" })).toHaveCount(0);
+    await expect(dialog).toBeVisible();
     await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
-    await win.getByRole("tab", { name: "Chat" }).click();
-    await expect(win.getByRole("region", { name: "Chat workspace" })).toBeVisible();
+
+    // Tucked, the conversation is a chip by Cairn; the chip — or Cairn's
+    // own node — brings the dialog back.
+    await win.getByRole("button", { name: "Tuck the conversation away" }).click();
+    await expect(dialog).toHaveCount(0);
+    const chip = win.getByRole("button", { name: "Open the conversation with Cairn" });
+    await expect(chip).toBeVisible();
+    // Force: the chip bobs gently on purpose (the approved mock look), and a
+    // perpetually animating element never reads "stable" to Playwright.
+    await chip.click({ force: true });
+    await expect(dialog).toBeVisible();
+    await win.getByRole("button", { name: "Tuck the conversation away" }).click();
+    await win.getByRole("button", { name: "Cairn, ready" }).click();
+    await expect(dialog).toBeVisible();
+
     await win.setViewportSize({ width: 1320, height: 820 });
     await projectHome.click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();

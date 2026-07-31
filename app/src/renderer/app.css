@@ -321,29 +321,51 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .project-rail-collapsed .rail-action { justify-content: center; padding-inline: 0; }
 
 .workspace-stage { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
-.workspace-tabs {
-  display: none; min-height: 42px; padding: 6px; gap: 6px; background: var(--rail-bg); border-bottom: 1px solid var(--rail-line);
-}
-.workspace-tabs button {
-  flex: 1; border: 0; border-radius: 10px; padding: 6px; background: transparent; color: var(--rail-muted); font: inherit; font-weight: 600;
-}
-.workspace-tabs button[aria-selected="true"] { background: var(--rail-panel); color: var(--neon); }
-.workspace-content {
-  flex: 1; min-height: 0; display: grid;
-  grid-template-columns: minmax(420px, min(var(--chat-width), calc(100% - 328px))) 8px minmax(320px, 1fr);
-}
-.workspace-chat-pane, .workspace-town-pane { min-width: 0; min-height: 0; overflow: hidden; }
-.workspace-divider { position: relative; cursor: col-resize; background: transparent; touch-action: none; }
-.workspace-divider::after { content: ""; position: absolute; inset: 0 3px; background: transparent; border-radius: 3px; }
-.workspace-divider:hover::after, .workspace-divider:focus-visible::after { background: rgb(255 210 122 / 35%); }
 .workspace-scroll { height: 100%; overflow-y: auto; padding: 24px; }
 .workspace-scroll > div { width: min(860px, 100%); margin-inline: auto; }
-.chat-screen-embedded { position: relative; inset: auto; height: 100%; background: transparent; }
-.chat-column.chat-column-embedded {
-  width: 100%; height: 100%; max-height: none; margin: 0; border-radius: 0; padding: 16px 18px 14px;
-  box-shadow: none;
+
+/* The villager bubble (Task 146): the town fills the stage and the
+   conversation lives inside it — a tailed dialog anchored beside Cairn's
+   node (Cairn always stands at the town center), or a one-line chip when
+   tucked. Geometry mirrors the owner-approved Task 136 mock. The overlay
+   root lets clicks pass through, so the town stays alive around the
+   dialog. No chat pane, no divider, no tabs. */
+.workspace-town-pane { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.chat-villager-root { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
+.chat-villager-root > * { pointer-events: auto; }
+.chat-column.chat-column-villager {
+  position: absolute; left: calc(50% + 96px); top: 12%;
+  width: min(400px, 38%); height: auto; max-height: 62%; margin: 0;
+  border-radius: 22px; box-shadow: 0 18px 50px rgb(0 0 0 / 30%);
+  animation: villager-rise .42s var(--spring) both;
 }
-.chat-column-static.chat-column-embedded { height: 100%; max-height: none; overflow-y: auto; margin: 0; }
+.chat-column-villager::before {
+  content: ""; position: absolute; left: -14px; bottom: 34px;
+  border: 10px solid transparent; border-right-color: var(--card-solid); border-left: 0;
+}
+.chat-column-villager .chat-messages { min-height: 0; }
+.chat-tuck {
+  border: 0; background: transparent; color: var(--card-muted); font: inherit;
+  font-size: .78rem; cursor: pointer; border-radius: 8px; padding: 3px 8px;
+}
+.chat-tuck:hover { background: var(--card); color: var(--card-ink); }
+.chat-villager-chip {
+  position: absolute; left: calc(50% + 84px); top: 30%; max-width: 250px;
+  padding: 9px 16px; border: 0; border-radius: 18px 18px 18px 4px;
+  background: var(--card-solid); color: var(--card-ink); font: inherit;
+  font-size: .84rem; text-align: left; cursor: pointer;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
+  animation: villager-bob 5s ease-in-out infinite;
+}
+.chat-villager-chip-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes villager-rise {
+  from { opacity: 0; transform: translateY(16px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes villager-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
 
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
@@ -519,7 +541,8 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 @media (prefers-reduced-motion: reduce) {
   .town-node, .town-thread-target, .town-face-thought { transition: none; }
   .town-face-holo, .town-face-eye-blink, .town-face-thought circle,
-  .town-worker-pad span, .town-node-working .town-node-status i { animation: none; }
+  .town-worker-pad span, .town-node-working .town-node-status i,
+  .chat-column-villager, .chat-villager-chip { animation: none; }
 }
 
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }
@@ -541,14 +564,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .log-row { align-items: flex-start; flex-direction: column; }
   .chat-column { width: calc(100% - 16px); height: calc(100% - 16px); margin: 8px auto 0; padding: 12px 14px; }
   .bubble { max-width: 92%; }
-}
-
-@media (max-width: 980px) {
-  .workspace-content { grid-template-columns: minmax(0, 1fr); }
-  .workspace-tabs { display: flex; }
-  .workspace-divider { display: none; }
-  .workspace-content[data-narrow-tab="chat"] .workspace-town-pane { display: none; }
-  .workspace-content[data-narrow-tab="town"] .workspace-chat-pane { display: none; }
+  /* The villager dialog centers itself and drops the tail on narrow panes
+     (its keyframe transforms would otherwise override the centering). */
+  .chat-column.chat-column-villager {
+    left: 50%; top: 10%; transform: translateX(-50%);
+    width: min(420px, calc(100% - 24px)); max-height: 58%; animation: none;
+  }
+  .chat-column-villager::before { display: none; }
+  .chat-villager-chip {
+    left: 50%; top: auto; bottom: 16%; transform: translateX(-50%);
+    max-width: calc(100% - 32px); animation: none;
+  }
 }
 
 @media (max-width: 760px) {
