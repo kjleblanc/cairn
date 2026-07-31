@@ -139,6 +139,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-static { height: auto; max-height: min(92vh, 760px); overflow-y: auto; margin-top: 3vh; }
 .chat-topbar { margin-bottom: 10px; }
 .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+/* Style the message list's scrollbar: unstyled, Windows paints its classic
+ * bar with arrow buttons, which reads as broken chrome inside the dialog. */
+.chat-messages { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.chat-messages::-webkit-scrollbar { width: 8px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
 .bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; }
 .bubble-owner { align-self: flex-end; background: var(--green-soft); color: var(--green-deep); border-bottom-right-radius: 4px; }
 .bubble-cairn { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; color: var(--card-ink); }
@@ -334,8 +340,18 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-villager-root { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
 .chat-villager-root > * { pointer-events: auto; }
 .chat-column.chat-column-villager {
-  position: absolute; left: calc(50% + 96px); top: 12%;
-  width: min(400px, 38%); height: auto; max-height: 62%; margin: 0;
+  position: absolute; top: 12%;
+  /* Wide enough for the conversation's contents (the run strip's two
+   * controls, the top bar's three items); the 400px of Task 146 squeezed
+   * them into wraps and clips. The width never pushes the left edge back
+   * over Cairn's node while there is room to avoid it: calc(50% - 128px)
+   * keeps the 96px anchor clearance plus the 32px pane margin, with a 400px
+   * floor — below the floor (very narrow panes) the dialog slides left over
+   * the node, the same overlay tradeoff the ≤620px centered mode already
+   * makes, and tucking reveals him again. */
+  left: max(16px, min(calc(50% + 96px), calc(100% - 32px - min(520px, max(400px, calc(50% - 128px))))));
+  width: min(520px, max(400px, calc(50% - 128px)), calc(100% - 32px));
+  height: auto; max-height: 76%; margin: 0;
   border-radius: 22px; box-shadow: 0 18px 50px rgb(0 0 0 / 30%);
   animation: villager-rise .42s var(--spring) both;
 }
@@ -343,14 +359,39 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   content: ""; position: absolute; left: -14px; bottom: 34px;
   border: 10px solid transparent; border-right-color: var(--card-solid); border-left: 0;
 }
-.chat-column-villager .chat-messages { min-height: 0; }
+/* Inside the dialog, only the message list gives. Before this, every child
+ * shrank proportionally once the column hit max-height, collapsing the list
+ * to a one-line strip with an always-on OS scrollbar; now the list — the one
+ * region that can scroll — absorbs the overflow and everything else (top bar,
+ * run strip, composer) keeps its natural size. */
+.chat-column-villager > * { flex-shrink: 0; }
+.chat-column-villager > .chat-messages { flex-shrink: 1; min-height: 0; }
+/* The top bar's provider·model pill takes the leftover space and ellipsizes
+ * instead of forcing a wrap: flex-wrap decides lines by HYPOTHETICAL sizes,
+ * so only a zero basis keeps the three top-bar items on one line. */
+.chat-column-villager .chat-topbar { row-gap: 4px; }
+.chat-column-villager .body-pill-wrap { flex: 1 1 0; min-width: 0; }
+.chat-column-villager .body-pill-wrap > .pill { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The run strip wraps instead of clipping its controls at the dialog's edge;
+ * the outcome line takes its own row so the stage, clock, and both pills are
+ * always fully visible. */
+.chat-column-villager .run-strip { flex-wrap: wrap; row-gap: 6px; }
+.chat-column-villager .run-strip-state { flex-shrink: 1; min-width: 0; }
+.chat-column-villager .run-strip-outcome { flex-basis: 100%; order: 5; }
+.chat-column-villager .run-strip-controls { margin-left: auto; }
+/* Cards' fact grids and long mono paths fit the narrower measure. */
+.chat-column-villager .route-facts { grid-template-columns: 1fr 1fr; }
+.chat-column-villager .route-facts strong,
+.chat-column-villager .result-card-files .mono { overflow-wrap: anywhere; }
 .chat-tuck {
   border: 0; background: transparent; color: var(--card-muted); font: inherit;
   font-size: .78rem; cursor: pointer; border-radius: 8px; padding: 3px 8px;
 }
 .chat-tuck:hover { background: var(--card); color: var(--card-ink); }
 .chat-villager-chip {
-  position: absolute; left: calc(50% + 84px); top: 30%; max-width: 250px;
+  /* Same right-edge guard as the dialog: 266 = 250 max-width + 16 margin. */
+  position: absolute; top: 30%; max-width: 250px;
+  left: max(16px, min(calc(50% + 84px), calc(100% - 266px)));
   padding: 9px 16px; border: 0; border-radius: 18px 18px 18px 4px;
   background: var(--card-solid); color: var(--card-ink); font: inherit;
   font-size: .84rem; text-align: left; cursor: pointer;
@@ -567,8 +608,8 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* The villager dialog centers itself and drops the tail on narrow panes
      (its keyframe transforms would otherwise override the centering). */
   .chat-column.chat-column-villager {
-    left: 50%; top: 10%; transform: translateX(-50%);
-    width: min(420px, calc(100% - 24px)); max-height: 58%; animation: none;
+    left: 50%; top: 8%; transform: translateX(-50%);
+    width: min(520px, calc(100% - 24px)); max-height: 84%; animation: none;
   }
   .chat-column-villager::before { display: none; }
   .chat-villager-chip {
