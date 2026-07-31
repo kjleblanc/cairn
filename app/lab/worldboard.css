@@ -1,0 +1,81 @@
+/* World palette board (Task 144). Throwaway board styling — the picked
+   direction gets ported into tokens.css properly. */
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; background: #efe9dc; color: #4a3f30;
+  font-family: "Quicksand", ui-rounded, "Segoe UI", system-ui, sans-serif;
+  padding: 40px 22px 80px;
+}
+.wb-board { width: min(1080px, 100%); margin: 0 auto; }
+.wb-board h1 { margin: 0 0 6px; font-size: 1.6rem; letter-spacing: -.01em; }
+.wb-sub { margin: 0 0 30px; color: #8a7a63; font-size: .92rem; max-width: 72ch; }
+
+.wb-direction { margin: 0 0 46px; }
+
+.wb-scene {
+  position: relative; height: 430px; border-radius: 22px; overflow: hidden;
+  box-shadow: 0 16px 44px rgb(74 63 48 / 18%);
+}
+.wb-hills { position: absolute; inset: auto 0 0; width: 100%; height: 48%; display: block; }
+.wb-thread { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+.wb-sun {
+  position: absolute; width: 58px; height: 58px; border-radius: 50%;
+  background: #fff8dc; box-shadow: 0 0 34px rgb(255 240 180 / 85%);
+}
+.wb-sun-low { width: 72px; height: 72px; box-shadow: 0 0 44px rgb(255 220 160 / 80%); }
+.wb-cloud {
+  position: absolute; width: 92px; height: 30px; border-radius: 999px;
+  background: rgb(255 255 255 / 92%);
+}
+.wb-cloud::before, .wb-cloud::after {
+  content: ""; position: absolute; border-radius: 50%; background: inherit;
+}
+.wb-cloud::before { width: 40px; height: 40px; left: 14px; top: -18px; }
+.wb-cloud::after { width: 28px; height: 28px; right: 16px; top: -12px; }
+.wb-cloud-small { transform: scale(.66); opacity: .85; }
+.wb-firefly {
+  position: absolute; width: 5px; height: 5px; border-radius: 50%;
+  box-shadow: 0 0 10px currentColor; opacity: .9;
+}
+
+.wb-spirit { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.wb-spirit-name {
+  padding: 3px 12px; border-radius: 999px; font-size: .72rem; font-weight: 700;
+  letter-spacing: .04em; box-shadow: 0 4px 14px rgb(0 0 0 / 12%);
+}
+
+.wb-card {
+  position: absolute; right: 4%; bottom: 7%; width: min(360px, 44%);
+  display: flex; flex-direction: column; gap: 10px; padding: 16px;
+  border-radius: 20px; box-shadow: 0 14px 36px rgb(0 0 0 / 16%);
+}
+.wb-bubble {
+  max-width: 88%; padding: 10px 14px; border-radius: 16px; font-size: .86rem;
+  border-bottom-left-radius: 4px; box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+}
+.wb-bubble-owner { align-self: flex-end; border-radius: 16px; border-bottom-right-radius: 4px; }
+.wb-card-row { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.wb-input {
+  flex: 1; padding: 9px 14px; border-radius: 10px; background: rgb(0 0 0 / 5%);
+  font-size: .84rem;
+}
+.wb-button {
+  padding: 9px 20px; border-radius: 999px; font-weight: 700; font-size: .88rem;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 14%);
+}
+
+.wb-meta { padding: 16px 6px 0; }
+.wb-meta h2 { margin: 0 0 6px; font-size: 1.2rem; }
+.wb-essence { margin: 0 0 10px; color: #6d5f4b; font-size: .94rem; max-width: 78ch; }
+.wb-kw { margin: 0 0 6px; color: #8a7a63; font-size: .86rem; max-width: 78ch; }
+.wb-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.wb-chip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 12px 4px 5px;
+  border-radius: 999px; background: #fff; font-size: .76rem; color: #6d5f4b;
+  box-shadow: 0 2px 8px rgb(74 63 48 / 10%);
+}
+.wb-chip i {
+  width: 18px; height: 18px; border-radius: 50%; display: inline-block;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 10%);
+}

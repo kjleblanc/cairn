@@ -60,6 +60,7 @@ export default defineConfig({
         lookboard: "lab/lookboard.html",
         shots: "lab/shots.html",
         chatmock: "lab/chatmock.html",
+        worldboard: "lab/worldboard.html",
       },
     },
   },

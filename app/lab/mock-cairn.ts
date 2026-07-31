@@ -19,6 +19,8 @@ import type {
   ConductorStreamSnapshot,
   ConductorTurn,
   InitInput,
+  PairingOffer,
+  PhoneBridgeState,
   Preflight,
   ProjectList,
   PushPreview,
@@ -271,6 +273,11 @@ const mock: CairnApi = {
   pushPreview: (_dir: string): Promise<PushPreview | null> => soon(null),
   pushExecute: (_dir: string, _preview: PushPreview): Promise<PushResult> =>
     soon({ ok: false, kind: "refused", message: "the lab never pushes — it is a design playground." }),
+  // The lab runs no main process, so the honest mock answer is the bridge's
+  // not-running state — the settings card then shows its plain reason line.
+  phoneBridgeState: () => soon({ running: false, reason: "The lab is a design playground — there is no computer side to pair with.", url: null, devices: [] }),
+  phoneBridgePairBegin: () => soon({ ok: false, message: "The lab is a design playground — there is no computer side to pair with." }),
+  phoneBridgeRevokeDevice: (_id: string) => soon({ ok: false, message: "No devices are paired in the lab." }),
 };
 
 /** Installs the mock bridge and the lab's scenario switch. Call BEFORE the
