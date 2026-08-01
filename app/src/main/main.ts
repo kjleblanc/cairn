@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, screen } from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
@@ -32,18 +32,43 @@ function contractPath(): string {
     : path.join(app.getAppPath(), "resources", "contract.md");
 }
 
+// Where an E2E window goes: past the far corner of every connected display,
+// unfocusable and out of the taskbar and alt-tab, so the owner's screen and
+// focus are never touched. The window still renders normally, so the suite
+// runs at full speed.
+function offScreenParking(): { x: number; y: number; focusable: boolean; skipTaskbar: boolean } {
+  const far =
+    Math.max(0, ...screen.getAllDisplays().map((d) => Math.max(d.bounds.x + d.bounds.width, d.bounds.y + d.bounds.height))) + 2000;
+  return { x: far, y: far, focusable: false, skipTaskbar: true };
+}
+
 export function createWindow(): BrowserWindow {
+  // E2E launches park their window OFF every display instead of showing it
+  // (Task 154). A suite run launches the real app dozens of times, and every
+  // normally-shown window pops onto the owner's screen and steals focus.
+  // `show: false` was tried first and is NOT viable: a hidden page gets
+  // almost no animation frames (measured 3 rAF in 2 s; timers run fine) and
+  // Playwright's waits poll on rAF, so every interaction crawls and
+  // timing-sensitive specs (the live-reply reattach) fail deterministically.
+  // backgroundThrottling stays off so the app's polling timers are never
+  // starved if the parked window counts as occluded. Keyed on CAIRN_E2E (the
+  // same gate as CAIRN_TEST_USER_DATA above, set only by the suite's
+  // isolated-profile fixture) so no ordinary launch can be parked by a stray
+  // variable.
+  const e2e = process.env.CAIRN_E2E === "1";
   const win = new BrowserWindow({
     width: 1320,
     height: 820,
     minWidth: 760,
     minHeight: 620,
     backgroundColor: "#fbf7ee",
+    ...(e2e ? offScreenParking() : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      ...(e2e ? { backgroundThrottling: false } : {}),
     },
   });
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== "undefined" && MAIN_WINDOW_VITE_DEV_SERVER_URL) {

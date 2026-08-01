@@ -88,9 +88,22 @@ test("pair and read: the phone watches the conversation live, and unpairing cuts
   // The disclosure sentence is on the pairing screen, verbatim.
   await expect(win.getByText("Traffic stays inside your home Wi-Fi and is not encrypted in v1; don't pair on a network you don't control.")).toBeVisible();
 
-  // The phone: a second window pointed at the shown address.
-  await app.evaluate(({ BrowserWindow }, url) => {
-    const phone = new BrowserWindow({ width: 390, height: 700 });
+  // The phone: a second window pointed at the shown address. Parked off every
+  // display like the main window under E2E (main.ts Task 154 — `show: false`
+  // starves rAF, which Playwright's waits poll on), with throttling off so its
+  // live stream and re-renders are never starved.
+  await app.evaluate(({ BrowserWindow, screen }, url) => {
+    const far =
+      Math.max(0, ...screen.getAllDisplays().map((d) => Math.max(d.bounds.x + d.bounds.width, d.bounds.y + d.bounds.height))) + 2000;
+    const phone = new BrowserWindow({
+      width: 390,
+      height: 700,
+      x: far,
+      y: far,
+      focusable: false,
+      skipTaskbar: true,
+      webPreferences: { backgroundThrottling: false },
+    });
     void phone.loadURL(url);
   }, address);
   const phone = await app.waitForEvent("window");
