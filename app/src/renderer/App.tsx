@@ -41,6 +41,9 @@ export function App() {
   }, []);
 
   const openProject = useCallback(async (dir: string) => {
+    // A fresh attempt starts clean: the previous failure never rides along
+    // while this one is in flight.
+    setError(null);
     const response = await cairn.projectOpen(dir);
     if (response.ok) enterWorkspace(dir, response.value);
     else setError(response.message);
@@ -48,17 +51,21 @@ export function App() {
 
   // A governed project boots into the persistent workspace with Chat selected.
   // The dashboard stays inside that workspace behind chat's own back control. On
-  // failure, autoOpen (an explicit CAIRN_OPEN target) surfaces the error
-  // overlay, while a stale last-recent entry falls back to the picker with
-  // a plain note instead of a dead end.
+  // failure, autoOpen (an explicit CAIRN_OPEN target) lands on a working screen
+  // — the picker, or the welcome when nothing is remembered — with the error
+  // dismissible on top, while a stale last-recent entry falls back to the
+  // picker with a plain note instead of a dead end.
   const boot = useCallback(async () => {
     const preflight = await cairn.preflight();
     setMock(preflight.mock);
     const list = await cairn.projectList();
     if (list.autoOpen) {
       const response = await cairn.projectOpen(list.autoOpen);
-      if (response.ok) { enterWorkspace(list.autoOpen, response.value); }
-      else setError(response.message);
+      if (response.ok) { enterWorkspace(list.autoOpen, response.value); return; }
+      setError(response.message);
+      setView(list.recent.length > 0
+        ? { name: "picker", startNew: false }
+        : { name: "welcome", preflight, hasRecent: false });
       return;
     }
     const last = list.recent[0];
@@ -101,7 +108,7 @@ export function App() {
 
   return (
     <main className="shell">
-      {error ? <div className="app-error-overlay"><ErrorCard message={error} /></div> : null}
+      {error ? <div className="app-error-overlay"><ErrorCard message={error} onDismiss={() => setError(null)} /></div> : null}
       {/* `inert` (with aria-hidden for assistive tech) takes the world out of
           the tab order and pointer reach while an overlay is up; the scrim
           already blocks clicks, inert blocks the keyboard. */}
@@ -111,7 +118,13 @@ export function App() {
       </div>
       {overlay ? (
         <Overlay label={overlay.name === "settings" ? "Settings" : "Your projects"}
-          onClose={() => setOverlay(null)}>
+          onClose={() => {
+            setOverlay(null);
+            // A failure raised inside the overlay (a folder that wouldn't
+            // open) belongs to it: closing the overlay acknowledges and
+            // clears it, so it never follows the owner across screens.
+            setError(null);
+          }}>
           {overlay.name === "settings" ? (
             <Settings onBack={() => setOverlay(null)} />
           ) : (

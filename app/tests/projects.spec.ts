@@ -268,4 +268,58 @@ test.describe("remembered projects: load, switch, track", () => {
     expect(readRegistry()).toHaveLength(25);
     await app.close();
   });
+
+  test("a failed open lets go: dismissible, and never follows across screens", async () => {
+    // Task 159, the owner's report: one failed open floated over every screen
+    // until a successful one replaced it. Reproduce that exact flow from
+    // inside an open project — the overlay lists Beta healthy, its contract
+    // file then goes away, and clicking its card fails the open.
+    const projC = join(root, "proj-c");
+    mkdirSync(projC);
+    scaffold(projC, "Gamma");
+    writeFileSync(registryFile(), JSON.stringify({
+      recent: [
+        { dir: projC, lastOpened: new Date().toISOString() },
+        { dir: projB, lastOpened: new Date(Date.now() - 60_000).toISOString() },
+      ],
+    }, null, 2));
+
+    const app = await electron.launch({ args: ["."], env: baseEnv() });
+    const win = await app.firstWindow();
+    await expect(win.getByRole("region", { name: "Gamma town square" })).toBeVisible({ timeout: 30_000 });
+
+    // The overlay lists Beta healthy…
+    await win.getByRole("button", { name: "Open project" }).click();
+    const overlay = win.getByRole("dialog", { name: "Your projects" });
+    const betaCard = overlay.locator(".card", { hasText: "Beta" });
+    await expect(betaCard).toBeVisible();
+    // …then its contract file goes away, so the open itself fails with the
+    // owner's exact message.
+    rmSync(join(projB, "AGENTS.md"));
+    await betaCard.getByText("Beta", { exact: true }).click();
+
+    // The card appears — and now carries a way out.
+    const errorOverlay = win.locator(".app-error-overlay");
+    await expect(errorOverlay).toContainText("That folder has no Cairn contract.");
+    const dismiss = errorOverlay.getByRole("button", { name: "Got it" });
+    await expect(dismiss).toBeVisible();
+    // The owner's review routine: the settled capture goes to the shots page.
+    await win.screenshot({ path: join(__dirname, "..", "shots", "task-159-error-card.png") });
+    await dismiss.click();
+    await expect(errorOverlay).toHaveCount(0);
+
+    // Triggered again, closing the overlay acknowledges and clears it. The ×
+    // is out of reach while the card floats over it (deliberate: the error
+    // is acknowledged first — disclosed in the report), so this uses Escape,
+    // one of the overlay's three ways out.
+    await betaCard.getByText("Beta", { exact: true }).click();
+    await expect(errorOverlay).toContainText("That folder has no Cairn contract.");
+    await win.keyboard.press("Escape");
+    await expect(win.getByRole("dialog", { name: "Your projects" })).toHaveCount(0);
+    await expect(errorOverlay).toHaveCount(0);
+
+    // …and the world underneath was alive the whole time.
+    await expect(win.getByRole("region", { name: "Gamma town square" })).toBeVisible();
+    await app.close();
+  });
 });

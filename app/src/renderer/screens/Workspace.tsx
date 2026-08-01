@@ -82,6 +82,9 @@ export function Workspace({
   }, [refreshProjects]);
 
   useEffect(() => {
+    // A new active project is a new context: a stale error card from the old
+    // one never follows the owner across it.
+    setError(null);
     setTownTask(null);
     setTownStream(null);
     setTownPresentation(defaultTownPresentation());
@@ -172,7 +175,7 @@ export function Workspace({
 
   return (
     <div className={`workspace-shell${railCollapsed ? " workspace-rail-collapsed" : ""}`}>
-      {error ? <div className="app-error-overlay"><ErrorCard message={error} /></div> : null}
+      {error ? <div className="app-error-overlay"><ErrorCard message={error} onDismiss={() => setError(null)} /></div> : null}
       <ProjectRail activeDir={activeDir} projects={orderedProjects}
         collapsed={railCollapsed} expanded={expanded}
         connected={conductor?.connected ?? false}

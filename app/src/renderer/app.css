@@ -34,6 +34,7 @@ p:last-child { margin-bottom: 0; }
 .badge-done { background: var(--green-soft); color: var(--green-deep); }
 .badge-stopped { background: var(--amber-soft); color: var(--amber-deep); }
 .error-card { background: var(--stop-soft); border-radius: var(--r-sm); padding: 12px 16px; color: var(--stop); margin: 0 0 12px; }
+.error-card-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
 /* App-level errors must stay visible even when the current screen (the chat
  * screen) is a `position: fixed` full-bleed layer that would otherwise paint
  * over normal in-flow content regardless of DOM order. Explicit fixed
