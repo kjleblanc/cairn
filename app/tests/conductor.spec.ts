@@ -1193,14 +1193,14 @@ test("the conductor comments on the card the envelope just posted, and the comme
   await app.close();
 });
 
-// Task 071 (review fix on 070), mock lane. Task 9 opened a window that never
-// existed before: while the envelope's comment streams, main holds the
-// project's one stream lock, but the renderer never started a stream, so the
-// composer stays open and invites a message main will refuse. Two things must
-// hold in that window — the transcript must never keep a message the main
-// process refused, and the owner must never be told to stop something with no
-// Stop control on screen.
-test("a message sent while the comment streams is refused, leaves no phantom turn, and is not lost", async () => {
+// Task 071 (review fix on 070) opened this window; Task 155 changed what
+// happens in it. While the envelope's comment streams, main holds the
+// project's one stream lock and the composer stays open — but a send made in
+// that window no longer bounces off the lock (Task 071's refusal bubble). It
+// waits VISIBLY: a dimmed bubble carries the exact words with a take-back,
+// the composer clears for the next thought, and the queue flushes in order
+// the moment the comment settles. No refusal, no phantom turn, no lost words.
+test("a message sent while the comment streams waits visibly and sends itself when the lock frees", async () => {
   // Task 137's flake fix: the old 3s-per-chunk delay made the refusal window
   // LONG but still bounded — under load the comment could finish before the
   // message went out, and the refusal never happened. Holding the fixture's
@@ -1235,43 +1235,52 @@ test("a message sent while the comment streams is refused, leaves no phantom tur
   // it accumulated invisibly and every send bounced for no visible reason.
   await expect(win.getByText(/A short comment on the result card above/)).toBeVisible();
 
+  // A send while the comment streams does not bounce — it waits. Two sends
+  // queue in order, each a dimmed bubble carrying its exact words; the
+  // composer clears for the next thought; nothing is refused, and no Stop
+  // control is pointed at (the comment is not the owner's to stop).
   await sendChat(win, "Is that everything?");
-  const refusal = win.locator(".bubble-system");
-  await expect(refusal).toBeVisible({ timeout: 10_000 });
-
-  // Task 153: a refused send keeps the owner's words in the composer. Before
-  // this, Send cleared the composer even though the send never happened.
-  await expect(win.getByPlaceholder("Talk with Cairn")).toHaveValue("Is that everything?");
-
-  // The message never reached the conversation — main refused before persisting
-  // anything — so it must not sit in the transcript looking sent. A reload would
-  // have made it vanish, which is the same thing as it never having been true.
-  await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(0);
-
-  // And the refusal says what is actually happening, without pointing at a Stop
-  // control that only ever appears for a reply the owner started.
-  await expect(refusal).toContainText("short comment");
-  await expect(refusal).not.toContainText("stop it first");
+  const waiting = win.locator(".bubble-pending");
+  await expect(waiting).toHaveCount(1);
+  await expect(waiting.first()).toContainText("Is that everything?");
+  await expect(waiting.first()).toContainText("Will send when Cairn finishes.");
+  await expect(win.getByPlaceholder("Talk with Cairn")).toHaveValue("");
+  await sendChat(win, "And keep it short.");
+  await expect(waiting).toHaveCount(2);
+  await expect(win.locator(".bubble-system")).toHaveCount(0);
   await expect(win.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
 
-  // Nothing was lost either: release the held comment so it lands, and the
-  // message goes through. The streaming comment bubble (bubble-commentary)
-  // unmounts as the settled turn lands — waiting for the caption to go is
-  // what keeps the Try again click after the lock has really been released.
+  // Queued words are not sent words: no settled owner bubble claims them. A
+  // take-back returns the exact words to the composer, and the queue
+  // shortens by exactly that message — nothing was clobbered or lost.
+  await expect(win.locator(".bubble-owner:not(.bubble-pending)", { hasText: "Is that everything?" })).toHaveCount(0);
+  await waiting.nth(1).getByRole("button", { name: "Take back" }).click();
+  await expect(win.locator(".bubble-pending")).toHaveCount(1);
+  await expect(win.getByPlaceholder("Talk with Cairn")).toHaveValue("And keep it short.");
+
+  // Release the held comment: it settles, and the queue flushes ITSELF — no
+  // Try again, no click. The streaming comment bubble (bubble-commentary)
+  // unmounts as the settled turn lands; waiting for the caption to go is
+  // what keeps the flush after the lock has really been released. The
+  // waiting message then becomes a real owner turn with a real answer.
   releaseFixtureCommentary();
   await expect(win.getByText(/A short comment on the result card above/)).toHaveCount(0, { timeout: 30_000 });
-  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
-  await refusal.getByRole("button", { name: "Try again" }).click();
+  await expect(win.locator(".bubble-pending")).toHaveCount(0, { timeout: 30_000 });
+  await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(1, { timeout: 30_000 });
   await waitStreamDone(win);
-  await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(1);
+  // One "Sure, got it." answers the set-aside above; the second is the
+  // flushed message's own reply — proof the queue really sent it.
+  await expect(win.getByText("Sure, got it.")).toHaveCount(2);
   await expect(win.locator(".bubble-system")).toHaveCount(0);
 
-  // On disk, exactly once — the refused send left no trace there either.
+  // On disk, exactly once — the queue sent it a single time, and the
+  // taken-back message left no trace at all.
   const turns = await win.evaluate(async (dir) => {
     const list = await window.cairn.conductorConversations(dir);
     return window.cairn.conductorTurns(dir, list[list.length - 1].id);
   }, project);
   expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Is that everything?").length).toBe(1);
+  expect(turns.filter((turn) => turn.role === "owner" && turn.text === "And keep it short.").length).toBe(0);
   await app.close();
 });
 
@@ -1320,7 +1329,95 @@ test("a second proposal after a dispatched run gets its own Send to dispatch", a
   await secondSend.click();
   await expect(win.locator(".dispatch-panel")).toBeVisible({ timeout: 15_000 });
   await win.locator(".dispatch-panel").getByRole("button", { name: "Run offline demonstration" }).click();
-  await expect(win.locator(".result-card")).toHaveCount(2, { timeout: 30_000 });
+
+  // Task 155 (fold away the past): when the second run's card lands, the
+  // first collapses into a one-line chip — only the current moment stays
+  // expanded. The chip's arrival is also this test's second-run gate: it
+  // exists only once two cards do.
+  const folded = win.locator(".result-card-folded");
+  await expect(folded).toHaveCount(1, { timeout: 30_000 });
+  await expect(win.locator(".result-card")).toHaveCount(1);
+  await expect(folded).toContainText("DONE");
+  await expect(folded).toContainText("Task 001");
+  await expect(folded).toHaveAttribute("aria-expanded", "false");
+  // It toggles: the old card opens on tap, and folds away again.
+  await folded.click();
+  await expect(win.locator(".result-card")).toHaveCount(2);
+  await expect(folded).toHaveAttribute("aria-expanded", "true");
+  await folded.click();
+  await expect(win.locator(".result-card")).toHaveCount(1);
+  await app.close();
+});
+
+// Task 155 (queue instead of bounce), mock lane — the same queue in the
+// window Task 071 never had: an ORDINARY reply streaming. The composer stays
+// open (before this task it was disabled mid-reply), a send waits visibly,
+// and it flushes itself when the first reply lands.
+test("a message sent while a reply streams queues and flushes when the reply lands", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-reply-queue-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "slowstream");
+  await expect(win.getByText(/One moment/)).toBeVisible({ timeout: 10_000 });
+  // Open mid-reply: the queue is what makes a send right now honest.
+  await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
+
+  await sendChat(win, "And then summarize.");
+  const waiting = win.locator(".bubble-pending");
+  await expect(waiting).toHaveCount(1);
+  await expect(waiting.first()).toContainText("And then summarize.");
+  await expect(waiting.first()).toContainText("Will send when Cairn finishes.");
+
+  // The first reply lands, the queue flushes itself, and the waiting message
+  // becomes a real owner turn with its own answer — nothing refused.
+  await expect(win.getByText(/done thinking\./)).toBeVisible({ timeout: 15_000 });
+  await expect(win.locator(".bubble-pending")).toHaveCount(0, { timeout: 15_000 });
+  await expect(win.locator(".bubble-owner", { hasText: "And then summarize." })).toHaveCount(1, { timeout: 15_000 });
+  await waitStreamDone(win);
+  await expect(win.getByText("Sure, got it.")).toBeVisible();
+  await expect(win.locator(".bubble-system")).toHaveCount(0);
+  await app.close();
+});
+
+// Task 155 (needs-you dot), mock lane. Tucked away while a proposed task
+// waits unanswered, the chip itself says a decision is waiting: the dot is
+// on it and its accessible name says so — the owner never has to open the
+// dialog to find out.
+test("the tucked chip carries a needs-you dot while a decision waits inside", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-needsyou-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  // Nothing waiting yet: no dot, and the plain accessible name.
+  await win.getByRole("button", { name: "Tuck the conversation away" }).click();
+  const chip = win.locator(".chat-villager-chip");
+  await expect(chip).toBeVisible();
+  await expect(win.locator(".chat-villager-chip-dot")).toHaveCount(0);
+  await expect(chip).toHaveAttribute("aria-label", "Open the conversation with Cairn");
+  // The chip bobs on a loop, so its box never sits still for Playwright's
+  // stability check — force skips that wait for the click only.
+  await chip.click({ force: true });
+  await expect(win.getByRole("button", { name: "Tuck the conversation away" })).toBeVisible();
+
+  // A proposed task with an unanswered risk chip is a waiting decision.
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  await expect(win.locator(".task-card")).toBeVisible();
+
+  await win.getByRole("button", { name: "Tuck the conversation away" }).click();
+  await expect(chip).toBeVisible();
+  await expect(win.locator(".chat-villager-chip-dot")).toBeVisible();
+  await expect(chip).toHaveAttribute("aria-label", "Open the conversation with Cairn — a decision is waiting for you");
+
+  // Dot or no, the chip still opens the conversation — and the waiting
+  // decision is right there.
+  await chip.click({ force: true });
+  await expect(win.locator(".task-card")).toBeVisible();
   await app.close();
 });
 

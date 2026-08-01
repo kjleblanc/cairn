@@ -340,6 +340,16 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // Villager bubble (Task 146): tucked, the dialog collapses to a one-line
   // chip floating by Cairn's node.
   const [tucked, setTucked] = useState(false);
+  // Queue instead of bounce (Task 155): messages sent while Cairn is
+  // answering — or while the envelope's comment streams — wait here, each
+  // visible with its own take-back, and flush in order the moment the stream
+  // lock frees. Renderer-only and ephemeral, like the composer's text: a
+  // reload or a screen change drops whatever was waiting.
+  const [pending, setPending] = useState<string[]>([]);
+  // Fold away the past (Task 155): every result card but the newest collapses
+  // to a one-line chip. This set holds the turn indices the owner has opened;
+  // the newest card is always expanded and never listed here.
+  const [openedCards, setOpenedCards] = useState<ReadonlySet<number>>(new Set());
   const [lastOwnerText, setLastOwnerText] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The current proposed-task card, if the most recent reply with a task
@@ -611,14 +621,31 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
 
   // Returns whether this call actually dispatched — appended the owner turn
   // and invoked `conductorSend` — as opposed to being refused outright
-  // (empty text, already streaming, or a task running, which main refuses at
-  // the send gate). The proposed-task card uses this to decide whether a chip
-  // may mark itself resolved: a chip must never look resolved for a message
-  // that never left the composer.
-  async function send(text: string): Promise<boolean> {
+  // (empty text or a task running, which main refuses at the send gate). A
+  // call made while a stream holds the lock QUEUES instead (Task 155) and
+  // counts as dispatched: its message is accepted, visible, and will send.
+  // The proposed-task card uses this to decide whether a chip may mark itself
+  // resolved: a chip must never look resolved for a message that never left
+  // the composer.
+  //
+  // `quiet` belongs to the queue's flush below: a flush can arrive a beat
+  // before main frees its stream lock (released in a finally AFTER the done
+  // delta), so the first attempt leaves no mark on a refusal and the caller
+  // retries shortly. A loud refusal keeps the words in the composer with a
+  // "Try again" (Task 153).
+  async function send(text: string, quiet = false): Promise<boolean> {
     const trimmed = text.trim();
-    if (!trimmed || streaming || runActive) return false;
+    if (!trimmed || runActive) return false;
     setError(null);
+    // Queue instead of bounce (Task 155): while a reply or the envelope's
+    // comment streams, main holds the project's one stream lock and would
+    // refuse. The message waits visibly in the pending row instead — never a
+    // phantom turn, never lost words.
+    if (streaming || commentary) {
+      setPending((p) => [...p, trimmed]);
+      setComposer("");
+      return true;
+    }
     setComposer("");
     setLastOwnerText(trimmed);
     // Shown at once so typing feels answered, and held by identity so a refusal
@@ -648,12 +675,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       inFlightRef.current = null;
       setStreaming(false);
       setTurns((t) => t.filter((turn) => turn !== optimistic));
-      // And back into the composer (Task 153): the text was cleared the
-      // moment Send was pressed, so without this a refused send reads as
-      // "my message vanished" — the failure the owner reported. The refusal
-      // bubble's "Try again" still resends this exact string.
-      setComposer(trimmed);
-      setError(response.message);
+      // A quiet refusal (the queue's flush arriving a beat before main frees
+      // its lock) leaves no mark — the caller retries. A loud one keeps the
+      // words in the composer (Task 153): the text was cleared the moment
+      // Send was pressed, so without this a refused send reads as "my
+      // message vanished". "Try again" resends this exact string.
+      if (!quiet) {
+        setComposer(trimmed);
+        setError(response.message);
+      }
       return false;
     }
     if (inFlight.id === null) {
@@ -663,6 +693,23 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     }
     return true;
   }
+
+  // The queue's flush (Task 155): the moment nothing streams and no run
+  // holds the gate, the oldest waiting message goes. The remaining ones
+  // follow one at a time — each send re-raises `streaming`, which gates this
+  // effect until that reply lands. If another stream has started meanwhile,
+  // send() simply re-queues the message.
+  useEffect(() => {
+    if (pending.length === 0 || streaming || commentary || runActive) return;
+    const [text, ...rest] = pending;
+    setPending(rest);
+    void (async () => {
+      if (await send(text, true)) return;
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+      await send(text);
+    })();
+    // `send` is this render's closure over refs and setters only — safe.
+  }, [pending, streaming, commentary, runActive]);
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -688,6 +735,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setCommentary(false);
     setError(null);
     setTaskBlock(null);
+    setOpenedCards(new Set());
+    // Queued messages belonged to the conversation being left: they will
+    // never send now, so their words come back to the composer rather than
+    // vanishing (Task 155).
+    if (pending.length > 0) {
+      const returned = pending.join("\n");
+      setComposer((current) => (current.trim() ? `${current}\n${returned}` : returned));
+      setPending([]);
+    }
     // A running dispatch belongs to the project, not to the conversation it
     // was started from, so it stays on screen; an undecided one goes with the
     // conversation that proposed it.
@@ -766,6 +822,17 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   }
 
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
+  // Fold away the past (Task 155): the turn index of the newest result card.
+  // Every older card renders as a one-line chip that toggles its card back
+  // into view; only this one stays expanded on its own.
+  const latestCardIndex = turns.reduce((found, turn, i) => (turn.role === "envelope" ? i : found), -1);
+  // Needs-you dot (Task 155): tucked away, the chip says when something
+  // inside waits on the owner — a proposed task to decide, a dispatch to
+  // confirm, or a push to approve.
+  const needsYou = taskBlock !== null
+    || dispatch?.phase === "confirm"
+    || pushFlow?.phase === "chip"
+    || pushFlow?.phase === "confirm";
   // The strip says only what the run itself said. While it runs, that is the
   // latest stage of the four (`Route | Run | Check | Result`) — "Starting"
   // until the first one arrives, which is a plainer truth than naming a stage
@@ -817,7 +884,27 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
             <div className="chat-messages">
               {turns.map((turn, i) => (turn.role === "envelope" ? (
                 <Fragment key={i}>
-                  <ResultCardView card={turn.card} onOpenRun={onOpenRun} />
+                  {/* Fold away the past (Task 155): an older card is this
+                    * one-line chip; tapping toggles the full card in and out
+                    * of view. The newest card keeps the moment on its own. */}
+                  {i !== latestCardIndex ? (
+                    <button type="button" className="result-card-folded"
+                      aria-expanded={openedCards.has(i)}
+                      onClick={() => setOpenedCards((open) => {
+                        const next = new Set(open);
+                        if (next.has(i)) next.delete(i); else next.add(i);
+                        return next;
+                      })}>
+                      <span className={`result-card-disposition result-card-${turn.card.disposition.toLowerCase()}`}>{turn.card.disposition}</span>
+                      <span className="result-card-folded-label">
+                        {turn.card.taskNumber !== null ? `Task ${String(turn.card.taskNumber).padStart(3, "0")}` : "A result with no records"}
+                      </span>
+                      <span className="result-card-folded-hint">{openedCards.has(i) ? "fold away" : "open"}</span>
+                    </button>
+                  ) : null}
+                  {i === latestCardIndex || openedCards.has(i) ? (
+                    <ResultCardView card={turn.card} onOpenRun={onOpenRun} />
+                  ) : null}
                   {/* Under the card that prompted it, and under that card only
                     * — never under an older one, and never under a card whose
                     * disposition was not DONE. */}
@@ -912,15 +999,30 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               {/* The envelope's comment, visible while it streams (Task 153).
                 * No Stop: it is the envelope's own call, and main's refusal
                 * copy deliberately never points at a control for it. The
-                * composer stays enabled by design (Task 070) — the caption is
-                * what makes that honest: why this text is appearing, and why
-                * a send right now may bounce once. */}
+                * composer stays enabled by design (Task 070) — since Task 155
+                * a send made now simply queues below instead of bouncing. */}
               {commentary ? (
                 <div className="bubble bubble-cairn bubble-commentary">
                   <Md text={streamingText || "…"} />
-                  <p className="small muted" style={{ margin: "8px 0 0" }}>A short comment on the result card above — not an answer to a message. If a send bounces while this streams, your words stay put.</p>
+                  <p className="small muted" style={{ margin: "8px 0 0" }}>A short comment on the result card above — not an answer to a message. Anything you send while this streams waits its turn below.</p>
                 </div>
               ) : null}
+              {/* The queue, made visible (Task 155): each message waiting for
+                * the stream lock, in the order it will send, dimmed because
+                * it has not gone yet — with a take-back that returns its
+                * exact words to the composer. */}
+              {pending.map((text, i) => (
+                <div key={i} className="bubble bubble-owner bubble-pending">
+                  {text}
+                  <div className="row bubble-pending-controls">
+                    <span className="small muted">Will send when Cairn finishes.</span>
+                    <Pill kind="quiet" onClick={() => {
+                      setPending((p) => p.filter((_, at) => at !== i));
+                      setComposer((current) => (current.trim() ? `${current}\n${text}` : text));
+                    }}>Take back</Pill>
+                  </div>
+                </div>
+              ))}
               {error ? (
                 <div className="bubble bubble-system">
                   <p>{error}</p>
@@ -959,9 +1061,12 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               <p className="small muted composer-closed">A task is running. You can type again when it finishes.</p>
             ) : null}
             <div className="chat-composer">
+              {/* Closed only while a task runs (its note above says why).
+                * While Cairn answers or comments, a send queues instead of
+                * bouncing (Task 155), so the composer stays open. */}
               <textarea ref={composerRef} value={composer} onChange={(e) => setComposer(e.target.value)}
-                onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={streaming || runActive} />
-              <Pill kind="primary" onClick={() => void send(composer)} disabled={streaming || runActive || !composer.trim()}>Send</Pill>
+                onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={runActive} />
+              <Pill kind="primary" onClick={() => void send(composer)} disabled={runActive || !composer.trim()}>Send</Pill>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
               <Pill kind="quiet" onClick={() => void newConversation()}>New conversation</Pill>
@@ -989,7 +1094,12 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       {tucked ? (
         <button type="button" className="chat-villager-chip"
           onClick={() => { setTucked(false); window.requestAnimationFrame(() => composerRef.current?.focus()); }}
-          aria-label="Open the conversation with Cairn">
+          aria-label={needsYou
+            ? "Open the conversation with Cairn — a decision is waiting for you"
+            : "Open the conversation with Cairn"}>
+          {/* The needs-you dot (Task 155): a decision waits inside — the
+            * owner learns it from the chip, without opening the dialog. */}
+          {needsYou ? <span className="chat-villager-chip-dot" aria-hidden="true" /> : null}
           <span className="chat-villager-chip-text">{lastReply?.role === "cairn" ? lastReply.text : "Talk with Cairn"}</span>
         </button>
       ) : column}
