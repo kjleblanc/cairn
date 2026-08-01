@@ -4,6 +4,7 @@ import type { CairnApi, ConductorDelta, ConductorOAuthEvent, TaskActivityEvent }
 const api: CairnApi = {
   preflight: () => ipcRenderer.invoke("preflight:check"),
   projectList: () => ipcRenderer.invoke("project:list"),
+  projectCheckup: (dir) => ipcRenderer.invoke("project:checkup", dir),
   projectPickFolder: () => ipcRenderer.invoke("project:pickFolder"),
   projectOpen: (dir) => ipcRenderer.invoke("project:open", dir),
   projectInit: (input) => ipcRenderer.invoke("project:init", input),

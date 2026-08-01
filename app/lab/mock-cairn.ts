@@ -221,6 +221,28 @@ const mock: CairnApi = {
   projectInit: (_input: InitInput) => soon(nope("the lab never creates projects")),
   projectStatus: (dir: string) => dir === DIR ? soon(ok(projectStatus)) : soon(nope("the lab has exactly one mock project")),
   projectForget: (_dir: string) => soon(nope("the lab never forgets its one project")),
+  // Task 160: a small plainly-mock sample report, shaped exactly like the
+  // real one, so the lab picker can show the checkup card.
+  projectCheckup: (dir: string) => dir === DIR ? soon(ok({
+    dir: DIR,
+    name: "Garden Lab (mock)",
+    generatedAt: new Date().toISOString(),
+    verdict: "Mostly healthy",
+    verdictNote: "Nothing on fire — a few things are worth a look.",
+    counts: { done: 2, stopped: 1, inFlight: 1, unlogged: 0, total: 4 },
+    trail: [
+      { n: 1, state: "done" },
+      { n: 2, state: "stopped" },
+      { n: 3, state: "done" },
+      { n: 4, state: "inflight" },
+    ],
+    findings: [
+      { group: "attention", title: "3 commits not pushed", detail: "Recent work exists only on this machine until it is pushed.", suggestionLabel: "Make the push decision", suggestion: "Work on: review the remote and make the push decision (3 unpushed commits)" },
+      { group: "attention", title: "Task 004 is in flight", detail: "Its brief is committed but no report yet — work is still underway." },
+      { group: "healthy", title: "Records intact — 3 brief/report pairs", detail: "Numbering runs continuously from 001 to 003, and every report has its log row." },
+      { group: "healthy", title: "1 stopped run filed honestly", detail: "Stopped tasks kept their records as evidence instead of being hidden." },
+    ],
+  })) : soon(nope("the lab has exactly one mock project")),
   townLoad: (_dir: string) => soon(ok(world.town)),
   townSave: (_dir: string, state: TownPresentationState) => { world.town = state; return soon(ok(world.town)); },
   taskRoute: (_dir: string, _outcome: string, _details: string): Promise<Result<TaskRoutePreview>> =>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ProjectStatus } from "@cairn/core";
-import type { RecentProject } from "../../shared/ipc";
+import type { CheckupReport, RecentProject } from "../../shared/ipc";
 import { STONE_MEANING } from "../components/Scene";
+import { CheckupCard } from "../components/Checkup";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 import { cairn } from "../api";
 
@@ -19,8 +20,12 @@ function lastOpenedText(iso: string): string {
   return `last opened ${new Date(t).toLocaleDateString()}`;
 }
 
-export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSettings }: {
-  startNew: boolean; note: string | null; onOpen: (dir: string) => void; onOpenFolder: () => void;
+export function Picker({ startNew, note, onOpen, onOpenSuggestion, onOpenFolder, onCreated, onSettings }: {
+  startNew: boolean; note: string | null; onOpen: (dir: string) => void;
+  /** Task 160: a checkup suggestion's tap — opens the project with the words
+   * pre-filled in the composer for the owner to review and send themselves. */
+  onOpenSuggestion: (dir: string, text: string) => void;
+  onOpenFolder: () => void;
   onCreated: (dir: string, status: ProjectStatus) => void; onSettings: () => void;
 }) {
   const [recent, setRecent] = useState<RecentProject[]>([]);
@@ -28,6 +33,18 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checkup, setCheckup] = useState<{ dir: string; report: CheckupReport } | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
+
+  // Task 160: one read-only audit on demand. The card only reports — it
+  // never fixes, moves, or deletes anything in the checked project.
+  async function checkProject(dir: string) {
+    setChecking(dir);
+    const r = await cairn.projectCheckup(dir);
+    setChecking(null);
+    if (r.ok) setCheckup({ dir, report: r.value });
+    else setError(r.message);
+  }
 
   useEffect(() => { void cairn.projectList().then((l) => setRecent(l.recent)); }, []);
 
@@ -108,6 +125,7 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
             </button>
             <div className="row">
               <span className="badge badge-done">{r.stones} {r.stones === 1 ? "stone" : "stones"}</span>
+              <Pill kind="quiet" disabled={checking === r.dir} onClick={() => void checkProject(r.dir)}>{checking === r.dir ? "Checking…" : "Checkup"}</Pill>
               <Pill kind="quiet" onClick={() => void forget(r.dir)}>Remove from this list</Pill>
             </div>
           </div>
@@ -134,6 +152,10 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
         <p className="small">A folder that already has a Cairn contract can be opened directly. For other existing work, follow Project Conversion in the guides.</p>
         <p className="small muted">This reset does not transform legacy <span className="mono">.git/cairn</span> task state; it preserves that state and blocks new task mutation until you migrate it safely.</p>
       </Card>
+      {checkup ? (
+        <CheckupCard report={checkup.report} onClose={() => setCheckup(null)}
+          onSuggestion={(text) => { const dir = checkup.dir; setCheckup(null); onOpenSuggestion(dir, text); }} />
+      ) : null}
     </div>
   );
 }

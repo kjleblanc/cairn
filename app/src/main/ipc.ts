@@ -25,6 +25,7 @@ import { emitBridgeSync } from "./bridge/hub.js";
 import { phoneBridgePairBegin, phoneBridgeRevokeDevice, phoneBridgeState } from "./bridge/runtime.js";
 import { logError, plainMessage } from "./log.js";
 import { pushExecute, pushPreview, pushRefusal } from "./push.js";
+import { runCheckup } from "./checkup.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
 import { currentTaskSession } from "./tasks.js";
 import { readTownState, writeTownState } from "./townstore.js";
@@ -113,6 +114,12 @@ export function registerProjectIpc(): void {
       forgetProject(dir);
       return null;
     }));
+
+  // Task 160: one read-only health audit, run on demand from the picker. The
+  // handler adds nothing to the module's own guarantees — no writes, no
+  // network, no model call — it only reports what runCheckup found.
+  ipcMain.handle("project:checkup", (_e, dir: string) =>
+    toResult("project:checkup", () => runCheckup(dir)));
 
   ipcMain.handle("project:pickFolder", async (): Promise<string | null> => {
     const res = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });

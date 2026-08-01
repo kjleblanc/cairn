@@ -27,6 +27,7 @@ function defaultTownPresentation(): TownPresentationState {
 export function Workspace({
   initialDir,
   initialStatus,
+  composerSeed = null,
   demoAvailable,
   onOpenProjects,
   onCreateProject,
@@ -34,6 +35,7 @@ export function Workspace({
 }: {
   initialDir: string;
   initialStatus: ProjectStatus;
+  composerSeed?: string | null;
   demoAvailable: boolean;
   onOpenProjects: () => void;
   onCreateProject: () => void;
@@ -58,6 +60,11 @@ export function Workspace({
   const townPresentationRef = useRef(townPresentation);
   activeDirRef.current = activeDir;
   townPresentationRef.current = townPresentation;
+  // Task 160: a checkup suggestion rides in exactly once — consumed by the
+  // first Chat mount, then cleared so an internal project switch (which
+  // remounts Chat by key) can never re-seed the composer's words.
+  const composerSeedRef = useRef(composerSeed);
+  useEffect(() => { composerSeedRef.current = null; }, []);
 
   const refreshProjects = useCallback(async () => {
     const list = await cairn.projectList();
@@ -202,6 +209,7 @@ export function Workspace({
               onFocusChat={focusChat}
               onOpenRun={() => setCenterView("task")} />
             <Chat key={activeDir} dir={activeDir} embedded focusSignal={chatFocusSignal}
+              initialComposer={composerSeedRef.current ?? undefined}
               onBack={openDashboard}
               onOpenRun={() => setCenterView("task")} />
           </section>

@@ -32,6 +32,10 @@ export function App() {
   // can switch projects internally without the shell knowing, and an
   // overlay-opened project must not inherit that stale internal state.
   const [session, setSession] = useState(0);
+  // Task 160: a checkup suggestion's words, carried into the workspace's
+  // composer exactly once per explicit entry. Every openProject call resets
+  // it, so a stale seed can never follow the owner into a later visit.
+  const [composerSeed, setComposerSeed] = useState<string | null>(null);
 
   const enterWorkspace = useCallback((dir: string, status: ProjectStatus) => {
     setError(null);
@@ -40,13 +44,14 @@ export function App() {
     setView({ name: "workspace", dir, status });
   }, []);
 
-  const openProject = useCallback(async (dir: string) => {
+  const openProject = useCallback(async (dir: string, composerText?: string) => {
     // A fresh attempt starts clean: the previous failure never rides along
     // while this one is in flight.
     setError(null);
+    setComposerSeed(composerText ?? null);
     const response = await cairn.projectOpen(dir);
     if (response.ok) enterWorkspace(dir, response.value);
-    else setError(response.message);
+    else { setError(response.message); setComposerSeed(null); }
   }, [enterWorkspace]);
 
   // A governed project boots into the persistent workspace with Chat selected.
@@ -94,11 +99,13 @@ export function App() {
         onBrowseRecent={() => setView({ name: "picker", startNew: false })} />;
       case "picker": return <Picker startNew={view.startNew} note={view.note ?? null}
         onOpen={(dir) => void openProject(dir)}
+        onOpenSuggestion={(dir, text) => void openProject(dir, text)}
         onOpenFolder={() => void pickAndOpen()}
         onCreated={enterWorkspace}
         onSettings={() => setOverlay({ name: "settings" })} />;
       case "workspace": return <Workspace key={`${view.dir}:${session}`}
         initialDir={view.dir} initialStatus={view.status}
+        composerSeed={composerSeed}
         demoAvailable={mock}
         onOpenProjects={() => setOverlay({ name: "picker", startNew: false })}
         onCreateProject={() => setOverlay({ name: "picker", startNew: true })}
@@ -130,6 +137,7 @@ export function App() {
           ) : (
             <Picker startNew={overlay.startNew} note={null}
               onOpen={(dir) => void openProject(dir)}
+              onOpenSuggestion={(dir, text) => void openProject(dir, text)}
               onOpenFolder={() => void pickAndOpen()}
               onCreated={enterWorkspace}
               onSettings={() => setOverlay({ name: "settings" })} />

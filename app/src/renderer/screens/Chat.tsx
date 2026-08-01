@@ -318,12 +318,15 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
  * The run then stays visible here: a status strip carries its stage, its
  * clock, a stop control, and the way to the run screen, and the composer
  * says plainly that it is closed until the run finishes. */
-export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0 }: {
+export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0, initialComposer = "" }: {
   dir: string;
   onBack: () => void;
   onOpenRun: () => void;
   embedded?: boolean;
   focusSignal?: number;
+  /** Task 160: words carried in once (a checkup suggestion) — read only at
+   * mount, so later re-renders and project switches never re-seed them. */
+  initialComposer?: string;
 }) {
   const [status, setStatus] = useState<ConductorStatus | null>(null);
   const [stones, setStones] = useState(0);
@@ -336,7 +339,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // renderer did not start it — so without this state it accumulated
   // invisibly: the composer looked ready while every send was refused.
   const [commentary, setCommentary] = useState(false);
-  const [composer, setComposer] = useState("");
+  const [composer, setComposer] = useState(initialComposer);
   // Villager bubble (Task 146): tucked, the dialog collapses to a one-line
   // chip floating by Cairn's node.
   const [tucked, setTucked] = useState(false);

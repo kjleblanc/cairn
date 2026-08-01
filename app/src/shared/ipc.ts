@@ -179,9 +179,40 @@ export interface ConductorDelta {
   followups?: string[] | null;
 }
 
+/**
+ * Task 160's checkup report. Built deterministically in main from the
+ * project's own records and local git — no model call, no network, and
+ * strictly read-only: a finding's `suggestion` is plain text the owner may
+ * send as their own message, never something the checkup does itself.
+ */
+export type CheckupGroup = "risk" | "attention" | "healthy";
+export type CheckupTrailState = "done" | "stopped" | "inflight" | "unlogged";
+/** One cell of the records strip: the task number is kept so the card's
+ * per-cell label can tell the truth (numbers with no records are skipped,
+ * not renumbered). */
+export type CheckupTrailEntry = { n: number; state: CheckupTrailState };
+export interface CheckupFinding {
+  group: CheckupGroup;
+  title: string;
+  detail: string;
+  suggestionLabel?: string;
+  suggestion?: string;
+}
+export interface CheckupReport {
+  dir: string;
+  name: string;
+  generatedAt: string;
+  verdict: "Healthy" | "Mostly healthy" | "Needs a decision";
+  verdictNote: string;
+  counts: { done: number; stopped: number; inFlight: number; unlogged: number; total: number };
+  trail: CheckupTrailEntry[];
+  findings: CheckupFinding[];
+}
+
 export interface CairnApi {
   preflight(): Promise<Preflight>;
   projectList(): Promise<ProjectList>;
+  projectCheckup(dir: string): Promise<Result<CheckupReport>>;
   projectPickFolder(): Promise<string | null>;
   projectOpen(dir: string): Promise<Result<ProjectStatus>>;
   projectInit(input: InitInput): Promise<Result<ProjectStatus>>;

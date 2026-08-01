@@ -691,3 +691,26 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .project-rail .rail-activity { position: absolute; right: 3px; bottom: 5px; }
   .workspace-scroll { padding: 16px; }
 }
+
+/* Task 160: the checkup card — a read-only report floating over any screen.
+   It sits under .app-error-overlay (z-index 1000) so errors stay on top. */
+.checkup-scrim { position: fixed; inset: 0; z-index: 900; background: rgb(13 9 31 / 58%); backdrop-filter: blur(3px); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 16px; }
+.checkup-card { width: min(560px, 100%); margin: 0; }
+.checkup-heading { margin: 0; font-size: 1.05rem; }
+.checkup-verdict { margin: 10px 0 2px; font-size: 1.5rem; font-weight: 600; }
+.checkup-trail { display: flex; flex-wrap: wrap; gap: 3px; margin: 12px 0 4px; }
+.checkup-cell { width: 8px; height: 8px; border-radius: 2px; background: var(--trail); }
+.checkup-cell-stopped { background: var(--stop); }
+.checkup-cell-inflight { background: transparent; box-shadow: inset 0 0 0 1.5px var(--amber); }
+.checkup-cell-unlogged { background: transparent; box-shadow: inset 0 0 0 1px var(--muted); }
+.checkup-group { margin-top: 14px; }
+.checkup-group-title { display: flex; align-items: baseline; gap: 8px; margin: 0 0 2px; font-weight: 600; }
+.checkup-group-title .muted { font-weight: 400; }
+.checkup-mark { width: 9px; height: 9px; border-radius: 3px; display: inline-block; align-self: center; }
+.checkup-mark-risk { background: var(--stop); }
+.checkup-mark-attention { background: var(--amber); }
+.checkup-mark-healthy { background: var(--green); }
+.checkup-finding { padding: 8px 0; border-top: 1px solid var(--line); }
+.checkup-finding p { margin: 0; }
+.checkup-finding .pill { margin-top: 6px; }
+.checkup-basis { margin-top: 14px; }
