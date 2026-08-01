@@ -175,7 +175,9 @@ function setScenario(next: LabScenario): void {
     world.session = {
       dir: DIR,
       outcome: "make the workspace feel like a calm digital garden",
-      adapterId: "lab-worker",
+      // The lab's stand-in worker wears the Codex face (Task 156) so the lab
+      // town shows the real cast treatment.
+      adapterId: "codex-exec",
       conversationId: CONVERSATION_ID,
       worker: true,
       startedAt: new Date().toISOString(),

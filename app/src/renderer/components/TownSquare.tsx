@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../../shared/ipc";
 import { computeTownLayout, TOWN_BOUNDS, TOWN_CENTER } from "../town/layout";
+import { TOWN_FACES, faceForAdapter, type TownFaceDef, type TownFaceState } from "../town/faces";
 import { townModelFromRuntime, type TownEntity, type TownRelationship } from "../town/model";
 import { TownDetail } from "./TownDetail";
 
@@ -40,42 +41,45 @@ function selectedItem(
     : relationships.find((relationship) => relationship.id === key.id) ?? null;
 }
 
-function TownFace({ kind, state = "ready" }: { kind: "cairn" | "worker"; state?: "ready" | "thinking" | "working" }) {
-  const isCairn = kind === "cairn";
-  const pose = isCairn ? state : "working";
+/**
+ * One cast face (Task 156): geometry from town/faces.tsx, colored by the
+ * face's own tokens, with its tilt, signature mark, and blink rhythm. Eye
+ * strokes sit in nested groups so per-eye blink animations compose; the
+ * mouth and any mark are plain strokes. Cairn keeps the thought bubbles.
+ */
+function TownFace({ face, state }: { face: TownFaceDef; state: TownFaceState }) {
+  const strokes = face.states[state];
+  const part = (name: "eyeL" | "eyeR" | "mouth") => strokes.filter((s) => s.part === name);
+  const draw = (list: typeof strokes) => list.map((s, i) => (
+    <path key={i} d={s.d} strokeWidth={s.w} opacity={s.o ?? 1} />
+  ));
+  /* town-face-worker stays as a compatibility class: lane C's in-flight
+     conductor.spec (Task 155) asserts the pre-cast class. Remove once 155
+     lands and the spec names the cast classes. */
+  const compat = face.id === "cairn" ? "" : " town-face-worker";
   return (
-    <span className={`town-face town-face-${kind}`} aria-hidden="true">
+    <span className={`town-face town-face-${face.id}${compat}`} aria-hidden="true"
+      style={{ "--face-color": face.color, "--face-glow": face.glow } as CSSProperties}>
       <span className="town-face-holo">
-        <svg className="town-face-svg" viewBox="0 0 100 100" focusable="false">
-          {pose === "ready" && (
-            <>
-              <path className="town-face-eye town-face-eye-blink town-face-eye-large" d="M 36 35 L 36 48" />
-              <path className="town-face-eye town-face-eye-blink town-face-eye-small" d="M 64 39 L 64 46" />
-              <path className="town-face-mouth" d="M 33 63 Q 48 70 70 57" />
-            </>
+        <span className="town-face-tilt" style={{ transform: face.tilt ? `rotate(${face.tilt}deg)` : undefined }}>
+          {face.mark.length > 0 && (
+            <svg className={`town-face-mark town-face-mark-${face.id}`} viewBox="0 0 100 100" focusable="false">
+              {draw(face.mark)}
+            </svg>
           )}
-          {pose === "thinking" && (
-            <>
-              <path className="town-face-eye town-face-eye-blink town-face-eye-large" d="M 33 33 L 40 41" />
-              <path className="town-face-eye town-face-eye-blink town-face-eye-small" d="M 65 32 L 65 41" />
-              <path className="town-face-mouth" d="M 35 63 L 43 63 M 49 60 L 56 67 M 63 61 L 70 61" />
-            </>
-          )}
-          {pose === "working" && (
-            <>
-              <path className="town-face-eye town-face-eye-heavy" d="M 28 36 L 44 42" />
-              <path className="town-face-eye town-face-eye-heavy" d="M 70 34 L 57 41" />
-              <path className="town-face-mouth town-face-mouth-heavy" d="M 35 63 L 42 58 L 50 67 L 58 59 L 68 61" />
-            </>
-          )}
-          {isCairn && (
-            <g className="town-face-thought">
-              <circle cx="78" cy="26" r="2.2" />
-              <circle cx="85" cy="18" r="1.7" />
-              <circle cx="91" cy="10" r="1.3" />
-            </g>
-          )}
-        </svg>
+          <svg className={`town-face-svg town-face-blink-${face.blink}`} viewBox="0 0 100 100" focusable="false">
+            <g className="town-face-eye town-face-eye-l">{draw(part("eyeL"))}</g>
+            <g className="town-face-eye town-face-eye-r">{draw(part("eyeR"))}</g>
+            {draw(part("mouth"))}
+            {face.id === "cairn" && (
+              <g className="town-face-thought">
+                <circle cx="78" cy="26" r="2.2" />
+                <circle cx="85" cy="18" r="1.7" />
+                <circle cx="91" cy="10" r="1.3" />
+              </g>
+            )}
+          </svg>
+        </span>
       </span>
     </span>
   );
@@ -114,6 +118,26 @@ export function TownSquare({
   const groundRef = useRef<HTMLDivElement>(null);
   const points = useMemo(() => ({ ...automaticPoints, ...dragPoints }), [automaticPoints, dragPoints]);
   const selection = selectedItem(selectedKey, model.entities, model.relationships);
+
+  /* The done moment (Task 156): when a run closes with a result, Cairn's
+     smile opens for a few seconds, then settles back to ready. Local to
+     the square — the town model and its visibility rules are unchanged. */
+  const [doneUntil, setDoneUntil] = useState(0);
+  const prevPhaseRef = useRef<"running" | "closed" | null>(null);
+  useEffect(() => {
+    const phase = task?.phase ?? null;
+    if (prevPhaseRef.current === "running" && phase === "closed" && task?.result) {
+      setDoneUntil(Date.now() + 6000);
+    }
+    prevPhaseRef.current = phase;
+  }, [task?.phase, task?.result]);
+  useEffect(() => {
+    if (!doneUntil) return;
+    const remaining = doneUntil - Date.now();
+    if (remaining <= 0) { setDoneUntil(0); return; }
+    const timer = window.setTimeout(() => setDoneUntil(0), remaining);
+    return () => window.clearTimeout(timer);
+  }, [doneUntil]);
 
   useEffect(() => {
     if (selectedKey && !selection) setSelectedKey(null);
@@ -213,16 +237,18 @@ export function TownSquare({
           const point = points[entity.id] ?? TOWN_CENTER;
           const isSelected = selectedKey?.id === entity.id;
           if (entity.kind === "cairn") {
+            const displayState: TownFaceState =
+              entity.state === "ready" && doneUntil > Date.now() ? "done" : entity.state;
             return (
               <button key={entity.id} type="button"
-                className={`town-node town-node-cairn town-node-${entity.state}`}
+                className={`town-node town-node-cairn town-node-${displayState}`}
                 style={pointStyle(point)}
-                aria-label={`Cairn, ${entity.state}`}
+                aria-label={`Cairn, ${displayState}`}
                 aria-pressed={isSelected}
                 onClick={(event) => selectEntity(event, entity)}>
-                <TownFace kind="cairn" state={entity.state} />
+                <TownFace face={TOWN_FACES.cairn} state={displayState} />
                 <strong>Cairn</strong>
-                <span className="town-node-status">{entity.state}</span>
+                <span className="town-node-status">{displayState}</span>
               </button>
             );
           }
@@ -237,7 +263,7 @@ export function TownSquare({
                 onPointerDown={(event) => beginDrag(event, entity)}
                 onClick={(event) => selectEntity(event, entity)}>
                 <span className="town-worker-pad" aria-hidden="true"><span /><span /></span>
-                <TownFace kind="worker" />
+                <TownFace face={faceForAdapter(entity.role)} state="working" />
                 <strong>{entity.name}</strong>
                 <span className="town-node-status"><i aria-hidden="true" /> working</span>
               </button>

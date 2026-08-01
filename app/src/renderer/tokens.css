@@ -65,6 +65,17 @@
   --garden-amber-soft: rgb(242 185 92 / 6%);
   --garden-amber-glow: rgb(242 185 92 / 8%);
   --garden-rose: #ff9e8a;
+  /* The cast (owner-approved, Task 152 board; ported Task 156): each worker
+     model's signature color on the night garden. Cairn stays --garden-cyan
+     and the fallback worker keeps --garden-amber. */
+  --face-kimi: #c9a7e8;
+  --face-kimi-glow: rgb(201 167 232 / 9%);
+  --face-codex: #f2a35c;
+  --face-codex-glow: rgb(242 163 92 / 9%);
+  --face-claude: #9fb8d8;
+  --face-claude-glow: rgb(159 184 216 / 9%);
+  --face-gemini: #8ad8b0;
+  --face-gemini-glow: rgb(138 216 176 / 9%);
   --garden-face-cairn: #ffe9d6;
   --garden-face-worker: #ffe4d9;
   --garden-face-ink: #3a2c22;

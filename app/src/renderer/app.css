@@ -147,7 +147,40 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
 .bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; }
 .bubble-owner { align-self: flex-end; background: var(--green-soft); color: var(--green-deep); border-bottom-right-radius: 4px; }
-.bubble-cairn { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; color: var(--card-ink); }
+/* Task 155 (less chrome): plain conversation carries no card weight — no
+ * border, no fill; Cairn's words read as plain prose. The fill that remains
+ * is reserved for the owner's own voice (so the two stay scannable) and the
+ * decision surfaces: result card, task card, dispatch panel. */
+.bubble-cairn { align-self: flex-start; background: transparent; border: 0; border-bottom-left-radius: 4px; color: var(--card-ink); padding: 4px; }
+/* Task 155 (queue instead of bounce): a message waiting for the stream lock
+ * looks like what it is — the owner's own words, not sent yet. */
+.bubble-pending { opacity: .64; }
+.bubble-pending-controls { margin-top: 6px; align-items: center; gap: 10px; }
+/* Task 155 (fold away the past): a settled older result card collapses to
+ * this one-line chip; only the current moment keeps the full card. */
+.result-card-folded {
+  align-self: stretch; display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: transparent; color: var(--card-muted); font: inherit; font-size: .82rem;
+  cursor: pointer; text-align: left;
+}
+.result-card-folded:hover { background: var(--card); color: var(--card-ink); }
+.result-card-folded-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-card-folded-hint { flex-shrink: 0; font-size: .74rem; }
+/* Task 157 (Cairn's follow-up suggestions): a small labeled row of tappable
+ * chips under the comment. Each chip is the whole suggestion — one tap makes
+ * it the owner's own message, so it reads and behaves like a send, not a
+ * dispatch. */
+.followups { align-self: stretch; margin: -2px 0 4px; }
+.followups-label { margin: 0 0 6px; }
+.followups-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.followup-chip {
+  padding: 6px 12px; border: 1px dashed var(--line); border-radius: 999px;
+  background: transparent; color: var(--card-ink); font: inherit; font-size: .85rem;
+  cursor: pointer; text-align: left; max-width: 100%;
+}
+.followup-chip:hover:not(:disabled) { background: var(--card); border-style: solid; }
+.followup-chip:disabled { opacity: .5; cursor: default; }
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
 /* The run, living in the conversation: one compact line above the composer. */
 .run-strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); }
@@ -392,13 +425,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* Same right-edge guard as the dialog: 266 = 250 max-width + 16 margin. */
   position: absolute; top: 30%; max-width: 250px;
   left: max(16px, min(calc(50% + 84px), calc(100% - 266px)));
+  display: flex; align-items: center; gap: 8px;
   padding: 9px 16px; border: 0; border-radius: 18px 18px 18px 4px;
   background: var(--card-solid); color: var(--card-ink); font: inherit;
   font-size: .84rem; text-align: left; cursor: pointer;
   box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
   animation: villager-bob 5s ease-in-out infinite;
 }
-.chat-villager-chip-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Task 155 (needs-you dot): tucked away, the chip says when a decision
+ * waits inside — no need to open the dialog to find out. */
+.chat-villager-chip-dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 0 3px var(--amber-soft); }
+.chat-villager-chip-text { display: block; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes villager-rise {
   from { opacity: 0; transform: translateY(16px) scale(.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -465,32 +502,38 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-face {
   position: relative; z-index: 1; width: 78px; height: 78px; display: block; margin-bottom: 4px;
 }
-.town-face-worker { width: 68px; height: 68px; }
+.town-face-kimi, .town-face-codex, .town-face-claude, .town-face-gemini, .town-face-worker-fallback {
+  width: 68px; height: 68px;
+}
 .town-face-holo {
   position: absolute; inset: 0; display: block;
-  filter: drop-shadow(0 0 9px var(--garden-cyan-glow)) drop-shadow(0 0 3px var(--garden-cyan-dim));
+  filter: drop-shadow(0 0 9px var(--face-glow)) drop-shadow(0 0 3px var(--face-glow));
   animation: town-face-float 6s ease-in-out infinite;
 }
-.town-face-worker .town-face-holo {
-  animation-delay: -2s;
-  filter: drop-shadow(0 0 9px var(--garden-amber-glow)) drop-shadow(0 0 3px var(--garden-worker-pad));
+/* Cairn keeps its exact original glow. */
+.town-face-cairn .town-face-holo {
+  filter: drop-shadow(0 0 9px var(--garden-cyan-glow)) drop-shadow(0 0 3px var(--garden-cyan-dim));
+}
+.town-face:not(.town-face-cairn) .town-face-holo { animation-delay: -2s; }
+.town-face-tilt { position: relative; display: block; width: 100%; height: 100%; }
+.town-face-mark {
+  position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none;
 }
 .town-face-svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.town-face-eye { fill: none; stroke: var(--garden-cyan); stroke-linecap: round; stroke-width: 3.2; }
-.town-face-worker .town-face-eye { stroke: var(--garden-amber); }
-.town-face-eye-small { stroke-width: 2.6; opacity: .75; }
-.town-face-eye-large { stroke-width: 3.8; }
-.town-face-eye-heavy { stroke-width: 3.6; }
-.town-face-eye-blink {
-  transform-box: fill-box; transform-origin: center; animation: town-face-blink 5.2s ease-in-out infinite;
+.town-face-svg path, .town-face-mark path {
+  fill: none; stroke: var(--face-color); stroke-linecap: round; stroke-linejoin: round;
 }
-.town-face-mouth {
-  fill: none; stroke: color-mix(in srgb, var(--garden-cyan) 78%, var(--garden-amber));
-  stroke-linecap: round; stroke-linejoin: round; stroke-width: 3;
-}
-.town-face-worker .town-face-mouth { stroke: var(--garden-amber); }
-.town-face-mouth-heavy { stroke-width: 3.4; }
-.town-face-thought { fill: var(--garden-cyan); opacity: 0; transition: opacity 180ms ease; }
+.town-face-eye { transform-box: fill-box; transform-origin: center; }
+/* The cast's blink rhythms (Task 156): single is the app's original. */
+.town-face-blink-single .town-face-eye { animation: town-face-blink 5.2s ease-in-out infinite; }
+.town-face-blink-double .town-face-eye-l { animation: town-face-blink-double 3.8s ease-in-out infinite; }
+.town-face-blink-slow .town-face-eye { animation: town-face-blink 8.5s ease-in-out infinite; }
+.town-face-blink-alternate .town-face-eye-l { animation: town-face-blink 5s ease-in-out infinite; }
+.town-face-blink-alternate .town-face-eye-r { animation: town-face-blink 5s ease-in-out 2.5s infinite; }
+.town-face-blink-squeeze .town-face-eye { animation: town-face-squeeze 5.4s ease-in-out infinite; }
+.town-face-mark-gemini path:nth-child(1) { animation: town-face-bob 2.8s ease-in-out infinite; }
+.town-face-mark-gemini path:nth-child(2) { animation: town-face-bob 2.8s ease-in-out 1.4s infinite; }
+.town-face-thought { fill: var(--face-color); opacity: 0; transition: opacity 180ms ease; }
 .town-node-thinking .town-face-thought, .town-node-working .town-face-thought { opacity: 1; }
 .town-face-thought circle { animation: town-face-thought 1.8s ease-in-out infinite; }
 .town-face-thought circle:nth-child(2) { animation-delay: .3s; opacity: .65; }
@@ -566,6 +609,20 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   0%, 91%, 100% { transform: scaleY(1); }
   94% { transform: scaleY(.12); }
 }
+@keyframes town-face-blink-double {
+  0%, 87%, 100% { transform: scaleY(1); }
+  90% { transform: scaleY(.12); }
+  92.5% { transform: scaleY(1); }
+  95% { transform: scaleY(.12); }
+}
+@keyframes town-face-squeeze {
+  0%, 90%, 100% { transform: scale(1, 1); }
+  94% { transform: scale(1.1, .45); }
+}
+@keyframes town-face-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
 @keyframes town-face-thought {
   0%, 100% { opacity: .22; }
   50% { opacity: 1; }
@@ -581,7 +638,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 @media (prefers-reduced-motion: reduce) {
   .town-node, .town-thread-target, .town-face-thought { transition: none; }
-  .town-face-holo, .town-face-eye-blink, .town-face-thought circle,
+  .town-face-holo, .town-face-eye, .town-face-thought circle, .town-face-mark path,
   .town-worker-pad span, .town-node-working .town-node-status i,
   .chat-column-villager, .chat-villager-chip { animation: none; }
 }
