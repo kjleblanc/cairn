@@ -1,5 +1,6 @@
-/* Cast board, take two (Task 149): stroke-face gallery. Throwaway board
-   styling — the picked faces get ported into the real town properly. */
+/* Cast board, expression pass (Task 152): stroke-face gallery with states,
+   marks, tilt, blink rhythms, and reactive one-shots. Throwaway board
+   styling — the picked faces port into the real town properly. */
 * { box-sizing: border-box; }
 body {
   margin: 0; min-height: 100vh; background: #efe9dc; color: #4a3f30;
@@ -10,36 +11,51 @@ body {
 .cb-board h1 { margin: 0 0 6px; font-size: 1.6rem; letter-spacing: -.01em; }
 .cb-sub { margin: 0 0 26px; color: #8a7a63; font-size: .92rem; max-width: 74ch; }
 .cb-footnote { margin-top: 8px; }
+.cb-h2 { margin: 34px 0 14px; font-size: 1.15rem; }
 
-/* per-model cards */
-.fb-cards {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 18px; margin: 0 0 42px;
-}
-.fb-card {
-  padding: 20px 22px; border-radius: 18px;
-  background: #faf5ea; box-shadow: 0 8px 26px rgb(74 63 48 / 12%);
-}
-.fb-card-dim { opacity: .75; }
-.fb-face-row { display: flex; align-items: flex-end; justify-content: space-between; }
-.fb-face-lg { display: inline-flex; padding: 6px; }
-.fb-face-sizes { display: flex; gap: 8px; align-items: center; }
-.fb-chip {
-  display: inline-flex; padding: 7px; border-radius: 12px;
-  box-shadow: 0 2px 8px rgb(74 63 48 / 14%);
-}
-.fb-chip-dark { background: #35304f; }
-.fb-chip-light { background: #fff; }
-.fb-card h3 {
-  margin: 10px 0 6px; font-size: 1rem; display: flex; align-items: center; gap: 8px;
-}
-.fb-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%); }
-.fb-card code { font-size: .72rem; color: #97856b; font-family: ui-monospace, monospace; }
-.fb-card p { margin: 0; font-size: .88rem; color: #6d5f4b; }
+/* --- face primitives ------------------------------------------------ */
+.fb-tilt { display: inline-flex; position: relative; }
+.fb-mark { position: absolute; inset: 0; pointer-events: none; }
+.fb-eye { transform-box: fill-box; transform-origin: center; }
+.fb-look { transition: transform .35s ease; }
+.fb-waiting .fb-look { transform: translateY(2.5px); }
 
-/* line-up scenes */
+@keyframes fb-dip {
+  0%, 91.5%, 100% { transform: scaleY(1); }
+  94.5% { transform: scaleY(.12); }
+}
+@keyframes fb-dip2 {
+  0%, 87%, 100% { transform: scaleY(1); }
+  90% { transform: scaleY(.12); }
+  92.5% { transform: scaleY(1); }
+  95% { transform: scaleY(.12); }
+}
+@keyframes fb-squeeze {
+  0%, 90%, 100% { transform: scale(1, 1); }
+  94% { transform: scale(1.1, .45); }
+}
+.fb-blink-single .fb-eye { animation: fb-dip 4.6s ease-in-out infinite; }
+.fb-blink-double .fb-eye-l { animation: fb-dip2 3.8s ease-in-out infinite; }
+.fb-blink-slow .fb-eye { animation: fb-dip 8.5s ease-in-out infinite; }
+.fb-blink-alternate .fb-eye-l { animation: fb-dip 5s ease-in-out infinite; }
+.fb-blink-alternate .fb-eye-r { animation: fb-dip 5s ease-in-out 2.5s infinite; }
+.fb-blink-squeeze .fb-eye { animation: fb-squeeze 5.4s ease-in-out infinite; }
+
+@keyframes fb-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+.fb-mark-gemini path:nth-child(1) { animation: fb-bob 2.8s ease-in-out infinite; }
+.fb-mark-gemini path:nth-child(2) { animation: fb-bob 2.8s ease-in-out 1.4s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fb-eye, .fb-mark path { animation: none !important; }
+  .fb-look { transition: none; }
+}
+
+/* --- live cast row --------------------------------------------------- */
 .cb-scene {
-  position: relative; height: 380px; border-radius: 22px; overflow: hidden;
+  position: relative; height: 400px; border-radius: 22px; overflow: hidden;
   box-shadow: 0 16px 44px rgb(74 63 48 / 18%); margin: 0 0 34px;
 }
 .cb-hills { position: absolute; inset: auto 0 0; width: 100%; height: 48%; display: block; }
@@ -48,28 +64,12 @@ body {
   letter-spacing: .12em; text-transform: uppercase; opacity: .85;
   text-shadow: 0 1px 8px rgb(0 0 0 / 25%);
 }
-
-.cb-sun {
-  position: absolute; width: 58px; height: 58px; border-radius: 50%;
-  background: #fff8dc; box-shadow: 0 0 34px rgb(255 240 180 / 85%);
-}
-.cb-cloud {
-  position: absolute; width: 92px; height: 30px; border-radius: 999px;
-  background: rgb(255 255 255 / 92%);
-}
-.cb-cloud::before, .cb-cloud::after {
-  content: ""; position: absolute; border-radius: 50%; background: inherit;
-}
-.cb-cloud::before { width: 40px; height: 40px; left: 14px; top: -18px; }
-.cb-cloud::after { width: 28px; height: 28px; right: 16px; top: -12px; }
-.cb-cloud-small { transform: scale(.66); opacity: .85; }
 .cb-firefly {
   position: absolute; width: 5px; height: 5px; border-radius: 50%;
   background: #ffd98a; box-shadow: 0 0 10px #ffd98a; opacity: .9;
 }
-
 .cb-cast-row {
-  position: absolute; inset: auto 0 10% 0;
+  position: absolute; inset: auto 0 16% 0;
   display: flex; justify-content: space-evenly; align-items: flex-end;
   padding: 0 3%;
 }
@@ -80,3 +80,51 @@ body {
   box-shadow: 0 4px 14px rgb(0 0 0 / 14%); white-space: nowrap;
 }
 .cb-tag strong { font-size: .8rem; letter-spacing: .02em; }
+
+.fb-mood-bar {
+  position: absolute; top: 12px; right: 14px; display: flex; gap: 8px;
+}
+.fb-mood-btn {
+  font: 600 12px/1 "Quicksand", ui-rounded, sans-serif; cursor: pointer;
+  color: #54452f; background: #f4ead9; border: none; border-radius: 999px;
+  padding: 9px 16px; box-shadow: 0 4px 14px rgb(0 0 0 / 20%);
+}
+.fb-mood-btn:hover { background: #fff8ea; }
+.fb-mood-btn.active { background: #f2b95c; }
+
+/* --- state grid ------------------------------------------------------ */
+.fb-grid {
+  display: grid; grid-template-columns: 150px repeat(4, 1fr);
+  gap: 10px; align-items: stretch; margin: 0 0 12px;
+}
+.fb-grid-head {
+  font-size: .72rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: #97856b; display: flex; align-items: flex-end; padding: 0 8px 4px;
+}
+.fb-grid-name {
+  display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: .9rem;
+  padding: 0 8px;
+}
+.fb-grid-cell {
+  display: flex; align-items: center; justify-content: center;
+  background: #faf5ea; border-radius: 16px; padding: 12px 8px;
+  box-shadow: 0 4px 16px rgb(74 63 48 / 10%);
+}
+.fb-grid-dim { opacity: .6; }
+.fb-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%); flex: none; }
+
+/* --- note cards ------------------------------------------------------ */
+.fb-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px; margin: 0 0 42px;
+}
+.fb-card {
+  padding: 20px 22px; border-radius: 18px;
+  background: #faf5ea; box-shadow: 0 8px 26px rgb(74 63 48 / 12%);
+}
+.fb-card h3 {
+  margin: 0 0 8px; font-size: 1rem; display: flex; align-items: center; gap: 8px;
+}
+.fb-card code { font-size: .72rem; color: #97856b; font-family: ui-monospace, monospace; }
+.fb-card p { margin: 0 0 8px; font-size: .88rem; color: #6d5f4b; }
+.fb-blink-note { color: #97856b; font-size: .84rem; }
