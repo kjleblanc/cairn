@@ -1710,3 +1710,62 @@ test("a stopped run never evaluates the push chip, with a real local commit wait
   expect(aheadCount(project)).toBe("1");
   await app.close();
 });
+
+// Task 157 (the owner's request): when a task completes, Cairn's comment is
+// followed by up to three follow-up suggestions as tappable chips. A tap is
+// not a dispatch — it sends the suggestion as the owner's own message, so the
+// ordinary conversation (and every one of its gates) decides what happens
+// next. Mock lane, offline demonstration.
+test("the comment's follow-up suggestions render as chips, and a tap sends one as the owner's message", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-followups-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  // The card, then the settled comment, then — under it — the chips.
+  await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
+  const chips = win.locator(".followup-chip");
+  await expect(chips).toHaveCount(2, { timeout: 15_000 });
+  await expect(chips.nth(0)).toHaveText("Show me how to try this myself");
+  await expect(chips.nth(1)).toHaveText("Pick the next small improvement");
+  // The comment's visible text carries no fence, and nothing dispatched:
+  // there is exactly the one card this run already had.
+  await expect(win.locator(".chat-messages")).not.toContainText("cairn-followups");
+  await expect(win.locator(".result-card")).toHaveCount(1);
+
+  // A tap sends the suggestion verbatim as the owner's own message. The
+  // chips step aside the moment the conversation moves on — they only ever
+  // hang on the latest word.
+  await chips.nth(0).click();
+  const sent = win.locator(".bubble-owner", { hasText: "Show me how to try this myself" });
+  await expect(sent).toHaveCount(1);
+  await expect(win.locator(".followup-chip")).toHaveCount(0);
+  await waitStreamDone(win);
+
+  // On disk: the commentary turn carries the suggestions (so a reload can
+  // re-render them), and the tapped one is an ordinary owner turn, verbatim.
+  const turns = await win.evaluate(async (dir) => {
+    const list = await window.cairn.conductorConversations(dir);
+    return window.cairn.conductorTurns(dir, list[list.length - 1].id);
+  }, project);
+  const comment = turns.find((turn) => turn.role === "cairn" && turn.text.includes("The card says this task finished DONE"));
+  expect(comment?.role).toBe("cairn");
+  if (comment?.role === "cairn") {
+    expect(comment.followups).toEqual(["Show me how to try this myself", "Pick the next small improvement"]);
+  }
+  expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Show me how to try this myself")).toHaveLength(1);
+  await app.close();
+});

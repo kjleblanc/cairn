@@ -829,9 +829,30 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   ) : null}
                 </Fragment>
               ) : (
-                <div key={i} className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}`}>
-                  {turn.role === "owner" ? turn.text : <Md text={turn.text} />}
-                </div>
+                <Fragment key={i}>
+                  <div className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}`}>
+                    {turn.role === "owner" ? turn.text : <Md text={turn.text} />}
+                  </div>
+                  {/* Task 157: the commentary's follow-up suggestions, offered
+                    * only while they are the conversation's latest word — once
+                    * anything newer lands (a tap sends the suggestion itself,
+                    * which appends the owner's turn), they step aside. A tap is
+                    * an ordinary send(): it queues, refuses, and retries exactly
+                    * like typed text, and it can never dispatch anything by
+                    * itself — the proposal card and its gates still decide. */}
+                  {turn.role === "cairn" && i === turns.length - 1 && turn.followups && turn.followups.length > 0 ? (
+                    <div className="followups" role="group" aria-label="Cairn's suggestions for what to do next">
+                      <p className="small muted followups-label">Where we could go next — tap one and it becomes your message to Cairn:</p>
+                      <div className="followups-row">
+                        {turn.followups.map((suggestion) => (
+                          <button key={suggestion} type="button" className="followup-chip"
+                            disabled={runActive}
+                            onClick={() => void send(suggestion)}>{suggestion}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </Fragment>
               )))}
               {taskBlock ? (
                 <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}

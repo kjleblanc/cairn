@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import type { ConductorTurn, ResultCard } from "../../shared/ipc.js";
+import type { ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
 import { cardDigest, cardMarkers, recordCardMarker } from "./cardauth.js";
+import { sanitizeFollowups } from "./followups.js";
 
 const IGNORE_LINE = "/.cairn/";
 
@@ -113,6 +114,18 @@ export function readTurns(root: string, id: string): ConductorTurn[] {
       const value = JSON.parse(line) as ConductorTurn;
       if (typeof value.ts !== "string") continue;
       if ((value.role === "owner" || value.role === "cairn") && typeof value.text === "string") {
+        // A commentary's suggestions (Task 157) are re-validated on read with
+        // the same fail-closed rule as at persist time: this file lives
+        // inside the project a worker can write to, so a hand-edited
+        // `followups` — wrong shape, oversized, multi-line — is dropped from
+        // the turn rather than rendered as a chip that sends itself on a tap.
+        // The turn itself always survives; only the field is fail-closed.
+        if (value.role === "cairn" && "followups" in value) {
+          const chat = value as ConductorChatTurn;
+          const cleaned = sanitizeFollowups(chat.followups);
+          if (cleaned === null) delete chat.followups;
+          else chat.followups = cleaned;
+        }
         turns.push(value);
       } else if (value.role === "envelope" && isResultCard(value.card)) {
         // Shape AND authorship. What the owner reads as Cairn's own

@@ -53,8 +53,14 @@ const DETAILS_TASK_BLOCK = JSON.stringify({
 // is a real state with its own rules — main holds the project's lock and the
 // renderer never started a stream — and a test can only stand in that window if
 // it lasts longer than a click. Same words, more room.
+//
+// Task 157 added the follow-up suggestions: a well-formed cairn-followups
+// fence rides the final part, so the whole loop — parse, persist, chips on
+// screen, tap-to-send — is provable offline. The visible comment text is
+// unchanged (the fence is stripped), and the usage frame is content-blind.
 const COMMENTARY_SCRIPT = {
-  parts: ["The card says", " this task finished DONE", ", and the report", " is in docs/ai-work."],
+  parts: ["The card says", " this task finished DONE", ", and the report", " is in docs/ai-work.",
+    "\n\n```cairn-followups\n[\"Show me how to try this myself\", \"Pick the next small improvement\"]\n```"],
   delayMs: 400,
 };
 let commentaryDelayMs = COMMENTARY_SCRIPT.delayMs;

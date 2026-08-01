@@ -173,6 +173,10 @@ export interface ConductorDelta {
    * bubble with no Stop control, and its failure is released quietly — no
    * error bubble, no phantom partial turn — matching main's silent drop. */
   turnKind?: ConductorStreamKind;
+  /** Task 157: the commentary's up-to-three next-step suggestions, on the
+   * done delta only. Null for a reply (a reply never carries them) and when
+   * the model's block failed validation — never a coerced list. */
+  followups?: string[] | null;
 }
 
 export interface CairnApi {
@@ -277,6 +281,11 @@ export interface ConductorChatTurn {
   ts: string;
   tokens?: number;
   costUsd?: number;
+  /** Task 157: present only on a cairn commentary turn — the next-step
+   * suggestions the model offered alongside its comment, validated before
+   * persist and re-validated on read (the conversation file lives inside the
+   * project a worker can write to). */
+  followups?: string[];
 }
 
 /** A turn the ENVELOPE wrote. It has no text: everything it says is rendered

@@ -25,6 +25,7 @@ import { cardBriefing } from "./relay.js";
 import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
 import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, readTurns } from "./store.js";
+import { extractFollowups } from "./followups.js";
 import { extractTaskBlock } from "./taskblock.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
@@ -41,9 +42,13 @@ const PROMPT_TOO_LARGE_MESSAGE =
  * failure is theirs to see and retry.
  *
  * "commentary" is the ENVELOPE's own paid call, on a card the owner asked
- * nothing about. It proposes nothing — a comment on finished work is not a
- * pitch for more — and if it fails, the card stands alone rather than growing
- * an error bubble and a "Try again" for a question no one asked.
+ * nothing about. It never proposes a dispatchable task — a comment on
+ * finished work becomes a `cairn-task` card over nobody's question — and if
+ * it fails, the card stands alone rather than growing an error bubble and a
+ * "Try again" for a question no one asked. Since Task 157 (the owner's
+ * request) it may offer up to three lightweight follow-up SUGGESTIONS:
+ * tapping one just sends an ordinary owner message, so every dispatch gate
+ * still waits for the owner.
  */
 type TurnKind = "reply" | "commentary";
 
@@ -54,9 +59,16 @@ type TurnKind = "reply" | "commentary";
  * context through `cardBriefing`, which keeps the report's own separation —
  * what Cairn's runtime verified under one label, what the worker claims under
  * another. So this says only what to do with it: comment once, in plain words,
- * on the records rather than on impressions, and propose nothing.
+ * on the records rather than on impressions, and then offer the follow-ups.
+ *
+ * Task 157 (the owner's request) added the suggestions: this turn's founding
+ * rule was "a comment on finished work is not a pitch for more", and the
+ * owner now asks for exactly that pitch — in lightweight form. A suggestion
+ * is not a proposal: it never becomes a `cairn-task` block here, it never
+ * dispatches anything, and tapping one just starts the ordinary conversation
+ * in which every gate still waits for the owner.
  */
-const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. Add one short plain-language comment for the owner. State result facts only from the card or the records in your briefing, and name your source. Do not propose a task.";
+const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. Do two things. First, add one short plain-language comment for the owner: state result facts only from the card or the records in your briefing, and name your source. Second, offer one to three small next steps the records genuinely point to, in one fenced block of short imperative sentences the owner could tap to send as-is (\"Retry the stopped task with a narrower outcome\", \"Update the milestone line in PROJECT.md\"). If nothing genuinely follows, omit the block entirely.\n\n```cairn-followups\n[\"first small next step\", \"second small next step\"]\n```\n\nNever emit a cairn-task block in this turn: these suggestions are not a dispatch — the owner decides each one in conversation.";
 
 /** One live stream per project dir, so a stray second send can't stomp on a
  * stream already in flight and `stop` has something to abort. It carries its
@@ -403,20 +415,27 @@ async function streamTurn(
       }
     }
 
-    const { block, text } = extractTaskBlock(full);
+    const { block, text: withoutTaskFence } = extractTaskBlock(full);
+    // Task 157: the suggestions ride the commentary turn only. A reply that
+    // emits the fence anyway has it stripped and dropped — symmetric with the
+    // commentary task-block drop below: neither voice may grow a control the
+    // other turn's owner never asked for.
+    const { followups: found, text } = extractFollowups(withoutTaskFence);
+    const followups = kind === "commentary" ? found : null;
     const cairnTurn: ConductorTurn = {
       role: "cairn",
       text,
       ts: new Date().toISOString(),
       ...(tokens !== undefined ? { tokens } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(followups !== null ? { followups } : {}),
     };
     appendTurn(dir, id, cairnTurn);
-    // "Do not propose a task" is enforced here as well as asked for above: a
-    // model that emits a block anyway has its fence stripped from the text like
+    // "No cairn-task block" is enforced here as well as asked for above: a
+    // model that emits one anyway has its fence stripped from the text like
     // any other, and the proposal is dropped rather than put on screen as a
     // card the owner never asked a question to get.
-    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: kind === "reply" ? block : null, turnKind: kind });
+    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: kind === "reply" ? block : null, followups, turnKind: kind });
   } catch (err) {
     if (kind === "commentary") {
       // The envelope started this call, not the owner. A comment that failed is
