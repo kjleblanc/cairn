@@ -38,7 +38,8 @@ function disposition(text: string): Disposition {
   return matches[0][1].toUpperCase() as "DONE" | "STOPPED";
 }
 
-function hasLegacyState(root: string): boolean {
+/** Exported so conversion (convert.ts) discloses the same reserved legacy signal. */
+export function hasLegacyState(root: string): boolean {
   try {
     const raw = execFileSync("git", ["rev-parse", "--git-dir"], {
       cwd: root,

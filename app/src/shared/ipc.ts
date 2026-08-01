@@ -1,4 +1,4 @@
-import type { ProjectStatus, RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
+import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required" };
@@ -28,6 +28,11 @@ export type TownPresentationState = {
   dividerWidth: number;
 };
 export type InitInput = { dir: string; name: string; what: string; who: string; milestone: string };
+/** Task 161: conversion's two-step result — the converted project's ordinary
+ * status (so the app can open it like any project) plus conversion's own
+ * account of what it added, kept, committed, and caveated. */
+export type ConvertResult = { status: ProjectStatus; outcome: ConvertOutcome };
+export type { ConvertInspection, ConvertOutcome };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 export type TaskActivityEvent = { dir: string; activity: SerialActivity };
 export type TaskRoutePreview = { route: RouteResult; disclosure?: WorkerDisclosure };
@@ -216,6 +221,8 @@ export interface CairnApi {
   projectPickFolder(): Promise<string | null>;
   projectOpen(dir: string): Promise<Result<ProjectStatus>>;
   projectInit(input: InitInput): Promise<Result<ProjectStatus>>;
+  projectConvertInspect(dir: string): Promise<Result<ConvertInspection>>;
+  projectConvert(input: InitInput): Promise<Result<ConvertResult>>;
   projectStatus(dir: string): Promise<Result<ProjectStatus>>;
   projectForget(dir: string): Promise<Result<null>>;
   townLoad(dir: string): Promise<Result<TownPresentationState>>;

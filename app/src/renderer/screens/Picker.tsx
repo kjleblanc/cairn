@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { ProjectStatus } from "@cairn/core";
-import type { CheckupReport, RecentProject } from "../../shared/ipc";
+import type { CheckupReport, ConvertInspection, RecentProject } from "../../shared/ipc";
 import { STONE_MEANING } from "../components/Scene";
 import { CheckupCard } from "../components/Checkup";
+import { ConvertPanel } from "../components/Convert";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 import { cairn } from "../api";
 
@@ -35,6 +36,8 @@ export function Picker({ startNew, note, onOpen, onOpenSuggestion, onOpenFolder,
   const [busy, setBusy] = useState(false);
   const [checkup, setCheckup] = useState<{ dir: string; report: CheckupReport } | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
+  const [converting, setConverting] = useState<{ dir: string; inspection: ConvertInspection } | null>(null);
+  const [inspecting, setInspecting] = useState(false);
 
   // Task 160: one read-only audit on demand. The card only reports — it
   // never fixes, moves, or deletes anything in the checked project.
@@ -43,6 +46,19 @@ export function Picker({ startNew, note, onOpen, onOpenSuggestion, onOpenFolder,
     const r = await cairn.projectCheckup(dir);
     setChecking(null);
     if (r.ok) setCheckup({ dir, report: r.value });
+    else setError(r.message);
+  }
+
+  // Task 161: conversion starts read-only — Cairn looks at the chosen folder
+  // and shows what it found before anything is written. The write happens
+  // only from the ConvertPanel's own explicit button.
+  async function startConvert() {
+    const d = await cairn.projectPickFolder();
+    if (!d) return;
+    setInspecting(true);
+    const r = await cairn.projectConvertInspect(d);
+    setInspecting(false);
+    if (r.ok) setConverting({ dir: d, inspection: r.value });
     else setError(r.message);
   }
 
@@ -103,6 +119,14 @@ export function Picker({ startNew, note, onOpen, onOpenSuggestion, onOpenFolder,
     );
   }
 
+  if (converting) {
+    return (
+      <ConvertPanel dir={converting.dir} inspection={converting.inspection}
+        onConverted={(dir, status) => { setConverting(null); onCreated(dir, status); }}
+        onBack={() => setConverting(null)} />
+    );
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: "24px auto" }}>
       <div className="row spread">
@@ -110,6 +134,7 @@ export function Picker({ startNew, note, onOpen, onOpenSuggestion, onOpenFolder,
         <button className="pill pill-quiet" onClick={onSettings}>Settings</button>
       </div>
       {note ? <p className="note-banner">{note}</p> : null}
+      {error ? <ErrorCard message={error} /> : null}
       {/* One gloss for the whole list, not one per row, and only when a stone
           badge is actually on screen — a first-run owner with no projects is
           owed no explanation of a figure they cannot see. */}
@@ -149,8 +174,10 @@ export function Picker({ startNew, note, onOpen, onOpenSuggestion, onOpenFolder,
         <Pill onClick={onOpenFolder}>Open a project folder</Pill>
       </div>
       <Card title="bring an existing project">
-        <p className="small">A folder that already has a Cairn contract can be opened directly. For other existing work, follow Project Conversion in the guides.</p>
-        <p className="small muted">This reset does not transform legacy <span className="mono">.git/cairn</span> task state; it preserves that state and blocks new task mutation until you migrate it safely.</p>
+        <p className="small">A folder that already has a Cairn contract can be opened directly. Other existing work can be converted: Cairn looks first and shows you what it found, then only ever adds its rulebook and records — nothing is overwritten, moved, or deleted.</p>
+        <div className="row" style={{ marginTop: 8 }}>
+          <Pill onClick={() => void startConvert()} disabled={inspecting}>{inspecting ? "Looking…" : "Convert an existing project"}</Pill>
+        </div>
       </Card>
       {checkup ? (
         <CheckupCard report={checkup.report} onClose={() => setCheckup(null)}

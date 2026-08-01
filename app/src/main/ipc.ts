@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, shell } from "electron";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { initProject, isCairnProject, projectStatus } from "@cairn/core";
+import { convertProject, initProject, inspectConversion, isCairnProject, projectStatus } from "@cairn/core";
 import type {
   ConductorConnectRequest,
   ConductorConsentCard,
@@ -122,6 +122,9 @@ export function registerProjectIpc(): void {
     toResult("project:checkup", () => runCheckup(dir)));
 
   ipcMain.handle("project:pickFolder", async (): Promise<string | null> => {
+    // Test seam (same family as CAIRN_OPEN): E2E specs cannot drive the
+    // native dialog, so a set path stands in for the owner's pick.
+    if (process.env.CAIRN_TEST_PICK_FOLDER) return process.env.CAIRN_TEST_PICK_FOLDER;
     const res = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
     return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0];
   });
@@ -146,6 +149,20 @@ export function registerProjectIpc(): void {
       const s = projectStatus(input.dir);
       touchProject(input.dir);
       return s;
+    }));
+
+  // Task 161: conversion, the button form of PROJECT-CONVERSION.md. Inspect
+  // is strictly read-only; convert only ever creates new paths and commits
+  // them by exact path when git allows (core's convertProject holds the law).
+  ipcMain.handle("project:convertInspect", (_e, dir: string) =>
+    toResult("project:convertInspect", () => inspectConversion(dir)));
+
+  ipcMain.handle("project:convert", (_e, input: InitInput) =>
+    toResult("project:convert", () => {
+      const outcome = convertProject(input.dir, input);
+      const s = projectStatus(input.dir);
+      touchProject(input.dir);
+      return { status: s, outcome };
     }));
 
   ipcMain.handle("project:status", (_e, dir: string) => toResult("project:status", () => projectStatus(dir)));

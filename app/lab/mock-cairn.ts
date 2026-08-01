@@ -219,6 +219,10 @@ const mock: CairnApi = {
   projectPickFolder: () => soon(null),
   projectOpen: (dir: string) => dir === DIR ? soon(ok(projectStatus)) : soon(nope("the lab has exactly one mock project")),
   projectInit: (_input: InitInput) => soon(nope("the lab never creates projects")),
+  // Task 161: the lab never converts either — the picker card's button gets
+  // the same honest "not in the lab" refusal as project creation.
+  projectConvertInspect: (_dir: string) => soon(nope("the lab never converts projects")),
+  projectConvert: (_input: InitInput) => soon(nope("the lab never converts projects")),
   projectStatus: (dir: string) => dir === DIR ? soon(ok(projectStatus)) : soon(nope("the lab has exactly one mock project")),
   projectForget: (_dir: string) => soon(nope("the lab never forgets its one project")),
   // Task 160: a small plainly-mock sample report, shaped exactly like the

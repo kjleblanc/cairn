@@ -22,7 +22,8 @@ export interface LogRow {
   moved: string;
 }
 
-const LOG_HEADER =
+/** Exported so conversion (convert.ts) seeds the exact same log the scaffold does. */
+export const LOG_HEADER =
   "| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |\n" +
   "|---|---|---|---|---|---|---|---|\n";
 
