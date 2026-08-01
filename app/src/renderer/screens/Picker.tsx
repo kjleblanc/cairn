@@ -98,17 +98,20 @@ export function Picker({ startNew, note, onOpen, onOpenFolder, onCreated, onSett
           owed no explanation of a figure they cannot see. */}
       {recent.some((r) => r.ok) ? <p className="small muted">{STONE_MEANING}</p> : null}
       {recent.map((r) => r.ok ? (
-        <button key={r.dir} className="card" style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer", font: "inherit" }}
-          onClick={() => onOpen(r.dir)}>
+        <div key={r.dir} className="card">
           <div className="row spread">
-            <div>
+            <button type="button" style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", padding: 0, background: "none", cursor: "pointer", font: "inherit" }}
+              onClick={() => onOpen(r.dir)}>
               <strong>{r.name || "Unnamed project"}</strong>
               <p className="small muted">{r.milestone || "milestone not set"}</p>
               {lastOpenedText(r.lastOpened) ? <p className="small muted">{lastOpenedText(r.lastOpened)}</p> : null}
+            </button>
+            <div className="row">
+              <span className="badge badge-done">{r.stones} {r.stones === 1 ? "stone" : "stones"}</span>
+              <Pill kind="quiet" onClick={() => void forget(r.dir)}>Remove from this list</Pill>
             </div>
-            <span className="badge badge-done">{r.stones} {r.stones === 1 ? "stone" : "stones"}</span>
           </div>
-        </button>
+        </div>
       ) : (
         <div key={r.dir} className="card">
           <div className="row spread">

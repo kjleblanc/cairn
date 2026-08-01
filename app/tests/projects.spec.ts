@@ -200,7 +200,8 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(brokenCard.getByText(/can't find this project/)).toBeVisible();
     const betaCard = win.locator(".card", { hasText: "Beta" });
     await expect(betaCard.getByText("last opened today")).toBeVisible();
-    const removeButton = win.getByRole("button", { name: "Remove from this list" });
+    // Scoped to the broken card: healthy cards carry the same control now.
+    const removeButton = brokenCard.getByRole("button", { name: "Remove from this list" });
     await expect(removeButton).toBeVisible();
 
     // Removing edits only the app's own list…
@@ -219,6 +220,32 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
     await win.getByRole("button", { name: "← Project home" }).click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
+    await app.close();
+  });
+
+  test("a healthy project can be removed without changing its folder, then opened again", async () => {
+    const contract = join(projB, "AGENTS.md");
+    const contractBefore = readFileSync(contract);
+
+    const app = await electron.launch({ args: ["."], env: baseEnv() });
+    const win = await app.firstWindow();
+    await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+    await win.getByRole("button", { name: "← Project home" }).click();
+    await win.getByRole("button", { name: "Switch project" }).click();
+    await win.getByRole("button", { name: "All projects" }).click();
+
+    const betaCard = win.locator(".card", { hasText: "Beta" });
+    await betaCard.getByRole("button", { name: "Remove from this list" }).click();
+    await expect(betaCard).toHaveCount(0);
+    expect(readRegistry().some((entry) => entry.dir === projB)).toBe(false);
+    expect(readFileSync(contract)).toEqual(contractBefore);
+
+    // Opening the untouched folder through the same API the folder picker uses
+    // both succeeds and remembers it again.
+    const reopened = await win.evaluate((dir) => window.cairn.projectOpen(dir), projB);
+    expect(reopened.ok).toBe(true);
+    expect(readRegistry()[0]?.dir).toBe(projB);
+    expect(readFileSync(contract)).toEqual(contractBefore);
     await app.close();
   });
 
