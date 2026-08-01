@@ -382,7 +382,11 @@ async function streamTurn(
     // A commentary turn nobody asked for tells nobody: it simply does not
     // happen, and the card is unaffected.
     if (promptTooLarge(messages)) {
-      if (kind === "reply") onDelta({ dir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE });
+      if (kind === "reply") onDelta({ dir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE, turnKind: kind });
+      // A commentary that never starts still releases the renderer's
+      // indicator (Task 153): a quiet error event, matching the silent drop
+      // in the catch below. No message, no bubble, no partial turn.
+      else onDelta({ dir, conversationId: id, kind: "error", turnKind: kind });
       return;
     }
     const slot: SlotWithKey = { baseUrl: conn.baseUrl, model: conn.model, apiKey: keystore.decryptedKey(conn) };
@@ -392,7 +396,7 @@ async function streamTurn(
         full += event.text;
         const live = controllers.get(dir);
         if (live?.controller === controller) live.text = full;
-        onDelta({ dir, conversationId: id, kind: "delta", text: event.text });
+        onDelta({ dir, conversationId: id, kind: "delta", text: event.text, turnKind: kind });
       } else if (event.kind === "usage") {
         tokens = (event.promptTokens ?? 0) + (event.completionTokens ?? 0);
         costUsd = event.costUsd;
@@ -412,22 +416,26 @@ async function streamTurn(
     // model that emits a block anyway has its fence stripped from the text like
     // any other, and the proposal is dropped rather than put on screen as a
     // card the owner never asked a question to get.
-    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: kind === "reply" ? block : null });
+    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: kind === "reply" ? block : null, turnKind: kind });
   } catch (err) {
     if (kind === "commentary") {
       // The envelope started this call, not the owner. A comment that failed is
       // logged and dropped: no partial turn, no retry, and no error bubble for
       // a question that was never asked. The card already said what happened.
+      // The one event (Task 153): a message-less error, so a renderer showing
+      // the comment mid-stream releases its indicator instead of holding it
+      // forever. Nothing is persisted and nothing is surfaced as an error.
       logError("conductor:commentary", err);
+      onDelta({ dir, conversationId: id, kind: "error", turnKind: kind });
     } else if (controller.signal.aborted) {
       const cairnTurn: ConductorTurn = { role: "cairn", text: `${full}\n\n(stopped early)`, ts: new Date().toISOString() };
       appendTurn(dir, id, cairnTurn);
-      onDelta({ dir, conversationId: id, kind: "error", message: "Stopped." });
+      onDelta({ dir, conversationId: id, kind: "error", message: "Stopped.", turnKind: kind });
     } else if (err instanceof ConductorHttpError) {
-      onDelta({ dir, conversationId: id, kind: "error", message: err.ownerMessage });
+      onDelta({ dir, conversationId: id, kind: "error", message: err.ownerMessage, turnKind: kind });
     } else {
       logError("conductor:send", err);
-      onDelta({ dir, conversationId: id, kind: "error", message: "Cairn had a problem answering. Trying again in a moment usually works." });
+      onDelta({ dir, conversationId: id, kind: "error", message: "Cairn had a problem answering. Trying again in a moment usually works.", turnKind: kind });
     }
   } finally {
     controllers.delete(dir);

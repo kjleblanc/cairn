@@ -167,6 +167,12 @@ export interface ConductorDelta {
   turn?: ConductorTurn;
   taskBlock?: TaskBlock | null;
   message?: string;
+  /** Which of Cairn's two voices is streaming: the reply the owner asked
+   * for, or the envelope's one short comment on a result card (Task 153).
+   * The renderer needs the difference: a commentary is shown as a labeled
+   * bubble with no Stop control, and its failure is released quietly — no
+   * error bubble, no phantom partial turn — matching main's silent drop. */
+  turnKind?: ConductorStreamKind;
 }
 
 export interface CairnApi {

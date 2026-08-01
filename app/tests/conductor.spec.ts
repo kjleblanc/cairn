@@ -1154,7 +1154,7 @@ test("the conductor comments on the card the envelope just posted, and the comme
   // The comment FOLLOWS the card, and the sibling combinator is the whole
   // assertion: the two replies that came before the dispatch — the proposal
   // and the set-aside acknowledgement — can never satisfy it.
-  const comment = win.locator(".chat-messages .result-card ~ .bubble-cairn");
+  const comment = win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)");
   await expect(comment).toHaveCount(1, { timeout: 30_000 });
   await expect(comment).toContainText("The card says this task finished DONE");
   // The card is untouched by it, and nothing was surfaced as a failure.
@@ -1230,9 +1230,18 @@ test("a message sent while the comment streams is refused, leaves no phantom tur
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
 
+  // Task 153: the comment is VISIBLE while it streams — a labeled bubble with
+  // no Stop — which is what makes the enabled composer honest. Before this,
+  // it accumulated invisibly and every send bounced for no visible reason.
+  await expect(win.getByText(/A short comment on the result card above/)).toBeVisible();
+
   await sendChat(win, "Is that everything?");
   const refusal = win.locator(".bubble-system");
   await expect(refusal).toBeVisible({ timeout: 10_000 });
+
+  // Task 153: a refused send keeps the owner's words in the composer. Before
+  // this, Send cleared the composer even though the send never happened.
+  await expect(win.getByPlaceholder("Talk with Cairn")).toHaveValue("Is that everything?");
 
   // The message never reached the conversation — main refused before persisting
   // anything — so it must not sit in the transcript looking sent. A reload would
@@ -1246,9 +1255,12 @@ test("a message sent while the comment streams is refused, leaves no phantom tur
   await expect(win.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
 
   // Nothing was lost either: release the held comment so it lands, and the
-  // message goes through.
+  // message goes through. The streaming comment bubble (bubble-commentary)
+  // unmounts as the settled turn lands — waiting for the caption to go is
+  // what keeps the Try again click after the lock has really been released.
   releaseFixtureCommentary();
-  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(1, { timeout: 30_000 });
+  await expect(win.getByText(/A short comment on the result card above/)).toHaveCount(0, { timeout: 30_000 });
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
   await refusal.getByRole("button", { name: "Try again" }).click();
   await waitStreamDone(win);
   await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(1);
@@ -1260,6 +1272,55 @@ test("a message sent while the comment streams is refused, leaves no phantom tur
     return window.cairn.conductorTurns(dir, list[list.length - 1].id);
   }, project);
   expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Is that everything?").length).toBe(1);
+  await app.close();
+});
+
+// Task 153: the owner's own report — "if Cairn wants to send to dispatch
+// more than once during a chat, the button never appears." The wedge was the
+// invisible commentary window (fixed above) plus the stale dispatched card
+// lingering with its spent button; this pins the whole second cycle, mock
+// lane both times.
+test("a second proposal after a dispatched run gets its own Send to dispatch", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-second-dispatch-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  // First proposal, resolved and dispatched to the offline demo.
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const taskCard = win.locator(".task-card");
+  await expect(taskCard).toBeVisible();
+  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  const panel = win.locator(".dispatch-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+
+  // The dispatched card leaves with its run: nothing stale offers to re-run
+  // a task that already started.
+  await expect(win.locator(".task-card")).toHaveCount(0);
+
+  // The result card lands and the envelope's comment settles — after this
+  // the stream lock is provably free for the next send.
+  await expect(win.locator(".result-card")).toHaveCount(1, { timeout: 30_000 });
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
+
+  // The second proposal in the SAME conversation gets its own card, with an
+  // enabled Send to dispatch (the fixture's detailtask carries no concerns),
+  // and the second dispatch opens and runs.
+  await sendChat(win, "detailtask now");
+  await waitStreamDone(win);
+  const secondCard = win.locator(".task-card");
+  await expect(secondCard).toBeVisible();
+  const secondSend = secondCard.getByRole("button", { name: "Send to dispatch" });
+  await expect(secondSend).toBeEnabled();
+  await secondSend.click();
+  await expect(win.locator(".dispatch-panel")).toBeVisible({ timeout: 15_000 });
+  await win.locator(".dispatch-panel").getByRole("button", { name: "Run offline demonstration" }).click();
+  await expect(win.locator(".result-card")).toHaveCount(2, { timeout: 30_000 });
   await app.close();
 });
 
@@ -1642,7 +1703,7 @@ test("a stopped run never evaluates the push chip, with a real local commit wait
   // waiting for it puts this assertion well past any moment a chip could have
   // appeared — it is absent because it was never evaluated, not because the
   // screen was read too early.
-  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn")).toHaveCount(1, { timeout: 30_000 });
+  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
   await expect(win.locator(".push-chip")).toHaveCount(0);
   await expect(win.locator(".push-confirm")).toHaveCount(0);
   await expect(win.getByText("Push?", { exact: false })).toHaveCount(0);

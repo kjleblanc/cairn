@@ -331,6 +331,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const [turns, setTurns] = useState<ConductorTurn[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
+  // The envelope's comment on a result card, while it streams (Task 153).
+  // Main holds the stream lock for it exactly like an owner's reply, but the
+  // renderer did not start it — so without this state it accumulated
+  // invisibly: the composer looked ready while every send was refused.
+  const [commentary, setCommentary] = useState(false);
   const [composer, setComposer] = useState("");
   // Villager bubble (Task 146): tucked, the dialog collapses to a one-line
   // chip floating by Cairn's node.
@@ -422,6 +427,12 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         streamingRef.current = stream.text;
         setStreamingText(stream.text);
         setStreaming(true);
+      } else if (stream?.kind === "commentary") {
+        // A reload mid-comment reattaches the same way, minus the in-flight
+        // bookkeeping: this stream was never this screen's send (Task 153).
+        streamingRef.current = stream.text;
+        setStreamingText(stream.text);
+        setCommentary(true);
       }
     });
     return () => { live = false; };
@@ -482,6 +493,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     }
 
     if (event.kind === "delta") {
+      // A delta for this conversation that no send of ours started is the
+      // envelope's comment: make it visible (Task 153). Main runs at most
+      // one stream per project, so this never overlaps an owner's reply.
+      if (event.turnKind === "commentary") setCommentary(true);
       streamingRef.current += event.text ?? "";
       setStreamingText(streamingRef.current);
       return;
@@ -490,6 +505,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       streamingRef.current = "";
       setStreamingText("");
       setStreaming(false);
+      setCommentary(false);
       inFlightRef.current = null;
       if (event.turn) setTurns((t) => [...t, event.turn as ConductorTurn]);
       // Only a reply that carries a new task block replaces the card — a
@@ -499,6 +515,17 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         setTaskBlock(event.taskBlock);
         setTaskBlockKey((k) => k + 1);
       }
+      return;
+    }
+    // A comment that ends without a done — failed, stopped, or too large —
+    // is dropped by main with nothing persisted and nothing to say (see
+    // service.ts). Release the indicator just as quietly: no error bubble,
+    // and no stopped-early echo of a partial turn that was never saved
+    // (Task 153).
+    if (event.turnKind === "commentary") {
+      streamingRef.current = "";
+      setStreamingText("");
+      setCommentary(false);
       return;
     }
     // A provider error or a manual stop, both delivered as {kind:"error"}. Any
@@ -621,6 +648,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       inFlightRef.current = null;
       setStreaming(false);
       setTurns((t) => t.filter((turn) => turn !== optimistic));
+      // And back into the composer (Task 153): the text was cleared the
+      // moment Send was pressed, so without this a refused send reads as
+      // "my message vanished" — the failure the owner reported. The refusal
+      // bubble's "Try again" still resends this exact string.
+      setComposer(trimmed);
       setError(response.message);
       return false;
     }
@@ -640,9 +672,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   }
 
   async function newConversation() {
-    if (streaming) {
+    if (streaming || commentary) {
       // Stop the abandoned stream before clearing state, so it can't keep
-      // running against a conversation the screen no longer shows.
+      // running against a conversation the screen no longer shows. A comment
+      // is stopped the same way (Task 153): it belongs to the conversation
+      // being left, and main drops the abort silently.
       await cairn.conductorStop(dir);
     }
     inFlightRef.current = null;
@@ -651,6 +685,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     streamingRef.current = "";
     setStreamingText("");
     setStreaming(false);
+    setCommentary(false);
     setError(null);
     setTaskBlock(null);
     // A running dispatch belongs to the project, not to the conversation it
@@ -722,6 +757,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // envelope posts its own result card into this conversation.
     setDispatch(null);
     setRealCallConfirmed(false);
+    // The proposed-task card leaves with its dispatch (Task 153): its chips
+    // are spent, and its still-clickable "Send to dispatch" would otherwise
+    // offer to re-run a task that is already running — and crowd the next
+    // proposal out of the conversation's attention.
+    setTaskBlock(null);
     void refreshSession();
   }
 
@@ -846,6 +886,18 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   <div className="row" style={{ marginTop: 8 }}>
                     <Pill kind="quiet" onClick={() => void cairn.conductorStop(dir)}>Stop</Pill>
                   </div>
+                </div>
+              ) : null}
+              {/* The envelope's comment, visible while it streams (Task 153).
+                * No Stop: it is the envelope's own call, and main's refusal
+                * copy deliberately never points at a control for it. The
+                * composer stays enabled by design (Task 070) — the caption is
+                * what makes that honest: why this text is appearing, and why
+                * a send right now may bounce once. */}
+              {commentary ? (
+                <div className="bubble bubble-cairn bubble-commentary">
+                  <Md text={streamingText || "…"} />
+                  <p className="small muted" style={{ margin: "8px 0 0" }}>A short comment on the result card above — not an answer to a message. If a send bounces while this streams, your words stay put.</p>
                 </div>
               ) : null}
               {error ? (
