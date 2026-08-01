@@ -1,94 +1,65 @@
-# Task 157 brief — Cairn suggests follow-up tasks when a task completes
+# Task 157 — Remove projects from the remembered-projects list
 
-## Requested visible outcome
+Requested outcome: In the desktop app's project picker ("Your projects"), every
+remembered project — healthy or broken — has a visible "Remove from this list"
+control; using it removes the project from Cairn's remembered list without
+touching its folder or files on disk, and the same unchanged folder can be
+re-opened afterward.
 
-Whenever a dispatched task finishes and the envelope posts the result card,
-Cairn's short comment on the card is followed by up to three concrete
-next-step suggestions, shown as tappable chips right under the comment.
-Tapping a chip sends that suggestion as the owner's own message, starting the
-ordinary conversation (pushback → proposal card → the owner's dispatch
-approval). The suggestions reappear after a reload, because they persist with
-the comment turn.
+Lane: **Standard** (Lane A, main checkout). Continuation of the stopped
+envelope runs 148/150 — their retained Picker/spec edits are the starting
+point, now verified from scratch in this lane.
 
-## Why (owner's words)
+## Details
 
-"Let's add follow up task suggestions from CAIRN whenever a task completes."
-
-This deliberately overrides the commentary turn's founding rule ("a comment
-on finished work is not a pitch for more", service.ts) — the owner now asks
-for exactly that pitch, in lightweight form.
+Task 148 (STOPPED, RECORD_VERIFICATION_FAILED) left the picker's healthy-card
+removal control and a reopen-safety E2E scenario uncommitted; Task 150
+(STOPPED, MODEL_REPORTED_STOPPED) re-verified typecheck and unit tests but
+could not build or run the Electron scenario in its sandbox. This task picks
+the work up in the owner's real environment: verify the retained edits end to
+end, repair whatever the never-run suite reveals, and land them.
 
 ## Boundary of intent — what must not change
 
-- Dispatch approval: suggestions never dispatch anything. A tap only sends an
-  ordinary owner message; every dispatch still waits behind the proposal card
-  and its own disclosure confirmation.
-- Cost basis: no new paid call. Suggestions ride the existing commentary
-  turn — same stream, same standing authorization. Commentary still skips
-  silently under its existing guards (no connection, stream in flight, run
-  active, quitting, card not posted); when it skips, there are no
-  suggestions, and the card stands alone exactly as today.
-- Commentary failure contract: still a silent drop — no error bubble, no
-  partial turn persisted, no chips from a comment that never finished.
-- Fail-closed parsing, same posture as the task block: a malformed
-  suggestions block yields no chips; the comment's visible text always
-  survives with the fence stripped. A commentary still never emits a
-  `cairn-task` proposal block.
-- The phone stays read-only (Task 143): the suggestion field may flow through
-  the bridge snapshot, but the phone page gains no action affordance.
-- No dependency changes. Protected in-flight work untouched: the modified
-  app.css, TownSquare.tsx, Picker.tsx, tokens.css, projects.spec.ts, LOG.md
-  (uncommitted per the Task 149 precedent), the untracked 148/150 records,
-  design/, faces.tsx, and the log files. (Chat.tsx is already modified in the
-  tree by another actor; I will read the current file and extend it
-  carefully, flagging any foreign hunks I find rather than reverting them.)
+- Removal edits Cairn's own remembered list only; it never deletes, moves, or
+  transforms project folders or their files on disk.
+- No behavior change outside the picker removal flow; no dependency changes.
+- Protected starting work stays byte-identical: every pre-existing modified or
+  untracked path, including the Task 156 cast-port files (TownSquare.tsx,
+  Chat.tsx, app.css, tokens.css, town/faces.tsx), `design/`, the two app logs,
+  and the uncommitted LOG.md rows 148–154 (left uncommitted per the Task 149
+  precedent — this task appends its own row but does not commit the file).
 
-## Plan (AI decision)
+## Owned records
 
-- New `app/src/main/conductor/followups.ts`: `extractFollowups(text)` parses
-  one ```cairn-followups fence holding a JSON array — 1 to 3 items, each a
-  non-empty single-line string ≤ 140 chars, trimmed, de-duplicated; any shape
-  violation returns null and the visible text keeps the fence stripped.
-- `service.ts`: `COMMENTARY_INSTRUCTION` now asks for the one short comment
-  plus up to three next steps in that fence, each written as a short
-  imperative the owner could send as-is; still "no cairn-task block". On the
-  commentary done delta, followups ride along; the persisted cairn turn
-  carries `followups` so a reload re-renders the chips. A reply turn that
-  emits the fence has it stripped and dropped (symmetric with the commentary
-  task-block drop).
-- `shared/ipc.ts`: `ConductorChatTurn` gains `followups?: string[]`;
-  `ConductorDelta` gains `followups?: string[] | null`.
-- `store.ts` `readTurns`: a persisted cairn turn's `followups` is revalidated
-  fail-closed (array of ≤ 3 single-line strings ≤ 140 chars) and dropped if
-  malformed — the conversation file lives inside the project a worker can
-  write to.
-- `Chat.tsx`: when the LAST turn is a cairn turn carrying followups (the just
-  -settled comment, or one read back from disk), render up to three chips
-  under it with a one-line plain label; a tap calls the ordinary `send()`
-  with the suggestion verbatim, so queueing, refusal, and retry behavior are
-  exactly Task 155's. The chips vanish the moment the conversation moves on
-  (they only render on the last turn).
-- Fixture + E2E: `fake-conductor.mjs`'s commentary script gains a followups
-  fence; `conductor.spec.ts` gains the regression — chips appear after the
-  comment settles, tapping one sends it as an owner message.
+- `docs/ai-work/tasks/157-brief.md`
+- `docs/ai-work/tasks/157-report.md`
+- `docs/ai-work/LOG.md` (row appended, file left uncommitted per the Task 149
+  precedent)
 
-## Checks that show the outcome holds
+## Protected starting Git state
 
-1. New unit pins: followups parser (valid 1–3, >3 rejected, non-array, bad
-   item, multiline, >140 chars, fence stripped, dedupe) and store round-trip
-   (valid persists, malformed dropped on read).
-2. `npm run typecheck` and `npm run test:unit` in `app/` — green.
-3. `npm run build:vite` and `npm run build:lab` — green.
-4. `conductor.spec.ts` E2E with the app token held (chunked per file over the
-   300 s shell cap), including the new suggestion regression; `bridge.spec.ts`
-   green (the snapshot now carries the new field). `projects.spec.ts` NOT run
-   (protected, per the Task 151/153/154 precedent).
+- HEAD: `9d19564` (main)
+- Working tree: existing changes protected (listed in the boundary above)
+- Existing staged work: no
 
-## DONE and STOPPED here
+## Checks (exact commands, run from `app/`)
 
-- DONE: checks 1–4 pass, and after a run settles the owner sees up to three
-  suggestion chips under Cairn's comment; tapping one sends it as their own
-  message and nothing dispatches by itself.
-- STOPPED: the commentary stream's reliability regresses (cards without a
-  comment, stuck indicators), the fixture harness flakes twice on the new
-  path for a harness reason, or protected work would be touched.
+- `npm run typecheck`
+- `npm run test:unit`
+- `npm run build:vite`
+- `npx playwright test tests/projects.spec.ts` — the full picker file (5
+  scenarios) with the app token held at `app/.app-token`; includes the new
+  removal-and-reopen scenario. The suite runs against a throwaway profile
+  (isolated-profile fixture) so the owner's real list is never touched, and
+  its windows park off every display (Task 154, `CAIRN_E2E=1`).
+- Machine-state precondition: no other Cairn instance may hold the
+  single-tenant surface during the E2E run — verified by taking the app token
+  (`mkdir app/.app-token` succeeds); released immediately after the run.
+- Final: `git status` shows protected work intact; this task's paths are
+  committed by exact name.
+
+DONE means the requested outcome holds in this tree with all checks green and
+the task's paths committed by exact name. STOPPED means a check fails beyond
+in-scope repair, protected work changes unexpectedly, or the app token is
+held by another lane or the owner.
