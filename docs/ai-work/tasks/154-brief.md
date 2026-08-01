@@ -1,58 +1,71 @@
-# Task 154 brief — port the cast into the real town
+# Task 154 brief — E2E tests stop taking over the owner's screen
 
 ## Requested visible outcome
 
-The owner approved Task 152's expressive cast: "Looks good. Let's go with
-this." Port it from the lab board into the real app:
+Running the Playwright E2E suite no longer pops app windows onto the owner's
+screen or steals focus from whatever they are doing. Every test launch runs
+with its window hidden; the suite's assertions and coverage are unchanged, so
+the same green run happens silently.
 
-1. Every live worker node in the town wears its model's face — distinct
-   geometry, signature color, mark, tilt, and blink rhythm — mapped from the
-   run's adapter id (`codex-exec` → Codex, `kimi-exec` → Kimi, claude/gemini
-   ids → their faces; anything unknown keeps today's shared working marks
-   and amber, unchanged).
-2. Cairn keeps its real ready/thinking/working marks byte-for-byte and gains
-   the cast's "done": for a few seconds after a run closes with a result,
-   Cairn's smile opens (aria: "Cairn, done"), then settles back.
-3. The lab's mock worker runs as `codex-exec` so the lab town shows the real
-   treatment.
-4. Captures of the real app (live worker face; Cairn) inspected and
-   published as the top shots-page entry.
+## Why (owner's words)
 
-Deliberately out of scope (each named on the lab board as later): the
-"waiting on approval" state (approval state lives in Chat/conductor — and
-lane B is actively editing `Chat.tsx`/`service.ts`/`ipc.ts`; this task
-steers clear), the delighted one-shot, and worker visibility rules (workers
-still appear only while running, so working is their only town state).
+"Whenever we run tests, it minimizes and interrupts what's on my screen."
+
+Cause found by inspection: every spec launches the real Electron app via
+`_electron.launch`, and `main.ts`'s `createWindow()` always shows the window
+(1320×820, focused). A full run launches the app dozens of times, so the
+owner's screen is repeatedly interrupted. `bridge.spec.ts` additionally opens
+a second "phone" `BrowserWindow` in-test.
 
 ## Boundary of intent — what must not change
 
-- Cairn's ready/thinking/working geometry and the thought bubbles stay
-  byte-for-byte; the fallback worker face is today's exact shared marks.
-- No behavior change to run/dispatch logic, visibility rules, drag, or
-  selection; no new dependencies; reduced-motion covers every new animation.
-- Foreign uncommitted work stays untouched: `Picker.tsx`,
-  `projects.spec.ts`, `Chat.tsx`, `service.ts`, `ipc.ts`, LOG.md's pending
-  rows (this task's row is appended, file still uncommitted per the 149/151
-  precedent), `app/tmp-capture/`, the 148/150 records.
-- `projects.spec.ts` is the stopped workers' file: it is not run and not
-  edited here (Task 151's policy), disclosed in the report.
+- Test behavior, assertions, and coverage: the suite must pass exactly as
+  before, driving the app through the same UI paths.
+- Ordinary app launches (owner double-click, `npm start`): the window still
+  shows by default. The hide is gated on `CAIRN_E2E=1`, the same test-only
+  marker that already gates `CAIRN_TEST_USER_DATA`; that marker is set only by
+  the suite's `isolated-profile` fixture, so no stray variable can hide a real
+  launch.
+- No dependency changes, no new packages.
+- Single-tenant rule unchanged: E2E runs only with the app token held.
+- Protected in-flight work in the tree is untouched: `projects.spec.ts`
+  (modified, a stopped worker's file — deliberately not run), `Picker.tsx`,
+  `LOG.md`, the untracked task records, `design/`, logs.
 
-## Checks that will show the outcome holds
+## Plan (AI decision)
 
-- `npm.cmd run typecheck`, `npm.cmd run test:unit` (existing 141 plus new
-  mapping tests), `npm.cmd run build:vite`, `npm.cmd run build:lab` clean.
-- Playwright E2E file-by-file with the app token held, excluding
-  `projects.spec.ts`; any test asserting the old shared worker geometry is
-  updated with disclosure (except the foreign file).
-- Real-app captures (Electron, visible window) inspected: the Codex face
-  live in the town in its color with mark and tilt; Cairn's ready face
-  unchanged; shots page serves the new entry.
+- `app/src/main/main.ts`: in `createWindow()`, when
+  `process.env.CAIRN_E2E === "1"`, create the window with `show: false` and
+  `webPreferences.backgroundThrottling: false` (hidden pages get their timers
+  throttled by Chromium; the app's polling must not be starved). All spec
+  launches inherit `CAIRN_E2E=1` through their `process.env` spreads, so this
+  one edit covers every launch site.
+- `app/tests/bridge.spec.ts`: the in-test "phone" window gets `show: false`
+  and `backgroundThrottling: false` too. Hidden windows still fire
+  `waitForEvent("window")` and are fully drivable over CDP.
 
-## DONE and STOPPED
+## Checks that show the outcome holds
 
-- DONE: cast lives in the real town per above, checks green, captures
-  published, records written, exact-path commits (brief; then the work).
-- STOPPED: the port can't hold the boundary (e.g. wiring the done moment
-  proves inseparable from the foreign lane's files), or checks fail beyond
-  honest repair; stop with state preserved and the smallest next choice
-  named.
+1. `npm run typecheck` and `npm run test:unit` in `app/` — green as before.
+2. `npm run build:vite` — green (the suite's global setup refuses a stale
+   bundle).
+3. A focused launch check: launch the app via Playwright with the E2E env and
+   assert `BrowserWindow.getAllWindows()[0].isVisible() === false` while the
+   page is fully drivable.
+4. The E2E suite, run per-spec file (300 s shell cap) with the app token held:
+   conductor, bridge, away, serial, routing, smoke, connect-kimi — all green.
+   `projects.spec.ts` is NOT run (protected in-flight edit, per the Task 151 /
+   153 precedent).
+5. Normal-launch path verified by inspection: `show: false` applies only
+   inside the `CAIRN_E2E === "1"` conditional; the default path constructs the
+   window exactly as before (Electron windows show by default).
+
+## DONE and STOPPED here
+
+- DONE: checks 1–4 pass, check 5 holds, and the owner can run the suite
+  without a single window appearing.
+- STOPPED: the suite fails for a harness reason twice, or hiding the window
+  breaks a test that genuinely needs OS visibility (none found by inspection:
+  no screenshots, no focus/minimize/restore assertions, no
+  `document.visibilityState` use in the renderer), or protected work would be
+  touched.
