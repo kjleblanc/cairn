@@ -5,13 +5,15 @@
 live-Town port, both complete. Nothing here loosens an approval, a
 verification, or a risk boundary.
 
-Six decisions were taken by the owner during the design conversation — the
-kind of picture to show, how long to keep them, how to signal uncertainty, the
-card's shape, how much Cairn explains itself, and how warm Cairn should be.
-They are marked **Owner decision** where they appear. The eight numbered
-Decisions below are the design that follows from them.
+Every choice below was taken by the owner during one design conversation on
+2026-08-02: which kind of picture to show, how long to keep them, how to
+signal uncertainty, the card's shape, how much Cairn explains itself, how warm
+Cairn should be, the release of visual preservation, the chosen visual
+direction, the pastel palette, still-by-default water, and the New Horizons
+treatment. Owner choices are marked **Owner decision** where they appear. The
+nine numbered Decisions are the design that follows from them.
 
-**This spec yields three implementation plans, not one.** See "Order of work".
+**This spec yields four implementation plans, not one.** See "Order of work".
 Each step is independently shippable and independently reviewable, which is
 the point: the owner has to review this work, and bundling it would make that
 harder.
@@ -273,6 +275,69 @@ The rule extends to every artifact the owner reads, and gains eval scenarios
 alongside the existing ten, with the same written pass/fail bars and the same
 `constitution` column.
 
+## Decision 9 — The visual language: Lantern on Water
+
+Four directions were built and independently checked; the owner chose one and
+then corrected it twice. The result is settled and recorded here rather than
+left to whoever implements it.
+
+**The direction is "Lantern on Water".** The conversation is a warm, softly lit
+lantern resting on dark water — light spills from it onto the pond instead of
+covering the pond. It replaces the current panel, which is a large bright white
+rectangle occupying roughly a third of the screen and fighting the whole scene.
+
+Five rules follow from the owner's corrections:
+
+1. **The cast carries the identity; the furniture does not.** The owner's words
+   were that they were *missing the "emoji" Ghost-in-the-Shell AI avatars* and
+   that the imagery read *"too sci fi"*. The resolution: the crisp luminous
+   face strokes on dark **are** the Ghost in the Shell half. Everything around
+   them — panels, menus, buttons, type — goes warm, rounded, and friendly.
+   Hairline rules, monospaced type, HUD labels, and crawling data-threads are
+   removed. The characters must be large and central, not edge decoration.
+
+2. **Face geometry stays verbatim — now by choice, not by constraint.** The
+   preserve-the-visuals boundary was lifted, and the owner then asked for these
+   faces back. Every path in the approved mockup was checked against
+   `app/src/renderer/town/faces.ts` and matched 20 of 20. Implementation must
+   keep that property and test it.
+
+3. **Colours are muted toward pastel.** Cairn `#a3ddd0`, Kimi `#d5c0ec`, Codex
+   `#f3c49a`, Claude `#b8c9de`; done `#c2ddb6`, stopped `#f2aaa4`, work in
+   transit `#f7d3a8`. These supersede the saturated set. Pastels on a dark
+   pond raise contrast rather than lowering it, so this costs no legibility.
+
+4. **Still water is the default; ripples are earned.** At rest the pond is one
+   continuous blend — no rings, no drawn contours, no perpetual animation. A
+   ripple exists **only** because a real event landed, in the receiver's own
+   colour, and then it is gone. This is not new policy: Task 168's brief
+   already required that "motion is information… never perpetual decoration."
+   **The shipped pond does not yet obey it** and ripples continuously. Bringing
+   it into line is part of this work, and is a rule Task 168 stated rather than
+   a defect it introduced.
+
+5. **New Horizons treatment on every interactive surface.** Buttons are chunky
+   pills with a solid lower edge that compresses on press. Motion uses
+   overshoot easing rather than linear ease-out. Menu items stagger in and
+   slide on hover. Characters spring when touched. Type is rounded and heavy
+   (600–850), never thin. `prefers-reduced-motion` still reaches the same
+   final state.
+
+**Known unsolved, and not to be discovered late.** All four explored directions
+failed at the narrow supported window (760×620), each differently: content
+silently clipped, a responsive rule that never fired at the size it was written
+for, the direction's premise vanishing, and a hard-coded width with no
+responsive rule at all. **Narrow-window behaviour is the binding constraint on
+this work, not the aesthetic**, and the plan must treat it as a first-class
+requirement rather than a final polish pass.
+
+One process note worth keeping. Three of the four generated directions asserted
+in their own header comments that they had invented no colours — "Nothing
+invented", "Every colour is a shipped Cairn token" — and all three had. The
+claims were confident, specific, checkable, and false. They were caught by an
+independent check, which is the same reason this project separates what Cairn
+verified from what a worker claimed.
+
 ## Order of work
 
 Design all three together — done here, so the card's shape is settled once —
@@ -282,14 +347,27 @@ person who has to do the reviewing, which works against the goal.
 **Each step below becomes its own plan and its own claimed task.** They share
 this spec so the card's shape is decided once, and nothing else.
 
-1. **Evidence (Decisions 1–4).** Highest relief, most of it already built, and
-   it upgrades the owner's ability to review everything after it by letting
-   them look instead of read.
-2. **Voice (Decisions 7–8).** Small, and it improves every brief and report
-   read during step 3.
-3. **Where answers come from (Decisions 5–6).** Last: the only piece needing
-   real judgment about which questions are the owner's, and by then its effects
-   can be seen rather than described.
+**The order changed once, on evidence.** It was originally evidence-first,
+because that was the owner's fastest relief. Then all four panel directions
+failed at the narrow window. That moved the largest unknown into the panel
+work, and unknown risk belongs early, so the panel moved up.
+
+1. **Voice (Decisions 7–8).** First because it is genuinely small — constitution
+   text plus eval scenarios — and it compounds: every brief, report, and card
+   produced by steps 2 through 4 is written under the improved rule rather than
+   retrofitted afterwards.
+2. **The panel and the visual language (Decision 9).** Second because it holds
+   the only unsolved problem in this spec. Narrow-window behaviour is proven
+   hard, and finding out late what a 760×620 window does to a lantern would
+   invalidate work built on top of it. It is also the container the next step
+   fills, so building the evidence section into a panel about to be replaced
+   would be doing it twice.
+3. **Evidence (Decisions 1–4).** Third, into a panel already known to hold a
+   full-width image pair at both sizes. Most of this already exists —
+   the captures, the captioned manifest — so it is largely delivery.
+4. **Where answers come from (Decisions 5–6).** Last: the only piece needing
+   real judgment about which questions belong to the owner, and by then its
+   effects can be looked at rather than described.
 
 ## How we would know it holds
 
@@ -313,6 +391,18 @@ this spec so the card's shape is decided once, and nothing else.
   pins the current ones.
 - New eval scenarios score plain language and the attribution boundary against
   written bars.
+- **Every face path still matches `faces.ts` verbatim**, asserted by a test
+  rather than by eye. The approved mockup matched 20 of 20; that is the bar.
+- **At rest, the pond produces no ripple.** A test observes a quiet session
+  across repeated polls and asserts no ripple element is created. A ripple
+  appears only against a real landed event, in the receiver's colour.
+- **The narrow window is checked first, not last.** Every panel state is
+  exercised at 760×620 as well as 1320×820, and the check is that no content
+  is clipped, no container is silently overflowed, and no responsive rule
+  fails to fire at the size it was written for. All four explored directions
+  failed at least one of those.
+- `prefers-reduced-motion` reaches the same final state, with no ripple or
+  packet animation pending.
 
 ## Deliberately out of scope
 
@@ -327,16 +417,9 @@ this spec so the card's shape is decided once, and nothing else.
 - **Any change to what Cairn may approve.** This spec makes Cairn decide more
   small things and show more evidence. It moves no risk boundary.
 
-- **The conversation panel's redesign — separate spec, but genuinely coupled.**
-  The owner has asked for the panel to be reworked (it is currently a large
-  bright white rectangle sitting on the dark pond, fighting the whole scene).
-  That is its own design and its own claimed task. It is named here because
-  the two constrain each other and must not be designed in ignorance of one
-  another: **this spec makes the result card grow two new sections** — an
-  evidence section leading with before/after pictures, and a "what you asked
-  for" list with three tag styles. A panel design that cannot hold a
-  full-width image pair, at both supported window sizes, is not a viable
-  panel design. Whichever lands second must honour the first.
+- **Distinct personalities beyond appearance.** Decision 9 fixes how the cast
+  *looks*. Giving Kimi, Codex, and Claude their own writing voices is the
+  separate item above.
 
 ## Open for the owner
 
