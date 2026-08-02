@@ -82,9 +82,18 @@ The work is therefore mostly **delivery**, not construction.
   the gate, not the safety." Cairn deciding *more* never means Cairn approving
   more. Installing software, spending money, sending data, deleting, and
   publishing all still stop for the owner's approval of that exact action.
-- **The shipped cast is untouched.** `app/src/renderer/town/faces.ts` stays
-  byte-for-byte, including Cairn `#7fd8c8`, Kimi `#c9a7e8`, Codex `#f2a35c`,
-  Claude `#9fb8d8`.
+- **Visual preservation is released — deliberately, by the owner, on
+  2026-08-02.** Every prior brief carried a preserve-the-visuals boundary;
+  Task 168's went as far as `faces.ts` byte-for-byte. The owner has now said:
+  *"No prior visuals should be regarded as should be preserved."* Face
+  geometry, colors, layout, and the conversation panel are all open.
+
+  **This release covers appearance only.** It does not touch a single item
+  above it in this list. Git remains the ledger, the claim/verified split
+  stays load-bearing, a capture may still only replay an event that actually
+  happened, and every risk boundary keeps its pause. A redesign may change how
+  a verified DONE *looks*; it may never change what earns one. If a visual
+  change would require softening one of those, the visual change is wrong.
 - **Task 168's presentation reducer is the arbiter of "an event happened".**
   `app/src/renderer/town/presentation.ts` already turns append-only runtime
   evidence into one-time keyed cues (`${runKey}:${index}:dispatch`), escalates
@@ -317,6 +326,17 @@ this spec so the card's shape is decided once, and nothing else.
   owner, but each needs its own register and its own scoring. Claim separately.
 - **Any change to what Cairn may approve.** This spec makes Cairn decide more
   small things and show more evidence. It moves no risk boundary.
+
+- **The conversation panel's redesign — separate spec, but genuinely coupled.**
+  The owner has asked for the panel to be reworked (it is currently a large
+  bright white rectangle sitting on the dark pond, fighting the whole scene).
+  That is its own design and its own claimed task. It is named here because
+  the two constrain each other and must not be designed in ignorance of one
+  another: **this spec makes the result card grow two new sections** — an
+  evidence section leading with before/after pictures, and a "what you asked
+  for" list with three tag styles. A panel design that cannot hold a
+  full-width image pair, at both supported window sizes, is not a viable
+  panel design. Whichever lands second must honour the first.
 
 ## Open for the owner
 
