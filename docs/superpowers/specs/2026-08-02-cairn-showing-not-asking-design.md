@@ -1,9 +1,9 @@
 # Showing, Not Asking — Design
 
-**Status:** proposed 2026-08-02. Sits on top of the Task 167 Ripple Pond
-direction and the Task 168 live-Town port, which is in flight and untouched by
-this spec. Nothing here loosens an approval, a verification, or a risk
-boundary.
+**Status:** proposed 2026-08-02; revised the same day after Task 168 landed at
+`d776558`. Sits on top of the Task 167 Ripple Pond direction and the Task 168
+live-Town port, both complete. Nothing here loosens an approval, a
+verification, or a risk boundary.
 
 Six decisions were taken by the owner during the design conversation — the
 kind of picture to show, how long to keep them, how to signal uncertainty, the
@@ -41,9 +41,15 @@ The repository already contains most of what this needs.
   label}]}` — plain-language captions, written per task, for the owner.
   `.gitignore` excludes the whole directory, and nothing in the app links to
   it. The owner has never seen any of them.
-- `app/tests/conductor.spec.ts:920` (`captureTask168`) already captures six
-  real app states at two window sizes, gated on `process.env.TASK168_CAPTURE_SIZE`.
-  All twelve files exist on disk right now.
+- **The capture code is written fresh each task and deleted with it.** Task 168
+  carried a `captureTask168` helper, gated on `process.env.TASK168_CAPTURE_SIZE`,
+  that captured six real app states at two window sizes. It produced all twelve
+  `task-168-*.png` files, and then **never entered the commit** — `d776558`
+  contains no screenshot call in `conductor.spec.ts`. The only survivor
+  anywhere in the suite is a single hand-placed line at
+  `app/tests/projects.spec.ts:307`. The pictures persist; the mechanism that
+  made them is rebuilt and thrown away every time. That waste is the clearest
+  argument for Decision 4.
 - Task 167's report records the gap plainly: "Automated browser screenshot
   capture was unavailable in this environment, so it was not claimed."
 - `app/playwright.config.ts` sets no `screenshot`, `video`, or `trace` option.
@@ -79,8 +85,14 @@ The work is therefore mostly **delivery**, not construction.
 - **The shipped cast is untouched.** `app/src/renderer/town/faces.ts` stays
   byte-for-byte, including Cairn `#7fd8c8`, Kimi `#c9a7e8`, Codex `#f2a35c`,
   Claude `#9fb8d8`.
-- **Task 168 finishes first.** It has uncommitted work in the tree. This spec
-  changes nothing it touches and must land after it.
+- **Task 168's presentation reducer is the arbiter of "an event happened".**
+  `app/src/renderer/town/presentation.ts` already turns append-only runtime
+  evidence into one-time keyed cues (`${runKey}:${index}:dispatch`), escalates
+  monotonically, and guarantees that repeated polls do not replay motion and
+  that stale timers are inert. Evidence capture **subscribes to that, and does
+  not invent a second notion of when something occurred.** Two independent
+  answers to "did this happen?" would eventually disagree, and the picture
+  would be the one that lied.
 
 ## Decision 1 — A finished job answers three questions, not two
 
@@ -130,9 +142,23 @@ without a retention rule that would delete the owner's history.
 
 ## Decision 4 — Capture becomes standing, not per-task
 
-`captureTask168` is the shape to generalise, not to copy. Capture moves out of
-one spec's helper and into a reusable harness fixture, keyed by the task being
-run rather than by a hard-coded task number and an env var named after it.
+Task 168's deleted `captureTask168` is the shape to generalise, not to copy —
+and it is genuinely deleted, so this is a rebuild from the pattern rather than
+a refactor of live code. Capture moves out of a per-task helper and into a
+reusable harness fixture, keyed by the run rather than by a hard-coded task
+number and an env var named after it.
+
+Two seams Task 168 built are reused rather than duplicated:
+
+- **When to capture** comes from `town/presentation.ts`'s keyed one-time cues.
+  A capture fires on a cue, so it inherits the guarantee that a repeated poll
+  produces no second event.
+- **Who the capture belongs to** comes from `app/src/main/workeridentity.ts`,
+  which resolves the worker from the adapter that actually won main's route and
+  exposes the real-call disclosure seam. Task 168 added it specifically so a
+  renderer-owned Boolean could not conjure a fictional villager; the same
+  reasoning applies to evidence, and it supplies the run identity Decision 4
+  needs to bind a manifest entry to a verified result.
 
 `app/shots/` **stays excluded from the project's history.**
 
@@ -250,7 +276,9 @@ this spec so the card's shape is decided once, and nothing else.
 - A worker-supplied image never appears on the verified side. A test asserts
   this directly.
 - A capture exists only for a state the run actually reached; a repeated poll
-  or re-render never produces a second capture of one event.
+  or re-render never produces a second capture of one event. Task 168's
+  `townpresentation.test.ts` already pins that guarantee for motion cues — the
+  evidence tests extend the same fixtures rather than starting a parallel set.
 - The album opens from a card, shows that job's captures under that job's
   name, and reaches past jobs.
 - A hedged answer produces a "you weren't sure" marking, and Cairn says so in
