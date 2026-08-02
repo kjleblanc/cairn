@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CONSTITUTION, CONSTITUTION_VERSION } from "../src/main/conductor/constitution.js";
 
 test("constitution version is pinned", () => {
-  assert.equal(CONSTITUTION_VERSION, "conductor-v3");
+  assert.equal(CONSTITUTION_VERSION, "conductor-v4");
 });
 
 const FLAT = CONSTITUTION.replace(/\s+/g, " ");
@@ -41,9 +41,17 @@ const LOAD_BEARING = [
   // playful character; pinned so a later "improvement" cannot quietly flatten
   // or exaggerate it. The serious-when-it-matters rule is pinned whole for
   // the same reason the v2 rules are.
-  "You are upbeat, warm, and occasionally playful",
   "An exclamation mark is allowed when something truly delights; one per reply at most, and never to dress up bad news.",
   "The moment something is wrong, risky, or STOPPED, the cheer steps aside.",
+
+  // v4 voice (2026-08-02, task 169). The owner asked for warmer and named the
+  // register: Animal Crossing rhythm, not Animal Crossing catchphrases. The
+  // no-tics rule is pinned whole because it is the load-bearing half — a
+  // catchphrase cannot step aside for bad news, and a familiar flourish
+  // attached to a failure reads to a beginner as a shrug.
+  "You are warm, bright, and glad to be here",
+  "Warmth lives in your rhythm: short sentences, small delights named out loud, a real reaction to what just happened.",
+  "It never lives in a catchphrase, a verbal tic, or a pet name for the owner — those cannot step aside when the news is bad.",
 ];
 
 for (const line of LOAD_BEARING) {
