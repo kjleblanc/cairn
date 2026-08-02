@@ -1261,7 +1261,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
 
   // The interim result relay (until Task 8): the conversation is not left
   // silent — the strip carries the terminal state and the way to the records.
-  await expect(strip).toContainText("STOPPED — CANCELLED_BY_OWNER", { timeout: 30_000 });
+  await expect(strip).toContainText("STOPPED — you stopped it yourself", { timeout: 30_000 });
   // The terminal line arrived as a change INSIDE the live region marked above,
   // not as a new region carrying a message no one hears.
   await expect(strip.locator(".run-strip-state")).toHaveAttribute("data-live-region-probe", "same-node");
@@ -1322,7 +1322,7 @@ test("a fresh confirmed dispatch reaches the same stable Town with reduced motio
   // semantic STOPPED state still lands immediately, without adding motion.
   const strip = win.locator(".run-strip");
   await strip.getByRole("button", { name: "Stop this task" }).click();
-  await expect(strip).toContainText("STOPPED — CANCELLED_BY_OWNER", { timeout: 30_000 });
+  await expect(strip).toContainText("STOPPED — you stopped it yourself", { timeout: 30_000 });
   await expect(town).toHaveAttribute("data-town-truth", "stopped");
   await expect(town).toHaveAttribute("data-town-outcome", "stopped");
   await expect(town).toHaveAttribute("data-town-motion", "none");

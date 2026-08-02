@@ -5,7 +5,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
 import { CODEX_EXEC_ADAPTER_ID } from "./codex.js";
 import { KIMI_EXEC_ADAPTER_ID } from "./kimi.js";
-import { composeWorkerReport, composeWorkerRowSummary, type ComposedRecordInput } from "./records.js";
+import { composeWorkerReport, composeWorkerRowSummary, stopReasonInPlainWords, type ComposedRecordInput } from "./records.js";
 import { appendLogRow, canonicalPath, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
 import {
@@ -1153,7 +1153,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         const restored = restoreLogBeforeThrow(projectRoot, start);
         throw recordVerificationFailed("Model-authored evidence was retained without overwrite.", restored);
       }
-      emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
+      emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(reason)}` });
       return {
         status: "stopped", reason, taskNumber, disposition: "STOPPED",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -1221,7 +1221,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           const restored = restoreLogBeforeThrow(projectRoot, start);
           throw recordVerificationFailed("Worker-authored evidence was retained without overwrite.", restored);
         }
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${reason}` });
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(reason)}` });
         return {
           status: "stopped", reason, taskNumber, disposition: "STOPPED",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -1250,7 +1250,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           throw recordVerificationFailed("Task records were retained for inspection.", restored);
         }
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")}` });
         return {
           status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -1383,7 +1383,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           throw recordVerificationFailed("Task records were retained for inspection.", restored);
         }
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: MODEL_RESULT_NOT_VERIFIED." });
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — MODEL_RESULT_NOT_VERIFIED" });
+        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")}` });
         return {
           status: "stopped", reason: "MODEL_RESULT_NOT_VERIFIED", taskNumber, disposition: "STOPPED",
           briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -1419,7 +1419,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     if (stopReason) {
       emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReason}.` });
       const closed = writeClosedRecords(projectRoot, contract, demo, "STOPPED", stopReason, start, Boolean(options.commitRecords));
-      emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReason}` });
+      emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(stopReason)}` });
       return {
         status: "stopped", reason: stopReason, taskNumber, disposition: "STOPPED",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
@@ -1462,7 +1462,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         throw recordVerificationFailed("Task records were retained for inspection.", restored);
       }
       emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
-      emit(activities, options.events, { stage: "Result", state: "stopped", detail: "STOPPED — RECORD_VERIFICATION_FAILED" });
+      emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")}` });
       return {
         status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",
         briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),

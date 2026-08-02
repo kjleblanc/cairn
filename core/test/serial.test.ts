@@ -586,7 +586,9 @@ test("a completed process with no claims fence stops WORKER_CLAIMS_MISSING", asy
   assert.match(report, /Bounded worker evidence: agentMessageCount=1; cachedInputTokens=0; commandExecutionCount=0; exitCode=0; failedToolItemCount=0; fileChangeCount=0; inputTokens=1; outputTokens=1; reasoningOutputTokens=0\./);
   assert.match(report, /no other item text, reasoning, commands, paths, stdout, stderr, thread IDs, account details, authentication data, or credentials/);
   assert.match(result.activities.map((activity) => activity.detail).join("\n"), /Bounded worker evidence: agentMessageCount=1; cachedInputTokens=0; commandExecutionCount=0; exitCode=0;/);
-  assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — WORKER_CLAIMS_MISSING/);
+  // Task 169: the strip says why in plain words. The code still rides the card
+  // and the report; a one-line glanceable status does not need it.
+  assert.match(result.activities.at(-1)?.detail ?? "", /STOPPED — the worker never said what it had done/);
 });
 
 function fixtureAdapter(id: string, evidence: Record<string, number>): TaskAdapter {
