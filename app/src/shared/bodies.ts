@@ -10,7 +10,9 @@
  * against the public, keyless catalog (`GET https://openrouter.ai/api/v1/models`)
  * on 2026-07-24 before shipping; the Kimi K3 entry and its price ($3/M input,
  * $15/M output — about 5× K2's $0.57/$2.30) were re-verified against the same
- * catalog on 2026-07-29. If a later provider catalog change retires one of
+ * catalog on 2026-07-29. The current Claude flagship, mid, and fast tiers
+ * and their per-token prices were verified there on 2026-08-01. If a later
+ * provider catalog change retires one of
  * these ids, the connect flow still works — "Custom…" always accepts any
  * model string — but the curated entry itself would need a follow-up task.
  *
@@ -73,6 +75,24 @@ export const BODIES: Body[] = [
     id: "openai/gpt-5-mini",
     name: "GPT-5 Mini",
     blurb: "OpenAI's small, quick model; capable for its size and about as cheap as the others here.",
+    billing: "Bills per use — sign in or paste a key",
+  },
+  {
+    id: "anthropic/claude-opus-5",
+    name: "Claude Opus 5",
+    blurb: "Anthropic's flagship tier; $5 per million input tokens and $25 per million output tokens.",
+    billing: "Bills per use — sign in or paste a key",
+  },
+  {
+    id: "anthropic/claude-sonnet-5",
+    name: "Claude Sonnet 5",
+    blurb: "Anthropic's mid tier; $2 per million input tokens and $10 per million output tokens.",
+    billing: "Bills per use — sign in or paste a key",
+  },
+  {
+    id: "anthropic/claude-haiku-4.5",
+    name: "Claude Haiku 4.5",
+    blurb: "Anthropic's fast tier; $1 per million input tokens and $5 per million output tokens.",
     billing: "Bills per use — sign in or paste a key",
   },
 ];

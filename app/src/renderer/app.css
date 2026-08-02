@@ -212,6 +212,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-claims { margin-top: 10px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--card-ink); }
 .result-card-claims-label { margin: 0 0 2px; }
 .result-card-claims-text { margin: 0 0 4px; white-space: pre-wrap; }
+.result-card-section-title { margin: 12px 0 4px; font-size: .9rem; }
+.result-card-detail-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.result-card-milestone { margin: 12px 0 0; }
 .result-card-path { margin: 8px 0 0; color: var(--card-muted); overflow-wrap: anywhere; }
 /* The push flow. The chip is a nudge and looks like one; the confirmation is
  * the contract's pause and looks like the other cards that ask for a decision

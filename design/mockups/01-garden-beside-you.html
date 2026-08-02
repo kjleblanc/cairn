@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cairn mockup 1 — the garden beside you</title>
+<style>
+  :root {
+    --ink: #0b1020;
+    --ink-2: #101731;
+    --cyan: #6fe3ff;
+    --cyan-dim: rgba(111, 227, 255, .35);
+    --amber: #ffc979;
+    --amber-soft: rgba(255, 201, 121, .55);
+    --rose: #ff9d9d;
+    --text: #e8ecf8;
+    --muted: #9aa7c7;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* ---------- chat panel ---------- */
+  .chat {
+    width: 400px;
+    min-width: 400px;
+    background: var(--ink-2);
+    border-right: 1px solid rgba(111, 227, 255, .12);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 16px 14px;
+    z-index: 2;
+  }
+  .chat h2 { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 14px; }
+  .bubble { border-radius: 14px; padding: 10px 14px; margin-bottom: 10px; font-size: 14px; line-height: 1.45; max-width: 92%; }
+  .bubble.owner { background: #1c2650; margin-left: auto; }
+  .bubble.cairn { background: #141c3d; border: 1px solid rgba(111, 227, 255, .15); }
+  .bubble.cairn em { color: var(--amber); font-style: normal; }
+  .result-card {
+    border: 1px solid var(--cyan-dim);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13px;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 3px, rgba(111, 227, 255, .03) 3px 4px),
+      rgba(111, 227, 255, .04);
+    margin-bottom: 10px;
+    animation: card-in .8s ease both;
+  }
+  @keyframes card-in { from { opacity: 0; transform: translateY(6px); filter: brightness(2); } to { opacity: 1; transform: none; filter: none; } }
+  .result-card .rc-title { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--cyan); opacity: .8; margin-bottom: 6px; }
+  .result-card .rc-done { color: #8ff0b3; font-weight: 700; letter-spacing: .06em; }
+  .result-card ul { margin: 6px 0 0 16px; color: var(--muted); line-height: 1.5; }
+  .result-card .claims { margin-top: 8px; padding-top: 6px; border-top: 1px dashed rgba(111, 227, 255, .2); color: var(--muted); font-size: 12px; }
+  .composer { margin-top: auto; background: #1a2247; border-radius: 12px; padding: 10px 14px; color: var(--muted); font-size: 14px; }
+
+  /* ---------- garden ---------- */
+  .garden {
+    position: relative;
+    flex: 1;
+    background:
+      radial-gradient(1200px 700px at 70% 110%, rgba(255, 201, 121, .07), transparent 60%),
+      radial-gradient(900px 600px at 30% -10%, rgba(111, 227, 255, .08), transparent 60%),
+      var(--ink);
+    overflow: hidden;
+  }
+  .star { position: absolute; width: 2px; height: 2px; border-radius: 50%; background: rgba(232, 236, 248, .5); animation: twinkle 4s ease-in-out infinite; }
+  @keyframes twinkle { 0%, 100% { opacity: .2; } 50% { opacity: .8; } }
+
+  .zone-caption {
+    position: absolute;
+    font-size: 10px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--cyan);
+    opacity: .55;
+  }
+
+  /* workspace pad */
+  .pad {
+    position: absolute; left: 50%; top: 52%;
+    width: 340px; height: 340px;
+    transform: translate(-50%, -50%);
+  }
+  .pad .ring {
+    position: absolute; inset: 0; border-radius: 50%;
+    border: 1px solid var(--cyan-dim);
+    animation: ring-breathe 5s ease-in-out infinite;
+  }
+  .pad .ring.r2 { inset: 28px; animation-delay: -1.6s; border-color: rgba(111, 227, 255, .22); }
+  .pad .ring.r3 { inset: 56px; animation-delay: -3.2s; border-style: dashed; border-color: rgba(111, 227, 255, .16); }
+  @keyframes ring-breathe { 0%, 100% { opacity: .4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.015); } }
+  .pad .floor {
+    position: absolute; inset: 90px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(111, 227, 255, .12), transparent 70%);
+  }
+
+  /* source pool */
+  .source {
+    position: absolute; left: 8%; bottom: 10%;
+    width: 210px; height: 120px;
+  }
+  .source .pool {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center, rgba(255, 201, 121, .22), rgba(255, 201, 121, .05) 65%, transparent 75%);
+    animation: pool-lap 6s ease-in-out infinite;
+  }
+  @keyframes pool-lap { 0%, 100% { transform: scale(1); opacity: .8; } 50% { transform: scale(1.05, 1.12); opacity: 1; } }
+  .source .zone-caption { bottom: -8px; left: 30px; color: var(--amber); }
+
+  /* archive strata */
+  .archive { position: absolute; right: 6%; top: 16%; width: 150px; }
+  .stratum {
+    height: 7px; border-radius: 4px;
+    background: linear-gradient(90deg, rgba(111, 227, 255, .35), rgba(111, 227, 255, .08));
+    margin-bottom: 9px;
+    animation: stratum-in 1s ease both;
+  }
+  .stratum.new { background: linear-gradient(90deg, var(--amber-soft), rgba(255, 201, 121, .12)); box-shadow: 0 0 12px rgba(255, 201, 121, .35); }
+  .stratum:nth-child(2) { width: 88%; } .stratum:nth-child(3) { width: 94%; animation-delay: .05s; }
+  .stratum:nth-child(4) { width: 82%; animation-delay: .1s; } .stratum:nth-child(5) { width: 90%; animation-delay: .15s; }
+  @keyframes stratum-in { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .archive .zone-caption { position: static; display: block; margin-top: 4px; }
+
+  /* tethers */
+  svg.tethers { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .tether { fill: none; stroke: var(--cyan-dim); stroke-width: 1.5; stroke-dasharray: 2 7; }
+  .tether.warm { stroke: var(--amber-soft); }
+  .pulse { fill: var(--cyan); filter: drop-shadow(0 0 5px var(--cyan)); }
+  .pulse.warm { fill: var(--amber); filter: drop-shadow(0 0 5px var(--amber)); }
+
+  /* ---------- avatar faces ---------- */
+  .avatar { position: absolute; width: 96px; text-align: center; }
+  .avatar small { display: block; margin-top: 6px; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+  .avatar .holo-ring {
+    width: 96px; height: 96px; border-radius: 50%;
+    border: 1.5px solid var(--cyan-dim);
+    padding: 5px;
+    position: relative;
+    animation: float 6s ease-in-out infinite;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 3px, rgba(111, 227, 255, .05) 3px 4px),
+      rgba(13, 18, 38, .8);
+    box-shadow: 0 0 24px rgba(111, 227, 255, .18), inset 0 0 18px rgba(111, 227, 255, .08);
+  }
+  .avatar.worker .holo-ring { width: 84px; height: 84px; animation-delay: -2s; }
+  .avatar.worker { width: 84px; }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+  .avatar .orbit {
+    position: absolute; inset: -9px; border-radius: 50%;
+    border: 1px dashed rgba(111, 227, 255, .3);
+    animation: spin 14s linear infinite;
+  }
+  .avatar.worker .orbit { inset: -8px; animation-duration: 10s; border-color: rgba(255, 201, 121, .4); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .face { width: 100%; height: 100%; display: block; }
+
+  /* legend */
+  .legend {
+    position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+    font-size: 11px; color: var(--muted); letter-spacing: .04em;
+    background: rgba(16, 23, 49, .7); border: 1px solid rgba(111, 227, 255, .12);
+    border-radius: 10px; padding: 8px 14px;
+  }
+  .legend b { color: var(--amber); font-weight: 600; }
+
+  .mock-badge {
+    position: absolute; top: 14px; right: 16px; z-index: 5;
+    font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--ink); background: var(--amber);
+    border-radius: 6px; padding: 4px 10px; font-weight: 700;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="mock-badge">mock data · design mockup 1</div>
+
+<aside class="chat">
+  <h2>Cairn — Chat</h2>
+  <div class="bubble owner">Make the README friendlier for beginners?</div>
+  <div class="bubble cairn">Good one — it is a little wall-of-text. I'd trim the glossary first. <em>Want me to send that to the worker?</em></div>
+  <div class="bubble owner">Yes please</div>
+  <div class="result-card">
+    <p class="rc-title">result card · checked by Cairn</p>
+    <p><span class="rc-done">DONE</span> — Task 099</p>
+    <ul>
+      <li>Your starting work: untouched</li>
+      <li>Files changed (checked with Git): README.md</li>
+      <li>Saved snapshot: yes</li>
+    </ul>
+    <p class="claims">The worker says the milestone moved: NO</p>
+  </div>
+  <div class="bubble cairn">All done — the README reads much kinder now. <em>Fancy that.</em></div>
+  <div class="composer">Talk with Cairn…</div>
+</aside>
+
+<main class="garden">
+  <!-- stars -->
+  <span class="star" style="left:12%;top:18%"></span><span class="star" style="left:34%;top:8%;animation-delay:-1s"></span>
+  <span class="star" style="left:58%;top:14%;animation-delay:-2s"></span><span class="star" style="left:76%;top:30%;animation-delay:-.5s"></span>
+  <span class="star" style="left:22%;top:44%;animation-delay:-3s"></span><span class="star" style="left:86%;top:60%;animation-delay:-1.4s"></span>
+  <span class="star" style="left:44%;top:26%;animation-delay:-2.4s"></span><span class="star" style="left:66%;top:70%;animation-delay:-.8s"></span>
+
+  <!-- tethers: chat-side cairn face -> worker pad, source -> pad -->
+  <svg class="tethers" viewBox="0 0 1000 700" preserveAspectRatio="none">
+    <path class="tether" d="M 300 300 Q 420 320 500 364" />
+    <path class="tether warm" d="M 190 560 Q 320 500 480 420" />
+    <circle class="pulse" r="4">
+      <animateMotion dur="3.2s" repeatCount="indefinite" path="M 300 300 Q 420 320 500 364" />
+    </circle>
+    <circle class="pulse warm" r="3">
+      <animateMotion dur="4.4s" repeatCount="indefinite" path="M 190 560 Q 320 500 480 420" />
+    </circle>
+  </svg>
+
+  <!-- Cairn face, near the chat -->
+  <div class="avatar cairn" style="left: 22%; top: 34%;">
+    <div class="orbit"></div>
+    <div class="holo-ring">
+      <svg class="face" viewBox="0 0 100 100">
+        <circle cx="50" cy="52" r="34" fill="#ffe9d6"/>
+        <ellipse cx="38" cy="48" rx="4.5" ry="6" fill="#2b2340">
+          <animate attributeName="ry" values="6;6;.6;6" keyTimes="0;.9;.95;1" dur="4.6s" repeatCount="indefinite"/>
+        </ellipse>
+        <ellipse cx="62" cy="48" rx="4.5" ry="6" fill="#2b2340">
+          <animate attributeName="ry" values="6;6;.6;6" keyTimes="0;.9;.95;1" dur="4.6s" repeatCount="indefinite"/>
+        </ellipse>
+        <circle cx="36.5" cy="46" r="1.5" fill="#fff"/><circle cx="60.5" cy="46" r="1.5" fill="#fff"/>
+        <circle cx="30" cy="58" r="4" fill="#ffb3a7" opacity=".55"/><circle cx="70" cy="58" r="4" fill="#ffb3a7" opacity=".55"/>
+        <path d="M 43 63 Q 50 68 57 63" stroke="#2b2340" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <small>cairn · listening</small>
+  </div>
+
+  <!-- workspace pad with worker face -->
+  <div class="pad">
+    <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div><div class="floor"></div>
+    <div class="avatar worker" style="left: 50%; top: 50%; transform: translate(-50%, -58%); position: absolute;">
+      <div class="orbit"></div>
+      <div class="holo-ring">
+        <svg class="face" viewBox="0 0 100 100">
+          <circle cx="50" cy="52" r="34" fill="#dff3ff"/>
+          <ellipse cx="38" cy="50" rx="4.5" ry="5.5" fill="#1d2b45"/>
+          <ellipse cx="62" cy="50" rx="4.5" ry="5.5" fill="#1d2b45"/>
+          <path d="M 32 42 L 44 45" stroke="#1d2b45" stroke-width="2.4" stroke-linecap="round"/>
+          <path d="M 68 42 L 56 45" stroke="#1d2b45" stroke-width="2.4" stroke-linecap="round"/>
+          <path d="M 45 64 Q 50 66 55 64" stroke="#1d2b45" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <small>worker · on task</small>
+    </div>
+    <span class="zone-caption" style="left: 50%; bottom: -30px; transform: translateX(-50%);">workspace</span>
+  </div>
+
+  <!-- source pool -->
+  <div class="source">
+    <div class="pool"></div>
+    <span class="zone-caption">source · connected</span>
+  </div>
+
+  <!-- archive -->
+  <div class="archive">
+    <div class="stratum new"></div><div class="stratum"></div><div class="stratum"></div>
+    <div class="stratum"></div><div class="stratum"></div>
+    <span class="zone-caption">archive · 099 layers</span>
+  </div>
+
+  <div class="legend">A task just finished: the pulse delivered it, a new <b>archive layer</b> settled, and the worker is winding down.</div>
+</main>
+
+</body>
+</html>

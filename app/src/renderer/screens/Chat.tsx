@@ -282,11 +282,27 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
 
       {card.disposition !== "ERROR" && wroteRecords ? (
         <div className="result-card-claims">
-          <p className="small muted result-card-claims-label">What the worker says it did — Cairn hasn&apos;t checked this</p>
+          <p className="small muted result-card-claims-label">Worker&apos;s account — Cairn checked the files above, but not these descriptions</p>
           {card.claims ? (
             <>
+              <h3 className="result-card-section-title">What was done</h3>
               <p className="result-card-claims-text">{card.claims.summary}</p>
-              <p className="small muted">The worker says the milestone moved: {card.claims.milestone}</p>
+              {Array.isArray(card.claims.changes) && card.claims.changes.length > 0 ? (
+                <ul className="result-card-detail-list">
+                  {card.claims.changes.map((change, index) => <li key={`${index}-${change}`}>{change}</li>)}
+                </ul>
+              ) : null}
+              <h3 className="result-card-section-title">What was checked</h3>
+              {Array.isArray(card.claims.checks) && card.claims.checks.length > 0 ? (
+                <ul className="result-card-detail-list">
+                  {card.claims.checks.map((check, index) => <li key={`${index}-${check.name}`}><strong>{check.name}:</strong> {check.result}</li>)}
+                </ul>
+              ) : <p className="result-card-claims-text">No checks were reported.</p>}
+              <h3 className="result-card-section-title">What to do next</h3>
+              <p className="result-card-claims-text">{card.claims.howToTry || "No trial steps were reported."}</p>
+              <h3 className="result-card-section-title">What still needs your judgment</h3>
+              <p className="result-card-claims-text">{card.claims.limitations || "The worker reported no remaining limitations."}</p>
+              <p className="small muted result-card-milestone">Milestone moved (worker&apos;s answer): {card.claims.milestone}</p>
             </>
           ) : (
             <p className="result-card-claims-text">The worker didn&apos;t leave a readable summary of what it did.</p>

@@ -92,7 +92,14 @@ export function composeResultCard(result: SerialRunResult): ResultCard {
   card.processFailure = composed.processFailure
     ? { code: composed.processFailure.code, debugPath: composed.processFailure.debugPath }
     : null;
-  card.claims = composed.claims ? { summary: composed.claims.summary, milestone: composed.claims.milestone } : null;
+  card.claims = composed.claims ? {
+    summary: composed.claims.summary,
+    changes: [...composed.claims.changes],
+    checks: composed.claims.checks.map((check) => ({ ...check })),
+    howToTry: composed.claims.howToTry,
+    limitations: composed.claims.limitations,
+    milestone: composed.claims.milestone,
+  } : null;
   card.route = {
     adapterLabel: composed.route.adapterLabel,
     provider: composed.route.provider,

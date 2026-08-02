@@ -1,0 +1,25 @@
+console: [vite] connecting...
+console: [vite] connected.
+console: %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold
+console: %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.
+console: Uncaught TypeError: Cannot read properties of undefined (reading 'taskCurrent')
+console: The above error occurred in the <ChatMock> component:
+
+    at ChatMock (http://localhost:7642/lab/chatmock.tsx:295:37)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+console: Uncaught TypeError: Cannot read properties of undefined (reading 'taskCurrent')
+captured task-136-a-open
+captured task-136-a-tucked
+captured task-136-b-open
+captured task-136-b-tucked
+captured task-136-c-open
+captured task-136-c-tucked

@@ -87,6 +87,14 @@ function doneCard(disposition: "DONE" | "STOPPED"): ResultCard {
       summary: disposition === "DONE"
         ? "Claimed: pads and faces are in and the suite was green."
         : "Claimed: partial progress before the stop.",
+      changes: disposition === "DONE"
+        ? ["Made the garden pads glow.", "Added blinking faces."]
+        : ["Started the garden update before Cairn stopped the run."],
+      checks: disposition === "DONE"
+        ? [{ name: "Garden tests", result: "All passed." }]
+        : [],
+      howToTry: "Open the garden and watch the pads and faces.",
+      limitations: disposition === "DONE" ? "The final look still needs your judgment." : "The update is incomplete.",
       milestone: "NO",
     },
     route: { adapterLabel: "Lab Worker", provider: "Lab Provider", model: "lab-face-1" },

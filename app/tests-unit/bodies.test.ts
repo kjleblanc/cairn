@@ -40,6 +40,35 @@ test("every OpenRouter body's billing line names the sign-in choice", () => {
   }
 });
 
+test("Claude's current flagship, mid, and fast tiers keep their verified OpenRouter ids and prices", () => {
+  const expected = [
+    {
+      id: "anthropic/claude-opus-5",
+      name: "Claude Opus 5",
+      price: "$5 per million input tokens and $25 per million output tokens",
+    },
+    {
+      id: "anthropic/claude-sonnet-5",
+      name: "Claude Sonnet 5",
+      price: "$2 per million input tokens and $10 per million output tokens",
+    },
+    {
+      id: "anthropic/claude-haiku-4.5",
+      name: "Claude Haiku 4.5",
+      price: "$1 per million input tokens and $5 per million output tokens",
+    },
+  ];
+
+  for (const tier of expected) {
+    const body = BODIES.find((candidate) => candidate.id === tier.id);
+    assert.ok(body, `${tier.name} is missing from the picker`);
+    assert.equal(body.name, tier.name);
+    assert.ok(body.blurb.includes(tier.price), `${tier.name} does not show its verified price`);
+    assert.equal(body.billing, "Bills per use — sign in or paste a key");
+    assert.equal(body.baseUrl, undefined, `${tier.name} must use OpenRouter`);
+  }
+});
+
 test("exactly two bodies are primary — the two doors on the connect card's first screen", () => {
   const primary = BODIES.filter((b) => b.primary === true);
   assert.equal(primary.length, 2);

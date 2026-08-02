@@ -308,7 +308,14 @@ export interface ResultCard {
   /** The worker process's own failure code and the retained local debug path
    * (null when the debug directory could not be created). */
   processFailure: { code: string; debugPath: string | null } | null;
-  claims: { summary: string; milestone: string } | null;
+  claims: {
+    summary: string;
+    changes: string[];
+    checks: { name: string; result: string }[];
+    howToTry: string;
+    limitations: string;
+    milestone: string;
+  } | null;
   route: { adapterLabel: string; provider: string; model: string } | null;
 }
 

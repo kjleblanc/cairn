@@ -194,8 +194,24 @@ export const PHONE_PAGE = `<!doctype html>
       card.appendChild(facts);
       if (c.claims && c.claims.summary) {
         var claims = el("div", "claims");
-        claims.appendChild(el("p", "small muted", "What the worker says it did \\u2014 Cairn hasn\\u2019t checked this"));
+        claims.appendChild(el("p", "small muted", "Worker\\u2019s account \\u2014 Cairn checked the files above, but not these descriptions"));
+        claims.appendChild(el("strong", null, "What was done"));
         claims.appendChild(el("p", null, c.claims.summary));
+        if (Array.isArray(c.claims.changes) && c.claims.changes.length) {
+          var changes = el("ul", "fact-list");
+          c.claims.changes.forEach(function (change) { changes.appendChild(el("li", null, change)); });
+          claims.appendChild(changes);
+        }
+        claims.appendChild(el("strong", null, "What was checked"));
+        var checks = el("ul", "fact-list");
+        if (Array.isArray(c.claims.checks) && c.claims.checks.length) {
+          c.claims.checks.forEach(function (check) { checks.appendChild(el("li", null, check.name + ": " + check.result)); });
+        } else checks.appendChild(el("li", null, "No checks were reported."));
+        claims.appendChild(checks);
+        claims.appendChild(el("strong", null, "What to do next"));
+        claims.appendChild(el("p", null, c.claims.howToTry || "No trial steps were reported."));
+        claims.appendChild(el("strong", null, "What still needs your judgment"));
+        claims.appendChild(el("p", null, c.claims.limitations || "The worker reported no remaining limitations."));
         card.appendChild(claims);
       }
       card.appendChild(el("p", "turn-when", fmtTime(turn.ts)));
