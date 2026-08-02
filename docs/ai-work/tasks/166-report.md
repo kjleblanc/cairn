@@ -109,7 +109,7 @@ All command output was observed in this task's terminal.
 - `npm.cmd run build:lab` — passed: 90 modules transformed and the lab bundle
   built.
 - Final affected Electron set:
-  `npx.cmd playwright test tests/conductor.spec.ts:173 tests/conductor.spec.ts:204 tests/conductor.spec.ts:611 tests/conductor.spec.ts:1082 tests/conductor.spec.ts:1123 tests/conductor.spec.ts:1184 tests/conductor.spec.ts:1254 tests/conductor.spec.ts:1343`
+  `npx.cmd playwright test tests/conductor.spec.ts:173 tests/conductor.spec.ts:204 tests/conductor.spec.ts:638 tests/conductor.spec.ts:1109 tests/conductor.spec.ts:1150 tests/conductor.spec.ts:1211 tests/conductor.spec.ts:1281 tests/conductor.spec.ts:1370`
   — 8 passed. These cover live reply reattachment, stopped-turn deduplication,
   result-card reload, no spent card on run reattachment, refused-start proposal
   retention, commentary, queued sends, and the third post-dispatch proposal.
