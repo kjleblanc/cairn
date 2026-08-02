@@ -63,6 +63,10 @@ const COMMENTARY_SCRIPT = {
     "\n\n```cairn-followups\n[\"Show me how to try this myself\", \"Pick the next small improvement\"]\n```"],
   delayMs: 400,
 };
+const STOPPED_COMMENTARY_SCRIPT = {
+  parts: ["The card says", " this task STOPPED safely", ", and the report explains why", " in docs/ai-work."],
+  delayMs: 400,
+};
 let commentaryDelayMs = COMMENTARY_SCRIPT.delayMs;
 
 // The comment-busy test's deterministic window (task 137's flake fix): while
@@ -163,6 +167,11 @@ function commentaryRequested(messages) {
   return Boolean(last) && last.role === "system" && typeof last.content === "string" && last.content.includes("result card");
 }
 
+function commentaryScriptFor(messages) {
+  const prompt = messages.map((message) => typeof message?.content === "string" ? message.content : "").join("\n");
+  return prompt.includes('"disposition":"STOPPED"') ? STOPPED_COMMENTARY_SCRIPT : COMMENTARY_SCRIPT;
+}
+
 // Repo task 080. What `commentaryRequested` reads is the ENVELOPE'S
 // INSTRUCTION, not the card — so it says a comment was asked for and nothing
 // at all about what the model was shown. Every commentary test would still
@@ -215,7 +224,7 @@ export function start() {
         const messages = messagesOf(rawBody);
         if (commentaryRequested(messages)) {
           lastCommentaryBody = rawBody;
-          void streamReply(res, { ...COMMENTARY_SCRIPT, delayMs: commentaryDelayMs }, commentaryGatePoint);
+          void streamReply(res, { ...commentaryScriptFor(messages), delayMs: commentaryDelayMs }, commentaryGatePoint);
           return;
         }
         const content = lastUserContent(messages);

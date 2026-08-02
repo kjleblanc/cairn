@@ -5,21 +5,21 @@ import { delimiter, join } from "node:path";
 /** The fake-codex lane, shared. A PATH shim that answers as the official
  * Codex CLI does, so a test can drive the whole real-call path (CAIRN_MOCK=0)
  * without a paid call: the returned env is spread into an Electron launch,
- * `marker` records that the exec really started, and `prompt` captures every
- * byte the worker was handed on stdin. `behavior: "slow"` delays the finish
- * by eight seconds, which is the only lane where a run is long enough to
- * watch, stop, or reload into.
+ * `marker` records that the exec really started, `prompt` captures every byte
+ * the worker was handed on stdin, and `release` deterministically completes
+ * the focus/return lane. `behavior: "town"` stays alive until Stop kills it.
  *
  * Ported VERBATIM from app/tests/routing.spec.ts:20-82 (Phase 3 Task 6); the
  * only edit is the `export` keyword. routing.spec.ts imports it unchanged.
  */
-export function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-claims" | "slow" | "town" = "success"): { env: NodeJS.ProcessEnv; marker: string; prompt: string } {
+export function fakeCodexEnvironment(_project: string, connected: boolean, behavior: "success" | "invalid-jsonl" | "missing-claims" | "slow" | "town" | "town-return" = "success"): { env: NodeJS.ProcessEnv; marker: string; prompt: string; release: string } {
   const bin = mkdtempSync(join(tmpdir(), "cairn-fake-codex-"));
   const marker = join(bin, "real-exec-started.txt");
   // What the worker was actually handed. The prompt arrives on stdin, so the
   // shim keeps every byte of it: a test can then assert on what Cairn really
   // sent, not on what the app believed it sent.
   const prompt = join(bin, "real-exec-prompt.txt");
+  const release = join(bin, "release-real-exec.txt");
   const dispatcher = join(bin, "fake-codex.cjs");
   const dispatcherSource = `
 const fs = require("node:fs");
@@ -57,7 +57,19 @@ process.stdin.on("end", () => {
     process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "m", type: "agent_message", text: "Done.\\n\\n\`\`\`cairn-claims\\n" + JSON.stringify({ disposition: "DONE", summary: "Added the visible result.", changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }], howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES" }) + "\\n\`\`\`" } }) + "\\n");
     process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
   };
-  setTimeout(finish, ${JSON.stringify(behavior === "slow" ? 8000 : behavior === "town" ? 15000 : 0)});
+  if (${JSON.stringify(behavior)} === "town") {
+    setInterval(() => {}, 1000);
+    return;
+  }
+  if (${JSON.stringify(behavior)} === "town-return") {
+    const gate = setInterval(() => {
+      if (!fs.existsSync(process.env.CAIRN_FAKE_CODEX_RELEASE)) return;
+      clearInterval(gate);
+      finish();
+    }, 20);
+    return;
+  }
+  setTimeout(finish, ${JSON.stringify(behavior === "slow" ? 8000 : 0)});
 });
 `;
   writeFileSync(dispatcher, dispatcherSource);
@@ -77,10 +89,12 @@ process.stdin.on("end", () => {
   return {
     marker,
     prompt,
+    release,
     env: {
       [pathKey]: `${bin}${delimiter}${process.env[pathKey] ?? ""}`,
       CAIRN_FAKE_CODEX_MARKER: marker,
       CAIRN_FAKE_CODEX_PROMPT: prompt,
+      CAIRN_FAKE_CODEX_RELEASE: release,
       LOCALAPPDATA: emptyLocalAppData,
       // Task 119: with kimi detection now part of every real lane, the codex
       // lane sets the positive test marker WITHOUT the fake-kimi opt-in, so

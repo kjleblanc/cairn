@@ -33,9 +33,40 @@
 }
 .town-node-ready .town-face-svg,
 .town-node-thinking .town-face-svg,
-.town-node-working .town-face-svg {
+.town-node-starting .town-face-svg,
+.town-node-working .town-face-svg,
+.town-node-checking .town-face-svg,
+.town-node-done .town-face-svg,
+.town-node-stopped .town-face-svg,
+.town-node-error .town-face-svg {
   animation: town-face-pop .45s var(--spring);
 }
+
+/* Task 168: motion is one piece of runtime evidence crossing the pond. The
+   reducer owns the sequence and timer; CSS only draws the current keyed cue,
+   so animation completion can never approve, delay, or manufacture work. */
+@keyframes town-packet-flight {
+  0% { left: var(--town-from-x); top: var(--town-from-y); opacity: 0; transform: translate(-50%, -50%) scale(.82); }
+  14% { opacity: 1; }
+  50% { left: var(--town-mid-x); top: var(--town-mid-y); opacity: 1; transform: translate(-50%, calc(-50% - 8px)) scale(1); }
+  88% { opacity: 1; }
+  100% { left: var(--town-to-x); top: var(--town-to-y); opacity: 0; transform: translate(-50%, -50%) scale(.9); }
+}
+.town-transfer-packet { animation: town-packet-flight 950ms cubic-bezier(.24, .72, .26, 1) both; }
+
+@keyframes town-receiver-ripple {
+  0% { opacity: .9; transform: translate(-50%, -50%) scale(.35); }
+  65% { opacity: .48; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(3.4); }
+}
+.town-transfer-ripple { animation: town-receiver-ripple 720ms ease-out both; }
+
+@keyframes town-terminal-ripple {
+  0% { opacity: .94; transform: translate(-50%, -50%) scale(.4); }
+  45% { opacity: .62; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(4.2); }
+}
+.town-terminal-ripple { animation: town-terminal-ripple 1.15s ease-out both; }
 
 /* Calmer idle life: the bob slows and shallows (overrides app.css's float),
    and the town's lantern skyglow breathes. */
@@ -81,7 +112,9 @@
 @media (prefers-reduced-motion: reduce) {
   .bubble, .result-card, .task-card, .push-chip, .run-strip, .town-node,
   .town-face-svg, .town-skyglow, .town-face-holo,
-  .overlay-card, .overlay-scrim { animation: none; }
+  .overlay-card, .overlay-scrim, .town-transfer-packet,
+  .town-transfer-ripple, .town-terminal-ripple { animation: none; }
+  .town-transfer-packet, .town-transfer-ripple, .town-terminal-ripple { display: none; }
   .town-node, .chat-composer button, .town-square-header button,
-  .rail-action, .rail-collapse { transition: none; }
+  .rail-action, .rail-collapse, .town-pond-layer { transition: none; }
 }

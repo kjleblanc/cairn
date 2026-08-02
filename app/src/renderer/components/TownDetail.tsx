@@ -12,10 +12,10 @@ export function TownDetail({
       <aside className="town-detail" aria-label={`${selection.name} details`} onClick={(event) => event.stopPropagation()}>
         <div className="town-detail-heading">
           <div>
-            <span className="town-detail-kicker">Live worker</span>
+            <span className="town-detail-kicker">{selection.state === "returned" ? "Worker handoff" : "Live worker"}</span>
             <h3>{selection.name}</h3>
           </div>
-          <span className="town-state-shape town-state-working">working</span>
+          <span className={`town-state-shape town-state-${selection.state}`}>{selection.state === "returned" ? "result sent" : "working"}</span>
         </div>
         <dl>
           <div><dt>Role</dt><dd>{selection.role}</dd></div>

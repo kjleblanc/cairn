@@ -18,6 +18,7 @@ import { createRoot } from "react-dom/client";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../src/shared/ipc";
 import { cairn } from "../src/renderer/api";
 import { TownSquare } from "../src/renderer/components/TownSquare";
+import { hydrateTownPresentation } from "../src/renderer/town/presentation";
 
 const DIR = "C:\\lab\\garden-lab";
 
@@ -128,6 +129,7 @@ function ChatMock() {
     <div className="chatmock-stage">
       <div className="chatmock-town">
         <TownSquare projectName="Garden Lab (mock)" task={task} stream={stream}
+          presentation={hydrateTownPresentation(task, stream)}
           positions={positions} onPositionsChange={setPositions}
           onFocusChat={() => setOpen(true)} onOpenRun={() => undefined} />
       </div>

@@ -45,6 +45,19 @@ test("offline-demo and closed sessions never become worker villagers", () => {
   assert.equal(offline.relationships.length, 0);
 });
 
+test("a real session is not a worker villager until Run actually starts", () => {
+  assert.equal(workerFromSession(session({ activities: [] })), null);
+  assert.equal(workerFromSession(session({
+    activities: [{ stage: "Route", state: "done", detail: "The approved route is ready" }],
+  })), null);
+  assert.notEqual(workerFromSession(session({
+    activities: [
+      { stage: "Route", state: "done", detail: "The approved route is ready" },
+      { stage: "Run", state: "working", detail: "The worker process is active" },
+    ],
+  })), null);
+});
+
 test("a real running session creates one truthful worker and one live task thread", () => {
   const model = townModelFromRuntime(session(), null);
   assert.equal(model.entities[0]?.state, "working");
@@ -72,6 +85,7 @@ test("duplicate current-era ids do not overclaim concurrency", () => {
     id: "worker:codex-exec",
     name: "Codex Exec worker",
     role: "codex-exec",
+    state: "working",
     currentTask: "One",
     latestActivity: "Running",
   };
@@ -81,11 +95,45 @@ test("duplicate current-era ids do not overclaim concurrency", () => {
   assert.equal(model.relationships[0]?.task, "One");
 });
 
+test("a worker result is named returned while Cairn checks it", () => {
+  const model = townModelFromRuntime(session({
+    activities: [
+      { stage: "Run", state: "working", detail: "Worker process active" },
+      { stage: "Run", state: "done", detail: "Worker returned evidence" },
+      { stage: "Check", state: "working", detail: "Cairn is checking" },
+    ],
+  }), null);
+  const worker = model.entities.find((entity) => entity.kind === "worker");
+  assert.equal(worker?.state, "returned");
+  assert.equal(model.relationships[0]?.summary, "Codex Exec worker returned a result to Cairn for checking");
+});
+
+test("intermediate Run and Check stops remove the worker immediately", () => {
+  const runStopped = workerFromSession(session({
+    activities: [
+      { stage: "Run", state: "working", detail: "Worker process active" },
+      { stage: "Run", state: "stopped", detail: "Worker stopped safely" },
+    ],
+  }));
+  assert.equal(runStopped, null);
+
+  const checkStopped = workerFromSession(session({
+    activities: [
+      { stage: "Run", state: "working", detail: "Worker process active" },
+      { stage: "Run", state: "done", detail: "Worker returned evidence" },
+      { stage: "Check", state: "working", detail: "Cairn is checking" },
+      { stage: "Check", state: "stopped", detail: "Evidence could not be verified" },
+    ],
+  }));
+  assert.equal(checkStopped, null);
+});
+
 test("the visible ring is capped and excess real workers form a counted landmark", () => {
   const workers = Array.from({ length: MAX_VISIBLE_WORKERS + 3 }, (_, index): TownWorkerInput => ({
     id: `worker:run-${index}`,
     name: `Worker ${index}`,
     role: "future worker",
+    state: "working",
     currentTask: `Task ${index}`,
     latestActivity: "Working",
   }));

@@ -13,6 +13,7 @@ import { composeErrorCard, composeResultCard, postResultCard } from "./conductor
 import { commentary, consumeProposal, restoreProposal } from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
+import { runtimeWorkerIdentity } from "./workeridentity.js";
 
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
@@ -91,9 +92,12 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     sessions.set(dir, {
       dir,
       outcome,
-      adapterId: request.adapterId ?? null,
+      // Request fields are not runtime identity. Detection below names the
+      // adapter that actually won the route and whether it owns a real-call
+      // disclosure seam before any Run activity can reach the renderer.
+      adapterId: null,
       conversationId: request.conversationId ?? null,
-      worker: realCallConfirmed === true,
+      worker: false,
       startedAt: new Date().toISOString(),
       activities: [],
       phase: "running",
@@ -108,6 +112,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     // a demo (no-disclosure) adapter returns undefined and needs no confirmation.
     let detected: Awaited<ReturnType<typeof detectedAdapters>>;
     let expected: WorkerDisclosure | undefined;
+    let routedAdapterId: string | null = null;
+    let routedWorker = false;
     let routeReady = false;
     try {
       detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? { outcome, details } : undefined);
@@ -116,6 +122,9 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const routed = preview.status === "ready"
         ? detected.adapters.find((adapter) => adapter.descriptor.id === preview.recommended.id)
         : undefined;
+      const identity = runtimeWorkerIdentity(routed);
+      routedAdapterId = identity.adapterId;
+      routedWorker = identity.worker;
       expected = routed?.disclosure?.(outcome, details);
     } catch (error) {
       cleanup();
@@ -125,6 +134,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     if (expected && (realCallConfirmed !== true || !sameDisclosure(disclosure, expected))) {
       cleanup();
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
+    }
+    const acceptedSession = sessions.get(dir);
+    if (acceptedSession) {
+      acceptedSession.adapterId = routedAdapterId;
+      acceptedSession.worker = routedWorker;
     }
     // Main has now accepted the run. Retire only a byte-matching proposal from
     // the same conversation before any task work begins, so a remounted Chat

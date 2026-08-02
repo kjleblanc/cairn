@@ -16,7 +16,7 @@ export type TownWorkerEntity = {
   kind: "worker";
   name: string;
   role: string;
-  state: "working";
+  state: "working" | "returned";
   currentTask: string;
   latestActivity: string;
 };
@@ -41,7 +41,7 @@ export type TownRelationship = {
   summary: string;
 };
 
-export type TownWorkerInput = Omit<TownWorkerEntity, "kind" | "state">;
+export type TownWorkerInput = Omit<TownWorkerEntity, "kind">;
 
 export type TownModel = {
   entities: TownEntity[];
@@ -63,11 +63,20 @@ function adapterName(adapterId: string): string {
  * adapter, an offline demo, or a retained closed result. */
 export function workerFromSession(session: RunSessionSnapshot | null): TownWorkerInput | null {
   if (!session || session.phase !== "running" || !session.worker || !session.adapterId) return null;
+  if (session.activities.some((activity) =>
+    activity.state === "stopped" && (activity.stage === "Run" || activity.stage === "Check" || activity.stage === "Result"))) return null;
+  // Main creates the session before it has finished the run-time route and
+  // disclosure gates. A villager appears only once the serial envelope emits
+  // the real Run/working activity — never from session existence alone.
+  if (!session.activities.some((activity) => activity.stage === "Run" && activity.state === "working")) return null;
   const latest = session.activities.at(-1);
+  const returned = session.activities.some((activity) =>
+    (activity.stage === "Run" && activity.state === "done") || activity.stage === "Check");
   return {
     id: `worker:${session.adapterId}`,
     name: adapterName(session.adapterId),
     role: session.adapterId,
+    state: returned ? "returned" : "working",
     currentTask: session.outcome,
     latestActivity: latest ? `${latest.stage}: ${latest.detail}` : "Starting the approved worker run",
   };
@@ -85,7 +94,7 @@ export function deriveTownModel(input: TownModelInput): TownModel {
     seen.add(worker.id);
     return true;
   })
-    .map<TownWorkerEntity>((worker) => ({ ...worker, kind: "worker", state: "working" }));
+    .map<TownWorkerEntity>((worker) => ({ ...worker, kind: "worker" }));
   const visibleWorkers = uniqueWorkers.slice(0, MAX_VISIBLE_WORKERS);
   const hiddenWorkers = uniqueWorkers.slice(MAX_VISIBLE_WORKERS);
   const entities: TownEntity[] = [cairn, ...visibleWorkers];
@@ -109,7 +118,9 @@ export function deriveTownModel(input: TownModelInput): TownModel {
       from: "cairn",
       to: worker.id,
       task: worker.currentTask,
-      summary: `${worker.name} is working on ${worker.currentTask}`,
+      summary: worker.state === "returned"
+        ? `${worker.name} returned a result to Cairn for checking`
+        : `${worker.name} is working on ${worker.currentTask}`,
     })),
   };
 }

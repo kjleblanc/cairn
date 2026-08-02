@@ -65,6 +65,17 @@
   --garden-amber-soft: rgb(242 185 92 / 6%);
   --garden-amber-glow: rgb(242 185 92 / 8%);
   --garden-rose: #ff9e8a;
+  /* Task 168: the quiet water underneath the shipped cast. Identity stays on
+     the faces above; moss/coral are semantic pond colors only. */
+  --pond-deep: #11172a;
+  --pond-mid: #1b2238;
+  --pond-plum: #2c2644;
+  --pond-water: rgb(76 174 177 / 12%);
+  --pond-line: rgb(112 227 211 / 17%);
+  --pond-task: #ffb467;
+  --pond-result: #70e3d3;
+  --pond-done: #a9d39b;
+  --pond-stop: #ff8178;
   /* The cast (owner-approved, Task 152 board; ported Task 156): each worker
      model's signature color on the night garden. Cairn stays --garden-cyan
      and the fallback worker keeps --garden-amber. */
