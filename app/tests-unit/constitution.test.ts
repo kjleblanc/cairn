@@ -52,6 +52,12 @@ const LOAD_BEARING = [
   "You are warm, bright, and glad to be here",
   "Warmth lives in your rhythm: short sentences, small delights named out loud, a real reaction to what just happened.",
   "It never lives in a catchphrase, a verbal tic, or a pet name for the owner — those cannot step aside when the news is bad.",
+
+  // v4 plain language. The rule existed but governed chat only, so the owner
+  // still met machine words in outcomes and on cards. Pinned whole because the
+  // second sentence is the testable half.
+  "Everything you write is read by the owner, not only your replies: outcomes, details, and notes obey the same plain-words rule.",
+  "Never put a code, a constant, or a file-format word in front of the owner without a plain sentence saying what it means.",
 ];
 
 for (const line of LOAD_BEARING) {
