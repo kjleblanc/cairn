@@ -43,6 +43,7 @@ const api: CairnApi = {
   conductorCurrent: (dir) => ipcRenderer.invoke("conductor:current", dir),
   conductorConversations: (dir) => ipcRenderer.invoke("conductor:conversations", dir),
   conductorTurns: (dir, id) => ipcRenderer.invoke("conductor:turns", dir, id),
+  conductorProposal: (dir, id) => ipcRenderer.invoke("conductor:proposal", dir, id),
   onConductorDelta: (callback) => {
     const listener = (_event: unknown, payload: ConductorDelta) => callback(payload);
     ipcRenderer.on("conductor:delta", listener);

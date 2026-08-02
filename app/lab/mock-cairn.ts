@@ -302,6 +302,9 @@ const mock: CairnApi = {
   conductorConversations: (_dir: string): Promise<ConductorConversationSummary[]> =>
     soon([{ id: CONVERSATION_ID, startedTs: STARTED, preview: "Can the workspace feel calmer?" }]),
   conductorTurns: (_dir: string, id: string) => soon(id === CONVERSATION_ID ? world.turns : []),
+  // The lab's canned reply emits no task block, so it has no actionable
+  // proposal for a remounted Chat to restore.
+  conductorProposal: (_dir: string, _id: string) => soon(null),
   onConductorDelta: (cb: (event: ConductorDelta) => void) => {
     listeners.conductor.add(cb);
     return () => listeners.conductor.delete(cb);

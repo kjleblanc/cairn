@@ -10,7 +10,7 @@ import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
 import { emitBridgeSync } from "./bridge/hub.js";
 import type { ConductorDelta, Result, ResultCard, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
-import { commentary } from "./conductor/service.js";
+import { commentary, consumeProposal, restoreProposal } from "./conductor/service.js";
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 
@@ -108,9 +108,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     // a demo (no-disclosure) adapter returns undefined and needs no confirmation.
     let detected: Awaited<ReturnType<typeof detectedAdapters>>;
     let expected: WorkerDisclosure | undefined;
+    let routeReady = false;
     try {
       detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? { outcome, details } : undefined);
       const preview = previewSerialRoute(outcome, detected.adapters, adapterId);
+      routeReady = preview.status === "ready";
       const routed = preview.status === "ready"
         ? detected.adapters.find((adapter) => adapter.descriptor.id === preview.recommended.id)
         : undefined;
@@ -124,6 +126,18 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       cleanup();
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
     }
+    // Main has now accepted the run. Retire only a byte-matching proposal from
+    // the same conversation before any task work begins, so a remounted Chat
+    // cannot resurrect a spent dispatch card even if result-card posting later
+    // fails. Refusals above deliberately leave it actionable.
+    const consumedProposal = routeReady && request.conversationId
+      ? consumeProposal(dir, request.conversationId, outcome, details)
+      : null;
+    const restoreConsumedProposal = (): void => {
+      if (consumedProposal !== null && request.conversationId) {
+        restoreProposal(dir, request.conversationId, consumedProposal);
+      }
+    };
     const run: Promise<Result<SerialRunResult>> = (async () => {
       try {
         const value = await runSerialTask(dir, outcome, {
@@ -142,10 +156,18 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         const safeValue = value.status === "connection-required" && detected.status
           ? { ...value, route: { ...value.route, reason: connectionRequiredReason(detected.status) } }
           : value;
+        // A route that closed before any task started is still the same
+        // actionable proposal. This is defensive when the earlier preview was
+        // ready but the run-time result says the connection changed.
+        if (safeValue.status === "connection-required") restoreConsumedProposal();
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.result = safeValue; }
         return { ok: true, value: safeValue };
       } catch (error) {
+        // The renderer keeps the proposal available when main returns a run
+        // error, so trusted main state must make the same retry possible after
+        // a remount.
+        restoreConsumedProposal();
         logError("task:run", error);
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.error = plainMessage(error); }

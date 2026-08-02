@@ -77,6 +77,33 @@ function aheadPhrase(ahead: number): string {
   return `${commitCount(ahead)} ahead`;
 }
 
+function sameTaskBlock(a: TaskBlock | null, b: TaskBlock | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.outcome === b.outcome && a.notes === b.notes && a.details === b.details &&
+    a.concerns.length === b.concerns.length &&
+    a.concerns.every((concern, i) => concern.kind === b.concerns[i].kind && concern.text === b.concerns[i].text);
+}
+
+/** Saved history may resolve after a live done/envelope event was already
+ * appended. Merge the two ordered views without duplicating the exact turn
+ * main both persisted and emitted. */
+function mergeSavedTurns(saved: readonly ConductorTurn[], current: readonly ConductorTurn[]): ConductorTurn[] {
+  const merged = [...saved];
+  const present = new Set(saved.map((turn) => JSON.stringify(turn)));
+  for (const turn of current) {
+    const key = JSON.stringify(turn);
+    if (present.has(key)) continue;
+    present.add(key);
+    merged.push(turn);
+  }
+  return merged;
+}
+
+function appendTurnOnce(turns: readonly ConductorTurn[], turn: ConductorTurn): ConductorTurn[] {
+  const key = JSON.stringify(turn);
+  return turns.some((current) => JSON.stringify(current) === key) ? [...turns] : [...turns, turn];
+}
+
 /**
  * The chip, the pause, and the outcome — one element at a time, under the
  * DONE card that prompted it. Nothing here is routed through the conductor:
@@ -347,6 +374,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const [status, setStatus] = useState<ConductorStatus | null>(null);
   const [stones, setStones] = useState(0);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [restoringConversation, setRestoringConversation] = useState(true);
   const [turns, setTurns] = useState<ConductorTurn[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -377,6 +405,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // instead of carrying over answers from the previous proposal.
   const [taskBlock, setTaskBlock] = useState<TaskBlock | null>(null);
   const [taskBlockKey, setTaskBlockKey] = useState(0);
+  // Main's conversation/proposal reads are asynchronous. If a live proposal or
+  // result arrives while they are in flight, that event is newer and must win
+  // rather than being overwritten when the older snapshot resolves.
+  const taskBlockVersionRef = useRef(0);
+  const taskBlockRef = useRef<TaskBlock | null>(null);
+  // Guards the whole asynchronous conversation restore, not just its proposal:
+  // a send or accepted delta owns newer conversation/turn state and an older
+  // mount snapshot may only merge history into that state, never replace it.
+  const conversationVersionRef = useRef(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   // The run this project has, if any: the same main-process session the run
@@ -418,6 +455,24 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setConversationId(id);
   }, []);
 
+  const applyTaskBlock = useCallback((next: TaskBlock | null) => {
+    const changed = !sameTaskBlock(taskBlockRef.current, next);
+    taskBlockRef.current = next;
+    setTaskBlock(next);
+    if (changed && next !== null) setTaskBlockKey((key) => key + 1);
+  }, []);
+
+  /** Re-read the proposal main still considers actionable. This is used after
+   * a dispatch/result because that event may belong to an older card while a
+   * newer proposal is already current. */
+  const reconcileProposal = useCallback(async (id: string): Promise<void> => {
+    const requestedAt = taskBlockVersionRef.current;
+    const restored = await cairn.conductorProposal(dir, id);
+    if (conversationIdRef.current !== id || taskBlockVersionRef.current !== requestedAt) return;
+    taskBlockVersionRef.current += 1;
+    applyTaskBlock(restored);
+  }, [dir, applyTaskBlock]);
+
   // Villager bubble (Task 146): an explicit "talk" intent from the shell —
   // the rail, Cairn's node, or the dashboard's Talk button — untucks the
   // dialog and focuses the composer.
@@ -441,31 +496,82 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // component's mount lifetime: switching projects may unmount Chat without
   // cancelling a reply, and returning reattaches to its accumulated text.
   useEffect(() => {
-    if (!status?.connected) return;
+    if (!status?.connected) { setRestoringConversation(false); return; }
     let live = true;
-    void Promise.all([cairn.conductorCurrent(dir), cairn.conductorConversations(dir)]).then(async ([stream, list]) => {
-      if (!live) return;
-      const id = stream?.conversationId ?? list.at(-1)?.id ?? null;
-      if (id === null) return;
-      const saved = await cairn.conductorTurns(dir, id);
-      if (!live) return;
-      setConvId(id);
-      setTurns(saved);
-      if (stream?.kind === "reply") {
-        inFlightRef.current = { id };
-        streamingRef.current = stream.text;
-        setStreamingText(stream.text);
-        setStreaming(true);
-      } else if (stream?.kind === "commentary") {
-        // A reload mid-comment reattaches the same way, minus the in-flight
-        // bookkeeping: this stream was never this screen's send (Task 153).
-        streamingRef.current = stream.text;
-        setStreamingText(stream.text);
-        setCommentary(true);
+    const restoreVersion = conversationVersionRef.current;
+    const proposalVersion = taskBlockVersionRef.current;
+    setRestoringConversation(true);
+    void (async () => {
+      try {
+        const [stream, list] = await Promise.all([
+          cairn.conductorCurrent(dir),
+          cairn.conductorConversations(dir),
+        ]);
+        if (!live || conversationVersionRef.current !== restoreVersion) return;
+        const id = stream?.conversationId ?? list.at(-1)?.id ?? null;
+        if (id === null) return;
+
+        // Adopt the id before the slower history reads. A done delta that lands
+        // during those reads now matches this conversation instead of falling
+        // through an empty ref. The version guard above prevents this adoption
+        // if newer local state already won meanwhile.
+        setConvId(id);
+        if (stream?.kind === "reply") {
+          inFlightRef.current = { id };
+          streamingRef.current = stream.text;
+          setStreamingText(stream.text);
+          setStreaming(true);
+        } else if (stream?.kind === "commentary") {
+          streamingRef.current = stream.text;
+          setStreamingText(stream.text);
+          setCommentary(true);
+        }
+
+        const [saved, restored] = await Promise.all([
+          cairn.conductorTurns(dir, id),
+          cairn.conductorProposal(dir, id),
+        ]);
+        // Close the small gap where the initial stream snapshot said "live"
+        // but its done event reached the renderer before the id was adopted.
+        const latestStream = await cairn.conductorCurrent(dir);
+        if (!live || conversationIdRef.current !== id) return;
+        if (conversationVersionRef.current !== restoreVersion) {
+          // A live event already appended newer state. Bring the older saved
+          // history in behind it without erasing or duplicating that event.
+          setTurns((current) => mergeSavedTurns(saved, current));
+          void reconcileProposal(id);
+          return;
+        }
+
+        setTurns(saved);
+        if (taskBlockVersionRef.current === proposalVersion) applyTaskBlock(restored);
+        if (latestStream?.conversationId === id && latestStream.kind === "reply") {
+          inFlightRef.current = { id };
+          streamingRef.current = latestStream.text;
+          setStreamingText(latestStream.text);
+          setStreaming(true);
+          setCommentary(false);
+        } else if (latestStream?.conversationId === id && latestStream.kind === "commentary") {
+          // A reload mid-comment reattaches the same way, minus the in-flight
+          // bookkeeping: this stream was never this screen's send (Task 153).
+          inFlightRef.current = null;
+          streamingRef.current = latestStream.text;
+          setStreamingText(latestStream.text);
+          setStreaming(false);
+          setCommentary(true);
+        } else {
+          inFlightRef.current = null;
+          streamingRef.current = "";
+          setStreamingText("");
+          setStreaming(false);
+          setCommentary(false);
+        }
+      } finally {
+        if (live) setRestoringConversation(false);
       }
-    });
+    })();
     return () => { live = false; };
-  }, [status?.connected, dir, setConvId]);
+  }, [status?.connected, dir, setConvId, applyTaskBlock, reconcileProposal]);
 
   const refreshSession = useCallback(async () => {
     setSession(await cairn.taskCurrent(dir));
@@ -480,6 +586,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   }), [dir, refreshSession]);
 
   const runActive = session?.phase === "running";
+  // The dispatch panel knows synchronously that this Chat started a run;
+  // main's shared session snapshot arrives a beat later. Treat both windows as
+  // the same serial gate so no spent card or composer remains clickable.
+  const taskBusy = runActive || dispatch?.phase === "running";
   // While a run lives, the clock ticks and the snapshot is re-read once a
   // second. The re-read is what closes the run honestly for a renderer that
   // was reloaded mid-run and so holds no run promise of its own to await: a
@@ -504,7 +614,12 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // that conversation shows it.
     if (event.kind === "envelope") {
       if (event.turn && conversationIdRef.current === event.conversationId) {
-        setTurns((t) => [...t, event.turn as ConductorTurn]);
+        conversationVersionRef.current += 1;
+        setTurns((turns) => appendTurnOnce(turns, event.turn as ConductorTurn));
+        // Ask main what remains actionable instead of blindly clearing: this
+        // result may belong to an older confirmation while a newer proposal is
+        // already current in the same conversation.
+        void reconcileProposal(event.conversationId);
       }
       return;
     }
@@ -521,6 +636,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       setConvId(event.conversationId);
     }
 
+    // Any accepted live event is newer than a mount-time conversation/history
+    // snapshot still in flight. Restore may merge older saved history later,
+    // but it may not replace this state.
+    conversationVersionRef.current += 1;
+
     if (event.kind === "delta") {
       // A delta for this conversation that no send of ours started is the
       // envelope's comment: make it visible (Task 153). Main runs at most
@@ -536,14 +656,14 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       setStreaming(false);
       setCommentary(false);
       inFlightRef.current = null;
-      if (event.turn) setTurns((t) => [...t, event.turn as ConductorTurn]);
+      if (event.turn) setTurns((turns) => appendTurnOnce(turns, event.turn as ConductorTurn));
       // Only a reply that carries a new task block replaces the card — a
       // plain reply (e.g. answering a question in ordinary prose) leaves
       // whatever card is already showing right where it is.
       if (event.taskBlock) {
-        setTaskBlock(event.taskBlock);
-        setTaskBlockKey((k) => k + 1);
-      }
+        taskBlockVersionRef.current += 1;
+        applyTaskBlock(event.taskBlock);
+      } else void reconcileProposal(event.conversationId);
       return;
     }
     // A comment that ends without a done — failed, stopped, or too large —
@@ -565,11 +685,14 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     const partial = streamingRef.current;
     streamingRef.current = "";
     setStreamingText("");
-    if (partial) {
+    if (event.turn) {
+      setTurns((turns) => appendTurnOnce(turns, event.turn as ConductorTurn));
+    } else if (partial) {
       setTurns((t) => [...t, { role: "cairn", text: `${partial}\n\n(stopped early)`, ts: new Date().toISOString() }]);
     }
+    void reconcileProposal(event.conversationId);
     setError(event.message ?? "Cairn had a problem answering.");
-  }), [dir, setConvId]);
+  }), [dir, setConvId, applyTaskBlock, reconcileProposal]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
 
@@ -654,7 +777,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // "Try again" (Task 153).
   async function send(text: string, quiet = false): Promise<boolean> {
     const trimmed = text.trim();
-    if (!trimmed || runActive) return false;
+    if (!trimmed || taskBusy || restoringConversation) return false;
     setError(null);
     // Queue instead of bounce (Task 155): while a reply or the envelope's
     // comment streams, main holds the project's one stream lock and would
@@ -665,6 +788,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       setComposer("");
       return true;
     }
+    conversationVersionRef.current += 1;
     setComposer("");
     setLastOwnerText(trimmed);
     // Shown at once so typing feels answered, and held by identity so a refusal
@@ -719,7 +843,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // effect until that reply lands. If another stream has started meanwhile,
   // send() simply re-queues the message.
   useEffect(() => {
-    if (pending.length === 0 || streaming || commentary || runActive) return;
+    if (pending.length === 0 || streaming || commentary || taskBusy) return;
     const [text, ...rest] = pending;
     setPending(rest);
     void (async () => {
@@ -728,7 +852,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       await send(text);
     })();
     // `send` is this render's closure over refs and setters only — safe.
-  }, [pending, streaming, commentary, runActive]);
+  }, [pending, streaming, commentary, taskBusy]);
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -753,7 +877,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setStreaming(false);
     setCommentary(false);
     setError(null);
-    setTaskBlock(null);
+    conversationVersionRef.current += 1;
+    taskBlockVersionRef.current += 1;
+    applyTaskBlock(null);
     setOpenedCards(new Set());
     // Queued messages belonged to the conversation being left: they will
     // never send now, so their words come back to the composer rather than
@@ -811,6 +937,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     const token = dispatchToken.current + 1;
     dispatchToken.current = token;
     setDispatch({ ...request, phase: "running", error: null });
+    const dispatchConversationId = conversationIdRef.current;
     const response = await cairn.taskRun({
       dir,
       outcome: request.outcome,
@@ -818,11 +945,16 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       adapterId,
       realCallConfirmed: worker && realCallConfirmed,
       disclosure: request.disclosure ?? undefined,
-      conversationId: conversationIdRef.current,
+      conversationId: dispatchConversationId,
     });
     if (dispatchToken.current !== token) return; // a newer dispatch owns the panel now
-    if (!response.ok) { setDispatch({ ...request, phase: "confirm", error: response.message }); return; }
+    if (!response.ok) {
+      if (dispatchConversationId) await reconcileProposal(dispatchConversationId);
+      setDispatch({ ...request, phase: "confirm", error: response.message });
+      return;
+    }
     if (response.value.status === "connection-required") {
+      if (dispatchConversationId) await reconcileProposal(dispatchConversationId);
       setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex's setup changed while you were deciding. Nothing was started or saved." });
       void refreshSession(); // this close leaves a closed session too — the strip must not keep showing it as running
       return;
@@ -830,13 +962,13 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // The confirmation panel's work is done: the run's own records are on
     // disk, the status strip below carries its terminal state, and the
     // envelope posts its own result card into this conversation.
+    if (dispatchConversationId) await reconcileProposal(dispatchConversationId);
     setDispatch(null);
     setRealCallConfirmed(false);
-    // The proposed-task card leaves with its dispatch (Task 153): its chips
-    // are spent, and its still-clickable "Send to dispatch" would otherwise
+    // Main's reconciliation removes only the proposal this dispatch spent:
+    // its still-clickable "Send to dispatch" would otherwise
     // offer to re-run a task that is already running — and crowd the next
     // proposal out of the conversation's attention.
-    setTaskBlock(null);
     void refreshSession();
   }
 
@@ -848,7 +980,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // Needs-you dot (Task 155): tucked away, the chip says when something
   // inside waits on the owner — a proposed task to decide, a dispatch to
   // confirm, or a push to approve.
-  const needsYou = taskBlock !== null
+  const proposalNeedsYou = taskBlock !== null && !taskBusy;
+  const needsYou = proposalNeedsYou
     || dispatch?.phase === "confirm"
     || pushFlow?.phase === "chip"
     || pushFlow?.phase === "confirm";
@@ -960,7 +1093,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   ) : null}
                 </Fragment>
               )))}
-              {taskBlock ? (
+              {taskBlock && !taskBusy ? (
                 <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
                   onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onCardSend} />
               ) : null}
@@ -1084,11 +1217,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 * While Cairn answers or comments, a send queues instead of
                 * bouncing (Task 155), so the composer stays open. */}
               <textarea ref={composerRef} value={composer} onChange={(e) => setComposer(e.target.value)}
-                onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={runActive} />
-              <Pill kind="primary" onClick={() => void send(composer)} disabled={runActive || !composer.trim()}>Send</Pill>
+                onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2} disabled={taskBusy || restoringConversation} />
+              <Pill kind="primary" onClick={() => void send(composer)} disabled={taskBusy || restoringConversation || !composer.trim()}>Send</Pill>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <Pill kind="quiet" onClick={() => void newConversation()}>New conversation</Pill>
+              <Pill kind="quiet" disabled={restoringConversation} onClick={() => void newConversation()}>New conversation</Pill>
             </div>
           </>
         ) : null}

@@ -315,6 +315,8 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:conversations", (_e, dir: string) => conductorService.conversations(dir));
 
   ipcMain.handle("conductor:turns", (_e, dir: string, id: string) => conductorService.turns(dir, id));
+
+  ipcMain.handle("conductor:proposal", (_e, dir: string, id: string) => conductorService.proposal(dir, id));
 }
 
 /** Task 143: the desktop's side of the phone bridge — the settings surface

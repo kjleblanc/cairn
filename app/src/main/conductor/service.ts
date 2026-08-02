@@ -11,6 +11,7 @@ import type {
   ConductorTurn,
   Result,
   ResultCard,
+  TaskBlock,
 } from "../../shared/ipc.js";
 import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
 import { isQuitDraining, isTaskRunning } from "../rungate.js";
@@ -85,6 +86,14 @@ type LiveStream = {
 
 const controllers = new Map<string, LiveStream>();
 
+/** The one still-actionable proposal per project. This state deliberately
+ * stays in main memory: conversation files live inside the worker-writable
+ * project, so replaying a control from those files would let edited history
+ * manufacture dispatch UI. A renderer remount may read this trusted snapshot;
+ * a full app restart safely forgets it. */
+type CurrentProposal = { conversationId: string; block: TaskBlock };
+const proposals = new Map<string, CurrentProposal>();
+
 /** The owner-facing disclosure Cairn shows before it may act on the
  * conversation without per-message approval. Main re-derives this from the
  * renderer's baseUrl+model and requires an exact match before connecting —
@@ -127,6 +136,7 @@ export function connect(request: ConductorConnectRequest): Result<null> {
 
 export function disconnect(): void {
   keystore.clearConnection();
+  proposals.clear();
 }
 
 /** One sign-in attempt at a time, app-wide — the loopback listener and the
@@ -223,6 +233,36 @@ export function turns(dir: string, id: string): ConductorTurn[] {
   return readTurns(dir, id);
 }
 
+/** Main's current structured proposal for this exact conversation, if it has
+ * not already been accepted for dispatch. Project conversation files are not
+ * consulted here. */
+export function proposal(dir: string, conversationId: string): TaskBlock | null {
+  const current = proposals.get(dir);
+  return current?.conversationId === conversationId ? current.block : null;
+}
+
+/** Retire only the exact proposal main emitted and the owner is now sending.
+ * A refused, stale, or renderer-invented request leaves the real proposal in
+ * place. */
+export function consumeProposal(
+  dir: string,
+  conversationId: string,
+  outcome: string,
+  details: string,
+): TaskBlock | null {
+  const current = proposals.get(dir);
+  if (current?.conversationId !== conversationId) return null;
+  if (current.block.outcome !== outcome || current.block.details !== details) return null;
+  proposals.delete(dir);
+  return current.block;
+}
+
+/** Put back a trusted proposal whose attempted run never started. Never
+ * overwrite a newer proposal that may already have become current. */
+export function restoreProposal(dir: string, conversationId: string, block: TaskBlock): void {
+  if (!proposals.has(dir)) proposals.set(dir, { conversationId, block });
+}
+
 /** Bounded visible state for renderer reattachment. The provider request,
  * credentials, raw events, and every other project's stream remain private to
  * the main process. */
@@ -283,6 +323,10 @@ export function send(
   const id = conversationId ?? newConversationId(dir);
   ensureCairnExcluded(dir);
   appendTurn(dir, id, { role: "owner", text, ts: new Date().toISOString() });
+  // Starting a different conversation retires the previous conversation's
+  // unspent card. Wait until its first turn is safely written, so a storage
+  // failure cannot discard the older actionable proposal.
+  if (conversationId === null) proposals.delete(dir);
 
   const controller = new AbortController();
   controllers.set(dir, {
@@ -431,6 +475,11 @@ async function streamTurn(
       ...(followups !== null ? { followups } : {}),
     };
     appendTurn(dir, id, cairnTurn);
+    // The parser above and this service are the trusted origin of dispatch
+    // controls. Keep the latest well-formed reply proposal available across a
+    // Chat remount; ordinary prose leaves the existing proposal in place, just
+    // like the live renderer path. Commentary may never create one.
+    if (kind === "reply" && block !== null) proposals.set(dir, { conversationId: id, block });
     // "No cairn-task block" is enforced here as well as asked for above: a
     // model that emits one anyway has its fence stripped from the text like
     // any other, and the proposal is dropped rather than put on screen as a
@@ -449,7 +498,10 @@ async function streamTurn(
     } else if (controller.signal.aborted) {
       const cairnTurn: ConductorTurn = { role: "cairn", text: `${full}\n\n(stopped early)`, ts: new Date().toISOString() };
       appendTurn(dir, id, cairnTurn);
-      onDelta({ dir, conversationId: id, kind: "error", message: "Stopped.", turnKind: kind });
+      // Carry the exact persisted turn so a renderer reattaching concurrently
+      // can deduplicate it by identity instead of fabricating a second turn
+      // with a different timestamp.
+      onDelta({ dir, conversationId: id, kind: "error", turn: cairnTurn, message: "Stopped.", turnKind: kind });
     } else if (err instanceof ConductorHttpError) {
       onDelta({ dir, conversationId: id, kind: "error", message: err.ownerMessage, turnKind: kind });
     } else {

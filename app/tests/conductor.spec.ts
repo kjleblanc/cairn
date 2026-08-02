@@ -92,6 +92,10 @@ let setFixtureCommentaryDelay: (delayMs: number) => void = () => {};
  * commentary stream pauses before its usage frame until released. */
 let holdFixtureCommentary: () => void = () => {};
 let releaseFixtureCommentary: () => void = () => {};
+/** Task 166's deterministic third-proposal window: the fixture pauses after
+ * its content and before done until the remounted Chat has visibly attached. */
+let holdFixtureThirdProposal: () => void = () => {};
+let releaseFixtureThirdProposal: () => void = () => {};
 /** The raw body of the last commentary request the fixture answered — what the
  * provider would actually have been sent (repo task 080). */
 let lastCommentaryBody: () => string | null = () => null;
@@ -117,6 +121,8 @@ test.beforeAll(async () => {
       setCommentaryDelay: (delayMs: number) => void;
       holdCommentary: () => void;
       releaseCommentary: () => void;
+      holdThirdProposal: () => void;
+      releaseThirdProposal: () => void;
     }>;
   };
   const server = await fixture.start();
@@ -127,6 +133,8 @@ test.beforeAll(async () => {
   setFixtureCommentaryDelay = server.setCommentaryDelay;
   holdFixtureCommentary = server.holdCommentary;
   releaseFixtureCommentary = server.releaseCommentary;
+  holdFixtureThirdProposal = server.holdThirdProposal;
+  releaseFixtureThirdProposal = server.releaseThirdProposal;
 
   const openRouterPath = pathToFileURL(join(__dirname, "fixtures", "fake-openrouter.mjs")).href;
   const openRouter = (await import(openRouterPath)) as {
@@ -157,6 +165,7 @@ test.afterAll(async () => {
 // itself, so order between them never matters.
 test.beforeEach(() => {
   releaseFixtureCommentary(); // a crashed test must never leave the gate held for the next one
+  releaseFixtureThirdProposal();
   setFixtureCommentaryDelay(400);
   rmSync(conductorFile(), { force: true });
 });
@@ -186,6 +195,57 @@ test("a live reply belongs to its project and reattaches after navigation", asyn
   await expect(win.getByText(/done thinking\./)).toBeVisible({ timeout: 15_000 });
   await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project)).toBeNull();
 
+  await app.close();
+});
+
+// Task 166 review edge: main persists the stopped-early turn before emitting
+// its error. Reattachment must use that exact turn, not fabricate another
+// timestamped copy beside the saved one.
+test("stopping a reply after reattachment shows the persisted partial turn once", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-reattach-stop-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  // Capture main's terminal event independently of Chat. Before Task 166 the
+  // error carried no turn, so this exact comparison fails regardless of
+  // whether Chat's asynchronous history restore wins or loses the UI race.
+  await win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task166StoppedTurn?: unknown };
+    state.task166StoppedTurn = undefined;
+    window.cairn.onConductorDelta((event) => {
+      if (event.kind === "error" && event.message === "Stopped.") {
+        state.task166StoppedTurn = event.turn;
+      }
+    });
+  });
+
+  await sendChat(win, "slowstream");
+  await expect(win.getByText(/One moment/)).toBeVisible({ timeout: 10_000 });
+  await win.getByRole("button", { name: /Project home/ }).click();
+  await win.getByRole("button", { name: "Talk with Cairn" }).click();
+  await win.getByRole("button", { name: "Stop", exact: true }).click();
+  await waitStreamDone(win);
+
+  const stopEvidence = await win.evaluate(async (dir) => {
+    const state = globalThis as typeof globalThis & { task166StoppedTurn?: unknown };
+    const list = await window.cairn.conductorConversations(dir);
+    const id = list.at(-1)?.id;
+    const turns = id ? await window.cairn.conductorTurns(dir, id) : [];
+    return { emitted: state.task166StoppedTurn, persisted: turns.at(-1) ?? null };
+  }, project);
+  expect(stopEvidence.emitted).toMatchObject({
+    role: "cairn",
+    text: expect.stringContaining("(stopped early)"),
+    ts: expect.any(String),
+  });
+  expect(stopEvidence.emitted).toEqual(stopEvidence.persisted);
+
+  const stopped = win.locator(".chat-messages .bubble-cairn", { hasText: "(stopped early)" });
+  await expect(stopped).toHaveCount(1);
+  await win.reload();
+  await expect(stopped).toHaveCount(1);
   await app.close();
 });
 
@@ -602,7 +662,7 @@ test("the envelope posts a DONE result card into the conversation, and the card 
   await expect(card).toContainText("Files changed (checked with Git, not taken on faith)");
   await expect(card).toContainText("docs/ai-work/LOG.md");
   // The worker's own words only ever appear under a heading that calls them claims.
-  await expect(card).toContainText("What the worker says it did — Cairn hasn't checked this");
+  await expect(card).toContainText("Worker's account — Cairn checked the files above, but not these descriptions");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
 
   // A reload throws away every scrap of renderer state. What comes back was
@@ -1068,6 +1128,10 @@ test("a reload mid-run reattaches the conversation's strip and shows the finishe
   // miss this window. Reattachment is a read, not a wait.
   await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 5_000 });
   await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/);
+  // Task 166 keeps an unspent proposal in trusted main-process state for Chat
+  // reattachment. The proposal that started this run was consumed when main
+  // accepted it, so reattachment must not put a spent card beside the run.
+  await expect(win.locator(".task-card")).toHaveCount(0);
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeDisabled();
   await expect(win.getByText("A task is running. You can type again when it finishes.")).toBeVisible();
 
@@ -1098,6 +1162,20 @@ test("a run that closes connection-required says so without inventing records", 
   // a strip to reattach to. The refusal lands on the panel that asked for it.
   await expect(win.locator(".dispatch-panel .dispatch-error")).toBeVisible({ timeout: 30_000 });
   await expect(win.locator(".run-strip")).toHaveCount(0);
+  // Task 166: a start refused because the routed worker disappeared never
+  // spent its proposal. Main retains the trusted block, and a Chat remount
+  // restores the retry card instead of losing it with the failed panel.
+  const retainedProposal = await win.evaluate(async (dir) => {
+    const id = (await window.cairn.conductorConversations(dir)).at(-1)?.id;
+    return id ? window.cairn.conductorProposal(dir, id) : null;
+  }, project);
+  expect(retainedProposal).toMatchObject({
+    outcome: "Change the page title",
+    details: "Keep the counts 74, 477, 256 exactly.",
+  });
+  await win.getByRole("button", { name: /Project home/ }).click();
+  await win.getByRole("button", { name: "Talk with Cairn" }).click();
+  await expect(win.locator(".task-card")).toBeVisible();
 
   // The other close: no named adapter, so core returns connection-required
   // instead of throwing, and the session stays closed-but-present for chat to
@@ -1289,7 +1367,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
 // invisible commentary window (fixed above) plus the stale dispatched card
 // lingering with its spent button; this pins the whole second cycle, mock
 // lane both times.
-test("a second proposal after a dispatched run gets its own Send to dispatch", async () => {
+test("later proposals after a dispatched run survive Chat reattachment", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-second-dispatch-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
@@ -1317,18 +1395,80 @@ test("a second proposal after a dispatched run gets its own Send to dispatch", a
   await expect(win.locator(".result-card")).toHaveCount(1, { timeout: 30_000 });
   await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
 
-  // The second proposal in the SAME conversation gets its own card, with an
-  // enabled Send to dispatch (the fixture's detailtask carries no concerns),
-  // and the second dispatch opens and runs.
-  await sendChat(win, "detailtask now");
+  // Task 166: collect main's parsed blocks, not the fixture model's own words.
+  // This listener lives at the preload seam rather than inside Chat, so it
+  // survives the navigation below and proves exactly what main emitted on its
+  // done delta.
+  await win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
+    state.task166Blocks = [];
+    window.cairn.onConductorDelta((event) => {
+      if (event.kind === "done" && event.taskBlock) state.task166Blocks?.push(event.taskBlock);
+    });
+  });
+
+  // The second proposal in the SAME conversation gets its own card. Its two
+  // concerns deliberately distinguish it from both neighboring proposals.
+  await sendChat(win, "twoconcerns now");
   await waitStreamDone(win);
   const secondCard = win.locator(".task-card");
   await expect(secondCard).toBeVisible();
-  const secondSend = secondCard.getByRole("button", { name: "Send to dispatch" });
-  await expect(secondSend).toBeEnabled();
-  await secondSend.click();
+  await expect(secondCard.locator(".task-chip")).toHaveCount(2);
+  await expect(secondCard.getByRole("button", { name: "Send to dispatch" })).toBeDisabled();
+
+  // The reported conversation reached a third proposal after its first
+  // dispatch. Leave Chat while that third reply is still live, then reattach:
+  // this pins both the settled-card loss and the async done-during-restore race.
+  holdFixtureThirdProposal();
+  try {
+    await sendChat(win, "detailtask third");
+    await expect(win.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    await win.getByRole("button", { name: /Project home/ }).click();
+    await win.getByRole("button", { name: "Talk with Cairn" }).click();
+    await expect(win.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+  } finally {
+    releaseFixtureThirdProposal();
+  }
+  await waitStreamDone(win);
+  // RED before Task 166: this remount discarded Chat's transient block even
+  // though main emitted it. The restored card must be the third proposal, not
+  // the first already dispatched or the superseded second one.
+  const restoredCard = win.locator(".task-card");
+  await expect(restoredCard).toBeVisible();
+  await expect(restoredCard.locator(".task-chip")).toHaveCount(0);
+  await expect(restoredCard).toContainText("74, 477, 256");
+  await expect(restoredCard.getByRole("button", { name: "Send to dispatch" })).toBeEnabled();
+  await expect.poll(() => win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
+    return state.task166Blocks?.length ?? 0;
+  })).toBe(2);
+  const mainBlocks = await win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
+    return state.task166Blocks ?? [];
+  });
+  expect(mainBlocks.at(-1)).toEqual({
+    outcome: "Change the page title",
+    concerns: [],
+    notes: "",
+    details: "74, 477, 256",
+  });
+  const mainProposal = await win.evaluate(async (dir) => {
+    const id = (await window.cairn.conductorConversations(dir)).at(-1)?.id;
+    return id ? window.cairn.conductorProposal(dir, id) : null;
+  }, project);
+  expect(mainProposal).toEqual(mainBlocks.at(-1));
+
+  // Dispatch the restored third proposal. This remains the second run, so the
+  // folding assertions below still prove the two-card history.
+  const restoredSend = restoredCard.getByRole("button", { name: "Send to dispatch" });
+  await restoredSend.click();
   await expect(win.locator(".dispatch-panel")).toBeVisible({ timeout: 15_000 });
   await win.locator(".dispatch-panel").getByRole("button", { name: "Run offline demonstration" }).click();
+  await expect(win.locator(".task-card")).toHaveCount(0);
+  await expect.poll(() => win.evaluate(async (dir) => {
+    const id = (await window.cairn.conductorConversations(dir)).at(-1)?.id;
+    return id ? window.cairn.conductorProposal(dir, id) : null;
+  }, project)).toBeNull();
 
   // Task 155 (fold away the past): when the second run's card lands, the
   // first collapses into a one-line chip — only the current moment stays

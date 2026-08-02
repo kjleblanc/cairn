@@ -248,6 +248,7 @@ export interface CairnApi {
   conductorCurrent(dir: string): Promise<ConductorStreamSnapshot | null>;
   conductorConversations(dir: string): Promise<ConductorConversationSummary[]>;
   conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
+  conductorProposal(dir: string, id: string): Promise<TaskBlock | null>;
   onConductorDelta(cb: (event: ConductorDelta) => void): () => void;
   pushPreview(dir: string): Promise<PushPreview | null>;
   /** Takes the whole preview the owner approved — not values picked out of it

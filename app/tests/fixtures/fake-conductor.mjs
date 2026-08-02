@@ -72,6 +72,8 @@ let commentaryDelayMs = COMMENTARY_SCRIPT.delayMs;
 // before the stream reaches the gate simply lets it pass.
 let commentaryHeld = false;
 let commentaryGate = null;
+let thirdProposalHeld = false;
+let thirdProposalGate = null;
 
 function holdCommentary() {
   commentaryHeld = true;
@@ -90,9 +92,29 @@ function commentaryGatePoint() {
   return new Promise((resolve) => { commentaryGate = resolve; });
 }
 
+function holdThirdProposal() {
+  thirdProposalHeld = true;
+}
+
+function releaseThirdProposal() {
+  thirdProposalHeld = false;
+  if (thirdProposalGate !== null) {
+    thirdProposalGate();
+    thirdProposalGate = null;
+  }
+}
+
+function thirdProposalGatePoint() {
+  if (!thirdProposalHeld) return Promise.resolve();
+  return new Promise((resolve) => { thirdProposalGate = resolve; });
+}
+
 function scriptFor(content) {
   if (content.includes("garble")) {
     return { parts: [`Here's the plan.\n\n\`\`\`cairn-task\n${GARBLED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
+  }
+  if (content.includes("detailtask third")) {
+    return { parts: [`Sure, here's the plan.\n\n\`\`\`cairn-task\n${DETAILS_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
   if (content.includes("detailtask")) {
     return { parts: [`Sure, here's the plan.\n\n\`\`\`cairn-task\n${DETAILS_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
@@ -203,7 +225,7 @@ export function start() {
           return;
         }
         lastReplyBody = rawBody;
-        void streamReply(res, scriptFor(content));
+        void streamReply(res, scriptFor(content), content.includes("detailtask third") ? thirdProposalGatePoint : undefined);
       });
     });
     server.listen(0, "127.0.0.1", () => {
@@ -221,6 +243,8 @@ export function start() {
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
         holdCommentary,
         releaseCommentary,
+        holdThirdProposal,
+        releaseThirdProposal,
       });
     });
   });
