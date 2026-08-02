@@ -201,6 +201,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
  * said by anyone — it is Cairn's runtime reporting what it verified. */
 .result-card { align-self: stretch; margin: 0; border: 1px solid var(--line); }
 .result-card-headline { margin: 0 0 8px; font-weight: 600; }
+/* Task 169: the plain clause leads, the fixed code follows quietly. Before
+   this, the headline read "STOPPED — CANCELLED_BY_OWNER". */
+.result-card-said { font-weight: 600; }
+.result-card-code { margin: -4px 0 8px; font-size: 11px; opacity: 0.62; }
 .result-card-disposition { font-size: .74rem; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 999px; }
 .result-card-done { background: var(--green-soft); color: var(--green-deep); }
 .result-card-stopped { background: var(--amber-soft); color: var(--amber-deep); }

@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
 import type { ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
+import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
@@ -259,9 +260,12 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
       <p className="card-title">result card — checked by Cairn, not written by the AI chat</p>
       <p className="result-card-headline">
         <span className={`result-card-disposition result-card-${card.disposition.toLowerCase()}`}>{card.disposition}</span>
-        {code ? <span className="result-card-code"> — {code}</span> : null}
+        {code ? <span className="result-card-said"> — {codeInPlainWords(code)}</span> : null}
         {wroteRecords ? <span className="result-card-task"> — Task {String(card.taskNumber).padStart(3, "0")}</span> : null}
       </p>
+      {/* The code is kept — it is real, and useful to anyone debugging — but it
+          is no longer the first thing the owner meets. */}
+      {code ? <p className="result-card-code">Code: {code}</p> : null}
 
       {card.disposition === "ERROR" ? (
         <p className="result-card-sentence">{ERROR_SENTENCE}</p>
