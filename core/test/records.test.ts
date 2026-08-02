@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { composeWorkerReport, composeWorkerRowSummary } from "../src/records.js";
+import { readFileSync } from "node:fs";
+import { composeWorkerReport, composeWorkerRowSummary, stopReasonInPlainWords } from "../src/records.js";
 
 const ROUTE = { adapterId: "codex-exec", adapterLabel: "Codex Exec", provider: "OpenAI", model: "gpt-5.6-sol", reason: "connected" };
 const CLAIMS = {
@@ -202,4 +203,50 @@ test("a process-failure bullet renders the code and debug path", () => {
   assert.match(report, /Process failure: `SPAWN_ENOENT`\./);
   assert.ok(report.includes("C:\\Users\\owner\\.cairn-debug\\047"), "the debug path must appear verbatim");
   assert.match(report, /never committed to the repository/);
+});
+
+/**
+ * Task 169. A fixed code is a fact the owner cannot read.
+ * `app/shots/task-168-stopped-desktop.png` caught the shipped card saying
+ * "STOPPED — CANCELLED_BY_OWNER"; the written report said the same kind of
+ * thing. Every reason now gets a plain clause, and the code follows it.
+ */
+const SERIAL_STOP_REASONS = [
+  "ADAPTER_FAILED", "INVALID_ADAPTER_RESULT", "PROTECTED_WORK_CHANGED",
+  "RECORD_VERIFICATION_FAILED", "WORKER_CLAIMS_MISSING",
+  "REAL_MODEL_CALL_NOT_AUTHORIZED", "MODEL_REPORTED_STOPPED",
+  "MODEL_RESULT_NOT_VERIFIED", "ADAPTER_TIMED_OUT", "CANCELLED_BY_OWNER",
+];
+
+test("every stop reason has a plain clause", () => {
+  for (const reason of SERIAL_STOP_REASONS) {
+    const said = stopReasonInPlainWords(reason);
+    assert.ok(said.length > 0, `no plain words for ${reason}`);
+    assert.ok(!said.includes("_"), `${reason} was echoed back as a code`);
+  }
+});
+
+test("an unknown reason is explained, never echoed", () => {
+  assert.ok(!stopReasonInPlainWords("SOMETHING_NEW").includes("SOMETHING_NEW"));
+});
+
+/**
+ * The app renders these codes on the card; core writes them into the report.
+ * Two copies exist because the renderer imports @cairn/core for types only,
+ * so a shared runtime table is not available. This asserts they never
+ * disagree, in the spirit of core/test/contract-mirrors.test.mjs.
+ *
+ * This file runs compiled, from core/dist/test/ (tsconfig outDir "dist",
+ * rootDir "."), so the repository root is three levels up — not two.
+ */
+test("core and the app say the same thing about a shared code", () => {
+  const appSource = readFileSync(
+    new URL("../../../app/src/shared/stopwords.ts", import.meta.url), "utf8");
+  for (const reason of SERIAL_STOP_REASONS) {
+    const said = stopReasonInPlainWords(reason);
+    assert.ok(
+      appSource.includes(`${reason}: "${said}"`),
+      `app/src/shared/stopwords.ts disagrees with core about ${reason}: core says "${said}"`,
+    );
+  }
 });

@@ -1,5 +1,8 @@
 import type { WorkerClaims } from "./claims.js";
 import type { AdapterTaskContract } from "./routing.js";
+// Type-only, and it must stay that way: serial.ts already imports this module
+// as a value, so a runtime import back would create a cycle.
+import type { SerialStopReason } from "./serial.js";
 
 export interface ComposedRecordInput {
   taskNumber: number;
@@ -99,13 +102,50 @@ function verifiedByCairnLines(input: ComposedRecordInput): string {
   return lines.join("\n");
 }
 
+/**
+ * Task 169: a fixed code is a fact the owner cannot read. The shipped card in
+ * `app/shots/task-168-stopped-desktop.png` said "STOPPED — CANCELLED_BY_OWNER"
+ * to a self-described beginner; the report was no better. Every reason gets one
+ * plain clause, and the code still follows it — the code is real and useful to
+ * anyone debugging, it just never arrives alone.
+ *
+ * Mirrored by `KNOWN_CODE_WORDS` in `app/src/shared/stopwords.ts`, which the
+ * renderer uses for the card; `core/test/records.test.ts` asserts the two never
+ * disagree. `Record<SerialStopReason, string>` is exhaustive by construction,
+ * so a new stop reason fails typecheck here rather than reaching an owner as a
+ * bare constant.
+ */
+const STOP_REASON_IN_PLAIN_WORDS: Record<SerialStopReason, string> = {
+  ADAPTER_FAILED: "the worker program itself did not run",
+  INVALID_ADAPTER_RESULT: "the worker finished, but its answer could not be read",
+  PROTECTED_WORK_CHANGED: "work that was meant to stay untouched had changed",
+  RECORD_VERIFICATION_FAILED: "Cairn could not confirm its own records were written correctly",
+  WORKER_CLAIMS_MISSING: "the worker never said what it had done",
+  REAL_MODEL_CALL_NOT_AUTHORIZED: "the run was not approved to make a real, paid call",
+  MODEL_REPORTED_STOPPED: "the worker stopped itself and said why",
+  MODEL_RESULT_NOT_VERIFIED: "the change could not be confirmed against a saved history",
+  ADAPTER_TIMED_OUT: "the worker ran out of time",
+  CANCELLED_BY_OWNER: "you stopped it yourself",
+};
+
+/**
+ * Never echoes an unrecognised code back at the owner. `Object.hasOwn` rather
+ * than `in`, so a reason named `constructor` cannot reach the prototype chain.
+ */
+export function stopReasonInPlainWords(reason: string | null): string {
+  if (reason !== null && Object.hasOwn(STOP_REASON_IN_PLAIN_WORDS, reason)) {
+    return STOP_REASON_IN_PLAIN_WORDS[reason as SerialStopReason];
+  }
+  return "it stopped for a reason Cairn has no plain description for";
+}
+
 /** The paid-call sentence appears only on STOPPED: a verified DONE needs no "stopped it" language. */
 function stoppedParagraph(input: ComposedRecordInput): string | null {
   if (input.disposition !== "STOPPED") return null;
   const paidClause = input.paidCallStarted
     ? " The worker process had already started; any cost for that call is already spent."
     : "";
-  return `The run stopped with the fixed code \`${input.stopReason}\`. The workspace may contain retained worker-authored evidence and must be inspected before another task.${paidClause}`;
+  return `The run stopped: ${stopReasonInPlainWords(input.stopReason)}. (Code: \`${input.stopReason}\`.) The workspace may contain retained worker-authored evidence and must be inspected before another task.${paidClause}`;
 }
 
 /**
