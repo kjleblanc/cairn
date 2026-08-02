@@ -323,7 +323,7 @@ Run from `app/`: `npm.cmd run typecheck` — Expected: no output, exit 0.
 
 Run from `app/`: `npm.cmd run build:vite` — Expected: builds with no error. This confirms the renderer still bundles without a runtime `@cairn/core` import.
 
-If `app/tests/conductor.spec.ts` or `app/tests/projects.spec.ts` asserts on the old headline text, update those selectors — the headline deliberately changed.
+No Playwright change is needed. The eight `.result-card-disposition` assertions in `app/tests/conductor.spec.ts` (lines 662, 677, 1354, 1452, 1646, 2016, 2109, 2291) target the DONE/STOPPED span, which this task does not touch. Nothing asserts the headline's code text.
 
 - [ ] **Step 5: Commit**
 
@@ -376,8 +376,10 @@ test("an unknown reason is explained, never echoed", () => {
 // only. This asserts they never disagree, in the spirit of
 // core/test/contract-mirrors.test.mjs.
 test("core and the app say the same thing about a shared code", () => {
+  // This file runs compiled, from core/dist/test/ (tsconfig outDir "dist",
+  // rootDir "."), so the repo root is three levels up — not two.
   const appSource = readFileSync(
-    new URL("../../app/src/shared/stopwords.ts", import.meta.url), "utf8");
+    new URL("../../../app/src/shared/stopwords.ts", import.meta.url), "utf8");
   for (const reason of [
     "ADAPTER_FAILED", "INVALID_ADAPTER_RESULT", "PROTECTED_WORK_CHANGED",
     "RECORD_VERIFICATION_FAILED", "WORKER_CLAIMS_MISSING",
