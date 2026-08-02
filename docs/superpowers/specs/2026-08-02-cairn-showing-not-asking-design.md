@@ -241,7 +241,21 @@ The constitution already says *"Plain words; when a technical term is genuinely
 needed, explain it in passing once."* Two gaps:
 
 1. It governs **chat only**. The jargon the owner actually hits lives in task
-   briefs, reports, and result cards.
+   briefs, reports, and result cards. Two examples were found by looking at
+   Task 168's own captures rather than by reasoning about it:
+
+   - `task-168-stopped-desktop.png` shows a result card reading
+     **"STOPPED — CANCELLED_BY_OWNER"**. That is a raw machine constant,
+     shown to a beginner, in the exact place the constitution's plain-words
+     rule does not reach. The sentence beside it — "The worker didn't leave a
+     readable summary of what it did" — shows the standard is achievable.
+   - `task-168-done-desktop.png` shows Cairn's own status line reading
+     **"brain disconnected"**. It means no conductor is connected. To someone
+     new it reads as something being wrong with Cairn.
+
+   Neither is a Task 168 defect; both predate it and sit outside its boundary.
+   They are recorded here because they are the failure this decision exists to
+   catch, found in the wild, in captures the owner had never been shown.
 2. **Nothing scores it.** The other three honesty rules are exercised by
    `docs/superpowers/evals/conductor-v0.md`; this one is a courtesy that slips
    whenever anyone forgets.
