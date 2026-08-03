@@ -79,6 +79,20 @@ test("every added motion stops for reduced motion", () => {
   for (const selector of [".pill", ".town-face", ".followup-chip"]) {
     assert.ok(reduced.includes(selector), `${selector} keeps moving under reduced motion`);
   }
+  // The rule is the same FINAL STATE, not merely less motion: a pill must
+  // still sit on its edge and a suggestion must still be fully arrived.
+  // Killing the animations is half of that; neutralising the hover and press
+  // geometry is the other half, and naming only the selectors above would
+  // pass with that half deleted.
+  for (const selector of [
+    ".pill:hover:not(:disabled)",
+    ".town-node:hover .town-face",
+    ".followup-chip:hover:not(:disabled)",
+  ]) {
+    assert.ok(reduced.includes(selector), `${selector} keeps its transform under reduced motion`);
+  }
+  assert.ok(reduced.includes("transform: none"),
+    "reduced motion leaves a hover or press transform applied");
 });
 
 test("the lantern's own buttons are the mockup's mint and ghost", () => {
@@ -95,9 +109,17 @@ test("nothing outranks the pill's own press", () => {
   // app.css. So a generic button rule there wins twice over, and the app's
   // most-clicked control keeps the old flat press while every test, the
   // typecheck, and both builds stay green. It happened; this is the guard.
-  const motion = renderer("motion.css");
-  for (const selector of [".chat-composer button:hover", ".chat-composer button:active"]) {
-    assert.ok(!motion.includes(selector),
-      `${selector} in motion.css outranks the pill treatment on the Send button`);
-  }
+  //
+  // Unqualified, not just `:hover`/`:active`: the bare
+  // `.chat-composer button { transition: … }` shorthand alone is (0,1,1)
+  // against `.pill`'s (0,1,0), which would silently drop `box-shadow` from
+  // Send's transition list and make the edge snap instead of compress.
+  const motion = renderer("motion.css")
+    // A comment may name the selector — that is how the rule explains itself.
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    // Killing the transition under reduced motion is correct, and this block
+    // runs to the end of the file.
+    .replace(/@media \(prefers-reduced-motion: reduce\)[\s\S]*$/, "");
+  assert.ok(!motion.includes(".chat-composer button"),
+    "a live rule in motion.css outranks the pill treatment on the Send button");
 });
