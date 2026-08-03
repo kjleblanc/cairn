@@ -1032,9 +1032,13 @@ Replace lines 613-627 (`.town-node-bed`, its two parts, and `.town-overflow-shap
 }
 /* The hairline ellipse each character used to stand inside is now the light
    it casts. The element stays — conductor.spec.ts locates it for the
-   reduced-motion check, and an absent element would fail that dishonestly. */
+   reduced-motion check, and an absent element would fail that dishonestly.
+   No `border` declaration at all, not `border: 0`: a span has no default
+   border to reset, so the reset would be a no-op that reads — to a later
+   maintainer and to this task's own test — as a border still being managed
+   here. Absence is the assertion. */
 .town-node-bed span {
-  position: absolute; inset: 3px 7px; border: 0; border-radius: 50%;
+  position: absolute; inset: 3px 7px; border-radius: 50%;
   background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 16%, transparent), transparent 72%);
 }
 .town-overflow-shape {
