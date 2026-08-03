@@ -540,19 +540,20 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-project-label { display: flex; min-width: 0; flex-direction: column; }
 .town-square-header span {
-  color: #aeb7c4; font: 600 .62rem var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--lantern-soft); font-size: .68rem; font-weight: 700; letter-spacing: .02em;
 }
-.town-square-header strong { overflow: hidden; color: #f6f0e8; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
+.town-square-header strong { overflow: hidden; color: var(--lantern-ink); font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
 .town-header-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 9px; }
 .town-square-header p {
-  min-width: 0; max-width: min(42vw, 390px); margin: 0; overflow: hidden; color: #cbd4da;
+  min-width: 0; max-width: min(42vw, 390px); margin: 0; overflow: hidden; color: var(--lantern-ink);
   font-size: .74rem; text-align: right; text-overflow: ellipsis; white-space: nowrap;
 }
 .town-square-header button {
-  flex: none; padding: 5px 7px; border: 1px solid rgb(112 227 211 / 20%); border-radius: 8px;
-  background: rgb(112 227 211 / 7%); color: #dce6e8; font: 600 .58rem var(--mono); cursor: pointer;
+  flex: none; padding: 6px 12px; border: 0; border-radius: 999px;
+  background: rgb(246 236 225 / 8%); color: var(--lantern-soft);
+  font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
-.town-square-header button:hover:not(:disabled) { border-color: var(--neon-soft); }
+.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 15%); color: var(--lantern-ink); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
 /* The sheen: the water breathes, it does not draw. Two soft pastel blooms from
    the approved lantern-v3 frame, blurred well past any edge. Its drift lives
@@ -582,21 +583,30 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
     color-mix(in srgb, var(--pond-stop) 13%, transparent), transparent 72%);
 }
 .town-threads { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; }
+/* A soft tether, not a data feed. The dashes and the glow were the crawling
+   thread Decision 9 names; what a thread has to say is that two villagers are
+   working together, and a faint continuous line says exactly that. */
 .town-threads path {
-  fill: none; stroke: rgb(112 227 211 / 42%); stroke-width: .55; vector-effect: non-scaling-stroke;
-  stroke-dasharray: 4 4; filter: drop-shadow(0 0 5px rgb(112 227 211 / 22%));
+  fill: none; stroke: color-mix(in srgb, var(--garden-cyan) 26%, transparent);
+  stroke-width: .55; vector-effect: non-scaling-stroke;
 }
 .town-transfer-layer { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
 .town-transfer-layer.town-transfer-dispatch { --town-packet-color: var(--pond-task); }
 .town-transfer-layer.town-transfer-return { --town-packet-color: var(--pond-result); }
+/* The packet keeps its word — the owner should be able to read what is
+   crossing the water — but says it in the app's own rounded voice.
+   `rgb(22 27 44 / …)` throughout this task is --lantern-deep (#161b2c) with an
+   alpha, the same shape the old rules used with the retired --pond-deep. It is
+   a derivation of an approved colour, not a new one. */
 .town-transfer-packet {
-  position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 5px;
-  min-width: 48px; max-width: 76px; padding: 4px 8px; transform: translate(-50%, -50%);
-  border: 1px solid color-mix(in srgb, var(--town-packet-color) 62%, transparent); border-radius: 999px;
-  background: rgb(17 23 42 / 92%); color: #fff8eb; box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
-  font: 600 .56rem var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+  position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 6px;
+  min-width: 48px; max-width: 86px; padding: 5px 11px; transform: translate(-50%, -50%);
+  border: 0; border-radius: 999px;
+  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 94%));
+  color: var(--lantern-ink); box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
+  font: inherit; font-size: .68rem; font-weight: 700; white-space: nowrap;
 }
-.town-transfer-packet i { width: 6px; height: 6px; flex: none; border-radius: 2px; background: var(--town-packet-color); box-shadow: 0 0 7px var(--town-packet-color); }
+.town-transfer-packet i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--town-packet-color); box-shadow: 0 0 7px var(--town-packet-color); }
 .town-transfer-ripple, .town-terminal-ripple {
   position: absolute; left: var(--town-to-x); top: var(--town-to-y); width: 38px; height: 14px; margin-top: 42px;
   transform: translate(-50%, -50%); border: 2px solid var(--town-receiver-color); border-radius: 50%;
@@ -626,10 +636,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   color: #f6f0e8; text-align: center; text-overflow: ellipsis; white-space: nowrap;
 }
 .town-node-status {
-  position: relative; z-index: 1; display: flex; align-items: center; gap: 5px; color: #aeb7c4;
-  font: 600 .62rem var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 5px;
+  color: var(--lantern-soft); font-size: .68rem; font-weight: 700;
 }
-.town-node-status i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 2px; background: var(--neon-warm); }
+.town-node-status i { width: 7px; height: 7px; border: 0; border-radius: 50%; background: var(--pond-task); }
 .town-node-checking .town-node-status { color: var(--pond-result); }
 .town-node-returned .town-node-status { color: var(--pond-result); }
 .town-node-done .town-node-status { color: var(--pond-done); }
@@ -683,25 +693,31 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   content: ""; position: absolute; inset: -8px 8px; border-radius: 50%;
   background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 12%, transparent), transparent 70%);
 }
+/* The hairline ellipse each character used to stand inside is now the light
+   it casts. The element stays — conductor.spec.ts locates it for the
+   reduced-motion check, and an absent element would fail that dishonestly. */
 .town-node-bed span {
-  position: absolute; inset: 3px 7px; border: 1px solid color-mix(in srgb, var(--agent-color) 24%, transparent); border-radius: 50%;
+  position: absolute; inset: 3px 7px; border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 16%, transparent), transparent 72%);
 }
 .town-overflow-shape {
-  width: 64px; height: 48px; display: grid; place-items: center; border: 1px solid var(--neon-soft);
-  border-radius: 50% 50% 30% 30%; background: var(--town-entity); color: var(--neon); font: 700 .9rem var(--mono);
+  width: 64px; height: 48px; display: grid; place-items: center; border: 0;
+  border-radius: 24px; background: rgb(246 236 225 / 9%); color: var(--lantern-ink);
+  font: inherit; font-size: .9rem; font-weight: 700;
 }
 .town-thread-target {
-  position: absolute; z-index: 4; min-width: 74px; padding: 4px 7px; transform: translate(-50%, -50%);
-  border: 1px solid rgb(112 227 211 / 38%); border-radius: 999px; background: rgb(17 23 42 / 88%);
-  color: #f6f0e8; font: inherit; cursor: pointer; box-shadow: 0 0 14px rgb(112 227 211 / 10%);
+  position: absolute; z-index: 4; min-width: 74px; padding: 5px 10px; transform: translate(-50%, -50%);
+  border: 0; border-radius: 999px; background: rgb(22 27 44 / 88%);
+  color: var(--lantern-ink); font: inherit; cursor: pointer;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
   transition: left 320ms var(--spring), top 320ms var(--spring), background-color 160ms ease;
 }
 .town-thread-target span { color: var(--pond-result); }
-.town-thread-target small { display: block; color: #aeb7c4; font: 600 .55rem var(--mono); text-transform: uppercase; }
-.town-thread-target[aria-pressed="true"] { border-color: var(--town-focus); background: rgb(112 227 211 / 13%); }
+.town-thread-target small { display: block; color: var(--lantern-soft); font-size: .58rem; font-weight: 700; }
+.town-thread-target[aria-pressed="true"] { background: color-mix(in srgb, var(--garden-cyan) 16%, rgb(22 27 44 / 88%)); }
 .town-thread-target-transfer {
   min-width: 18px; width: 18px; height: 18px; padding: 0;
-  border-color: rgb(112 227 211 / 22%); background: rgb(17 23 42 / 62%); box-shadow: none;
+  background: rgb(22 27 44 / 62%); box-shadow: none;
 }
 .town-thread-target-transfer > * {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -709,7 +725,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-thread-target-transfer::after {
   content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--pond-result);
-  box-shadow: 0 0 6px rgb(127 216 200 / 45%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--pond-result) 45%, transparent);
 }
 .town-empty-note {
   position: absolute; z-index: 5; inset: auto 18px 24px; margin: 0; color: #aeb7c4;
@@ -723,7 +739,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .town-detail-heading > div { min-width: 0; }
-.town-detail-kicker { color: var(--town-muted); font: 600 .58rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.town-detail-kicker { color: var(--town-muted); font-size: .62rem; font-weight: 700; letter-spacing: .02em; }
 .town-detail h3 { margin: 2px 0 8px; font-size: .9rem; }
 .town-detail p { margin: 0; color: var(--town-muted); font-size: .72rem; line-height: 1.45; }
 .town-detail dl { display: grid; gap: 4px; margin: 0; font-size: .7rem; }
@@ -731,20 +747,22 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-detail dt { color: var(--town-muted); }
 .town-detail dd { margin: 0; overflow-wrap: anywhere; }
 .town-state-shape {
-  flex: none; padding: 3px 7px; border: 1px solid currentColor; border-radius: 6px;
-  color: var(--neon); font: 600 .58rem var(--mono); text-transform: uppercase;
+  flex: none; padding: 4px 10px; border: 0; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: var(--garden-cyan); font: inherit; font-size: .62rem; font-weight: 700;
 }
-.town-state-working { color: var(--neon-warm); border-radius: 3px; }
+.town-state-working { color: var(--pond-task); }
 .town-state-returned, .town-state-checking { color: var(--pond-result); }
 .town-state-stopped, .town-state-error { color: var(--pond-stop); }
-.town-state-thinking { border-style: dashed; }
-.town-state-more { color: var(--neon); }
-.town-thread-key { color: var(--neon); font-size: 1.25rem; }
+.town-state-thinking { opacity: .75; }
+.town-state-more { color: var(--garden-cyan); }
+.town-thread-key { color: var(--garden-cyan); font-size: 1.25rem; }
 .town-detail-action {
-  width: 100%; margin-top: 9px; padding: 6px 10px; border: 1px solid var(--town-line);
-  border-radius: 9px; background: var(--town-node-selected); color: var(--town-ink); font: 600 .68rem var(--mono); cursor: pointer;
+  width: 100%; margin-top: 9px; padding: 8px 12px; border: 0;
+  border-radius: 999px; background: var(--town-node-selected); color: var(--town-ink);
+  font: inherit; font-size: .72rem; font-weight: 700; cursor: pointer;
 }
-.town-detail-action:hover { border-color: var(--neon-soft); }
+.town-detail-action:hover { background: var(--town-node-hover); }
 .town-overflow-list { display: grid; gap: 5px; margin: 2px 0 0; padding: 0; list-style: none; font-size: .7rem; }
 .town-overflow-list li { display: flex; justify-content: space-between; gap: 10px; }
 .town-overflow-list span { color: var(--town-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
