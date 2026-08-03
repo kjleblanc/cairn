@@ -1145,6 +1145,7 @@ git commit -m "The town's furniture goes warm and rounded; the cast keeps the id
 **Files:**
 - Modify: `app/src/renderer/main.tsx:1-5` (the 700 weight)
 - Modify: `app/src/renderer/app.css:3-10` (body and headings), `:22-32` (`.pill`), `:178-184` (`.followup-chip`), `:572-574` (`.town-face`), `:718-723` (reduced motion), and a new block after Task 4's lantern children
+- Modify: `app/src/renderer/motion.css:89-97` (retire the generic composer-button treatment the new pill supersedes)
 - Test: `app/tests-unit/newhorizons.test.ts` (create)
 
 **Interfaces:**
@@ -1248,6 +1249,20 @@ test("the lantern's own buttons are the mockup's mint and ghost", () => {
     "Send is not the approved mint gradient");
   assert.ok(rule(".chat-column-villager .pill-primary").includes("#7cbdae"),
     "Send has no solid lower edge to compress");
+});
+
+test("nothing outranks the pill's own press", () => {
+  // `.chat-composer` holds exactly one button — the Send pill — and
+  // `motion.css`'s `.chat-composer button:hover:not(:disabled)` is (0,3,1)
+  // against `.pill:hover:not(:disabled)`'s (0,3,0), in a file imported AFTER
+  // app.css. So a generic button rule there wins twice over, and the app's
+  // most-clicked control keeps the old flat press while every test, the
+  // typecheck, and both builds stay green. It happened; this is the guard.
+  const motion = renderer("motion.css");
+  for (const selector of [".chat-composer button:hover", ".chat-composer button:active"]) {
+    assert.ok(!motion.includes(selector),
+      `${selector} in motion.css outranks the pill treatment on the Send button`);
+  }
 });
 ```
 
@@ -1383,8 +1398,10 @@ Finally, append the lantern's own button variants **after** Task 4's `.chat-colu
    these give the lantern's three the mockup's own colours. Specificity note:
    `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
    exactly right — the press must still compress whatever the resting colour. */
+/* Only the edge needs saying: `--card-solid` and `--card-ink` are already
+   re-pointed on the lantern (Task 4), so the base `.pill` rule above resolves
+   to exactly these values inside this scope on its own. */
 .chat-column-villager .pill {
-  background: rgb(246 236 225 / 7%); color: var(--lantern-ink);
   --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
 }
 .chat-column-villager .pill-primary {
@@ -1402,6 +1419,28 @@ Finally, append the lantern's own button variants **after** Task 4's `.chat-colu
 .chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 ```
 
+Finally, in `app/src/renderer/motion.css`, retire the generic composer-button treatment that the new pill supersedes. **This is the step that makes the whole task real on the button the owner will press most.** `.chat-composer` holds exactly one button — the Send pill (`Chat.tsx:1225` renders `<Pill kind="primary">`, and `Ui.tsx:15` gives it `class="pill pill-primary"`) — and `motion.css`'s `.chat-composer button:hover:not(:disabled)` is specificity (0,3,1) against `.pill:hover:not(:disabled)`'s (0,3,0), in a file imported *after* `app.css`. It therefore wins twice over, and Send would keep its old flat `-1px` lift and 140ms `ease` while every test, the typecheck, and both builds stayed green.
+
+Replace lines 89-97 with the same three rules minus `.chat-composer button`, which now has a better home:
+
+```css
+/* Buttons respond under the pointer. Named classes only — town nodes are
+   transform-positioned buttons and must keep their own transform.
+   `.chat-composer button` is deliberately absent: its only member is the Send
+   pill, and `.pill` in app.css now owns every pill's hover and press. Putting
+   it back would silently outrank that treatment, because this file loads last
+   and the descendant selector is more specific. */
+.town-square-header button, .rail-action, .rail-collapse {
+  transition: transform 140ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.town-square-header button:hover:not(:disabled),
+.rail-action:hover, .rail-collapse:hover { transform: translateY(-1px); }
+.town-square-header button:active:not(:disabled),
+.rail-action:active, .rail-collapse:active { transform: translateY(0) scale(.97); }
+```
+
+Leave `motion.css`'s reduced-motion block alone: it still names `.chat-composer button` under `transition: none`, which stays true and harmless — `.pill` is killed there by `app.css`'s own block as well.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run from `app/`: `npm.cmd run test:unit` — Expected: PASS, all tests.
@@ -1415,7 +1454,7 @@ Run from `app/`: `npm.cmd run build:lab` — Expected: builds clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/renderer/main.tsx app/src/renderer/app.css app/tests-unit/newhorizons.test.ts
+git add app/src/renderer/main.tsx app/src/renderer/app.css app/src/renderer/motion.css app/tests-unit/newhorizons.test.ts
 git commit -m "New Horizons treatment: pills with weight, springs, staggered suggestions"
 ```
 
