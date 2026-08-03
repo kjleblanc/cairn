@@ -2122,6 +2122,53 @@ git commit -m "The narrow window: an honest line, or the pond whole"
 - [ ] **Look at it — reduced motion.** Turn on `prefers-reduced-motion` and repeat both. Expected: the same final states, arrived at without travel — no sway, no drift, no stagger, no pending ripple.
 - [ ] **Show the owner.** Take one capture of the wide layout with a settled DONE card and one of the narrow window in both states, and put them in front of them. Decision 9 is a taste decision; the tests only prove it was implemented as written.
 
+## Corrections applied during execution
+
+The task bodies above are the plan as written before any of it ran. Execution
+found **eight defects in them**, every one in the plan rather than in an
+implementation. They are listed here rather than edited silently into the tasks
+above, so the record shows what was planned as well as what shipped. Three were
+caught by implementers who stopped and asked instead of guessing; five by
+reviewers.
+
+| # | Defect | Where | Fixed in |
+|---|---|---|---|
+| 1 | The still-water replay guard asserted one earned ripple; the reducer earns two (`return` then `done`), as `townpresentation.test.ts:151` already pinned. | Task 3 | `f9713e3` |
+| 2 | The deleted-token sweep did not exclude the guard test, which necessarily quotes the strings it forbids. | Task 3 | `446d567` |
+| 3 | `--card: rgb(246 236 225 / 6%)` traced to neither mockup, breaking the plan's own "exactly one derived value". `--card-solid`'s 9% was a border value used as a fill. | Task 4 | `365f1a8`, `96c1284` |
+| 4 | The reduced-motion test sliced `app.css` to end-of-file, where a later block keeps the searched substring alive — it could not fail. | Task 4 | `365f1a8`, `96c1284` |
+| 5 | The prescribed CSS wrote `border: 0` on a rule whose own test forbade the substring `border:`. Unsatisfiable as written. | Task 5 | `ef6488e` |
+| 6 | Two more unsourced alphas: `15%` on the header hover (mockup uses 14%) and `94%` on the packet (the rule it replaced used 92%). | Task 5 | `7020f16`, `61fb550` |
+| 7 | **The Send button never got the treatment.** `motion.css`'s `.chat-composer button:hover:not(:disabled)` is (0,3,1) against `.pill`'s (0,3,0), in a file imported later — so it won twice over, on the app's most-clicked control, with every check green. | Task 6 | `3a2d55a`, `3b09633` |
+| 8 | **The lantern swayed forever under `prefers-reduced-motion`.** The sway is declared on `.chat-column.chat-column-villager` (0,2,0); the reduced-motion block named `.chat-column-villager` (0,1,0) and lost. Task 4's test passed because it checked presence, not victory. | Tasks 4, 6, 7 | `468ca97`, `ebbfc44` |
+
+Two further review findings were fixed in Task 7's second wave and are recorded
+here because they change the shipped code away from the text above: the
+put-away conversation takes `visibility: hidden` rather than `pointer-events:
+none` alone (it was tabbable off-screen); `.pond-line-text` became a real
+`role="status"` live region (hiding the town header below 1260px had removed the
+pond's only announcement); the shore clamp moved into `townShore()` in
+`town/layout.ts` so it has an assertion that can fail; and the reduced-motion
+guard is anchored so the compound selector cannot stand in for the plain one.
+All in `e69058f`.
+
+**The pattern worth keeping.** Three of the eight — #4, #7, #8 — are one defect
+wearing different clothes: **a CSS rule that exists but does not win, guarded by
+a test that checks the rule is present rather than that it prevails.** Source-text
+tests are cheap and they caught real things here, but they cannot see the
+cascade. Every such test on this plan now either bounds its search to the block
+it means to check, or asserts source-order victory directly. A later plan
+touching this CSS should assume that shape is the failure mode.
+
+**One thing was deliberately NOT fixed**, and it is the owner's call rather than
+this plan's: below 1260px the town header is hidden, which removes the "Reset
+layout" control — while the pond, when open, now lets a villager be dragged and
+saved out to `TOWN_BOUNDS.maxX`. Widening the window then presentation-clamps it
+back to the shore with no reset available at the width where the change was
+made. It is recoverable (the reset exists on the wide layout, where the clamping
+becomes visible), and fixing it properly means deciding what chrome the narrow
+pond carries — which the approved mockup does not show.
+
 ## What this plan deliberately does not do
 
 - **It does not run the eval.** A run costs real money on the owner's account and needs their explicit go. Scenarios 11 and 12 still have written bars and no results, which is honest. The visual language is not scored by the eval in any case — it is scored by the owner's eyes.
