@@ -973,7 +973,8 @@ In `app/src/renderer/app.css`, replace lines 475-489 (the header's type and its 
   background: rgb(246 236 225 / 8%); color: var(--lantern-soft);
   font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
-.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 15%); color: var(--lantern-ink); }
+/* 14% is the mockup's own hover fill (`.l3-ghost:hover`, lantern-v3.html:81). */
+.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
 ```
 
@@ -996,13 +997,15 @@ Replace lines 527-534 (`.town-transfer-packet` and its dot) with:
 /* The packet keeps its word — the owner should be able to read what is
    crossing the water — but says it in the app's own rounded voice.
    `rgb(22 27 44 / …)` throughout this task is --lantern-deep (#161b2c) with an
-   alpha, the same shape the old rules used with the retired --pond-deep. It is
-   a derivation of an approved colour, not a new one. */
+   alpha, the same shape the old rules used with the retired --pond-deep — and
+   with the SAME alphas those rules carried (92% here, 88% and 62% on the thread
+   target below), so only the hue moves. It is a derivation of an approved
+   colour, not a new one. */
 .town-transfer-packet {
   position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 6px;
   min-width: 48px; max-width: 86px; padding: 5px 11px; transform: translate(-50%, -50%);
   border: 0; border-radius: 999px;
-  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 94%));
+  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 92%));
   color: var(--lantern-ink); box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
   font: inherit; font-size: .68rem; font-weight: 700; white-space: nowrap;
 }
@@ -1288,7 +1291,10 @@ Replace lines 22-32 (`.pill` and its variants) with:
 .pill {
   font: inherit; font-weight: 700; font-size: .95rem; border: none; border-radius: 999px;
   padding: 11px 22px; background: var(--card-solid); color: var(--card-ink); cursor: pointer;
-  --pill-edge: rgb(0 0 0 / 12%);
+  /* Every edge is a wash of a token this pill already carries, never a raw
+     black: a real solid edge is a darker shade of the button, and deriving it
+     keeps the "invent no colours" rule true without a neutral escape hatch. */
+  --pill-edge: color-mix(in srgb, var(--card-ink) 16%, transparent);
   box-shadow: 0 4px 0 var(--pill-edge);
   transition: transform .3s var(--pop), box-shadow .3s var(--ease), background-color .2s, opacity .15s;
 }
@@ -1299,7 +1305,7 @@ Replace lines 22-32 (`.pill` and its variants) with:
 }
 .pill:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .pill:disabled { opacity: .5; cursor: default; transform: none; }
-.pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green) 58%, #000); }
+.pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green-deep) 55%, transparent); }
 .pill-quiet { background: transparent; color: var(--card-muted); --pill-edge: transparent; }
 .pill-danger { background: var(--stop-soft); color: var(--stop); --pill-edge: color-mix(in srgb, var(--stop) 34%, transparent); }
 ```
@@ -1370,7 +1376,8 @@ Finally, append the lantern's own button variants **after** Task 4's `.chat-colu
    `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
    exactly right — the press must still compress whatever the resting colour. */
 .chat-column-villager .pill {
-  background: rgb(246 236 225 / 7%); color: var(--lantern-ink); --pill-edge: rgb(0 0 0 / 22%);
+  background: rgb(246 236 225 / 7%); color: var(--lantern-ink);
+  --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
 }
 .chat-column-villager .pill-primary {
   background: linear-gradient(165deg, #bfe8dd, var(--garden-cyan)); color: #17302b;
