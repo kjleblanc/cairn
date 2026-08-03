@@ -365,7 +365,7 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
  * The run then stays visible here: a status strip carries its stage, its
  * clock, a stop control, and the way to the run screen, and the composer
  * says plainly that it is closed until the run finishes. */
-export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0, initialComposer = "" }: {
+export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0, initialComposer = "", onNeedsYouChange }: {
   dir: string;
   onBack: () => void;
   onOpenRun: () => void;
@@ -374,6 +374,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   /** Task 160: words carried in once (a checkup suggestion) — read only at
    * mount, so later re-renders and project switches never re-seed them. */
   initialComposer?: string;
+  /** Decision 9: the narrow window's status line turns amber when a decision
+   * is waiting. That signal is Task 155's, computed below; this publishes it
+   * rather than letting a second component work it out again. */
+  onNeedsYouChange?: (needsYou: boolean) => void;
 }) {
   const [status, setStatus] = useState<ConductorStatus | null>(null);
   const [stones, setStones] = useState(0);
@@ -989,6 +993,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     || dispatch?.phase === "confirm"
     || pushFlow?.phase === "chip"
     || pushFlow?.phase === "confirm";
+  // The narrow window's status line lives outside this component, so the
+  // needs-you signal is published rather than recomputed there. One answer,
+  // one place.
+  useEffect(() => { onNeedsYouChange?.(needsYou); }, [needsYou, onNeedsYouChange]);
   // The strip says only what the run itself said. While it runs, that is the
   // latest stage of the four (`Route | Run | Check | Result`) — "Starting"
   // until the first one arrives, which is a plainer truth than naming a stage

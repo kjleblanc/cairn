@@ -1061,48 +1061,93 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(worker.locator(".town-face-worker")).toHaveCount(1);
   await expect(worker.locator(".town-worker-pad")).toHaveCount(1);
 
-  // At the minimum supported Town size, the FULL Cairn and worker buttons —
-  // not just their face strokes — remain beside the same conversation. The
-  // dialog, nodes, and owner controls all stay inside the viewport.
+  // The narrow window (Decision 9, approved 2026-08-03). All four explored
+  // panel directions failed here, each by shrinking its wide layout. The
+  // resolution: the pond is never reduced — at 760×620 it is either its whole
+  // self or it is a sentence. Closed, the conversation takes the window and
+  // the cast waits behind the line; opened, the pond is whole.
   await win.setViewportSize({ width: 760, height: 620 });
   await expect(win.getByRole("button", { name: /Conductor.*worker task running/ })).toBeVisible();
-  const narrowLayout = await win.evaluate(() => {
+  const pondLine = win.locator(".pond-line");
+  await expect(pondLine).toBeVisible();
+  await expect(pondLine).toHaveAttribute("aria-expanded", "false");
+  await expect(pondLine).toContainText("Codex Exec worker is working");
+  await expect(town.locator(".town-node-cairn")).toBeHidden();
+  await expect(worker).toBeHidden();
+  const narrowClosed = await win.evaluate(() => {
     const dialog = document.querySelector<HTMLElement>(".chat-column-villager")?.getBoundingClientRect();
-    const town = document.querySelector<HTMLElement>(".town-square")?.getBoundingClientRect();
-    const cairnNode = document.querySelector<HTMLElement>(".town-node-cairn")?.getBoundingClientRect();
-    const workerNode = document.querySelector<HTMLElement>(".town-node-worker")?.getBoundingClientRect();
-    if (!dialog || !town || !cairnNode || !workerNode) throw new Error("Expected the minimum-size Town cast and conversation");
-    const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right && left.right > right.left
-      && left.top < right.bottom && left.bottom > right.top;
+    const pane = document.querySelector<HTMLElement>(".workspace-town-pane")?.getBoundingClientRect();
+    const line = document.querySelector<HTMLElement>(".pond-line")?.getBoundingClientRect();
+    if (!dialog || !pane || !line) throw new Error("Expected the narrow line and the conversation");
     const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
       && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
-    const controlsFit = Array.from(document.querySelectorAll<HTMLElement>(
-      ".chat-topbar button, .run-strip-controls button",
-    )).every((control) => {
-      const rect = control.getBoundingClientRect();
-      return contains(dialog, rect);
-    });
     return {
-      cairnClear: !overlaps(dialog, cairnNode),
-      workerClear: !overlaps(dialog, workerNode),
-      cairnFits: contains(town, cairnNode),
-      workerFits: contains(town, workerNode),
-      dialogFits: contains(town, dialog),
-      controlsFit,
+      // Takes the window, and sits clear of the line rather than under it.
+      dialogTakesTheWindow: dialog.width > pane.width - 40,
+      dialogClearsTheLine: dialog.top >= line.bottom - 1,
+      dialogFits: contains(pane, dialog),
+      controlsFit: Array.from(document.querySelectorAll<HTMLElement>(
+        ".chat-topbar button, .run-strip-controls button",
+      )).every((control) => contains(dialog, control.getBoundingClientRect())),
       pageFits: document.documentElement.scrollWidth <= window.innerWidth
         && document.documentElement.scrollHeight <= window.innerHeight,
     };
   });
-  expect(narrowLayout).toEqual({
-    cairnClear: true,
-    workerClear: true,
-    cairnFits: true,
-    workerFits: true,
+  expect(narrowClosed).toEqual({
+    dialogTakesTheWindow: true,
+    dialogClearsTheLine: true,
     dialogFits: true,
     controlsFit: true,
     pageFits: true,
   });
+
+  // Pressing the line opens the pond WHOLE, over the window. Both villagers
+  // are fully inside it and clear of each other — not crowded into the half
+  // that used to be reserved for the conversation.
+  await pondLine.click({ noWaitAfter: true });
+  await expect(pondLine).toHaveAttribute("aria-expanded", "true");
+  await expect(town.locator(".town-node-cairn")).toBeVisible();
+  await expect(worker).toBeVisible();
+  const narrowOpen = await win.evaluate(() => {
+    const town = document.querySelector<HTMLElement>(".town-square")?.getBoundingClientRect();
+    const cairnNode = document.querySelector<HTMLElement>(".town-node-cairn")?.getBoundingClientRect();
+    const workerNode = document.querySelector<HTMLElement>(".town-node-worker")?.getBoundingClientRect();
+    if (!town || !cairnNode || !workerNode) throw new Error("Expected the whole pond at 760x620");
+    const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
+      && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+    const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right && left.right > right.left
+      && left.top < right.bottom && left.bottom > right.top;
+    return {
+      cairnFits: contains(town, cairnNode),
+      workerFits: contains(town, workerNode),
+      castIsSeparate: !overlaps(cairnNode, workerNode),
+      pageFits: document.documentElement.scrollWidth <= window.innerWidth
+        && document.documentElement.scrollHeight <= window.innerHeight,
+    };
+  });
+  expect(narrowOpen).toEqual({
+    cairnFits: true, workerFits: true, castIsSeparate: true, pageFits: true,
+  });
+
+  // One control brings the conversation back.
+  await win.getByRole("button", { name: "Back to the conversation" }).click({ noWaitAfter: true });
+  await expect(pondLine).toHaveAttribute("aria-expanded", "false");
+  await expect(town.locator(".town-node-cairn")).toBeHidden();
+
+  // The rule fires at exactly the size it was written for. Terminal Glass's
+  // never did, which is one of the four failures this resolution replaces —
+  // so both sides of the boundary are checked, not just a comfortable width.
+  await win.setViewportSize({ width: 1260, height: 820 });
+  await expect(pondLine).toBeVisible();
+  await win.setViewportSize({ width: 1261, height: 820 });
+  await expect(pondLine).toBeHidden();
+
+  // Above 1260px nothing about any of this exists: the approved wide layout is
+  // untouched, and the line is gone rather than merely hidden from view.
   await win.setViewportSize({ width: 1320, height: 820 });
+  await expect(pondLine).toBeHidden();
+  await expect(town.locator(".town-node-cairn")).toBeVisible();
+  await expect(town.locator(".town-square-header")).toBeVisible();
 
   await win.locator(".rail-project-select", { hasText: otherName }).click({ noWaitAfter: true });
   const otherTown = win.getByRole("region", { name: `${otherName} town square` });

@@ -9,6 +9,7 @@ import type {
   TownPresentationState,
 } from "../../shared/ipc";
 import { cairn } from "../api";
+import { PondLine } from "../components/PondLine";
 import { ProjectRail } from "../components/ProjectRail";
 import { TownSquare } from "../components/TownSquare";
 import { ErrorCard } from "../components/Ui";
@@ -56,6 +57,12 @@ export function Workspace({
   const [runtimePresentation, setRuntimePresentation] = useState(() => hydrateTownPresentation(null, null));
   const [centerView, setCenterView] = useState<CenterView>("chat");
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+  // The narrow window (Decision 9). 1260px is the app's existing breakpoint;
+  // this mirrors it in JS only because the cast's shore depends on it, and
+  // CSS cannot tell the layout algorithm anything.
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 1260px)").matches ?? false);
+  const [pondOpen, setPondOpen] = useState(false);
+  const [chatNeedsYou, setChatNeedsYou] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([initialDir]));
   const [manualExpansion, setManualExpansion] = useState<Set<string>>(() => new Set());
@@ -140,9 +147,18 @@ export function Workspace({
   }, []);
 
   useEffect(() => {
+    const query = window.matchMedia("(max-width: 1260px)");
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
     // A new active project is a new context: a stale error card from the old
-    // one never follows the owner across it.
+    // one never follows the owner across it, and neither does an open pond.
     setError(null);
+    setPondOpen(false);
     setTownTask(null);
     setTownStream(null);
     runtimeDirRef.current = null;
@@ -295,11 +311,15 @@ export function Workspace({
         {centerView === "chat" ? (
           /* One world: the town fills the stage and the conversation lives
              inside it as the villager bubble anchored to Cairn. */
-          <section className="workspace-town-pane" aria-label="Town square">
+          <section className={`workspace-town-pane${pondOpen ? " workspace-town-pane-pond-open" : ""}`}
+            aria-label="Town square">
+            <PondLine presentation={runtimePresentation} needsYou={chatNeedsYou}
+              open={pondOpen} onToggle={setPondOpen} />
             <TownSquare key={`town:${activeDir}`} projectName={projectStatus.facts.name || "Project"}
               task={townTask} stream={townStream}
               presentation={runtimePresentation}
               positions={townPresentation.positions}
+              wholePond={narrow && pondOpen}
               onPositionsChange={(positions: Record<string, TownPoint>) => {
                 const state = { ...townPresentationRef.current, positions };
                 persistTownPresentation(activeDirRef.current, state);
@@ -308,6 +328,7 @@ export function Workspace({
               onOpenRun={() => setCenterView("task")} />
             <Chat key={`chat:${activeDir}`} dir={activeDir} embedded focusSignal={chatFocusSignal}
               initialComposer={composerSeedRef.current ?? undefined}
+              onNeedsYouChange={setChatNeedsYou}
               onBack={openDashboard}
               onOpenRun={() => setCenterView("task")} />
           </section>

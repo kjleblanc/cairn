@@ -410,6 +410,51 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   --town-chat-width: min(520px, max(400px, calc(50% - 128px)), calc(100% - 32px));
   position: relative; flex: 1; min-height: 0; overflow: hidden;
 }
+/* The narrow window's status line (Decision 9, approved 2026-08-03). Absent
+   from the approved wide layout, which is untouched; the ≤1260px block below
+   turns it on. */
+.pond-line {
+  display: none; position: absolute; z-index: 9; inset: 0 0 auto; width: 100%; height: 54px;
+  align-items: center; gap: 11px; padding: 0 15px;
+  border: 0; border-bottom: 1px solid rgb(246 236 225 / 9%);
+  background: rgb(33 39 57 / 72%); backdrop-filter: blur(14px);
+  color: var(--lantern-ink); font: inherit; font-size: .78rem; font-weight: 700;
+  text-align: left; cursor: pointer;
+  transition: background-color .25s var(--ease);
+}
+.pond-line:hover { background: rgb(43 51 74 / 82%); }
+.pond-line:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: -3px; }
+.pond-line-dot {
+  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--lantern-soft); box-shadow: 0 0 9px var(--lantern-soft);
+}
+.pond-line-busy .pond-line-dot { background: var(--pond-task); box-shadow: 0 0 9px var(--pond-task); }
+.pond-line-done .pond-line-dot { background: var(--pond-done); box-shadow: 0 0 9px var(--pond-done); }
+.pond-line-stopped .pond-line-dot { background: var(--pond-stop); box-shadow: 0 0 9px var(--pond-stop); }
+/* Amber is the one state the owner has to act on, so it colours the whole
+   line rather than a 7px dot. Task 155's needs-you signal decides it. */
+.pond-line-needs-you {
+  color: var(--pond-task);
+  background: color-mix(in srgb, var(--pond-task) 14%, rgb(22 27 44 / 82%));
+}
+.pond-line-needs-you .pond-line-dot { background: var(--pond-task); box-shadow: 0 0 9px var(--pond-task); }
+.pond-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pond-line-peek {
+  display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none;
+  color: var(--lantern-soft); font-size: .72rem;
+}
+.pond-line-chevron { transition: transform .4s var(--pop); }
+.workspace-town-pane-pond-open .pond-line-chevron { transform: rotate(180deg); }
+.pond-back {
+  display: none; position: absolute; z-index: 10; left: 50%; bottom: 18px;
+  transform: translateX(-50%); padding: 10px 20px;
+  border: 1px solid rgb(246 236 225 / 16%); border-radius: 999px;
+  background: rgb(33 39 57 / 88%); color: var(--lantern-ink);
+  font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer;
+  transition: transform .35s var(--pop), background-color .2s;
+}
+.pond-back:hover { transform: translateX(-50%) translateY(-2px) scale(1.04); }
+.pond-back:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .chat-villager-root { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
 .chat-villager-root > * { pointer-events: auto; }
 .chat-column.chat-column-villager {
@@ -958,6 +1003,58 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      rail regime. Saved workers are presentation-clamped to this shore in the
      Town component while their stored coordinates remain unchanged. */
   .town-square-ground { right: 152px; }
+}
+
+/* The narrow window, resolved 2026-08-03 and owner-approved.
+   "A line is honest because it is a line. A small pond is dishonest because it
+   pretends to be a picture." So the pond is never reduced: at this width it is
+   either its whole self or it is a sentence. The conversation is the default,
+   because that is where the owner acts; the pond is orientation, and
+   orientation is something you go and check.
+   This is a SECOND block at the SAME 1260px breakpoint, not a new one. It sits
+   after the 621–1260 block because that block sets `left`, `width`, and
+   `.town-square-ground { right }` at equal specificity and would otherwise win
+   on source order. */
+@media (max-width: 1260px) {
+  .pond-line { display: flex; }
+  .workspace-town-pane-pond-open .pond-back { display: block; }
+
+  /* The town header is replaced by the line at this width. */
+  .workspace-town-pane .town-square-header { display: none; }
+
+  /* The pond's contents wait behind the line. `visibility`, not `opacity`:
+     nothing hidden may be focusable, hoverable, or reported as visible. */
+  .workspace-town-pane .town-square-ground,
+  .workspace-town-pane .town-empty-note,
+  .workspace-town-pane .town-detail { visibility: hidden; }
+  .workspace-town-pane-pond-open .town-square-ground,
+  .workspace-town-pane-pond-open .town-empty-note,
+  .workspace-town-pane-pond-open .town-detail { visibility: visible; }
+
+  /* Whole, not reduced: the ground fills the pane under the line. */
+  .workspace-town-pane .town-square-ground { inset: 54px 12px 12px; }
+  .workspace-town-pane .town-detail { inset: auto 12px 68px 12px; }
+
+  /* The conversation takes the window. */
+  .chat-column.chat-column-villager {
+    left: 11px; right: 11px; top: 65px; bottom: 11px;
+    width: auto; height: auto; max-height: none; transform: none;
+    border-radius: 26px; padding: 15px;
+    animation: villager-rise .42s var(--spring) both;
+  }
+  /* With the full width back, the top bar and run controls need none of the
+     621–1260 block's cramping. */
+  .chat-column-villager .chat-topbar { display: flex; }
+  .chat-column-villager .run-strip-controls { flex: none; width: auto; margin-left: auto; }
+  .chat-column-villager .run-strip-controls .pill { flex: none; padding: 11px 22px; font-size: .95rem; }
+  .chat-column-villager .route-facts { grid-template-columns: repeat(3, 1fr); }
+
+  /* Opening the pond puts the conversation away rather than shrinking it. */
+  .workspace-town-pane-pond-open .chat-column.chat-column-villager {
+    transform: translateY(102%); opacity: .35; pointer-events: none;
+    transition: transform .48s var(--pop), opacity .3s var(--ease);
+  }
+  .workspace-town-pane-pond-open .chat-villager-chip { display: none; }
 }
 
 /* Task 160: the checkup card — a read-only report floating over any screen.
