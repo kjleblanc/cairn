@@ -682,6 +682,25 @@ function lanternRule(): string {
 }
 
 /**
+ * app.css's `prefers-reduced-motion` block, brace-balanced.
+ *
+ * Slicing to end-of-file instead would be worse than useless here: the ≤620px
+ * block further down carries `.chat-column.chat-column-villager`, whose text
+ * contains `.chat-column-villager`, so a regression that dropped this element
+ * from the real reduced-motion rule would still find the substring and pass.
+ */
+function reducedMotionBlock(): string {
+  const start = css.indexOf("@media (prefers-reduced-motion: reduce)");
+  assert.notEqual(start, -1, "app.css has no reduced-motion block");
+  let depth = 0;
+  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}" && --depth === 0) return css.slice(start, index + 1);
+  }
+  return assert.fail("app.css's reduced-motion block never closes");
+}
+
+/**
  * Decision 9: "Lantern on Water". The conversation is a warm, softly lit
  * lantern resting on dark water — light spills from it onto the pond instead
  * of covering the pond. It replaces a large bright white rectangle that
@@ -721,8 +740,8 @@ test("the lantern has no tail", () => {
 test("the lantern sways, and stops swaying for reduced motion", () => {
   assert.ok(css.includes("@keyframes lantern-sway"), "the lantern does not sway");
   assert.ok(lanternRule().includes("lantern-sway"), "the sway is declared but never used");
-  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-  assert.ok(reduced.includes(".chat-column-villager"), "the sway is not killed for reduced motion");
+  assert.ok(reducedMotionBlock().includes(".chat-column-villager"),
+    "the sway is not killed for reduced motion");
 });
 
 test("each disposition chip wears its own approved colour", () => {
@@ -777,9 +796,13 @@ In `app/src/renderer/app.css`, replace lines 386-405 — the whole `.chat-column
   /* The paired tokens are re-pointed once, here. Every card, rule, and muted
      line inside the lantern is already written against them, so they re-tone
      through the cascade rather than being rewritten rule by rule. Only what
-     carries its own colour in the approved mockup is named below. */
-  --card: rgb(246 236 225 / 6%);
-  --card-solid: rgb(246 236 225 / 9%);
+     carries its own colour in the approved mockup is named below.
+     Each alpha is the mockup's own value for the surface that token serves:
+     5% is `.l3-card` / `.l3-menu`, the card fill (lantern-v3.html:99,110);
+     7% is `.l3-input`, the composer field (lantern-v3.html:130); 13% is the
+     hairline rule (narrow-v2.html:66,69). */
+  --card: rgb(246 236 225 / 5%);
+  --card-solid: rgb(246 236 225 / 7%);
   --card-ink: var(--lantern-ink);
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);
@@ -1186,7 +1209,20 @@ test("type is heavy, and the heavy face is really loaded", () => {
 });
 
 test("every added motion stops for reduced motion", () => {
-  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+  // Brace-balanced, not sliced to end-of-file: the ≤620px and 621–1260px
+  // blocks further down mention `.pill` and `.chat-column-villager`, so an
+  // end-of-file slice would find those selectors and pass even after a
+  // regression removed them from the reduced-motion rule itself.
+  const start = css.indexOf("@media (prefers-reduced-motion: reduce)");
+  assert.notEqual(start, -1, "app.css has no reduced-motion block");
+  let depth = 0;
+  let end = -1;
+  for (let index = css.indexOf("{", start); index < css.length && end < 0; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}" && --depth === 0) end = index + 1;
+  }
+  assert.notEqual(end, -1, "app.css's reduced-motion block never closes");
+  const reduced = css.slice(start, end);
   for (const selector of [".pill", ".town-face", ".followup-chip"]) {
     assert.ok(reduced.includes(selector), `${selector} keeps moving under reduced motion`);
   }
