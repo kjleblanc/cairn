@@ -1215,7 +1215,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
       // A STOPPED close: Cairn authors honest STOPPED records from whatever
       // claims (if any) survived, keeps the retained evidence, commits nothing.
       const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${reason}.` });
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).` });
         const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null, recovery);
         if (!records.verified) {
           const restored = restoreLogBeforeThrow(projectRoot, start);
@@ -1249,7 +1249,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           const restored = restoreLogBeforeThrow(projectRoot, start);
           throw recordVerificationFailed("Task records were retained for inspection.", restored);
         }
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")} (RECORD_VERIFICATION_FAILED).` });
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")}` });
         return {
           status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",
@@ -1382,7 +1382,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
           const restored = restoreLogBeforeThrow(projectRoot, start);
           throw recordVerificationFailed("Task records were retained for inspection.", restored);
         }
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: MODEL_RESULT_NOT_VERIFIED." });
+        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")} (MODEL_RESULT_NOT_VERIFIED).` });
         emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")}` });
         return {
           status: "stopped", reason: "MODEL_RESULT_NOT_VERIFIED", taskNumber, disposition: "STOPPED",
@@ -1417,7 +1417,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         ? "PROTECTED_WORK_CHANGED"
         : null;
     if (stopReason) {
-      emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReason}.` });
+      emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords(stopReason)} (${stopReason}).` });
       const closed = writeClosedRecords(projectRoot, contract, demo, "STOPPED", stopReason, start, Boolean(options.commitRecords));
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(stopReason)}` });
       return {
@@ -1461,7 +1461,7 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
         const restored = restoreLogBeforeThrow(projectRoot, start);
         throw recordVerificationFailed("Task records were retained for inspection.", restored);
       }
-      emit(activities, options.events, { stage: "Check", state: "stopped", detail: "Stopped safely: RECORD_VERIFICATION_FAILED." });
+      emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")} (RECORD_VERIFICATION_FAILED).` });
       emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")}` });
       return {
         status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",

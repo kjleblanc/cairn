@@ -37,7 +37,11 @@ test("legacy state is preserved and the project conversion path remains visible"
   await window.getByRole("button", { name: "Switch project" }).click();
   await window.getByRole("button", { name: "All projects" }).click();
   await expect(window.getByText("bring an existing project")).toBeVisible();
-  await expect(window.getByText(/does not transform legacy/)).toBeVisible();
+  // Task 161 rewrote this screen and moved its legacy sentence into Convert.tsx,
+  // leaving this assertion pinned to copy the app no longer shows. This is the
+  // successor promise on the same screen (Picker.tsx:177): the conversion path
+  // is visible AND it still promises to preserve whatever it finds.
+  await expect(window.getByText(/nothing is overwritten, moved, or deleted/)).toBeVisible();
   expect(readFileSync(evidence, "utf8")).toBe("preserve exactly\n");
   await app.close();
 });

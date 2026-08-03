@@ -267,7 +267,9 @@ test("missing worker claims show only bounded numeric Codex event evidence", asy
   await win.getByLabel("I approve this one real Codex Exec call.").check();
   await win.getByRole("button", { name: "Start one real Codex Exec call" }).click();
   await expect(win.getByRole("heading", { name: "Adapter stopped safely" })).toBeVisible({ timeout: 30_000 });
-  await expect(win.getByText(/Stopped safely: WORKER_CLAIMS_MISSING/)).toBeVisible();
+  // Task 170: the run screen says why, then gives the code. It is a debugging
+  // surface, so unlike the one-line strip it keeps the constant.
+  await expect(win.getByText(/Stopped safely: the worker never said what it had done \(WORKER_CLAIMS_MISSING\)/)).toBeVisible();
   await expect(win.getByText(/Bounded worker evidence: agentMessageCount=1; cachedInputTokens=4; commandExecutionCount=2; exitCode=0;/)).toBeVisible();
   expect(await win.locator("body").innerText()).not.toContain("sk-secret-event-payload");
   const report = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
