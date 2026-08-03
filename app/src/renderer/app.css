@@ -411,9 +411,13 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* The paired tokens are re-pointed once, here. Every card, rule, and muted
      line inside the lantern is already written against them, so they re-tone
      through the cascade rather than being rewritten rule by rule. Only what
-     carries its own colour in the approved mockup is named below. */
-  --card: rgb(246 236 225 / 6%);
-  --card-solid: rgb(246 236 225 / 9%);
+     carries its own colour in the approved mockup is named below.
+     Each alpha is the mockup's own value for the surface that token serves:
+     5% is `.l3-card` / `.l3-menu`, the card fill (lantern-v3.html:99,110);
+     7% is `.l3-input`, the composer field (lantern-v3.html:130); 13% is the
+     hairline rule (narrow-v2.html:66,69). */
+  --card: rgb(246 236 225 / 5%);
+  --card-solid: rgb(246 236 225 / 7%);
   --card-ink: var(--lantern-ink);
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);

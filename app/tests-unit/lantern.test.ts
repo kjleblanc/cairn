@@ -13,6 +13,25 @@ function lanternRule(): string {
 }
 
 /**
+ * app.css's `prefers-reduced-motion` block, brace-balanced.
+ *
+ * Slicing to end-of-file instead would be worse than useless here: the ≤620px
+ * block further down carries `.chat-column.chat-column-villager`, whose text
+ * contains `.chat-column-villager`, so a regression that dropped this element
+ * from the real reduced-motion rule would still find the substring and pass.
+ */
+function reducedMotionBlock(): string {
+  const start = css.indexOf("@media (prefers-reduced-motion: reduce)");
+  assert.notEqual(start, -1, "app.css has no reduced-motion block");
+  let depth = 0;
+  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}" && --depth === 0) return css.slice(start, index + 1);
+  }
+  return assert.fail("app.css's reduced-motion block never closes");
+}
+
+/**
  * Decision 9: "Lantern on Water". The conversation is a warm, softly lit
  * lantern resting on dark water — light spills from it onto the pond instead
  * of covering the pond. It replaces a large bright white rectangle that
@@ -52,8 +71,8 @@ test("the lantern has no tail", () => {
 test("the lantern sways, and stops swaying for reduced motion", () => {
   assert.ok(css.includes("@keyframes lantern-sway"), "the lantern does not sway");
   assert.ok(lanternRule().includes("lantern-sway"), "the sway is declared but never used");
-  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-  assert.ok(reduced.includes(".chat-column-villager"), "the sway is not killed for reduced motion");
+  assert.ok(reducedMotionBlock().includes(".chat-column-villager"),
+    "the sway is not killed for reduced motion");
 });
 
 test("each disposition chip wears its own approved colour", () => {
