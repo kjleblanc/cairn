@@ -500,7 +500,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      tokens have to come with it — in light theme --stop-soft is a bright pale
      block on dark paper, and --stop text measures ~3:1 against the card. */
   --stop: var(--pond-stop);
-  --stop-soft: color-mix(in srgb, var(--pond-stop) 18%, transparent);
+  /* 12%, not 18%: the coral text sits ON this wash, so a lighter wash costs
+     contrast. Measured against the card's own 5% wash over the paper —
+     18% gives 4.27:1 (under the 4.5 floor for this 14.7px bold), 15% is 4.54
+     with no headroom, 12% is 4.83. The blend ratio is the free parameter here;
+     the approved coral itself does not move. */
+  --stop-soft: color-mix(in srgb, var(--pond-stop) 12%, transparent);
   color: var(--card-ink);
   /* The rise lands the panel, and then it STAYS landed.
      The approved lantern-v3 mockup swayed the whole lantern on an 8s loop, and
