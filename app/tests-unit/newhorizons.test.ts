@@ -87,3 +87,17 @@ test("the lantern's own buttons are the mockup's mint and ghost", () => {
   assert.ok(rule(".chat-column-villager .pill-primary").includes("#7cbdae"),
     "Send has no solid lower edge to compress");
 });
+
+test("nothing outranks the pill's own press", () => {
+  // `.chat-composer` holds exactly one button — the Send pill — and
+  // `motion.css`'s `.chat-composer button:hover:not(:disabled)` is (0,3,1)
+  // against `.pill:hover:not(:disabled)`'s (0,3,0), in a file imported AFTER
+  // app.css. So a generic button rule there wins twice over, and the app's
+  // most-clicked control keeps the old flat press while every test, the
+  // typecheck, and both builds stay green. It happened; this is the guard.
+  const motion = renderer("motion.css");
+  for (const selector of [".chat-composer button:hover", ".chat-composer button:active"]) {
+    assert.ok(!motion.includes(selector),
+      `${selector} in motion.css outranks the pill treatment on the Send button`);
+  }
+});

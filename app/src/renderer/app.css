@@ -553,8 +553,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    these give the lantern's three the mockup's own colours. Specificity note:
    `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
    exactly right — the press must still compress whatever the resting colour. */
+/* Only the edge needs saying: `--card-solid` and `--card-ink` are already
+   re-pointed on the lantern (Task 4), so the base `.pill` rule above resolves
+   to exactly these values inside this scope on its own. */
 .chat-column-villager .pill {
-  background: rgb(246 236 225 / 7%); color: var(--lantern-ink);
   --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
 }
 .chat-column-villager .pill-primary {
