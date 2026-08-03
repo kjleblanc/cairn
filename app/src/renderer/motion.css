@@ -75,10 +75,10 @@
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-5px); }
 }
-.town-skyglow { animation: town-sky-breathe 9s ease-in-out infinite; }
-@keyframes town-sky-breathe {
-  0%, 100% { opacity: .65; }
-  50% { opacity: 1; }
+.town-skyglow { animation: town-sheen-drift 24s ease-in-out infinite; }
+@keyframes town-sheen-drift {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(30px, -16px) scale(1.06); }
 }
 
 /* Nodes settle rather than dart when the layout moves them. */

@@ -459,11 +459,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
-  color: #f6f0e8;
+  color: var(--lantern-ink);
+  /* One continuous blend, from the approved lantern-v3 frame: three soft
+     ellipses over a single diagonal. Nothing here has an edge that could read
+     as a drawn ring. */
   background:
-    radial-gradient(ellipse at 50% 43%, rgb(112 227 211 / 8%), transparent 30%),
-    radial-gradient(ellipse at 72% 20%, rgb(169 154 232 / 9%), transparent 25%),
-    linear-gradient(155deg, var(--pond-plum), var(--pond-deep) 58%, #0d1323);
+    radial-gradient(ellipse 90% 70% at 30% 68%, #2b3350, transparent 70%),
+    radial-gradient(ellipse 70% 55% at 74% 14%, #352c4e, transparent 72%),
+    radial-gradient(ellipse 60% 45% at 50% 100%, #1d2438, transparent 70%),
+    linear-gradient(165deg, var(--lantern-plum), var(--lantern-mid) 45%, var(--lantern-deep));
 }
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;
@@ -487,34 +491,32 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-square-header button:hover:not(:disabled) { border-color: var(--neon-soft); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
+/* The sheen: the water breathes, it does not draw. Two soft pastel blooms from
+   the approved lantern-v3 frame, blurred well past any edge. Its drift lives
+   in motion.css. */
 .town-skyglow {
-  position: absolute; inset: 8% 12% auto; height: 38%; border-radius: 50%; filter: blur(46px);
-  background: radial-gradient(ellipse, rgb(112 227 211 / 8%), rgb(169 154 232 / 5%) 42%, transparent 72%);
+  position: absolute; inset: 0; pointer-events: none; filter: blur(46px); opacity: .5;
+  background:
+    radial-gradient(ellipse 30% 20% at 32% 62%, rgb(163 221 208 / 13%), transparent 70%),
+    radial-gradient(ellipse 22% 15% at 62% 40%, rgb(213 192 236 / 10%), transparent 72%);
 }
 .town-square-ground { position: absolute; z-index: 2; inset: 62px 48px 142px 0; }
+/* The outcome wash. Still water has no rim, so a settled DONE or STOPPED
+   colours the water itself rather than drawing a ring around it. Quiet water
+   carries no wash at all. */
 .town-pond-layer {
-  position: absolute; z-index: 0; inset: 5% 5% 2%; overflow: hidden; border: 1px solid var(--pond-line);
-  border-radius: 48% 52% 45% 55% / 52% 44% 56% 48%;
-  background:
-    radial-gradient(ellipse at 50% 44%, rgb(112 227 211 / 8%), transparent 42%),
-    linear-gradient(175deg, rgb(76 174 177 / 10%), rgb(17 23 42 / 34%));
-  box-shadow: inset 0 0 60px rgb(0 0 0 / 24%), 0 0 38px rgb(112 227 211 / 4%);
-  transition: border-color 300ms ease, background-color 300ms ease, box-shadow 300ms ease;
+  position: absolute; z-index: 0; inset: 0; pointer-events: none;
+  opacity: 0; transition: opacity 300ms ease, background 300ms ease;
 }
-.town-pond-contour {
-  position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%) rotate(-3deg);
-  border: 1px solid var(--pond-line); border-radius: 50%; opacity: .58;
-}
-.town-pond-contour-a { width: 27%; height: 31%; }
-.town-pond-contour-b { width: 52%; height: 57%; opacity: .38; }
-.town-pond-contour-c { width: 77%; height: 78%; opacity: .22; }
 .town-pond-done {
-  border-color: color-mix(in srgb, var(--pond-done) 42%, transparent);
-  box-shadow: inset 0 0 70px color-mix(in srgb, var(--pond-done) 10%, transparent), 0 0 34px color-mix(in srgb, var(--pond-done) 8%, transparent);
+  opacity: 1;
+  background: radial-gradient(ellipse 62% 48% at 44% 56%,
+    color-mix(in srgb, var(--pond-done) 13%, transparent), transparent 72%);
 }
 .town-pond-stopped, .town-pond-error {
-  border-color: color-mix(in srgb, var(--pond-stop) 46%, transparent);
-  box-shadow: inset 0 0 70px color-mix(in srgb, var(--pond-stop) 9%, transparent), 0 0 34px color-mix(in srgb, var(--pond-stop) 7%, transparent);
+  opacity: 1;
+  background: radial-gradient(ellipse 62% 48% at 44% 56%,
+    color-mix(in srgb, var(--pond-stop) 13%, transparent), transparent 72%);
 }
 .town-threads { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .town-threads path {

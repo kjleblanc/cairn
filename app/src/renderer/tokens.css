@@ -69,13 +69,10 @@
   --garden-amber-soft: rgb(242 185 92 / 6%);
   --garden-amber-glow: rgb(242 185 92 / 8%);
   --garden-rose: #ff9e8a;
-  /* Task 168: the quiet water underneath the shipped cast. Identity stays on
-     the faces above; moss/coral are semantic pond colors only. */
-  --pond-deep: #11172a;
-  --pond-mid: #1b2238;
-  --pond-plum: #2c2644;
-  --pond-water: rgb(76 174 177 / 12%);
-  --pond-line: rgb(112 227 211 / 17%);
+  /* Task 168, re-toned by Decision 9: the pond's semantic colours. Identity
+     stays on the faces above; these say what happened, not who did it. The
+     ground colours that used to sit here are gone — still water is one blend,
+     drawn by .town-square from the --lantern-* set. */
   --pond-task: #f7d3a8;
   /* "The result is with Cairn" — Cairn's own approved colour, not an eighth.
      TownSquare.tsx already paints a returning ripple with it; now the ripple

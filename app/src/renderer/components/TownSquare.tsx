@@ -369,11 +369,12 @@ export function TownSquare({
       <div className="town-skyglow" aria-hidden="true" />
 
       <div ref={groundRef} className="town-square-ground" aria-label="Town ground">
-        <div className={`town-pond-layer town-pond-${presentation.settledOutcome ?? "quiet"}`} aria-hidden="true">
-          <span className="town-pond-contour town-pond-contour-a" />
-          <span className="town-pond-contour town-pond-contour-b" />
-          <span className="town-pond-contour town-pond-contour-c" />
-        </div>
+        {/* Still water (Decision 9, rule 4). Three drawn contour rings used to
+            live here — ripples that never happened, drawn forever. At rest the
+            pond is now one continuous blend, and this layer carries only the
+            colour a settled outcome washes over it. A real ripple exists only
+            inside the keyed cue below. */}
+        <div className={`town-pond-layer town-pond-${presentation.settledOutcome ?? "quiet"}`} aria-hidden="true" />
         <svg className="town-threads" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           {visibleRelationships.map((relationship) => {
             const from = points[relationship.from] ?? TOWN_CENTER;
