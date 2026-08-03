@@ -4,9 +4,11 @@ body {
   background: var(--bg); color: var(--ink);
   font-family: "Quicksand", ui-rounded, "Segoe UI", system-ui, sans-serif;
   font-size: 15.5px; line-height: 1.55; overflow-x: hidden;
+  /* Decision 9, rule 5: heavy, never thin. 700 is Quicksand's real top. */
+  font-weight: 600;
 }
 #root { min-height: 100vh; display: flex; flex-direction: column; }
-h1, h2, h3 { line-height: 1.2; margin: 0 0 .35em; letter-spacing: -.01em; font-weight: 600; }
+h1, h2, h3 { line-height: 1.2; margin: 0 0 .35em; letter-spacing: -.01em; font-weight: 700; }
 h1 { font-size: 1.65rem; }
 h2 { font-size: 1.2rem; }
 p { margin: 0 0 10px; }
@@ -19,17 +21,30 @@ p:last-child { margin-bottom: 0; }
 
 .card { background: var(--card); border-radius: var(--r); padding: 16px 20px; margin: 0 0 12px; color: var(--card-ink); }
 .card-title { font-size: .8rem; letter-spacing: .05em; color: var(--card-muted); margin: 0 0 8px; }
+/* New Horizons pills (Decision 9, rule 5): a chunky pill with a solid lower
+   edge. It lifts under the pointer and sinks onto its own edge when pressed,
+   so a press has weight instead of a colour change. --pill-edge is the edge
+   colour each variant sets for itself. */
 .pill {
-  font: inherit; font-weight: 600; font-size: .95rem; border: none; border-radius: 999px;
+  font: inherit; font-weight: 700; font-size: .95rem; border: none; border-radius: 999px;
   padding: 11px 22px; background: var(--card-solid); color: var(--card-ink); cursor: pointer;
-  transition: transform .15s var(--spring), opacity .15s;
+  /* Every edge is a wash of a token this pill already carries, never a raw
+     black: a real solid edge is a darker shade of the button, and deriving it
+     keeps the "invent no colours" rule true without a neutral escape hatch. */
+  --pill-edge: color-mix(in srgb, var(--card-ink) 16%, transparent);
+  box-shadow: 0 4px 0 var(--pill-edge);
+  transition: transform .3s var(--pop), box-shadow .3s var(--ease), background-color .2s, opacity .15s;
 }
-.pill:hover { transform: translateY(-1px); }
-.pill:active { transform: scale(.97); }
+.pill:hover:not(:disabled) { transform: translateY(-2px) scale(1.04); }
+.pill:active:not(:disabled) {
+  transform: translateY(2px) scale(.97); box-shadow: 0 1px 0 var(--pill-edge);
+  transition-duration: .09s;
+}
+.pill:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .pill:disabled { opacity: .5; cursor: default; transform: none; }
-.pill-primary { background: var(--green); color: var(--green-ink); }
-.pill-quiet { background: transparent; color: var(--card-muted); }
-.pill-danger { background: var(--stop-soft); color: var(--stop); }
+.pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green-deep) 55%, transparent); }
+.pill-quiet { background: transparent; color: var(--card-muted); --pill-edge: transparent; }
+.pill-danger { background: var(--stop-soft); color: var(--stop); --pill-edge: color-mix(in srgb, var(--stop) 34%, transparent); }
 .badge { display: inline-block; border-radius: 999px; padding: 1px 12px; font-size: .78rem; font-weight: 600; }
 .badge-done { background: var(--green-soft); color: var(--green-deep); }
 .badge-stopped { background: var(--amber-soft); color: var(--amber-deep); }
@@ -175,13 +190,27 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .followups { align-self: stretch; margin: -2px 0 4px; }
 .followups-label { margin: 0 0 6px; }
 .followups-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Suggestions stagger in and slide under the pointer (Decision 9, rule 5).
+   The arrival fills BACKWARDS, not both: a forwards fill would pin the final
+   keyframe's `transform: none` over the hover slide for good. */
 .followup-chip {
   padding: 6px 12px; border: 1px dashed var(--line); border-radius: 999px;
   background: transparent; color: var(--card-ink); font: inherit; font-size: .85rem;
   cursor: pointer; text-align: left; max-width: 100%;
+  animation: lantern-arrive .5s var(--pop) backwards;
+  transition: transform .3s var(--pop), background-color .2s, border-color .2s;
 }
-.followup-chip:hover:not(:disabled) { background: var(--card); border-style: solid; }
+.followup-chip:nth-child(1) { animation-delay: .05s; }
+.followup-chip:nth-child(2) { animation-delay: .11s; }
+.followup-chip:nth-child(3) { animation-delay: .17s; }
+.followup-chip:nth-child(4) { animation-delay: .23s; }
+.followup-chip:hover:not(:disabled) { background: var(--card); border-style: solid; transform: translateX(5px) scale(1.02); }
+.followup-chip:active:not(:disabled) { transform: translateX(5px) scale(.98); }
 .followup-chip:disabled { opacity: .5; cursor: default; }
+@keyframes lantern-arrive {
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  to { opacity: 1; transform: none; }
+}
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
 /* The run, living in the conversation: one compact line above the composer. */
 .run-strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); }
@@ -520,6 +549,28 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .chat-composer textarea { border-radius: 18px; padding: 12px 16px; }
 .chat-column-villager .bubble-system { border-radius: 16px; }
 
+/* The lantern's buttons. The globals above give every pill its chunky edge;
+   these give the lantern's three the mockup's own colours. Specificity note:
+   `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
+   exactly right — the press must still compress whatever the resting colour. */
+.chat-column-villager .pill {
+  background: rgb(246 236 225 / 7%); color: var(--lantern-ink);
+  --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
+}
+.chat-column-villager .pill-primary {
+  background: linear-gradient(165deg, #bfe8dd, var(--garden-cyan)); color: #17302b;
+  --pill-edge: #7cbdae;
+  box-shadow: 0 5px 0 var(--pill-edge), 0 8px 20px rgb(163 221 208 / 22%);
+}
+.chat-column-villager .pill-quiet {
+  background: rgb(246 236 225 / 7%); color: var(--lantern-soft); --pill-edge: transparent;
+}
+.chat-column-villager .pill-quiet:hover:not(:disabled) {
+  background: rgb(246 236 225 / 14%); color: var(--lantern-ink);
+}
+.chat-column-villager .chat-tuck { color: var(--lantern-soft); }
+.chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
+
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
   color: var(--lantern-ink);
@@ -647,9 +698,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-node-returned .town-node-status { color: var(--pond-result); }
 .town-node-done .town-node-status { color: var(--pond-done); }
 .town-node-stopped .town-node-status, .town-node-error .town-node-status { color: var(--pond-stop); }
+/* The cast springs when touched (Decision 9, rule 5). The transform lives on
+   .town-face, which carries none of its own — .town-face-holo owns the float,
+   .town-face-tilt owns the tilt, so nothing here fights either. */
 .town-face {
   position: relative; z-index: 1; width: 78px; height: 78px; display: block; margin-bottom: 4px;
+  transition: transform .45s var(--pop);
 }
+.town-node:hover .town-face { transform: scale(1.06); }
+.town-node:active .town-face { transform: scale(.94); }
 .town-face-kimi, .town-face-codex, .town-face-claude, .town-face-gemini, .town-face-worker-fallback {
   width: 68px; height: 68px;
 }
@@ -806,10 +863,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .town-node, .town-thread-target, .town-face-thought { transition: none; }
+  .town-node, .town-thread-target, .town-face-thought, .town-face, .pill,
+  .followup-chip, .town-pond-layer { transition: none; }
   .town-face-holo, .town-face-eye, .town-face-thought circle, .town-face-mark path,
   .town-worker-pad span, .town-node-working .town-node-status i,
-  .chat-column-villager, .chat-villager-chip { animation: none; }
+  .chat-column-villager, .chat-villager-chip, .followup-chip { animation: none; }
+  /* Reduced motion reaches the same final state, so a pill still sits on its
+     edge and a suggestion is still fully arrived — they simply get there
+     without travelling. */
+  .pill:hover:not(:disabled), .pill:active:not(:disabled),
+  .town-node:hover .town-face, .town-node:active .town-face,
+  .followup-chip:hover:not(:disabled), .followup-chip:active:not(:disabled) { transform: none; }
 }
 
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }
