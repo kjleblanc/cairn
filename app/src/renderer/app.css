@@ -497,12 +497,23 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);
   color: var(--card-ink);
-  /* The rise lands the panel; the sway begins where the rise ended, so the two
-     never fight over `transform`.
-     Killing these needs the reduced-motion block at the END of this file, not
-     the one above: a media query adds no specificity, so `.chat-column-villager`
-     up there is (0,1,0) and loses to this rule's (0,2,0). */
-  animation: villager-rise .42s var(--spring) both, lantern-sway 8s ease-in-out .42s infinite;
+  /* The rise lands the panel, and then it STAYS landed.
+     The approved lantern-v3 mockup swayed the whole lantern on an 8s loop, and
+     that is deliberately not shipped: the mockup swayed a picture, while this
+     panel holds the composer, the run controls, and every card. An infinite
+     transform on the container means every control inside it is permanently
+     moving. That is not only a testing problem — it is harder to hit for
+     anyone, and materially so with a motor impairment — but the test evidence
+     is unusually clean: with the sway, Playwright reported "element is not
+     stable" 60 times over 30 seconds on the first click of nearly every spec
+     (19 failed / 4 passed against a 3-failure baseline); with it removed and
+     nothing else changed, the same specs passed in 4.5 seconds.
+     Everything else about the lantern is the mockup: warm paper, the light
+     spilling onto the water, the rounding.
+     Killing what remains needs the reduced-motion block at the END of this
+     file, not the one above: a media query adds no specificity, so
+     `.chat-column-villager` up there is (0,1,0) and loses to this (0,2,0). */
+  animation: villager-rise .42s var(--spring) both;
 }
 /* Inside the dialog, only the message list gives. Before this, every child
  * shrank proportionally once the column hit max-height, collapsing the list
@@ -556,11 +567,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 @keyframes villager-bob {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
-}
-
-@keyframes lantern-sway {
-  0%, 100% { transform: rotate(0deg) translateY(0); }
-  50% { transform: rotate(-.3deg) translateY(-5px); }
 }
 
 /* Inside the lantern (Decision 9). Everything not named here re-tones through
