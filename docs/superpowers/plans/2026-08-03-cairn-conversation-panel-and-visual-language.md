@@ -2145,12 +2145,27 @@ reviewers.
 Two further review findings were fixed in Task 7's second wave and are recorded
 here because they change the shipped code away from the text above: the
 put-away conversation takes `visibility: hidden` rather than `pointer-events:
-none` alone (it was tabbable off-screen); `.pond-line-text` became a real
-`role="status"` live region (hiding the town header below 1260px had removed the
-pond's only announcement); the shore clamp moved into `townShore()` in
-`town/layout.ts` so it has an assertion that can fail; and the reduced-motion
+none` alone (it was tabbable off-screen); the narrow window gained a real
+`role="status"` live region, because hiding the town header below 1260px had
+removed the pond's only announcement; the shore clamp moved into `townShore()`
+in `town/layout.ts` so it has an assertion that can fail; and the reduced-motion
 guard is anchored so the compound selector cannot stand in for the plain one.
 All in `e69058f`.
+
+A third wave (`d0bb024`) followed, on review findings against those fixes. The
+live region **moved out of the button** to a sibling `.pond-line-live`: a
+`role="button"` element has Children Presentational: True, so a live region
+nested inside one has its role dropped and may never announce — it would have
+been recorded as fixed while possibly still broken. The drag clamp was split
+from the render clamp (see the owner note below). And the reduced-motion sweep
+went **beyond this plan's scope**: the review checked every animation in
+`app.css`, not only ours, and found seven pre-existing rules losing to the first
+reduced-motion block exactly as the lantern's sway did — the cast kept blinking
+for a user who had asked their system not to. Fixing them was a scope decision,
+taken because the mechanism was understood and the fix was eight selectors.
+**That sweep was targeted, not exhaustive**: `.stone-drop` on the onboarding
+scene is still named in neither block, so "reduced motion is done" is not a
+conclusion this work supports.
 
 **The pattern worth keeping.** Three of the eight — #4, #7, #8 — are one defect
 wearing different clothes: **a CSS rule that exists but does not win, guarded by
@@ -2160,14 +2175,27 @@ cascade. Every such test on this plan now either bounds its search to the block
 it means to check, or asserts source-order victory directly. A later plan
 touching this CSS should assume that shape is the failure mode.
 
-**One thing was deliberately NOT fixed**, and it is the owner's call rather than
-this plan's: below 1260px the town header is hidden, which removes the "Reset
-layout" control — while the pond, when open, now lets a villager be dragged and
-saved out to `TOWN_BOUNDS.maxX`. Widening the window then presentation-clamps it
-back to the shore with no reset available at the width where the change was
-made. It is recoverable (the reset exists on the wide layout, where the clamping
-becomes visible), and fixing it properly means deciding what chrome the narrow
-pond carries — which the approved mockup does not show.
+**Two things are left for the owner rather than decided here**, both about the
+narrow window and neither a defect:
+
+1. **There is no "Reset layout" control below 1260px.** The town header carries
+   it, and the header is hidden at that width because the status line replaces
+   it. Restoring it means deciding what chrome the narrow pond carries, which
+   the approved mockup does not show. Nothing is unrecoverable: a drag saves at
+   most `TOWN_SHORE_BESIDE_CHAT`, which is the shore the wide layout uses, so a
+   position made at a narrow window is exactly where the wide layout will draw
+   it. (An earlier version of this work let a drag save out to
+   `TOWN_BOUNDS.maxX`, which the wide layout would then clamp away invisibly
+   with no reset at the width where the change was made. That trap was closed
+   in `d0bb024` by keeping the *render* clamp relaxed and the *save* clamp at
+   the shore.)
+2. **With the pond whole, a drag has an invisible wall at the shore that the
+   drawn layout does not.** A villager the layout solver placed past it will
+   jump left when grabbed, on a pond whose whole premise is that no shore is
+   there. The trade was deliberate — an invisible wall beats a save you cannot
+   undo at that width — but it is the kind of thing the "**Look at it — the
+   narrow window**" step will surface, so it is written down rather than left
+   to be discovered live.
 
 ## What this plan deliberately does not do
 
