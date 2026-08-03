@@ -628,13 +628,13 @@ Run from `app/`: `npm.cmd run typecheck` — Expected: no output, exit 0.
 
 Run from `app/`: `npm.cmd run build:vite` — Expected: builds clean.
 
-Confirm nothing else referenced the deleted tokens:
+Confirm nothing else referenced the deleted tokens. The guard test you just wrote necessarily quotes the very strings it forbids, so exclude it — otherwise its own assertions read as survivors:
 
 ```bash
-grep -rn "pond-deep\|pond-mid\|pond-plum\|pond-water\|pond-line\|pond-contour" app/src app/tests app/tests-unit app/lab
+grep -rn "pond-deep\|pond-mid\|pond-plum\|pond-water\|pond-line\|pond-contour" app/src app/tests app/tests-unit app/lab | grep -v "tests-unit/stillwater.test.ts"
 ```
 
-Expected: no output.
+Expected: no output. Run it once without the exclusion too: every hit must be inside `stillwater.test.ts`, and nowhere else.
 
 - [ ] **Step 5: Commit**
 
