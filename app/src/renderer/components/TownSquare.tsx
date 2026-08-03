@@ -9,7 +9,7 @@ import {
   type PointerEvent,
 } from "react";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../../shared/ipc";
-import { computeTownLayout, TOWN_BOUNDS, TOWN_CENTER } from "../town/layout";
+import { computeTownLayout, townShore, TOWN_BOUNDS, TOWN_CENTER, TOWN_SHORE_BESIDE_CHAT } from "../town/layout";
 import { TOWN_FACES, faceForAdapter, type TownFaceDef, type TownFaceState } from "../town/faces";
 import { townModelFromRuntime, type TownEntity, type TownRelationship } from "../town/model";
 import { townPresentationStatus, type TownRuntimePresentation, type TownTruth } from "../town/presentation";
@@ -175,6 +175,7 @@ export function TownSquare({
   stream,
   presentation,
   positions,
+  wholePond,
   onPositionsChange,
   onFocusChat,
   onOpenRun,
@@ -184,6 +185,9 @@ export function TownSquare({
   stream: ConductorStreamSnapshot | null;
   presentation: TownRuntimePresentation;
   positions: Record<string, TownPoint>;
+  /** True only while the narrow window is showing the pond whole, over the
+   *  conversation. There is then no shore to keep the cast behind. */
+  wholePond: boolean;
   onPositionsChange: (positions: Record<string, TownPoint>) => void;
   onFocusChat: () => void;
   onOpenRun: () => void;
@@ -203,15 +207,18 @@ export function TownSquare({
   const dragRef = useRef<{ id: string; startX: number; startY: number; moved: boolean } | null>(null);
   const groundRef = useRef<HTMLDivElement>(null);
   const cairnButtonRef = useRef<HTMLButtonElement>(null);
+  // Chat is part of this same Town at every desktop width, so villagers stay
+  // on the pond side of its shore — including at the 1260/1261 rail
+  // breakpoint. When the narrow window shows the pond WHOLE there is no
+  // conversation beside it, so the cast uses the layout's own full bound.
+  // Stored coordinates are never rewritten either way.
+  const shore = townShore(wholePond);
   const points = useMemo(() => Object.fromEntries(
     Object.entries({ ...automaticPoints, ...dragPoints }).map(([id, point]) => [
       id,
-      // Chat is part of this same Town at every desktop width. Keep every
-      // villager on the pond side of its shore, including the 1260/1261 rail
-      // breakpoint; stored coordinates remain unchanged.
-      { ...point, x: Math.min(point.x, 0.52) },
+      { ...point, x: Math.min(point.x, shore) },
     ]),
-  ), [automaticPoints, dragPoints]);
+  ), [automaticPoints, dragPoints, shore]);
   const lastWorkerPointsRef = useRef<{ runKey: string | null; points: Record<string, TownPoint> }>({
     runKey: presentation.runKey,
     points: {},
@@ -308,7 +315,11 @@ export function TownSquare({
     const bounds = groundRef.current?.getBoundingClientRect();
     if (!bounds || bounds.width === 0 || bounds.height === 0) return TOWN_CENTER;
     return {
-      x: Math.max(TOWN_BOUNDS.minX, Math.min(0.52, (clientX - bounds.left) / bounds.width)),
+      // The RENDER clamp relaxes with the whole pond so the cast can spread;
+      // what a drag SAVES does not. A pointer must not place a villager where
+      // the wide layout will clamp it back invisibly — the "Reset layout"
+      // control lives in the town header, which is hidden below 1260px.
+      x: Math.max(TOWN_BOUNDS.minX, Math.min(TOWN_SHORE_BESIDE_CHAT, (clientX - bounds.left) / bounds.width)),
       y: Math.max(TOWN_BOUNDS.minY, Math.min(TOWN_BOUNDS.maxY, (clientY - bounds.top) / bounds.height)),
     };
   }

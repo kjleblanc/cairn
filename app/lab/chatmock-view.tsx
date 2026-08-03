@@ -128,9 +128,13 @@ function ChatMock() {
   return (
     <div className="chatmock-stage">
       <div className="chatmock-town">
+        {/* Never whole: this harness has no `.workspace-town-pane` and no
+            narrow-window line to open the pond with, so the cast keeps the
+            shore the wide layout reserves for the conversation. */}
         <TownSquare projectName="Garden Lab (mock)" task={task} stream={stream}
           presentation={hydrateTownPresentation(task, stream)}
           positions={positions} onPositionsChange={setPositions}
+          wholePond={false}
           onFocusChat={() => setOpen(true)} onOpenRun={() => undefined} />
       </div>
 

@@ -146,8 +146,10 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(dialog).toBeVisible();
     await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
 
-    // Tucked, the conversation is a chip by Cairn; the chip — or Cairn's
-    // own node — brings the dialog back.
+    // Tucked, the conversation is a chip by Cairn, and the chip brings the
+    // dialog back. Below 1260px that is the affordance: the cast waits behind
+    // the pond line, because the pond is never shrunk to fit beside the
+    // conversation (Task 171). Cairn's own node is checked wide, just below.
     await win.getByRole("button", { name: "Tuck the conversation away" }).click();
     await expect(dialog).toHaveCount(0);
     const chip = win.getByRole("button", { name: "Open the conversation with Cairn" });
@@ -156,11 +158,14 @@ test.describe("remembered projects: load, switch, track", () => {
     // perpetually animating element never reads "stable" to Playwright.
     await chip.click({ force: true });
     await expect(dialog).toBeVisible();
+
+    await win.setViewportSize({ width: 1320, height: 820 });
+    // Wide, the pond sits beside the conversation, so Cairn's own node is the
+    // other way back.
     await win.getByRole("button", { name: "Tuck the conversation away" }).click();
     await win.getByRole("button", { name: "Cairn, ready" }).click();
     await expect(dialog).toBeVisible();
 
-    await win.setViewportSize({ width: 1320, height: 820 });
     await projectHome.click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
     await expect(win.getByRole("button", { name: "Start a task" })).toBeVisible();

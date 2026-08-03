@@ -20,6 +20,14 @@ This is **plan 2 of 4** from `docs/superpowers/specs/2026-08-02-cairn-showing-no
   - `.superpowers/brainstorm/52918-1785736835/content/narrow-v2.html` — the narrow behaviour.
   Open both before starting. Every literal colour, easing curve, and radius in this plan is transcribed from them.
 - **Invent no colours.** Three of the four generated directions asserted in their own headers that they had invented none, and all three had. Every value below is either one of the seven approved colours, a value copied verbatim from an approved mockup, or a `color-mix` of one of those. **The plan contains exactly one derived value** — the ERROR chip's ink `#4a201c` in Task 4 — and it is labelled there so the owner can look at it.
+
+  **What this rule protects, stated exactly, because three tasks in a row turned up borderline cases:** it protects against inventing a **hue**. That is the failure the spec records — directions that shipped colours the palette never approved and then said they hadn't.
+
+  Three consequences, each one checkable rather than a matter of taste:
+
+  1. **Every hue-bearing value must trace** to one of the seven approved colours, a mockup line, or an approved token — or be a `color-mix` of those. In a `color-mix`, the percentage is a blend ratio, not an alpha, and does not itself need a source.
+  2. **The alpha on a traced hue must match** its mockup source or the rule it replaces. The hue being right does not make the alpha free. Three of this plan's own defects were exactly this, all caught in review: `--card: rgb(246 236 225 / 6%)` in Task 4 (fixed in `96c1284`), and `rgb(246 236 225 / 15%)` plus `rgb(22 27 44 / 94%)` in Task 5 (fixed in `61fb550`).
+  3. **A neutral black shadow carries no hue** and does not need a mockup line — but it must use an alpha `app.css` already contains, so "the app's idiom" is a grep rather than a feeling. That set is `{.14, 16%, .18, 24%, 32%, 42%}` as of this plan's base. A shadow wanting a value outside it is proposing a new idiom and should say so.
 - **The seven approved colours, with the roles they land on:** Cairn `#a3ddd0` → `--garden-cyan`; Kimi `#d5c0ec` → `--face-kimi`; Codex `#f3c49a` → `--face-codex`; Claude `#b8c9de` → `--face-claude`; done `#c2ddb6` → `--pond-done`; stopped `#f2aaa4` → `--pond-stop`; work in transit `#f7d3a8` → `--pond-task`.
 - **Face geometry stays verbatim from `app/src/renderer/town/faces.ts`.** Now the owner's choice, not a constraint. Task 1 pins it and every later task must keep that test green.
 - **Still water is the default.** At rest the pond is one continuous blend — no rings, no drawn contours, no perpetual ripple. A ripple exists only because a real event landed, in the receiver's own colour. **This changes Task 168's shipped behaviour**: the pond currently draws three permanent contour rings. That is a rule 168's brief stated and its implementation did not reach — not a defect it introduced.
@@ -682,6 +690,25 @@ function lanternRule(): string {
 }
 
 /**
+ * app.css's `prefers-reduced-motion` block, brace-balanced.
+ *
+ * Slicing to end-of-file instead would be worse than useless here: the ≤620px
+ * block further down carries `.chat-column.chat-column-villager`, whose text
+ * contains `.chat-column-villager`, so a regression that dropped this element
+ * from the real reduced-motion rule would still find the substring and pass.
+ */
+function reducedMotionBlock(): string {
+  const start = css.indexOf("@media (prefers-reduced-motion: reduce)");
+  assert.notEqual(start, -1, "app.css has no reduced-motion block");
+  let depth = 0;
+  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}" && --depth === 0) return css.slice(start, index + 1);
+  }
+  return assert.fail("app.css's reduced-motion block never closes");
+}
+
+/**
  * Decision 9: "Lantern on Water". The conversation is a warm, softly lit
  * lantern resting on dark water — light spills from it onto the pond instead
  * of covering the pond. It replaces a large bright white rectangle that
@@ -721,8 +748,27 @@ test("the lantern has no tail", () => {
 test("the lantern sways, and stops swaying for reduced motion", () => {
   assert.ok(css.includes("@keyframes lantern-sway"), "the lantern does not sway");
   assert.ok(lanternRule().includes("lantern-sway"), "the sway is declared but never used");
-  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-  assert.ok(reduced.includes(".chat-column-villager"), "the sway is not killed for reduced motion");
+  assert.ok(reducedMotionBlock().includes(".chat-column-villager"),
+    "the sway is not killed for reduced motion");
+});
+
+test("reduced motion WINS over the sway, rather than merely naming it", () => {
+  // The sway is declared on `.chat-column.chat-column-villager` — two classes,
+  // (0,2,0). The reduced-motion block above names `.chat-column-villager`,
+  // which is (0,1,0) and LOSES to it. So for a while the lantern swayed on
+  // under reduced motion and the test above passed anyway, which is why this
+  // second one exists: naming an element is not the same as beating it.
+  //
+  // Equal specificity is settled by source order, so the property that
+  // actually matters is that the LAST rule matching the sway's own selector is
+  // the one that stops the animation.
+  const selectorAt = css.lastIndexOf(".chat-column.chat-column-villager");
+  const reducedAt = css.lastIndexOf("@media (prefers-reduced-motion: reduce)");
+  assert.ok(reducedAt < selectorAt,
+    "the sway's selector is declared after the last reduced-motion block, so it wins");
+  const winner = css.slice(selectorAt, css.indexOf("}", selectorAt));
+  assert.ok(winner.includes("animation: none"),
+    "the last rule matching the sway's selector does not stop its animation");
 });
 
 test("each disposition chip wears its own approved colour", () => {
@@ -777,9 +823,13 @@ In `app/src/renderer/app.css`, replace lines 386-405 — the whole `.chat-column
   /* The paired tokens are re-pointed once, here. Every card, rule, and muted
      line inside the lantern is already written against them, so they re-tone
      through the cascade rather than being rewritten rule by rule. Only what
-     carries its own colour in the approved mockup is named below. */
-  --card: rgb(246 236 225 / 6%);
-  --card-solid: rgb(246 236 225 / 9%);
+     carries its own colour in the approved mockup is named below.
+     Each alpha is the mockup's own value for the surface that token serves:
+     5% is `.l3-card` / `.l3-menu`, the card fill (lantern-v3.html:99,110);
+     7% is `.l3-input`, the composer field (lantern-v3.html:130); 13% is the
+     hairline rule (narrow-v2.html:66,69). */
+  --card: rgb(246 236 225 / 5%);
+  --card-solid: rgb(246 236 225 / 7%);
   --card-ink: var(--lantern-ink);
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);
@@ -950,7 +1000,8 @@ In `app/src/renderer/app.css`, replace lines 475-489 (the header's type and its 
   background: rgb(246 236 225 / 8%); color: var(--lantern-soft);
   font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
-.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 15%); color: var(--lantern-ink); }
+/* 14% is the mockup's own hover fill (`.l3-ghost:hover`, lantern-v3.html:81). */
+.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
 ```
 
@@ -973,13 +1024,15 @@ Replace lines 527-534 (`.town-transfer-packet` and its dot) with:
 /* The packet keeps its word — the owner should be able to read what is
    crossing the water — but says it in the app's own rounded voice.
    `rgb(22 27 44 / …)` throughout this task is --lantern-deep (#161b2c) with an
-   alpha, the same shape the old rules used with the retired --pond-deep. It is
-   a derivation of an approved colour, not a new one. */
+   alpha, the same shape the old rules used with the retired --pond-deep — and
+   with the SAME alphas those rules carried (92% here, 88% and 62% on the thread
+   target below), so only the hue moves. It is a derivation of an approved
+   colour, not a new one. */
 .town-transfer-packet {
   position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 6px;
   min-width: 48px; max-width: 86px; padding: 5px 11px; transform: translate(-50%, -50%);
   border: 0; border-radius: 999px;
-  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 94%));
+  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 92%));
   color: var(--lantern-ink); box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
   font: inherit; font-size: .68rem; font-weight: 700; white-space: nowrap;
 }
@@ -1009,9 +1062,13 @@ Replace lines 613-627 (`.town-node-bed`, its two parts, and `.town-overflow-shap
 }
 /* The hairline ellipse each character used to stand inside is now the light
    it casts. The element stays — conductor.spec.ts locates it for the
-   reduced-motion check, and an absent element would fail that dishonestly. */
+   reduced-motion check, and an absent element would fail that dishonestly.
+   No `border` declaration at all, not `border: 0`: a span has no default
+   border to reset, so the reset would be a no-op that reads — to a later
+   maintainer and to this task's own test — as a border still being managed
+   here. Absence is the assertion. */
 .town-node-bed span {
-  position: absolute; inset: 3px 7px; border: 0; border-radius: 50%;
+  position: absolute; inset: 3px 7px; border-radius: 50%;
   background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 16%, transparent), transparent 72%);
 }
 .town-overflow-shape {
@@ -1107,6 +1164,7 @@ git commit -m "The town's furniture goes warm and rounded; the cast keeps the id
 **Files:**
 - Modify: `app/src/renderer/main.tsx:1-5` (the 700 weight)
 - Modify: `app/src/renderer/app.css:3-10` (body and headings), `:22-32` (`.pill`), `:178-184` (`.followup-chip`), `:572-574` (`.town-face`), `:718-723` (reduced motion), and a new block after Task 4's lantern children
+- Modify: `app/src/renderer/motion.css:89-97` (retire the generic composer-button treatment the new pill supersedes)
 - Test: `app/tests-unit/newhorizons.test.ts` (create)
 
 **Interfaces:**
@@ -1186,10 +1244,37 @@ test("type is heavy, and the heavy face is really loaded", () => {
 });
 
 test("every added motion stops for reduced motion", () => {
-  const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+  // Brace-balanced, not sliced to end-of-file: the ≤620px and 621–1260px
+  // blocks further down mention `.pill` and `.chat-column-villager`, so an
+  // end-of-file slice would find those selectors and pass even after a
+  // regression removed them from the reduced-motion rule itself.
+  const start = css.indexOf("@media (prefers-reduced-motion: reduce)");
+  assert.notEqual(start, -1, "app.css has no reduced-motion block");
+  let depth = 0;
+  let end = -1;
+  for (let index = css.indexOf("{", start); index < css.length && end < 0; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}" && --depth === 0) end = index + 1;
+  }
+  assert.notEqual(end, -1, "app.css's reduced-motion block never closes");
+  const reduced = css.slice(start, end);
   for (const selector of [".pill", ".town-face", ".followup-chip"]) {
     assert.ok(reduced.includes(selector), `${selector} keeps moving under reduced motion`);
   }
+  // The rule is the same FINAL STATE, not merely less motion: a pill must
+  // still sit on its edge and a suggestion must still be fully arrived.
+  // Killing the animations is half of that; neutralising the hover and press
+  // geometry is the other half, and naming only the selectors above would
+  // pass with that half deleted.
+  for (const selector of [
+    ".pill:hover:not(:disabled)",
+    ".town-node:hover .town-face",
+    ".followup-chip:hover:not(:disabled)",
+  ]) {
+    assert.ok(reduced.includes(selector), `${selector} keeps its transform under reduced motion`);
+  }
+  assert.ok(reduced.includes("transform: none"),
+    "reduced motion leaves a hover or press transform applied");
 });
 
 test("the lantern's own buttons are the mockup's mint and ghost", () => {
@@ -1197,6 +1282,27 @@ test("the lantern's own buttons are the mockup's mint and ghost", () => {
     "Send is not the approved mint gradient");
   assert.ok(rule(".chat-column-villager .pill-primary").includes("#7cbdae"),
     "Send has no solid lower edge to compress");
+});
+
+test("nothing outranks the pill's own press", () => {
+  // `.chat-composer` holds exactly one button — the Send pill — and
+  // `motion.css`'s `.chat-composer button:hover:not(:disabled)` is (0,3,1)
+  // against `.pill:hover:not(:disabled)`'s (0,3,0), in a file imported AFTER
+  // app.css. So a generic button rule there wins twice over, and the app's
+  // most-clicked control keeps the old flat press while every test, the
+  // typecheck, and both builds stay green. It happened; this is the guard.
+  // Unqualified, not just `:hover`/`:active`: the bare
+  // `.chat-composer button { transition: … }` shorthand alone is (0,1,1)
+  // against `.pill`'s (0,1,0), which would silently drop `box-shadow` from
+  // Send's transition list and make the edge snap instead of compress.
+  const motion = renderer("motion.css")
+    // A comment may name the selector — that is how the rule explains itself.
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    // Killing the transition under reduced motion is correct, and this block
+    // runs to the end of the file.
+    .replace(/@media \(prefers-reduced-motion: reduce\)[\s\S]*$/, "");
+  assert.ok(!motion.includes(".chat-composer button"),
+    "a live rule in motion.css outranks the pill treatment on the Send button");
 });
 ```
 
@@ -1248,7 +1354,10 @@ Replace lines 22-32 (`.pill` and its variants) with:
 .pill {
   font: inherit; font-weight: 700; font-size: .95rem; border: none; border-radius: 999px;
   padding: 11px 22px; background: var(--card-solid); color: var(--card-ink); cursor: pointer;
-  --pill-edge: rgb(0 0 0 / 12%);
+  /* Every edge is a wash of a token this pill already carries, never a raw
+     black: a real solid edge is a darker shade of the button, and deriving it
+     keeps the "invent no colours" rule true without a neutral escape hatch. */
+  --pill-edge: color-mix(in srgb, var(--card-ink) 16%, transparent);
   box-shadow: 0 4px 0 var(--pill-edge);
   transition: transform .3s var(--pop), box-shadow .3s var(--ease), background-color .2s, opacity .15s;
 }
@@ -1259,7 +1368,7 @@ Replace lines 22-32 (`.pill` and its variants) with:
 }
 .pill:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .pill:disabled { opacity: .5; cursor: default; transform: none; }
-.pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green) 58%, #000); }
+.pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green-deep) 55%, transparent); }
 .pill-quiet { background: transparent; color: var(--card-muted); --pill-edge: transparent; }
 .pill-danger { background: var(--stop-soft); color: var(--stop); --pill-edge: color-mix(in srgb, var(--stop) 34%, transparent); }
 ```
@@ -1329,8 +1438,11 @@ Finally, append the lantern's own button variants **after** Task 4's `.chat-colu
    these give the lantern's three the mockup's own colours. Specificity note:
    `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
    exactly right — the press must still compress whatever the resting colour. */
+/* Only the edge needs saying: `--card-solid` and `--card-ink` are already
+   re-pointed on the lantern (Task 4), so the base `.pill` rule above resolves
+   to exactly these values inside this scope on its own. */
 .chat-column-villager .pill {
-  background: rgb(246 236 225 / 7%); color: var(--lantern-ink); --pill-edge: rgb(0 0 0 / 22%);
+  --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
 }
 .chat-column-villager .pill-primary {
   background: linear-gradient(165deg, #bfe8dd, var(--garden-cyan)); color: #17302b;
@@ -1347,6 +1459,28 @@ Finally, append the lantern's own button variants **after** Task 4's `.chat-colu
 .chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 ```
 
+Finally, in `app/src/renderer/motion.css`, retire the generic composer-button treatment that the new pill supersedes. **This is the step that makes the whole task real on the button the owner will press most.** `.chat-composer` holds exactly one button — the Send pill (`Chat.tsx:1225` renders `<Pill kind="primary">`, and `Ui.tsx:15` gives it `class="pill pill-primary"`) — and `motion.css`'s `.chat-composer button:hover:not(:disabled)` is specificity (0,3,1) against `.pill:hover:not(:disabled)`'s (0,3,0), in a file imported *after* `app.css`. It therefore wins twice over, and Send would keep its old flat `-1px` lift and 140ms `ease` while every test, the typecheck, and both builds stayed green.
+
+Replace lines 89-97 with the same three rules minus `.chat-composer button`, which now has a better home:
+
+```css
+/* Buttons respond under the pointer. Named classes only — town nodes are
+   transform-positioned buttons and must keep their own transform.
+   `.chat-composer button` is deliberately absent: its only member is the Send
+   pill, and `.pill` in app.css now owns every pill's hover and press. Putting
+   it back would silently outrank that treatment, because this file loads last
+   and the descendant selector is more specific. */
+.town-square-header button, .rail-action, .rail-collapse {
+  transition: transform 140ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.town-square-header button:hover:not(:disabled),
+.rail-action:hover, .rail-collapse:hover { transform: translateY(-1px); }
+.town-square-header button:active:not(:disabled),
+.rail-action:active, .rail-collapse:active { transform: translateY(0) scale(.97); }
+```
+
+Leave `motion.css`'s reduced-motion block alone: it still names `.chat-composer button` under `transition: none`, which stays true and harmless — `.pill` is killed there by `app.css`'s own block as well.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run from `app/`: `npm.cmd run test:unit` — Expected: PASS, all tests.
@@ -1360,7 +1494,7 @@ Run from `app/`: `npm.cmd run build:lab` — Expected: builds clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add app/src/renderer/main.tsx app/src/renderer/app.css app/tests-unit/newhorizons.test.ts
+git add app/src/renderer/main.tsx app/src/renderer/app.css app/src/renderer/motion.css app/tests-unit/newhorizons.test.ts
 git commit -m "New Horizons treatment: pills with weight, springs, staggered suggestions"
 ```
 
@@ -1374,6 +1508,7 @@ git commit -m "New Horizons treatment: pills with weight, springs, staggered sug
 - Modify: `app/src/renderer/screens/Workspace.tsx` (the narrow query, `pondOpen`, `chatNeedsYou`, the pane)
 - Modify: `app/src/renderer/screens/Chat.tsx:368-373` (the new prop), `~:992` (publish it)
 - Modify: `app/src/renderer/components/TownSquare.tsx:172-190` (the `wholePond` prop), `:206-214`, `:307-314` (the shore)
+- Modify: `app/lab/chatmock-view.tsx` (the second `<TownSquare>` call site — `wholePond={false}`)
 - Modify: `app/src/renderer/app.css` — a `.pond-line` base rule, and a new `@media (max-width: 1260px)` block **after** the existing `@media (min-width: 621px) and (max-width: 1260px)` block
 - Modify: `app/tests/conductor.spec.ts:1064-1104` (the 760×620 block)
 - Test: `app/tests-unit/pondline.test.ts` (create)
@@ -1826,6 +1961,23 @@ Then add a **new** `@media (max-width: 1260px)` block immediately after the exis
   }
   .workspace-town-pane-pond-open .chat-villager-chip { display: none; }
 }
+
+/* Reduced motion, part two — placed LAST in the file, deliberately.
+   A media query adds no specificity, so the block near the top loses to every
+   `.chat-column.chat-column-villager` rule below it, including the one that
+   declares the lantern's infinite sway. Naming the element up there was never
+   enough; only source order settles a tie. Everything here reaches the SAME
+   final state as the motion it replaces — the chevron still points the other
+   way when the pond is open, the conversation is still put away, the lantern
+   still sits where it landed. Nothing travels to get there.
+   `.pond-back` keeps `translateX(-50%)` rather than taking `transform: none`,
+   because that transform is its centring, not its animation. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-column.chat-column-villager,
+  .workspace-town-pane-pond-open .chat-column.chat-column-villager { animation: none; transition: none; }
+  .pond-line, .pond-line-chevron, .pond-back { transition: none; }
+  .pond-back:hover { transform: translateX(-50%); }
+}
 ```
 
 Finally, replace `app/tests/conductor.spec.ts` lines 1064-1104 (the old 760×620 block, from the `// At the minimum supported Town size` comment through `expect(narrowLayout).toEqual({ ... });`) with:
@@ -1924,7 +2076,9 @@ Finally, replace `app/tests/conductor.spec.ts` lines 1064-1104 (the old 760×620
 
 Run from `app/`: `npm.cmd run test:unit` — Expected: PASS, all tests.
 
-Run from `app/`: `npm.cmd run typecheck` — Expected: no output, exit 0. This is also what catches a missed `wholePond` prop at the one `<TownSquare>` call site.
+Run from `app/`: `npm.cmd run typecheck` — Expected: no output, exit 0.
+
+**There are TWO `<TownSquare>` call sites, not one:** `Workspace.tsx` and `app/lab/chatmock-view.tsx`. The lab harness has no narrow window, so `wholePond={false}` is the only truthful value there. Note that `build:lab` does **not** catch a missing prop — only `typecheck` does, because `lab/` sits inside `tsconfig.json`'s include list.
 
 Run from `app/`: `npm.cmd run build:vite` — Expected: builds clean.
 
@@ -1967,6 +2121,81 @@ git commit -m "The narrow window: an honest line, or the pond whole"
 - [ ] **Look at it — the narrow window.** Resize to 760×620. Expected: a line at the top, the conversation filling the window under it, no cast. Press the line: the pond fills the window whole with both villagers spread across it. Press "Back to the conversation": the conversation returns.
 - [ ] **Look at it — reduced motion.** Turn on `prefers-reduced-motion` and repeat both. Expected: the same final states, arrived at without travel — no sway, no drift, no stagger, no pending ripple.
 - [ ] **Show the owner.** Take one capture of the wide layout with a settled DONE card and one of the narrow window in both states, and put them in front of them. Decision 9 is a taste decision; the tests only prove it was implemented as written.
+
+## Corrections applied during execution
+
+The task bodies above are the plan as written before any of it ran. Execution
+found **eight defects in them**, every one in the plan rather than in an
+implementation. They are listed here rather than edited silently into the tasks
+above, so the record shows what was planned as well as what shipped. Three were
+caught by implementers who stopped and asked instead of guessing; five by
+reviewers.
+
+| # | Defect | Where | Fixed in |
+|---|---|---|---|
+| 1 | The still-water replay guard asserted one earned ripple; the reducer earns two (`return` then `done`), as `townpresentation.test.ts:151` already pinned. | Task 3 | `f9713e3` |
+| 2 | The deleted-token sweep did not exclude the guard test, which necessarily quotes the strings it forbids. | Task 3 | `446d567` |
+| 3 | `--card: rgb(246 236 225 / 6%)` traced to neither mockup, breaking the plan's own "exactly one derived value". `--card-solid`'s 9% was a border value used as a fill. | Task 4 | `365f1a8`, `96c1284` |
+| 4 | The reduced-motion test sliced `app.css` to end-of-file, where a later block keeps the searched substring alive — it could not fail. | Task 4 | `365f1a8`, `96c1284` |
+| 5 | The prescribed CSS wrote `border: 0` on a rule whose own test forbade the substring `border:`. Unsatisfiable as written. | Task 5 | `ef6488e` |
+| 6 | Two more unsourced alphas: `15%` on the header hover (mockup uses 14%) and `94%` on the packet (the rule it replaced used 92%). | Task 5 | `7020f16`, `61fb550` |
+| 7 | **The Send button never got the treatment.** `motion.css`'s `.chat-composer button:hover:not(:disabled)` is (0,3,1) against `.pill`'s (0,3,0), in a file imported later — so it won twice over, on the app's most-clicked control, with every check green. | Task 6 | `3a2d55a`, `3b09633` |
+| 8 | **The lantern swayed forever under `prefers-reduced-motion`.** The sway is declared on `.chat-column.chat-column-villager` (0,2,0); the reduced-motion block named `.chat-column-villager` (0,1,0) and lost. Task 4's test passed because it checked presence, not victory. | Tasks 4, 6, 7 | `468ca97`, `ebbfc44` |
+
+Two further review findings were fixed in Task 7's second wave and are recorded
+here because they change the shipped code away from the text above: the
+put-away conversation takes `visibility: hidden` rather than `pointer-events:
+none` alone (it was tabbable off-screen); the narrow window gained a real
+`role="status"` live region, because hiding the town header below 1260px had
+removed the pond's only announcement; the shore clamp moved into `townShore()`
+in `town/layout.ts` so it has an assertion that can fail; and the reduced-motion
+guard is anchored so the compound selector cannot stand in for the plain one.
+All in `e69058f`.
+
+A third wave (`d0bb024`) followed, on review findings against those fixes. The
+live region **moved out of the button** to a sibling `.pond-line-live`: a
+`role="button"` element has Children Presentational: True, so a live region
+nested inside one has its role dropped and may never announce — it would have
+been recorded as fixed while possibly still broken. The drag clamp was split
+from the render clamp (see the owner note below). And the reduced-motion sweep
+went **beyond this plan's scope**: the review checked every animation in
+`app.css`, not only ours, and found seven pre-existing rules losing to the first
+reduced-motion block exactly as the lantern's sway did — the cast kept blinking
+for a user who had asked their system not to. Fixing them was a scope decision,
+taken because the mechanism was understood and the fix was eight selectors.
+**That sweep was targeted, not exhaustive**: `.stone-drop` on the onboarding
+scene is still named in neither block, so "reduced motion is done" is not a
+conclusion this work supports.
+
+**The pattern worth keeping.** Three of the eight — #4, #7, #8 — are one defect
+wearing different clothes: **a CSS rule that exists but does not win, guarded by
+a test that checks the rule is present rather than that it prevails.** Source-text
+tests are cheap and they caught real things here, but they cannot see the
+cascade. Every such test on this plan now either bounds its search to the block
+it means to check, or asserts source-order victory directly. A later plan
+touching this CSS should assume that shape is the failure mode.
+
+**Two things are left for the owner rather than decided here**, both about the
+narrow window and neither a defect:
+
+1. **There is no "Reset layout" control below 1260px.** The town header carries
+   it, and the header is hidden at that width because the status line replaces
+   it. Restoring it means deciding what chrome the narrow pond carries, which
+   the approved mockup does not show. Nothing is unrecoverable: a drag saves at
+   most `TOWN_SHORE_BESIDE_CHAT`, which is the shore the wide layout uses, so a
+   position made at a narrow window is exactly where the wide layout will draw
+   it. (An earlier version of this work let a drag save out to
+   `TOWN_BOUNDS.maxX`, which the wide layout would then clamp away invisibly
+   with no reset at the width where the change was made. That trap was closed
+   in `d0bb024` by keeping the *render* clamp relaxed and the *save* clamp at
+   the shore.)
+2. **With the pond whole, a drag has an invisible wall at the shore that the
+   drawn layout does not.** A villager the layout solver placed past it will
+   jump left when grabbed, on a pond whose whole premise is that no shore is
+   there. The trade was deliberate — an invisible wall beats a save you cannot
+   undo at that width — but it is the kind of thing the "**Look at it — the
+   narrow window**" step will surface, so it is written down rather than left
+   to be discovered live.
 
 ## What this plan deliberately does not do
 

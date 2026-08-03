@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const tokens = readFileSync(join(__dirname, "..", "..", "src", "renderer", "tokens.css"), "utf8");
+const renderer = (file: string) =>
+  readFileSync(join(__dirname, "..", "..", "src", "renderer", file), "utf8");
+const tokens = renderer("tokens.css");
+const app = renderer("app.css");
 
 /**
  * Decision 9, rule 3: the muted pastels supersede the saturated set. These
@@ -20,8 +23,20 @@ const APPROVED: Array<[token: string, hex: string]> = [
   ["--pond-task", "#f7d3a8"],
 ];
 
-/** The values the pastels replace. Any survivor is a half-finished re-tone. */
-const SUPERSEDED = ["#7fd8c8", "#c9a7e8", "#f2a35c", "#9fb8d8", "#a9d39b", "#ff8178", "#ffb467", "#70e3d3"];
+/**
+ * The values the pastels replace, each with the `rgb()` form it also takes.
+ * Any survivor is a half-finished re-tone.
+ */
+const SUPERSEDED: Array<[hex: string, rgb: string]> = [
+  ["#7fd8c8", "127 216 200"],
+  ["#c9a7e8", "201 167 232"],
+  ["#f2a35c", "242 163 92"],
+  ["#9fb8d8", "159 184 216"],
+  ["#a9d39b", "169 211 155"],
+  ["#ff8178", "255 129 120"],
+  ["#ffb467", "255 180 103"],
+  ["#70e3d3", "112 227 211"],
+];
 
 test("every approved pastel is on its own token", () => {
   for (const [token, hex] of APPROVED) {
@@ -30,11 +45,24 @@ test("every approved pastel is on its own token", () => {
 });
 
 test("no superseded saturated value survives on a re-toned token", () => {
+  // app.css as well as tokens.css, and the rgb() form as well as the hex, so
+  // the test covers what its name claims. It did not: the pre-pastel teal
+  // survived a whole task cycle on the town header and both town-node rules,
+  // written as `rgb(112 227 211 / …)`, where a hex-only sweep of one file was
+  // structurally unable to see it.
+  //
   // --neon (#7fd8c8) is the project rail's own colour and is NOT part of
-  // Decision 9, so it is excluded here by name rather than by accident.
-  const withoutRail = tokens.replace(/--neon:\s*#7fd8c8;/, "--neon: RAIL;");
-  for (const hex of SUPERSEDED) {
-    assert.ok(!withoutRail.includes(hex), `${hex} is still in tokens.css after the pastel re-tone`);
+  // Decision 9, so its token and its one rgb() use are excluded by name rather
+  // than by accident. A rail literal at any other alpha stops matching these
+  // and fails the sweep, which is the right way round: it comes back to be
+  // justified instead of riding in on a wildcard.
+  const swept = [
+    tokens.replace(/--neon:\s*#7fd8c8;/, "--neon: RAIL;"),
+    app.replace(/rgb\(127 216 200 \/ 12%\)/, "RAIL"),
+  ].join("\n");
+  for (const [hex, rgb] of SUPERSEDED) {
+    assert.ok(!swept.includes(hex), `${hex} is still in the renderer after the pastel re-tone`);
+    assert.ok(!swept.includes(rgb), `${hex} survives as rgb(${rgb}) after the pastel re-tone`);
   }
 });
 

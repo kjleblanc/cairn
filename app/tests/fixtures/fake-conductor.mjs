@@ -78,6 +78,8 @@ let commentaryHeld = false;
 let commentaryGate = null;
 let thirdProposalHeld = false;
 let thirdProposalGate = null;
+let answerHeld = false;
+let answerGate = null;
 
 function holdCommentary() {
   commentaryHeld = true;
@@ -111,6 +113,27 @@ function releaseThirdProposal() {
 function thirdProposalGatePoint() {
   if (!thirdProposalHeld) return Promise.resolve();
   return new Promise((resolve) => { thirdProposalGate = resolve; });
+}
+
+// The sibling-chip regression needs to inspect the card while the answer turn
+// is definitely still active. A fixed chunk delay can expire before React and
+// Playwright get a turn on a loaded full-suite run, so hold the usage/DONE
+// frames explicitly and release them from the test's finally block.
+function holdAnswer() {
+  answerHeld = true;
+}
+
+function releaseAnswer() {
+  answerHeld = false;
+  if (answerGate !== null) {
+    answerGate();
+    answerGate = null;
+  }
+}
+
+function answerGatePoint() {
+  if (!answerHeld) return Promise.resolve();
+  return new Promise((resolve) => { answerGate = resolve; });
 }
 
 function scriptFor(content) {
@@ -234,7 +257,12 @@ export function start() {
           return;
         }
         lastReplyBody = rawBody;
-        void streamReply(res, scriptFor(content), content.includes("detailtask third") ? thirdProposalGatePoint : undefined);
+        const beforeDone = content.includes("detailtask third")
+          ? thirdProposalGatePoint
+          : content.includes("plain redirect is enough")
+            ? answerGatePoint
+            : undefined;
+        void streamReply(res, scriptFor(content), beforeDone);
       });
     });
     server.listen(0, "127.0.0.1", () => {
@@ -254,6 +282,8 @@ export function start() {
         releaseCommentary,
         holdThirdProposal,
         releaseThirdProposal,
+        holdAnswer,
+        releaseAnswer,
       });
     });
   });

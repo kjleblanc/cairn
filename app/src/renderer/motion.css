@@ -85,14 +85,16 @@
 .town-node { transition: left 460ms var(--spring), top 460ms var(--spring), background-color 160ms ease; }
 
 /* Buttons respond under the pointer. Named classes only — town nodes are
-   transform-positioned buttons and must keep their own transform. */
-.chat-composer button, .town-square-header button, .rail-action, .rail-collapse {
+   transform-positioned buttons and must keep their own transform.
+   `.chat-composer button` is deliberately absent: its only member is the Send
+   pill, and `.pill` in app.css now owns every pill's hover and press. Putting
+   it back would silently outrank that treatment, because this file loads last
+   and the descendant selector is more specific. */
+.town-square-header button, .rail-action, .rail-collapse {
   transition: transform 140ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
 }
-.chat-composer button:hover:not(:disabled),
 .town-square-header button:hover:not(:disabled),
 .rail-action:hover, .rail-collapse:hover { transform: translateY(-1px); }
-.chat-composer button:active:not(:disabled),
 .town-square-header button:active:not(:disabled),
 .rail-action:active, .rail-collapse:active { transform: translateY(0) scale(.97); }
 
@@ -117,4 +119,17 @@
   .town-transfer-packet, .town-transfer-ripple, .town-terminal-ripple { display: none; }
   .town-node, .chat-composer button, .town-square-header button,
   .rail-action, .rail-collapse, .town-pond-layer { transition: none; }
+  /* `town-face-pop` is declared on eight COMPOUND selectors above — each
+     (0,2,0) — while `.town-face-svg` in the kill list is (0,1,0) and loses to
+     every one of them. Naming the element was never enough: the whole cast
+     still popped on every state change for a user who asked for no motion. The
+     eight are repeated verbatim so the tie is settled by source order instead. */
+  .town-node-ready .town-face-svg,
+  .town-node-thinking .town-face-svg,
+  .town-node-starting .town-face-svg,
+  .town-node-working .town-face-svg,
+  .town-node-checking .town-face-svg,
+  .town-node-done .town-face-svg,
+  .town-node-stopped .town-face-svg,
+  .town-node-error .town-face-svg { animation: none; }
 }

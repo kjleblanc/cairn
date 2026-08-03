@@ -277,3 +277,29 @@ export function townPresentationStatus(state: TownRuntimePresentation): string {
   if (state.truth === "checking") return "Result returned — Cairn is checking.";
   return "Town is quiet.";
 }
+
+export type PondLineTone = "quiet" | "busy" | "needs-you" | "done" | "stopped";
+
+/**
+ * The narrow window's status line (Decision 9, resolved 2026-08-03). Below
+ * 1260px the conversation takes the window and the pond becomes a sentence the
+ * owner can go and look at — so this line carries who is working and what
+ * state the water is in, and turns amber when a decision is waiting.
+ *
+ * `needsYou` is Task 155's signal, computed once in Chat and passed in. Two
+ * independent answers to "is something waiting?" would eventually disagree,
+ * and the line would be the one that lied.
+ */
+export function pondLineTone(state: TownRuntimePresentation, needsYou: boolean): PondLineTone {
+  if (needsYou) return "needs-you";
+  if (state.truth === "done") return "done";
+  if (state.truth === "stopped" || state.truth === "error") return "stopped";
+  if (state.truth === "quiet") return "quiet";
+  return "busy";
+}
+
+/** The line's words. Never a second notion of what the water is doing. */
+export function pondLineLabel(state: TownRuntimePresentation, needsYou: boolean): string {
+  if (needsYou) return "Something in the conversation is waiting for you.";
+  return townPresentationStatus(state);
+}

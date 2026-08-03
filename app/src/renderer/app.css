@@ -4,9 +4,11 @@ body {
   background: var(--bg); color: var(--ink);
   font-family: "Quicksand", ui-rounded, "Segoe UI", system-ui, sans-serif;
   font-size: 15.5px; line-height: 1.55; overflow-x: hidden;
+  /* Decision 9, rule 5: heavy, never thin. 700 is Quicksand's real top. */
+  font-weight: 600;
 }
 #root { min-height: 100vh; display: flex; flex-direction: column; }
-h1, h2, h3 { line-height: 1.2; margin: 0 0 .35em; letter-spacing: -.01em; font-weight: 600; }
+h1, h2, h3 { line-height: 1.2; margin: 0 0 .35em; letter-spacing: -.01em; font-weight: 700; }
 h1 { font-size: 1.65rem; }
 h2 { font-size: 1.2rem; }
 p { margin: 0 0 10px; }
@@ -19,17 +21,30 @@ p:last-child { margin-bottom: 0; }
 
 .card { background: var(--card); border-radius: var(--r); padding: 16px 20px; margin: 0 0 12px; color: var(--card-ink); }
 .card-title { font-size: .8rem; letter-spacing: .05em; color: var(--card-muted); margin: 0 0 8px; }
+/* New Horizons pills (Decision 9, rule 5): a chunky pill with a solid lower
+   edge. It lifts under the pointer and sinks onto its own edge when pressed,
+   so a press has weight instead of a colour change. --pill-edge is the edge
+   colour each variant sets for itself. */
 .pill {
-  font: inherit; font-weight: 600; font-size: .95rem; border: none; border-radius: 999px;
+  font: inherit; font-weight: 700; font-size: .95rem; border: none; border-radius: 999px;
   padding: 11px 22px; background: var(--card-solid); color: var(--card-ink); cursor: pointer;
-  transition: transform .15s var(--spring), opacity .15s;
+  /* Every edge is a wash of a token this pill already carries, never a raw
+     black: a real solid edge is a darker shade of the button, and deriving it
+     keeps the "invent no colours" rule true without a neutral escape hatch. */
+  --pill-edge: color-mix(in srgb, var(--card-ink) 16%, transparent);
+  box-shadow: 0 4px 0 var(--pill-edge);
+  transition: transform .3s var(--pop), box-shadow .3s var(--ease), background-color .2s, opacity .15s;
 }
-.pill:hover { transform: translateY(-1px); }
-.pill:active { transform: scale(.97); }
+.pill:hover:not(:disabled) { transform: translateY(-2px) scale(1.04); }
+.pill:active:not(:disabled) {
+  transform: translateY(2px) scale(.97); box-shadow: 0 1px 0 var(--pill-edge);
+  transition-duration: .09s;
+}
+.pill:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .pill:disabled { opacity: .5; cursor: default; transform: none; }
-.pill-primary { background: var(--green); color: var(--green-ink); }
-.pill-quiet { background: transparent; color: var(--card-muted); }
-.pill-danger { background: var(--stop-soft); color: var(--stop); }
+.pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green-deep) 55%, transparent); }
+.pill-quiet { background: transparent; color: var(--card-muted); --pill-edge: transparent; }
+.pill-danger { background: var(--stop-soft); color: var(--stop); --pill-edge: color-mix(in srgb, var(--stop) 34%, transparent); }
 .badge { display: inline-block; border-radius: 999px; padding: 1px 12px; font-size: .78rem; font-weight: 600; }
 .badge-done { background: var(--green-soft); color: var(--green-deep); }
 .badge-stopped { background: var(--amber-soft); color: var(--amber-deep); }
@@ -175,13 +190,27 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .followups { align-self: stretch; margin: -2px 0 4px; }
 .followups-label { margin: 0 0 6px; }
 .followups-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Suggestions stagger in and slide under the pointer (Decision 9, rule 5).
+   The arrival fills BACKWARDS, not both: a forwards fill would pin the final
+   keyframe's `transform: none` over the hover slide for good. */
 .followup-chip {
   padding: 6px 12px; border: 1px dashed var(--line); border-radius: 999px;
   background: transparent; color: var(--card-ink); font: inherit; font-size: .85rem;
   cursor: pointer; text-align: left; max-width: 100%;
+  animation: lantern-arrive .5s var(--pop) backwards;
+  transition: transform .3s var(--pop), background-color .2s, border-color .2s;
 }
-.followup-chip:hover:not(:disabled) { background: var(--card); border-style: solid; }
+.followup-chip:nth-child(1) { animation-delay: .05s; }
+.followup-chip:nth-child(2) { animation-delay: .11s; }
+.followup-chip:nth-child(3) { animation-delay: .17s; }
+.followup-chip:nth-child(4) { animation-delay: .23s; }
+.followup-chip:hover:not(:disabled) { background: var(--card); border-style: solid; transform: translateX(5px) scale(1.02); }
+.followup-chip:active:not(:disabled) { transform: translateX(5px) scale(.98); }
 .followup-chip:disabled { opacity: .5; cursor: default; }
+@keyframes lantern-arrive {
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  to { opacity: 1; transform: none; }
+}
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
 /* The run, living in the conversation: one compact line above the composer. */
 .run-strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); }
@@ -382,6 +411,52 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   --town-chat-width: min(520px, max(400px, calc(50% - 128px)), calc(100% - 32px));
   position: relative; flex: 1; min-height: 0; overflow: hidden;
 }
+/* The narrow window's status line (Decision 9, approved 2026-08-03). Absent
+   from the approved wide layout, which is untouched; the ≤1260px block below
+   turns it on. */
+.pond-line {
+  display: none; position: absolute; z-index: 9; inset: 0 0 auto; width: 100%; height: 54px;
+  align-items: center; gap: 11px; padding: 0 15px;
+  border: 0; border-bottom: 1px solid rgb(246 236 225 / 9%);
+  background: rgb(33 39 57 / 72%); backdrop-filter: blur(14px);
+  color: var(--lantern-ink); font: inherit; font-size: .78rem; font-weight: 700;
+  text-align: left; cursor: pointer;
+  transition: background-color .25s var(--ease);
+}
+.pond-line-live { display: none; }
+.pond-line:hover { background: rgb(43 51 74 / 82%); }
+.pond-line:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: -3px; }
+.pond-line-dot {
+  flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--lantern-soft); box-shadow: 0 0 9px var(--lantern-soft);
+}
+.pond-line-busy .pond-line-dot { background: var(--pond-task); box-shadow: 0 0 9px var(--pond-task); }
+.pond-line-done .pond-line-dot { background: var(--pond-done); box-shadow: 0 0 9px var(--pond-done); }
+.pond-line-stopped .pond-line-dot { background: var(--pond-stop); box-shadow: 0 0 9px var(--pond-stop); }
+/* Amber is the one state the owner has to act on, so it colours the whole
+   line rather than a 7px dot. Task 155's needs-you signal decides it. */
+.pond-line-needs-you {
+  color: var(--pond-task);
+  background: color-mix(in srgb, var(--pond-task) 14%, rgb(22 27 44 / 82%));
+}
+.pond-line-needs-you .pond-line-dot { background: var(--pond-task); box-shadow: 0 0 9px var(--pond-task); }
+.pond-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pond-line-peek {
+  display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none;
+  color: var(--lantern-soft); font-size: .72rem;
+}
+.pond-line-chevron { transition: transform .4s var(--pop); }
+.workspace-town-pane-pond-open .pond-line-chevron { transform: rotate(180deg); }
+.pond-back {
+  display: none; position: absolute; z-index: 10; left: 50%; bottom: 18px;
+  transform: translateX(-50%); padding: 10px 20px;
+  border: 1px solid rgb(246 236 225 / 16%); border-radius: 999px;
+  background: rgb(33 39 57 / 88%); color: var(--lantern-ink);
+  font: inherit; font-size: .78rem; font-weight: 700; cursor: pointer;
+  transition: transform .35s var(--pop), background-color .2s;
+}
+.pond-back:hover { transform: translateX(-50%) translateY(-2px) scale(1.04); }
+.pond-back:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .chat-villager-root { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
 .chat-villager-root > * { pointer-events: auto; }
 .chat-column.chat-column-villager {
@@ -412,17 +487,44 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* The paired tokens are re-pointed once, here. Every card, rule, and muted
      line inside the lantern is already written against them, so they re-tone
      through the cascade rather than being rewritten rule by rule. Only what
-     carries its own colour in the approved mockup is named below. */
-  --card: rgb(246 236 225 / 6%);
-  --card-solid: rgb(246 236 225 / 9%);
+     carries its own colour in the approved mockup is named below.
+     Each alpha is the mockup's own value for the surface that token serves:
+     5% is `.l3-card` / `.l3-menu`, the card fill (lantern-v3.html:99,110);
+     7% is `.l3-input`, the composer field (lantern-v3.html:130); 13% is the
+     hairline rule (narrow-v2.html:66,69). */
+  --card: rgb(246 236 225 / 5%);
+  --card-solid: rgb(246 236 225 / 7%);
   --card-ink: var(--lantern-ink);
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);
+  /* The panel is dark paper in BOTH themes now, so the theme-paired warning
+     tokens have to come with it — in light theme --stop-soft is a bright pale
+     block on dark paper, and --stop text measures ~3:1 against the card. */
+  --stop: var(--pond-stop);
+  /* 12%, not 18%: the coral text sits ON this wash, so a lighter wash costs
+     contrast. Measured against the card's own 5% wash over the paper —
+     18% gives 4.27:1 (under the 4.5 floor for this 14.7px bold), 15% is 4.54
+     with no headroom, 12% is 4.83. The blend ratio is the free parameter here;
+     the approved coral itself does not move. */
+  --stop-soft: color-mix(in srgb, var(--pond-stop) 12%, transparent);
   color: var(--card-ink);
-  /* The rise lands the panel; the sway begins where the rise ended, so the two
-     never fight over `transform`. Both die together under the reduced-motion
-     rule below, which already names this element. */
-  animation: villager-rise .42s var(--spring) both, lantern-sway 8s ease-in-out .42s infinite;
+  /* The rise lands the panel, and then it STAYS landed.
+     The approved lantern-v3 mockup swayed the whole lantern on an 8s loop, and
+     that is deliberately not shipped: the mockup swayed a picture, while this
+     panel holds the composer, the run controls, and every card. An infinite
+     transform on the container means every control inside it is permanently
+     moving. That is not only a testing problem — it is harder to hit for
+     anyone, and materially so with a motor impairment — but the test evidence
+     is unusually clean: with the sway, Playwright reported "element is not
+     stable" 60 times over 30 seconds on the first click of nearly every spec
+     (19 failed / 4 passed against a 3-failure baseline); with it removed and
+     nothing else changed, the same specs passed in 4.5 seconds.
+     Everything else about the lantern is the mockup: warm paper, the light
+     spilling onto the water, the rounding.
+     Killing what remains needs the reduced-motion block at the END of this
+     file, not the one above: a media query adds no specificity, so
+     `.chat-column-villager` up there is (0,1,0) and loses to this (0,2,0). */
+  animation: villager-rise .42s var(--spring) both;
 }
 /* Inside the dialog, only the message list gives. Before this, every child
  * shrank proportionally once the column hit max-height, collapsing the list
@@ -459,8 +561,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: absolute; top: 30%; max-width: 250px;
   left: max(16px, min(calc(50% + 84px), calc(100% - 266px)));
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 16px; border: 0; border-radius: 18px 18px 18px 4px;
-  background: var(--card-solid); color: var(--card-ink); font: inherit;
+  /* The chip is the lantern's put-away form, but it sits OUTSIDE
+     `.chat-column-villager`, so it resolved the GLOBAL `--card-solid` /
+     `--card-ink` — the bright cream fill Decision 9 exists to remove, sitting
+     on the dark pond. It carries the lantern's own paper and border instead. */
+  padding: 9px 16px; border: 1px solid rgb(246 236 225 / 12%);
+  border-radius: 18px 18px 18px 4px;
+  background: linear-gradient(170deg, var(--lantern-paper-lit), var(--lantern-paper) 62%);
+  color: var(--lantern-ink); font: inherit;
   font-size: .84rem; text-align: left; cursor: pointer;
   box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
   animation: villager-bob 5s ease-in-out infinite;
@@ -476,11 +584,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 @keyframes villager-bob {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
-}
-
-@keyframes lantern-sway {
-  0%, 100% { transform: rotate(0deg) translateY(0); }
-  50% { transform: rotate(-.3deg) translateY(-5px); }
 }
 
 /* Inside the lantern (Decision 9). Everything not named here re-tones through
@@ -516,6 +619,34 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .chat-column-villager .chat-composer textarea { border-radius: 18px; padding: 12px 16px; }
 .chat-column-villager .bubble-system { border-radius: 16px; }
+/* A popover needs an opaque fill. `--card-solid` is re-pointed to a 7% wash on
+   the lantern (right for the composer field it came from, wrong for a panel
+   that drops over the conversation and would read straight through). */
+.chat-column-villager .body-pill-panel { background: var(--lantern-paper-lit); }
+
+/* The lantern's buttons. The globals above give every pill its chunky edge;
+   these give the lantern's three the mockup's own colours. Specificity note:
+   `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
+   exactly right — the press must still compress whatever the resting colour. */
+/* Only the edge needs saying: `--card-solid` and `--card-ink` are already
+   re-pointed on the lantern (Task 4), so the base `.pill` rule above resolves
+   to exactly these values inside this scope on its own. */
+.chat-column-villager .pill {
+  --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
+}
+.chat-column-villager .pill-primary {
+  background: linear-gradient(165deg, #bfe8dd, var(--garden-cyan)); color: #17302b;
+  --pill-edge: #7cbdae;
+  box-shadow: 0 5px 0 var(--pill-edge), 0 8px 20px rgb(163 221 208 / 22%);
+}
+.chat-column-villager .pill-quiet {
+  background: rgb(246 236 225 / 7%); color: var(--lantern-soft); --pill-edge: transparent;
+}
+.chat-column-villager .pill-quiet:hover:not(:disabled) {
+  background: rgb(246 236 225 / 14%); color: var(--lantern-ink);
+}
+.chat-column-villager .chat-tuck { color: var(--lantern-soft); }
+.chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
@@ -532,24 +663,33 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;
   justify-content: space-between; gap: 16px; padding: 11px 16px;
-  border-bottom: 1px solid rgb(112 227 211 / 13%); background: rgb(17 23 42 / 78%);
+  /* Decision 9, rule 3: the pre-pastel teal and the retired --pond-deep both
+     survived here as raw literals. Same alphas, pastel hues — `163 221 208` is
+     Cairn's own #a3ddd0 and `22 27 44` is --lantern-deep, the substitution
+     .town-thread-target already makes. Only the hue moves. */
+  border-bottom: 1px solid rgb(163 221 208 / 13%); background: rgb(22 27 44 / 78%);
   backdrop-filter: blur(14px);
 }
 .town-project-label { display: flex; min-width: 0; flex-direction: column; }
 .town-square-header span {
-  color: #aeb7c4; font: 600 .62rem var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--lantern-soft); font-size: .68rem; font-weight: 700; letter-spacing: .02em;
 }
-.town-square-header strong { overflow: hidden; color: #f6f0e8; font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
+.town-square-header strong { overflow: hidden; color: var(--lantern-ink); font-size: .9rem; text-overflow: ellipsis; white-space: nowrap; }
 .town-header-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 9px; }
 .town-square-header p {
-  min-width: 0; max-width: min(42vw, 390px); margin: 0; overflow: hidden; color: #cbd4da;
+  min-width: 0; max-width: min(42vw, 390px); margin: 0; overflow: hidden; color: var(--lantern-ink);
   font-size: .74rem; text-align: right; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 7% is the mockup's own ghost-button FILL (`.l3-ghost`, lantern-v3.html:80).
+   The 8% this carried came from a hairline BORDER declaration, which is not a
+   fill alpha; the rule it replaced used 7% too, so 7% is doubly sourced. */
 .town-square-header button {
-  flex: none; padding: 5px 7px; border: 1px solid rgb(112 227 211 / 20%); border-radius: 8px;
-  background: rgb(112 227 211 / 7%); color: #dce6e8; font: 600 .58rem var(--mono); cursor: pointer;
+  flex: none; padding: 6px 12px; border: 0; border-radius: 999px;
+  background: rgb(246 236 225 / 7%); color: var(--lantern-soft);
+  font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
-.town-square-header button:hover:not(:disabled) { border-color: var(--neon-soft); }
+/* 14% is the mockup's own hover fill (`.l3-ghost:hover`, lantern-v3.html:81). */
+.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
 /* The sheen: the water breathes, it does not draw. Two soft pastel blooms from
    the approved lantern-v3 frame, blurred well past any edge. Its drift lives
@@ -579,21 +719,32 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
     color-mix(in srgb, var(--pond-stop) 13%, transparent), transparent 72%);
 }
 .town-threads { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: visible; }
+/* A soft tether, not a data feed. The dashes and the glow were the crawling
+   thread Decision 9 names; what a thread has to say is that two villagers are
+   working together, and a faint continuous line says exactly that. */
 .town-threads path {
-  fill: none; stroke: rgb(112 227 211 / 42%); stroke-width: .55; vector-effect: non-scaling-stroke;
-  stroke-dasharray: 4 4; filter: drop-shadow(0 0 5px rgb(112 227 211 / 22%));
+  fill: none; stroke: color-mix(in srgb, var(--garden-cyan) 26%, transparent);
+  stroke-width: .55; vector-effect: non-scaling-stroke;
 }
 .town-transfer-layer { position: absolute; z-index: 2; inset: 0; pointer-events: none; }
 .town-transfer-layer.town-transfer-dispatch { --town-packet-color: var(--pond-task); }
 .town-transfer-layer.town-transfer-return { --town-packet-color: var(--pond-result); }
+/* The packet keeps its word — the owner should be able to read what is
+   crossing the water — but says it in the app's own rounded voice.
+   `rgb(22 27 44 / …)` throughout this task is --lantern-deep (#161b2c) with an
+   alpha, the same shape the old rules used with the retired --pond-deep — and
+   with the SAME alphas those rules carried (92% here, 88% and 62% on the thread
+   target below), so only the hue moves. It is a derivation of an approved
+   colour, not a new one. */
 .town-transfer-packet {
-  position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 5px;
-  min-width: 48px; max-width: 76px; padding: 4px 8px; transform: translate(-50%, -50%);
-  border: 1px solid color-mix(in srgb, var(--town-packet-color) 62%, transparent); border-radius: 999px;
-  background: rgb(17 23 42 / 92%); color: #fff8eb; box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
-  font: 600 .56rem var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap;
+  position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 6px;
+  min-width: 48px; max-width: 86px; padding: 5px 11px; transform: translate(-50%, -50%);
+  border: 0; border-radius: 999px;
+  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 92%));
+  color: var(--lantern-ink); box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
+  font: inherit; font-size: .68rem; font-weight: 700; white-space: nowrap;
 }
-.town-transfer-packet i { width: 6px; height: 6px; flex: none; border-radius: 2px; background: var(--town-packet-color); box-shadow: 0 0 7px var(--town-packet-color); }
+.town-transfer-packet i { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--town-packet-color); box-shadow: 0 0 7px var(--town-packet-color); }
 .town-transfer-ripple, .town-terminal-ripple {
   position: absolute; left: var(--town-to-x); top: var(--town-to-y); width: 38px; height: 14px; margin-top: 42px;
   transform: translate(-50%, -50%); border: 2px solid var(--town-receiver-color); border-radius: 50%;
@@ -611,11 +762,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   align-items: center; justify-content: center; gap: 4px; touch-action: manipulation;
   transition: left 320ms var(--spring), top 320ms var(--spring), background-color 160ms ease;
 }
-.town-node:hover { background: rgb(112 227 211 / 7%); }
+.town-node:hover { background: rgb(163 221 208 / 7%); }
 .town-node:focus-visible, .town-thread-target:focus-visible, .town-detail-action:focus-visible {
   outline: 3px solid var(--town-focus); outline-offset: 3px;
 }
-.town-node[aria-pressed="true"] { background: rgb(112 227 211 / 11%); box-shadow: 0 0 0 1px rgb(112 227 211 / 38%); }
+.town-node[aria-pressed="true"] { background: rgb(163 221 208 / 11%); box-shadow: 0 0 0 1px rgb(163 221 208 / 38%); }
 .town-node-worker { cursor: grab; }
 .town-node-worker[data-dragging="true"] { cursor: grabbing; transition: none; }
 .town-node strong {
@@ -623,17 +774,23 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   color: #f6f0e8; text-align: center; text-overflow: ellipsis; white-space: nowrap;
 }
 .town-node-status {
-  position: relative; z-index: 1; display: flex; align-items: center; gap: 5px; color: #aeb7c4;
-  font: 600 .62rem var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  position: relative; z-index: 1; display: flex; align-items: center; gap: 5px;
+  color: var(--lantern-soft); font-size: .68rem; font-weight: 700;
 }
-.town-node-status i { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 2px; background: var(--neon-warm); }
+.town-node-status i { width: 7px; height: 7px; border: 0; border-radius: 50%; background: var(--pond-task); }
 .town-node-checking .town-node-status { color: var(--pond-result); }
 .town-node-returned .town-node-status { color: var(--pond-result); }
 .town-node-done .town-node-status { color: var(--pond-done); }
 .town-node-stopped .town-node-status, .town-node-error .town-node-status { color: var(--pond-stop); }
+/* The cast springs when touched (Decision 9, rule 5). The transform lives on
+   .town-face, which carries none of its own — .town-face-holo owns the float,
+   .town-face-tilt owns the tilt, so nothing here fights either. */
 .town-face {
   position: relative; z-index: 1; width: 78px; height: 78px; display: block; margin-bottom: 4px;
+  transition: transform .45s var(--pop);
 }
+.town-node:hover .town-face { transform: scale(1.06); }
+.town-node:active .town-face { transform: scale(.94); }
 .town-face-kimi, .town-face-codex, .town-face-claude, .town-face-gemini, .town-face-worker-fallback {
   width: 68px; height: 68px;
 }
@@ -680,25 +837,37 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   content: ""; position: absolute; inset: -8px 8px; border-radius: 50%;
   background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 12%, transparent), transparent 70%);
 }
+/* The hairline ellipse each character used to stand inside is now the light
+   it casts. The element stays — conductor.spec.ts locates it for the
+   reduced-motion check, and an absent element would fail that dishonestly.
+   No `border` declaration at all, not `border: 0`: a span has no default
+   border to reset, so the reset would be a no-op that reads — to a later
+   maintainer and to this task's own test — as a border still being managed
+   here. Absence is the assertion. */
 .town-node-bed span {
-  position: absolute; inset: 3px 7px; border: 1px solid color-mix(in srgb, var(--agent-color) 24%, transparent); border-radius: 50%;
+  position: absolute; inset: 3px 7px; border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 16%, transparent), transparent 72%);
 }
+/* 7% for the same reason as the header's button above: the 9% here was a
+   hairline border's alpha spent as a fill. */
 .town-overflow-shape {
-  width: 64px; height: 48px; display: grid; place-items: center; border: 1px solid var(--neon-soft);
-  border-radius: 50% 50% 30% 30%; background: var(--town-entity); color: var(--neon); font: 700 .9rem var(--mono);
+  width: 64px; height: 48px; display: grid; place-items: center; border: 0;
+  border-radius: 24px; background: rgb(246 236 225 / 7%); color: var(--lantern-ink);
+  font: inherit; font-size: .9rem; font-weight: 700;
 }
 .town-thread-target {
-  position: absolute; z-index: 4; min-width: 74px; padding: 4px 7px; transform: translate(-50%, -50%);
-  border: 1px solid rgb(112 227 211 / 38%); border-radius: 999px; background: rgb(17 23 42 / 88%);
-  color: #f6f0e8; font: inherit; cursor: pointer; box-shadow: 0 0 14px rgb(112 227 211 / 10%);
+  position: absolute; z-index: 4; min-width: 74px; padding: 5px 10px; transform: translate(-50%, -50%);
+  border: 0; border-radius: 999px; background: rgb(22 27 44 / 88%);
+  color: var(--lantern-ink); font: inherit; cursor: pointer;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 24%);
   transition: left 320ms var(--spring), top 320ms var(--spring), background-color 160ms ease;
 }
 .town-thread-target span { color: var(--pond-result); }
-.town-thread-target small { display: block; color: #aeb7c4; font: 600 .55rem var(--mono); text-transform: uppercase; }
-.town-thread-target[aria-pressed="true"] { border-color: var(--town-focus); background: rgb(112 227 211 / 13%); }
+.town-thread-target small { display: block; color: var(--lantern-soft); font-size: .58rem; font-weight: 700; }
+.town-thread-target[aria-pressed="true"] { background: color-mix(in srgb, var(--garden-cyan) 16%, rgb(22 27 44 / 88%)); }
 .town-thread-target-transfer {
   min-width: 18px; width: 18px; height: 18px; padding: 0;
-  border-color: rgb(112 227 211 / 22%); background: rgb(17 23 42 / 62%); box-shadow: none;
+  background: rgb(22 27 44 / 62%); box-shadow: none;
 }
 .town-thread-target-transfer > * {
   position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -706,7 +875,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-thread-target-transfer::after {
   content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--pond-result);
-  box-shadow: 0 0 6px rgb(127 216 200 / 45%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--pond-result) 45%, transparent);
 }
 .town-empty-note {
   position: absolute; z-index: 5; inset: auto 18px 24px; margin: 0; color: #aeb7c4;
@@ -720,7 +889,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .town-detail-heading > div { min-width: 0; }
-.town-detail-kicker { color: var(--town-muted); font: 600 .58rem var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.town-detail-kicker { color: var(--town-muted); font-size: .62rem; font-weight: 700; letter-spacing: .02em; }
 .town-detail h3 { margin: 2px 0 8px; font-size: .9rem; }
 .town-detail p { margin: 0; color: var(--town-muted); font-size: .72rem; line-height: 1.45; }
 .town-detail dl { display: grid; gap: 4px; margin: 0; font-size: .7rem; }
@@ -728,20 +897,22 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-detail dt { color: var(--town-muted); }
 .town-detail dd { margin: 0; overflow-wrap: anywhere; }
 .town-state-shape {
-  flex: none; padding: 3px 7px; border: 1px solid currentColor; border-radius: 6px;
-  color: var(--neon); font: 600 .58rem var(--mono); text-transform: uppercase;
+  flex: none; padding: 4px 10px; border: 0; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: var(--garden-cyan); font: inherit; font-size: .62rem; font-weight: 700;
 }
-.town-state-working { color: var(--neon-warm); border-radius: 3px; }
+.town-state-working { color: var(--pond-task); }
 .town-state-returned, .town-state-checking { color: var(--pond-result); }
 .town-state-stopped, .town-state-error { color: var(--pond-stop); }
-.town-state-thinking { border-style: dashed; }
-.town-state-more { color: var(--neon); }
-.town-thread-key { color: var(--neon); font-size: 1.25rem; }
+.town-state-thinking { opacity: .75; }
+.town-state-more { color: var(--garden-cyan); }
+.town-thread-key { color: var(--garden-cyan); font-size: 1.25rem; }
 .town-detail-action {
-  width: 100%; margin-top: 9px; padding: 6px 10px; border: 1px solid var(--town-line);
-  border-radius: 9px; background: var(--town-node-selected); color: var(--town-ink); font: 600 .68rem var(--mono); cursor: pointer;
+  width: 100%; margin-top: 9px; padding: 8px 12px; border: 0;
+  border-radius: 999px; background: var(--town-node-selected); color: var(--town-ink);
+  font: inherit; font-size: .72rem; font-weight: 700; cursor: pointer;
 }
-.town-detail-action:hover { border-color: var(--neon-soft); }
+.town-detail-action:hover { background: var(--town-node-hover); }
 .town-overflow-list { display: grid; gap: 5px; margin: 2px 0 0; padding: 0; list-style: none; font-size: .7rem; }
 .town-overflow-list li { display: flex; justify-content: space-between; gap: 10px; }
 .town-overflow-list span { color: var(--town-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -778,10 +949,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .town-node, .town-thread-target, .town-face-thought { transition: none; }
+  .town-node, .town-thread-target, .town-face-thought, .town-face, .pill,
+  .followup-chip, .town-pond-layer { transition: none; }
   .town-face-holo, .town-face-eye, .town-face-thought circle, .town-face-mark path,
   .town-worker-pad span, .town-node-working .town-node-status i,
-  .chat-column.chat-column-villager, .chat-villager-chip { animation: none; }
+  .chat-column-villager, .chat-villager-chip, .followup-chip { animation: none; }
+  /* Reduced motion reaches the same final state, so a pill still sits on its
+     edge and a suggestion is still fully arrived — they simply get there
+     without travelling. */
+  .pill:hover:not(:disabled), .pill:active:not(:disabled),
+  .town-node:hover .town-face, .town-node:active .town-face,
+  .followup-chip:hover:not(:disabled), .followup-chip:active:not(:disabled) { transform: none; }
 }
 
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }
@@ -803,12 +981,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .log-row { align-items: flex-start; flex-direction: column; }
   .chat-column { width: calc(100% - 16px); height: calc(100% - 16px); margin: 8px auto 0; padding: 12px 14px; }
   .bubble { max-width: 92%; }
-  /* The villager dialog centers itself on narrow panes (its keyframe
-     transforms would otherwise override the centering). */
-  .chat-column.chat-column-villager {
-    left: 50%; top: 8%; transform: translateX(-50%);
-    width: min(520px, calc(100% - 24px)); max-height: 84%; animation: none;
-  }
   .chat-villager-chip {
     left: 50%; top: auto; bottom: 16%; transform: translateX(-50%);
     max-width: calc(100% - 32px); animation: none;
@@ -866,6 +1038,82 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .town-square-ground { right: 152px; }
 }
 
+/* The narrow window, resolved 2026-08-03 and owner-approved.
+   "A line is honest because it is a line. A small pond is dishonest because it
+   pretends to be a picture." So the pond is never reduced: at this width it is
+   either its whole self or it is a sentence. The conversation is the default,
+   because that is where the owner acts; the pond is orientation, and
+   orientation is something you go and check.
+   This is a SECOND block at the SAME 1260px breakpoint, not a new one. It sits
+   after the 621–1260 block because that block sets `left`, `width`, and
+   `.town-square-ground { right }` at equal specificity and would otherwise win
+   on source order.
+   DO NOT let a CSS minifier merge these two same-condition blocks: a merged
+   block lands at the FIRST one's position, the 621–1260 block wins, and the
+   reduced pond the owner rejected comes back in production builds only.
+   conductor.spec.ts's `dialogTakesTheWindow` is what catches it. */
+@media (max-width: 1260px) {
+  .pond-line { display: flex; }
+  /* Screen-reader-only, so the announcement exists at exactly the widths where
+     the town header's own `role="status"` is display:none — and nowhere else.
+     Above 1260px the base `display: none` prunes this from the accessibility
+     tree exactly as it prunes the button, so nothing is announced twice. */
+  .pond-line-live {
+    position: absolute; display: block; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+  .workspace-town-pane-pond-open .pond-back { display: block; }
+
+  /* The town header is replaced by the line at this width. */
+  .workspace-town-pane .town-square-header { display: none; }
+
+  /* The pond's contents wait behind the line. `visibility`, not `opacity`:
+     nothing hidden may be focusable, hoverable, or reported as visible. */
+  .workspace-town-pane .town-square-ground,
+  .workspace-town-pane .town-empty-note,
+  .workspace-town-pane .town-detail { visibility: hidden; }
+  .workspace-town-pane-pond-open .town-square-ground,
+  .workspace-town-pane-pond-open .town-empty-note,
+  .workspace-town-pane-pond-open .town-detail { visibility: visible; }
+
+  /* Whole, not reduced: the ground fills the pane under the line. */
+  .workspace-town-pane .town-square-ground { inset: 54px 12px 12px; }
+  .workspace-town-pane .town-detail { inset: auto 12px 68px 12px; }
+  /* Clear of the "back to the conversation" pill, exactly as .town-detail is:
+     these two are the arms of one ternary and only the other was moved. */
+  .workspace-town-pane .town-empty-note { inset: auto 18px 68px; }
+
+  /* The conversation takes the window. */
+  .chat-column.chat-column-villager {
+    left: 11px; right: 11px; top: 65px; bottom: 11px;
+    width: auto; height: auto; max-height: none; transform: none;
+    border-radius: 26px; padding: 15px;
+    animation: villager-rise .42s var(--spring) both;
+    /* The put-away transition belongs on the BASE rule, as narrow-v2.html:52
+       has it, so it is symmetric: declared only on the open-state rule, the
+       slide plays on the way out and the panel SNAPS back, because removing
+       the class leaves the after-change style with no transition to run. */
+    transition: transform .48s var(--pop), opacity .3s var(--ease), visibility .48s;
+  }
+  /* With the full width back, the top bar and run controls need none of the
+     621–1260 block's cramping. */
+  .chat-column-villager .chat-topbar { display: flex; }
+  .chat-column-villager .run-strip-controls { flex: none; width: auto; margin-left: auto; }
+  .chat-column-villager .run-strip-controls .pill { flex: none; padding: 11px 22px; font-size: .95rem; }
+  .chat-column-villager .route-facts { grid-template-columns: repeat(3, 1fr); }
+
+  /* Opening the pond puts the conversation away rather than shrinking it. */
+  /* Hidden from the keyboard too, not just the mouse: `pointer-events: none`
+     leaves the composer and every control tabbable off-screen, and focusing a
+     child translated 102% down can scroll this `overflow: hidden` pane and
+     shift the pond that is supposed to be whole. `visibility` is in the
+     transition list so the slide still plays before it goes. */
+  .workspace-town-pane-pond-open .chat-column.chat-column-villager {
+    transform: translateY(102%); opacity: .35; visibility: hidden; pointer-events: none;
+  }
+  .workspace-town-pane-pond-open .chat-villager-chip { display: none; }
+}
+
 /* Task 160: the checkup card — a read-only report floating over any screen.
    It sits under .app-error-overlay (z-index 1000) so errors stay on top. */
 .checkup-scrim { position: fixed; inset: 0; z-index: 900; background: rgb(13 9 31 / 58%); backdrop-filter: blur(3px); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 16px; }
@@ -888,3 +1136,36 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .checkup-finding p { margin: 0; }
 .checkup-finding .pill { margin-top: 6px; }
 .checkup-basis { margin-top: 14px; }
+
+/* Reduced motion, part two — placed LAST in the file, deliberately.
+   A media query adds no specificity, so the block near the top loses to every
+   `.chat-column.chat-column-villager` rule below it, including the one that
+   declares the lantern's finite entrance. Naming the element up there was never
+   enough; only source order settles a tie. Everything here reaches the SAME
+   final state as the motion it replaces — the chevron still points the other
+   way when the pond is open, the conversation is still put away, the lantern
+   still sits where it landed. Nothing travels to get there.
+   `.pond-back` keeps `translateX(-50%)` rather than taking `transform: none`,
+   because that transform is its centring, not its animation. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-column.chat-column-villager,
+  .workspace-town-pane-pond-open .chat-column.chat-column-villager { animation: none; transition: none; }
+  .pond-line, .pond-line-chevron, .pond-back { transition: none; }
+  .pond-back:hover { transform: translateX(-50%); }
+  /* Found while fixing the lantern's entrance: these pre-date this work and lose
+     to the block at the top of the file the same way it did. Every one is a
+     specificity loss, not a miss — the eye groups carry both `town-face-eye`
+     and `town-face-eye-l`/`-r` (TownSquare.tsx:155-156), so that block's
+     `.town-face-eye` does match them and is simply outranked: the blink rules
+     are (0,2,0) against its (0,1,0), and the Gemini mark's
+     `path:nth-child()` is (0,2,1) against its (0,1,1). The cast kept blinking
+     for a user who asked it not to. */
+  .town-face-blink-single .town-face-eye,
+  .town-face-blink-double .town-face-eye-l,
+  .town-face-blink-slow .town-face-eye,
+  .town-face-blink-alternate .town-face-eye-l,
+  .town-face-blink-alternate .town-face-eye-r,
+  .town-face-blink-squeeze .town-face-eye,
+  .town-face-mark-gemini path:nth-child(1),
+  .town-face-mark-gemini path:nth-child(2) { animation: none; }
+}

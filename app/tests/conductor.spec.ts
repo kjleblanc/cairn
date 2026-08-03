@@ -57,22 +57,17 @@ async function connectToFixture(
   fixtureUrl: string,
   model: string,
   apiKey = "sk-test-key",
-  forceActions = true,
+  verifyCardBinding = false,
 ): Promise<void> {
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
-  // The card rides Cairn's continuously moving lantern. Visibility is asserted
-  // above. Most historical tests force through Playwright's stricter
-  // never-moving requirement; Task 172's permission regression instead uses
-  // the app's real reduced-motion surface and ordinary owner actions.
-  const actionOptions = forceActions ? { force: true } : {};
-  await win.getByRole("button", { name: "Choose a different brain" }).click(actionOptions);
-  await win.getByRole("button", { name: "Custom…" }).click(actionOptions);
+  await win.getByRole("button", { name: "Choose a different brain" }).click();
+  await win.getByRole("button", { name: "Custom…" }).click();
   const baseUrlInput = card.locator('input[type="text"]').first();
   const modelInput = win.getByPlaceholder("e.g. moonshotai/kimi-k3");
-  await baseUrlInput.fill(fixtureUrl, actionOptions);
-  await modelInput.fill(model, actionOptions);
-  if (!forceActions) {
+  await baseUrlInput.fill(fixtureUrl);
+  await modelInput.fill(model);
+  if (verifyCardBinding) {
     // No fallback checkbox can be confirmed while a replacement card is
     // unavailable, even after an earlier valid seat was on screen.
     await baseUrlInput.fill("not-a-provider-url");
@@ -80,12 +75,12 @@ async function connectToFixture(
     await baseUrlInput.fill(fixtureUrl);
     await expect(card.locator('input[type="checkbox"]')).toHaveCount(2);
   }
-  await win.getByPlaceholder("Stored encrypted; shown never again").fill(apiKey, actionOptions);
+  await win.getByPlaceholder("Stored encrypted; shown never again").fill(apiKey);
   const connectButton = win.getByRole("button", { name: "Connect" });
   await expect(connectButton).toBeDisabled(); // both standing-authorization choices are affirmative, never inferred from filled fields
-  await confirmConductorConsent(card, forceActions, async () => expect(connectButton).toBeDisabled());
+  await confirmConductorConsent(card, async () => expect(connectButton).toBeDisabled());
   await expect(connectButton).toBeEnabled();
-  if (!forceActions) {
+  if (verifyCardBinding) {
     // Changing the exact card clears both affirmations. Returning to the old
     // seat does not resurrect them; the owner must check its words again.
     await modelInput.fill(`${model}-changed`);
@@ -97,10 +92,10 @@ async function connectToFixture(
     await expect(card.locator('input[type="checkbox"]')).toHaveCount(2);
     await expect(card.locator('input[type="checkbox"]').nth(0)).not.toBeChecked();
     await expect(card.locator('input[type="checkbox"]').nth(1)).not.toBeChecked();
-    await confirmConductorConsent(card, false, async () => expect(connectButton).toBeDisabled());
+    await confirmConductorConsent(card, async () => expect(connectButton).toBeDisabled());
     await expect(connectButton).toBeEnabled();
   }
-  await connectButton.click(actionOptions);
+  await connectButton.click();
   await expect(card).not.toBeVisible({ timeout: 10_000 });
 }
 
@@ -111,15 +106,13 @@ async function connectToFixture(
  * second choice was actually shown. */
 async function confirmConductorConsent(
   card: Locator,
-  forceActions = true,
   afterFirst?: () => Promise<void>,
 ): Promise<void> {
   const checkboxes = card.locator('input[type="checkbox"]');
   await expect(checkboxes).toHaveCount(2);
-  const actionOptions = forceActions ? { force: true } : {};
-  await checkboxes.nth(0).check(actionOptions);
+  await checkboxes.nth(0).check();
   await afterFirst?.();
-  await checkboxes.nth(1).check(actionOptions);
+  await checkboxes.nth(1).check();
 }
 
 async function useStableOwnerActions(win: Page): Promise<void> {
@@ -137,10 +130,9 @@ async function waitStreamDone(win: Page): Promise<void> {
 // `exact` for the same reason as "Stop" above: role-name matching is substring
 // by default, and a proposed-task card on screen puts a "Send to dispatch"
 // button in the same window as the composer's "Send".
-async function sendChat(win: Page, text: string, forceActions = true): Promise<void> {
-  const actionOptions = forceActions ? { force: true } : {};
-  await win.getByPlaceholder("Talk with Cairn").fill(text, actionOptions);
-  await win.getByRole("button", { name: "Send", exact: true }).click({ ...actionOptions, noWaitAfter: true });
+async function sendChat(win: Page, text: string): Promise<void> {
+  await win.getByPlaceholder("Talk with Cairn").fill(text);
+  await win.getByRole("button", { name: "Send", exact: true }).click({ noWaitAfter: true });
 }
 
 test.describe.configure({ mode: "serial" });
@@ -156,6 +148,10 @@ let releaseFixtureCommentary: () => void = () => {};
  * its content and before done until the remounted Chat has visibly attached. */
 let holdFixtureThirdProposal: () => void = () => {};
 let releaseFixtureThirdProposal: () => void = () => {};
+/** Landing integration: the sibling-chip answer waits before DONE until its
+ * busy-state assertion has observed the other chip. */
+let holdFixtureAnswer: () => void = () => {};
+let releaseFixtureAnswer: () => void = () => {};
 /** The raw body of the last commentary request the fixture answered — what the
  * provider would actually have been sent (repo task 080). */
 let lastCommentaryBody: () => string | null = () => null;
@@ -183,6 +179,8 @@ test.beforeAll(async () => {
       releaseCommentary: () => void;
       holdThirdProposal: () => void;
       releaseThirdProposal: () => void;
+      holdAnswer: () => void;
+      releaseAnswer: () => void;
     }>;
   };
   const server = await fixture.start();
@@ -195,6 +193,8 @@ test.beforeAll(async () => {
   releaseFixtureCommentary = server.releaseCommentary;
   holdFixtureThirdProposal = server.holdThirdProposal;
   releaseFixtureThirdProposal = server.releaseThirdProposal;
+  holdFixtureAnswer = server.holdAnswer;
+  releaseFixtureAnswer = server.releaseAnswer;
 
   const openRouterPath = pathToFileURL(join(__dirname, "fixtures", "fake-openrouter.mjs")).href;
   const openRouter = (await import(openRouterPath)) as {
@@ -226,6 +226,7 @@ test.afterAll(async () => {
 test.beforeEach(() => {
   releaseFixtureCommentary(); // a crashed test must never leave the gate held for the next one
   releaseFixtureThirdProposal();
+  releaseFixtureAnswer();
   setFixtureCommentaryDelay(400);
   rmSync(conductorFile(), { force: true });
 });
@@ -655,7 +656,7 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   }, { baseUrl: fixtureUrl, model: "fixture-model" });
   expect(refusedFreshConnect).toEqual({ ok: false, message: "CONDUCTOR_CONNECT_NOT_AUTHORIZED" });
   expect(existsSync(conductorFile())).toBe(false);
-  await connectToFixture(firstWindow, fixtureUrl, "fixture-model", "sk-test-key", false);
+  await connectToFixture(firstWindow, fixtureUrl, "fixture-model", "sk-test-key", true);
   await firstApp.close();
 
   const storedPath = conductorFile();
@@ -755,7 +756,7 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   expect(renewedStored.authorizedDataScope).toBe(currentCard?.data);
   expect(renewedStored.keyB64).toBe(legacyStored.keyB64);
 
-  await sendChat(win, `Inspect ${safePath} and propose changing the page title.`, false);
+  await sendChat(win, `Inspect ${safePath} and propose changing the page title.`);
   await waitStreamDone(win);
 
   const sent = lastReplyBody();
@@ -1049,6 +1050,7 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   await expect(taskCard.getByRole("button", { name: "Send to dispatch" })).toBeDisabled();
 
   await questionChip.getByPlaceholder("Your answer").fill("No, a plain redirect is enough.");
+  holdFixtureAnswer();
   await questionChip.getByRole("button", { name: "Answer" }).click();
 
   // The locked state is transient — it ends the moment the answer's stream
@@ -1056,11 +1058,15 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   // first-run flake seen in tasks 131/137), so the pin is ONE locator, one
   // atomic observation per poll: a risk chip that both says the lock and
   // has its button disabled.
-  await expect(
-    riskChip
-      .filter({ hasText: "Wait for Cairn to finish answering." })
-      .locator('button:has-text("Set aside")[disabled]'),
-  ).toBeVisible();
+  try {
+    await expect(
+      riskChip
+        .filter({ hasText: "Wait for Cairn to finish answering." })
+        .locator('button:has-text("Set aside")[disabled]'),
+    ).toBeVisible();
+  } finally {
+    releaseFixtureAnswer();
+  }
 
   await waitStreamDone(win);
   await expect(riskChip.getByRole("button", { name: "Set aside" })).toBeEnabled();
@@ -1294,48 +1300,93 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(worker.locator(".town-face-worker")).toHaveCount(1);
   await expect(worker.locator(".town-worker-pad")).toHaveCount(1);
 
-  // At the minimum supported Town size, the FULL Cairn and worker buttons —
-  // not just their face strokes — remain beside the same conversation. The
-  // dialog, nodes, and owner controls all stay inside the viewport.
+  // The narrow window (Decision 9, approved 2026-08-03). All four explored
+  // panel directions failed here, each by shrinking its wide layout. The
+  // resolution: the pond is never reduced — at 760×620 it is either its whole
+  // self or it is a sentence. Closed, the conversation takes the window and
+  // the cast waits behind the line; opened, the pond is whole.
   await win.setViewportSize({ width: 760, height: 620 });
   await expect(win.getByRole("button", { name: /Conductor.*worker task running/ })).toBeVisible();
-  const narrowLayout = await win.evaluate(() => {
+  const pondLine = win.locator(".pond-line");
+  await expect(pondLine).toBeVisible();
+  await expect(pondLine).toHaveAttribute("aria-expanded", "false");
+  await expect(pondLine).toContainText("Codex Exec worker is working");
+  await expect(town.locator(".town-node-cairn")).toBeHidden();
+  await expect(worker).toBeHidden();
+  const narrowClosed = await win.evaluate(() => {
     const dialog = document.querySelector<HTMLElement>(".chat-column-villager")?.getBoundingClientRect();
-    const town = document.querySelector<HTMLElement>(".town-square")?.getBoundingClientRect();
-    const cairnNode = document.querySelector<HTMLElement>(".town-node-cairn")?.getBoundingClientRect();
-    const workerNode = document.querySelector<HTMLElement>(".town-node-worker")?.getBoundingClientRect();
-    if (!dialog || !town || !cairnNode || !workerNode) throw new Error("Expected the minimum-size Town cast and conversation");
-    const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right && left.right > right.left
-      && left.top < right.bottom && left.bottom > right.top;
+    const pane = document.querySelector<HTMLElement>(".workspace-town-pane")?.getBoundingClientRect();
+    const line = document.querySelector<HTMLElement>(".pond-line")?.getBoundingClientRect();
+    if (!dialog || !pane || !line) throw new Error("Expected the narrow line and the conversation");
     const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
       && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
-    const controlsFit = Array.from(document.querySelectorAll<HTMLElement>(
-      ".chat-topbar button, .run-strip-controls button",
-    )).every((control) => {
-      const rect = control.getBoundingClientRect();
-      return contains(dialog, rect);
-    });
     return {
-      cairnClear: !overlaps(dialog, cairnNode),
-      workerClear: !overlaps(dialog, workerNode),
-      cairnFits: contains(town, cairnNode),
-      workerFits: contains(town, workerNode),
-      dialogFits: contains(town, dialog),
-      controlsFit,
+      // Takes the window, and sits clear of the line rather than under it.
+      dialogTakesTheWindow: dialog.width > pane.width - 40,
+      dialogClearsTheLine: dialog.top >= line.bottom - 1,
+      dialogFits: contains(pane, dialog),
+      controlsFit: Array.from(document.querySelectorAll<HTMLElement>(
+        ".chat-topbar button, .run-strip-controls button",
+      )).every((control) => contains(dialog, control.getBoundingClientRect())),
       pageFits: document.documentElement.scrollWidth <= window.innerWidth
         && document.documentElement.scrollHeight <= window.innerHeight,
     };
   });
-  expect(narrowLayout).toEqual({
-    cairnClear: true,
-    workerClear: true,
-    cairnFits: true,
-    workerFits: true,
+  expect(narrowClosed).toEqual({
+    dialogTakesTheWindow: true,
+    dialogClearsTheLine: true,
     dialogFits: true,
     controlsFit: true,
     pageFits: true,
   });
+
+  // Pressing the line opens the pond WHOLE, over the window. Both villagers
+  // are fully inside it and clear of each other — not crowded into the half
+  // that used to be reserved for the conversation.
+  await pondLine.click({ noWaitAfter: true });
+  await expect(pondLine).toHaveAttribute("aria-expanded", "true");
+  await expect(town.locator(".town-node-cairn")).toBeVisible();
+  await expect(worker).toBeVisible();
+  const narrowOpen = await win.evaluate(() => {
+    const town = document.querySelector<HTMLElement>(".town-square")?.getBoundingClientRect();
+    const cairnNode = document.querySelector<HTMLElement>(".town-node-cairn")?.getBoundingClientRect();
+    const workerNode = document.querySelector<HTMLElement>(".town-node-worker")?.getBoundingClientRect();
+    if (!town || !cairnNode || !workerNode) throw new Error("Expected the whole pond at 760x620");
+    const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
+      && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+    const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right && left.right > right.left
+      && left.top < right.bottom && left.bottom > right.top;
+    return {
+      cairnFits: contains(town, cairnNode),
+      workerFits: contains(town, workerNode),
+      castIsSeparate: !overlaps(cairnNode, workerNode),
+      pageFits: document.documentElement.scrollWidth <= window.innerWidth
+        && document.documentElement.scrollHeight <= window.innerHeight,
+    };
+  });
+  expect(narrowOpen).toEqual({
+    cairnFits: true, workerFits: true, castIsSeparate: true, pageFits: true,
+  });
+
+  // One control brings the conversation back.
+  await win.getByRole("button", { name: "Back to the conversation" }).click({ noWaitAfter: true });
+  await expect(pondLine).toHaveAttribute("aria-expanded", "false");
+  await expect(town.locator(".town-node-cairn")).toBeHidden();
+
+  // The rule fires at exactly the size it was written for. Terminal Glass's
+  // never did, which is one of the four failures this resolution replaces —
+  // so both sides of the boundary are checked, not just a comfortable width.
+  await win.setViewportSize({ width: 1260, height: 820 });
+  await expect(pondLine).toBeVisible();
+  await win.setViewportSize({ width: 1261, height: 820 });
+  await expect(pondLine).toBeHidden();
+
+  // Above 1260px nothing about any of this exists: the approved wide layout is
+  // untouched, and the line is gone rather than merely hidden from view.
   await win.setViewportSize({ width: 1320, height: 820 });
+  await expect(pondLine).toBeHidden();
+  await expect(town.locator(".town-node-cairn")).toBeVisible();
+  await expect(town.locator(".town-square-header")).toBeVisible();
 
   await win.locator(".rail-project-select", { hasText: otherName }).click({ noWaitAfter: true });
   const otherTown = win.getByRole("region", { name: `${otherName} town square` });
