@@ -233,9 +233,11 @@ export const PHONE_PAGE = `<!doctype html>
       ? status.provider + " \\u00b7 " + status.model
       : "not connected";
     root.textContent = "";
-    var statusLine = el("p", "small muted", status.connected
-      ? "Connected: " + conn
-      : "Cairn isn\\u2019t connected to a provider on the computer right now.");
+    var statusLine = el("p", "small muted", status.consentRequired
+      ? "Cairn is paused until you review the updated project-file sharing permission on the computer."
+      : status.connected
+        ? "Connected: " + conn
+        : "Cairn isn\\u2019t connected to a provider on the computer right now.");
     root.appendChild(statusLine);
 
     var convo = state.conversation;

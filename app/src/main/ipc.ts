@@ -8,6 +8,7 @@ import type {
   ConductorDelta,
   ConductorOAuthEvent,
   ConductorOAuthRequest,
+  ConductorRenewConsentRequest,
   ConductorSendRequest,
   ConductorStatus,
   InitInput,
@@ -256,6 +257,17 @@ export function registerConductorIpc(): void {
       return result;
     } catch (err) {
       logError("conductor:connect", err);
+      return { ok: false, message: plainMessage(err) };
+    }
+  });
+
+  ipcMain.handle("conductor:renewConsent", (_e, request: ConductorRenewConsentRequest): Result<null> => {
+    try {
+      const result = conductorService.renewConsent(request);
+      if (result.ok) emitBridgeSync();
+      return result;
+    } catch (err) {
+      logError("conductor:renewConsent", err);
       return { ok: false, message: plainMessage(err) };
     }
   });

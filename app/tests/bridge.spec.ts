@@ -34,7 +34,7 @@ function baseEnv(project: string): { [key: string]: string } {
 
 // The same custom-seat connect path conductor.spec.ts drives (Task 137's
 // quiet card): Choose a different brain → Custom… → URL, model, key,
-// checkbox, Connect.
+// both permission checkboxes, Connect.
 async function connectToFixture(win: Page, fixtureUrl: string, model: string): Promise<void> {
   const card = win.locator(".card", { hasText: "connect cairn's brain" });
   await expect(card).toBeVisible({ timeout: 30_000 });
@@ -43,7 +43,7 @@ async function connectToFixture(win: Page, fixtureUrl: string, model: string): P
   await card.locator('input[type="text"]').first().fill(fixtureUrl);
   await win.getByPlaceholder("e.g. moonshotai/kimi-k3").fill(model);
   await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-test-key");
-  await card.locator('input[type="checkbox"]').check();
+  for (const checkbox of await card.locator('input[type="checkbox"]').all()) await checkbox.check();
   await win.getByRole("button", { name: "Connect" }).click();
   await expect(card).not.toBeVisible({ timeout: 10_000 });
 }

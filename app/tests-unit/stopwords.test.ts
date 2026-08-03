@@ -24,7 +24,7 @@ test("the ten serial stop reasons are all covered", () => {
 test("the app's own closes are covered too", () => {
   for (const code of [
     "CONNECTION_REQUIRED", "CONDUCTOR_CONNECT_NOT_AUTHORIZED",
-    "CONDUCTOR_OAUTH_NOT_AUTHORIZED",
+    "CONDUCTOR_OAUTH_NOT_AUTHORIZED", "CONDUCTOR_CONSENT_REQUIRED",
   ]) {
     assert.ok(code in KNOWN_CODE_WORDS, `no plain words for ${code}`);
   }

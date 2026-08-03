@@ -18,6 +18,7 @@ export function ProjectRail({
   collapsed,
   expanded,
   connected,
+  consentRequired,
   bodyLabel,
   onToggleCollapsed,
   onToggleProject,
@@ -31,6 +32,7 @@ export function ProjectRail({
   collapsed: boolean;
   expanded: ReadonlySet<string>;
   connected: boolean;
+  consentRequired: boolean;
   bodyLabel: string;
   onToggleCollapsed: () => void;
   onToggleProject: (dir: string) => void;
@@ -42,11 +44,11 @@ export function ProjectRail({
   return (
     <aside className={`project-rail${collapsed ? " project-rail-collapsed" : ""}`} aria-label="Cairn projects">
       <div className="rail-identity">
-        <span className={`rail-cairn-mark${connected ? " rail-cairn-connected" : ""}`} aria-hidden="true">C</span>
+        <span className={`rail-cairn-mark${connected ? " rail-cairn-connected" : consentRequired ? " rail-cairn-paused" : ""}`} aria-hidden="true">C</span>
         {!collapsed ? (
           <span className="rail-identity-copy">
             <strong>Cairn</strong>
-            <span>{connected ? bodyLabel : "brain disconnected"}</span>
+            <span>{consentRequired ? "brain paused · review permission" : connected ? bodyLabel : "brain disconnected"}</span>
           </span>
         ) : null}
         <button type="button" className="rail-collapse" onClick={onToggleCollapsed}

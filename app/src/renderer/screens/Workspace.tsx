@@ -194,6 +194,7 @@ export function Workspace({
       void refreshProjects();
       void refreshActiveStatus();
       void refreshActiveRuntime();
+      void cairn.conductorStatus().then(setConductor);
     };
     const offTask = cairn.onTaskActivity(refresh);
     const offConductor = cairn.onConductorDelta(refresh);
@@ -283,6 +284,7 @@ export function Workspace({
       <ProjectRail activeDir={activeDir} projects={orderedProjects}
         collapsed={railCollapsed} expanded={expanded}
         connected={conductor?.connected ?? false}
+        consentRequired={conductor?.consentRequired ?? false}
         bodyLabel={conductor?.connected ? `${conductor.provider} · ${conductor.model}` : ""}
         onToggleCollapsed={() => setRailCollapsed((value) => !value)}
         onToggleProject={toggleProject}

@@ -93,7 +93,7 @@ export interface Bridge {
 /** What the phone renders. Conversation content only — no filesystem paths,
  * no provider URL, no tokens. */
 interface BridgeSnapshot {
-  status: { connected: boolean; provider: string; model: string };
+  status: { connected: boolean; consentRequired: boolean; provider: string; model: string };
   project: { name: string } | null;
   conversation: {
     id: string;
@@ -176,7 +176,12 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       }
     }
     return {
-      status: { connected: st.connected, provider: st.provider, model: st.model },
+      status: {
+        connected: st.connected,
+        consentRequired: st.consentRequired,
+        provider: st.provider,
+        model: st.model,
+      },
       project: project === null ? null : { name: project.name },
       conversation,
       device: { name: device.name },

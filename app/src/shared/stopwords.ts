@@ -37,6 +37,7 @@ export const KNOWN_CODE_WORDS: Readonly<Record<string, string>> = {
   CONNECTION_REQUIRED: "no assistant is connected yet, so nothing could run",
   CONDUCTOR_CONNECT_NOT_AUTHORIZED: "connecting was not approved, so it did not happen",
   CONDUCTOR_OAUTH_NOT_AUTHORIZED: "signing in was not approved, so it did not happen",
+  CONDUCTOR_CONSENT_REQUIRED: "your saved assistant is paused until you review Cairn's updated sharing permission",
 };
 
 const UNKNOWN = "it stopped for a reason Cairn has no plain description for";

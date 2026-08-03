@@ -165,7 +165,7 @@ test("checkup reports a messy project honestly and seeds suggestions without sen
     await card.locator('input[type="text"]').first().fill(fixtureUrl);
     await win.getByPlaceholder("e.g. moonshotai/kimi-k3").fill("checkup-e2e-model");
     await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-test-key");
-    await card.locator('input[type="checkbox"]').check();
+    for (const checkbox of await card.locator('input[type="checkbox"]').all()) await checkbox.check();
     await win.getByRole("button", { name: "Connect" }).click();
     await expect(card).not.toBeVisible({ timeout: 10_000 });
 

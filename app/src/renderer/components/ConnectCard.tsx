@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ConductorConsentCard } from "../../shared/ipc";
+import type { ConductorConsentCard, ConductorStatus } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BODIES, OPENROUTER_BASE_URL, RECOMMENDATION_NOTE, RECOMMENDED_BODY, bodyBaseUrl, type Body } from "../../shared/bodies";
 import { Card, ErrorCard, Pill } from "./Ui";
@@ -72,7 +72,8 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * main will re-derive and check before it ever stores a key (the dispatch-gate
  * pattern from tasks.ts) — the consent strings shown here always come from
  * `conductor:consentCard`, never a renderer-side copy. That includes the
- * checkbox label, so a plan-based seat never sits under "costs money".
+ * checkbox labels, so a plan-based seat never sits under "costs money" and
+ * file contents always have their own explicit authorization.
  *
  * Task 030 made this a one-paste flow. The default panel asks for only the
  * key — the base URL and model already hold Cairn's curated pick
@@ -116,7 +117,7 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  *
  * Task 131 adds the one-click door: on any OpenRouter seat, a "Sign in with
  * OpenRouter" button above the key field starts the PKCE dance in main —
- * same consent checkbox, no key anywhere — and the card switches to an
+ * same consent checkboxes, no key anywhere — and the card switches to an
  * `oauth` waiting panel with a fallback link and a Cancel. The terminal
  * event arrives over `onConductorOAuth`: done behaves exactly like a
  * pasted-key success (seat memory, close), failed returns here with the
@@ -124,7 +125,7 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * universal fallback; Kimi and custom seats show no sign-in button.
  *
  * Task 137 puts the card on a diet and makes sign-in the whole default path
- * for OpenRouter seats: body name, the consent block, the checkbox, one
+ * for OpenRouter seats: body name, the consent block, its authorization, one
  * button. The key path collapses behind a "Use a key instead" toggle that
  * opens three short inline steps (console button, create-and-copy, paste
  * field); the Kimi seat shows its three steps directly, and the separate
@@ -133,18 +134,25 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * lines are removed; the consent strings and the key field's placeholder
  * stay byte-identical, and a remembered seat still opens with the key path
  * expanded (task 127's pre-filled reconnect). */
-export function ConnectCard({ onConnected }: { onConnected: () => void }) {
+export function ConnectCard({ status, onConnected }: { status: ConductorStatus; onConnected: () => void }) {
   const [rememberedSeat] = useState<RememberedSeat | null>(() => readRememberedSeat());
-  const [panel, setPanel] = useState<Panel>(rememberedSeat ? "default" : "start");
+  const initialSeat = status.consentRequired
+    ? { baseUrl: status.baseUrl, model: status.model }
+    : rememberedSeat;
+  const [panel, setPanel] = useState<Panel>(initialSeat ? "default" : "start");
   const [custom, setCustom] = useState(
-    rememberedSeat ? !BODIES.some((b) => b.id === rememberedSeat.model && bodyBaseUrl(b) === rememberedSeat.baseUrl) : false,
+    initialSeat ? !BODIES.some((b) => b.id === initialSeat.model && bodyBaseUrl(b) === initialSeat.baseUrl) : false,
   );
-  const [baseUrl, setBaseUrl] = useState(rememberedSeat?.baseUrl ?? DEFAULT_BASE_URL);
-  const [model, setModel] = useState(rememberedSeat?.model ?? RECOMMENDED_BODY.id);
+  const [baseUrl, setBaseUrl] = useState(initialSeat?.baseUrl ?? DEFAULT_BASE_URL);
+  const [model, setModel] = useState(initialSeat?.model ?? RECOMMENDED_BODY.id);
   const [moreOpen, setMoreOpen] = useState(false);
   const [apiKey, setApiKey] = useState("");
-  const [checked, setChecked] = useState(false);
-  const [card, setCard] = useState<ConductorConsentCard | null>(null);
+  // Each affirmative choice is bound to the exact card text it accompanied.
+  // A provider/model edit invalidates the loaded card immediately in render,
+  // before the replacement IPC response can arrive.
+  const [checkedCard, setCheckedCard] = useState<string | null>(null);
+  const [fileContentsCheckedCard, setFileContentsCheckedCard] = useState<string | null>(null);
+  const [loadedCard, setLoadedCard] = useState<ConductorConsentCard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -158,27 +166,40 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
    * rather than a mount-time closure. */
   const seatRef = useRef({ baseUrl, model });
   seatRef.current = { baseUrl, model };
+  const card = loadedCard?.baseUrl === baseUrl.trim() && loadedCard.model === model.trim()
+    ? loadedCard
+    : null;
+  const cardIdentity = card === null ? null : JSON.stringify(card);
+  const checked = cardIdentity !== null && checkedCard === cardIdentity;
+  const fileContentsChecked = cardIdentity !== null && fileContentsCheckedCard === cardIdentity;
 
   useEffect(() => {
     let cancelled = false;
+    setLoadedCard(null);
+    setCheckedCard(null);
+    setFileContentsCheckedCard(null);
     try {
       new URL(baseUrl.trim());
     } catch {
-      setCard(null);
       return;
     }
     void cairn.conductorConsentCard(baseUrl.trim(), model.trim()).then((response) => {
-      if (!cancelled) setCard(response.ok ? response.value : null);
+      if (!cancelled) setLoadedCard(response.ok ? response.value : null);
     });
     return () => { cancelled = true; };
   }, [baseUrl, model]);
 
   async function connect() {
-    if (!card || !checked || !model.trim() || !apiKey.trim() || connecting) return;
+    if (!card || !checked || !fileContentsChecked || !model.trim() || !apiKey.trim() || connecting) return;
     setConnecting(true);
     setError(null);
     try {
-      const response = await cairn.conductorConnect({ card, apiKey, consentConfirmed: true });
+      const response = await cairn.conductorConnect({
+        card,
+        apiKey,
+        consentConfirmed: true,
+        fileContentsConfirmed: true,
+      });
       if (!response.ok) { setError(response.message); return; }
       // Remember the seat — never the key — so the next visit opens pre-filled.
       localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ baseUrl: baseUrl.trim(), model: model.trim() }));
@@ -209,18 +230,59 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
     });
   }, [onConnected]);
 
-  /** Begins the PKCE dance in main. The same consent gate as connect(): no
-   * checked box, no browser. Main replies with the auth URL immediately and
+  /** Begins the PKCE dance in main. The same consent gate as connect(): an
+   * unchecked box means no browser. Main replies with the auth URL immediately and
    * the card switches to the waiting panel; the outcome arrives above. */
   async function beginOAuth() {
-    if (!card || !checked || connecting) return;
+    if (!card || !checked || !fileContentsChecked || connecting) return;
     setConnecting(true);
     setError(null);
     try {
-      const response = await cairn.conductorOAuthBegin({ card, consentConfirmed: true });
+      const response = await cairn.conductorOAuthBegin({
+        card,
+        consentConfirmed: true,
+        fileContentsConfirmed: true,
+      });
       if (!response.ok) { setError(response.message); return; }
       setOauthUrl(response.value.authUrl);
       setPanel("oauth");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  /** A stale saved connection needs only a new permission marker. Main
+   * re-derives the card from that saved seat and rewrites no key bytes; this
+   * renderer neither asks for nor receives the credential. */
+  async function renewConsent() {
+    if (!card || !checked || !fileContentsChecked || connecting) return;
+    setConnecting(true);
+    setError(null);
+    try {
+      const response = await cairn.conductorRenewConsent({
+        card,
+        consentConfirmed: true,
+        fileContentsConfirmed: true,
+      });
+      if (!response.ok) { setError(response.message); return; }
+      onConnected();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function disconnectSavedConnection() {
+    if (connecting) return;
+    setConnecting(true);
+    setError(null);
+    try {
+      const response = await cairn.conductorDisconnect();
+      if (!response.ok) { setError(response.message); return; }
+      onConnected();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -259,6 +321,46 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   // The memory line stays only while the seat on screen IS the remembered
   // one — editing a field or choosing another brain takes it away.
   const showingMemory = rememberedSeat !== null && baseUrl === rememberedSeat.baseUrl && model === rememberedSeat.model;
+
+  if (status.consentRequired) {
+    return (
+      <Card title="review the new sharing permission">
+        <p>
+          Your saved <strong>{status.provider}</strong> connection using <strong>{status.model}</strong> is paused. Cairn can now share a bounded snapshot of selected project-file contents, so review the wider permission before another conversation.
+        </p>
+        <p className="small muted">Your saved key is still encrypted. Reviewing this permission does not contact the provider or replace the key.</p>
+        {error ? <ErrorCard message={error} /> : null}
+        {card ? (
+          <>
+            <div style={{ marginTop: 14 }}>
+              <p className="small"><strong>What may flow:</strong> {card.data}</p>
+              <p className="small"><strong>Cost:</strong> {card.cost}</p>
+            </div>
+            <label className="row" style={{ marginTop: 14, alignItems: "flex-start" }}>
+              <input type="checkbox" checked={checked}
+                onChange={(e) => setCheckedCard(e.target.checked ? cardIdentity : null)} />
+              <span>{card.checkbox}</span>
+            </label>
+            <label className="row" style={{ marginTop: 10, alignItems: "flex-start" }}>
+              <input type="checkbox" checked={fileContentsChecked}
+                onChange={(e) => setFileContentsCheckedCard(e.target.checked ? cardIdentity : null)} />
+              <span>{card.fileContentsCheckbox}</span>
+            </label>
+          </>
+        ) : (
+          <p className="small muted" style={{ marginTop: 14 }}>Loading the permission for this saved connection...</p>
+        )}
+        <div className="row" style={{ marginTop: 14 }}>
+          <Pill kind="primary" disabled={!card || !checked || !fileContentsChecked || connecting} onClick={() => void renewConsent()}>
+            {connecting ? "Saving..." : "Allow and continue"}
+          </Pill>
+          <Pill kind="quiet" disabled={connecting} onClick={() => void disconnectSavedConnection()}>
+            Disconnect and delete the saved key
+          </Pill>
+        </div>
+      </Card>
+    );
+  }
 
   if (panel === "start") {
     return (
@@ -347,7 +449,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   }
 
   // Task 137's quiet card: every screen says only what the next click needs.
-  // The consent block and checkbox stay fully visible above every action —
+  // The consent block and both checkboxes stay fully visible above every action —
   // they ARE the standing authorization — but everything around them is one
   // short line or a three-step list. Shared pieces keep the flavors honest:
   const keyInput = (
@@ -361,15 +463,23 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
   ) : (
     <p className="small muted" style={{ marginTop: 14 }}>Enter a provider base URL to see what Cairn will share.</p>
   );
-  const checkboxRow = (
+  const checkboxRow = card ? (
     <label className="row" style={{ marginTop: 14, alignItems: "flex-start" }}>
-      <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-      <span>{card ? card.checkbox : "I understand what will be shared and that conversation costs money on my account"}</span>
+      <input type="checkbox" checked={checked}
+        onChange={(e) => setCheckedCard(e.target.checked ? cardIdentity : null)} />
+      <span>{card.checkbox}</span>
     </label>
-  );
+  ) : null;
+  const fileContentsCheckboxRow = card ? (
+    <label className="row" style={{ marginTop: 10, alignItems: "flex-start" }}>
+      <input type="checkbox" checked={fileContentsChecked}
+        onChange={(e) => setFileContentsCheckedCard(e.target.checked ? cardIdentity : null)} />
+      <span>{card.fileContentsCheckbox}</span>
+    </label>
+  ) : null;
   const connectRow = (
     <div className="row" style={{ marginTop: 14 }}>
-      <Pill kind="primary" disabled={!card || !checked || !model.trim() || !apiKey.trim() || connecting} onClick={() => void connect()}>
+      <Pill kind="primary" disabled={!card || !checked || !fileContentsChecked || !model.trim() || !apiKey.trim() || connecting} onClick={() => void connect()}>
         {connecting ? "Connecting…" : "Connect"}
       </Pill>
     </div>
@@ -405,6 +515,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
           </p>
           {consentBlock}
           {checkboxRow}
+          {fileContentsCheckboxRow}
           {connectRow}
         </>
       ) : null}
@@ -414,6 +525,7 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
           <Field label="API key">{keyInput}</Field>
           {consentBlock}
           {checkboxRow}
+          {fileContentsCheckboxRow}
           {connectRow}
         </>
       ) : null}
@@ -422,8 +534,9 @@ export function ConnectCard({ onConnected }: { onConnected: () => void }) {
         <>
           {consentBlock}
           {checkboxRow}
+          {fileContentsCheckboxRow}
           <div className="row" style={{ marginTop: 14 }}>
-            <Pill kind="primary" disabled={!card || !checked || connecting} onClick={() => void beginOAuth()}>
+            <Pill kind="primary" disabled={!card || !checked || !fileContentsChecked || connecting} onClick={() => void beginOAuth()}>
               {connecting ? "Opening sign-in…" : "Sign in with OpenRouter"}
             </Pill>
           </div>

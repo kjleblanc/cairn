@@ -1,6 +1,7 @@
 import { app, safeStorage } from "electron";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
+import { atomicWriteText } from "../atomicwrite.js";
 
 /** The provider connection, at rest: the key is always encrypted-then-base64,
  * never held anywhere else. Only `decryptedKey` turns it back into a secret,
@@ -9,6 +10,10 @@ export interface StoredConnection {
   baseUrl: string;
   model: string;
   keyB64: string;
+  /** Exact `ConductorConsentCard.data` text the owner last authorized.
+   * Legacy records have null; unknown future strings are preserved so Cairn
+   * can pause them without discarding the saved credential. */
+  authorizedDataScope: string | null;
 }
 
 function filePath(): string {
@@ -41,22 +46,36 @@ export function readConnection(): StoredConnection | null {
     const data = JSON.parse(readFileSync(filePath(), "utf8")) as Partial<StoredConnection>;
     if (typeof data.baseUrl !== "string" || typeof data.model !== "string" || typeof data.keyB64 !== "string") return null;
     if (!isParsableUrl(data.baseUrl)) return null;
-    return { baseUrl: data.baseUrl, model: data.model, keyB64: data.keyB64 };
+    return {
+      baseUrl: data.baseUrl,
+      model: data.model,
+      keyB64: data.keyB64,
+      authorizedDataScope: typeof data.authorizedDataScope === "string" ? data.authorizedDataScope : null,
+    };
   } catch {
     return null;
   }
 }
 
 function writeConnection(conn: StoredConnection): void {
-  writeFileSync(filePath(), JSON.stringify(conn), "utf8");
+  atomicWriteText(filePath(), JSON.stringify(conn));
 }
 
 /** Encrypts `apiKey` with the OS key store and persists it alongside the
  * plain-text base URL and model. Throws if the platform cannot encrypt —
  * callers must check `encryptionAvailable()` first. */
-export function saveKey(baseUrl: string, model: string, apiKey: string): void {
+export function saveKey(baseUrl: string, model: string, apiKey: string, authorizedDataScope: string): void {
   const keyB64 = safeStorage.encryptString(apiKey).toString("base64");
-  writeConnection({ baseUrl, model, keyB64 });
+  writeConnection({ baseUrl, model, keyB64, authorizedDataScope });
+}
+
+/** Records the newly reviewed data scope without decrypting, replacing, or
+ * otherwise touching the saved credential bytes. */
+export function updateAuthorizedDataScope(authorizedDataScope: string): boolean {
+  const conn = readConnection();
+  if (!conn) return false;
+  writeConnection({ ...conn, authorizedDataScope });
+  return true;
 }
 
 /** Updates the model on an existing connection without touching the stored

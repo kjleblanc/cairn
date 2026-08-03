@@ -24,10 +24,15 @@ import type { ConductorConsentCard } from "../../shared/ipc.js";
 
 const KIMI_CODE_HOST = "api.kimi.com";
 
-/** What may flow during conversation. True for every body; unchanged since
- * the connected-conductor contract was written. */
+/** What may flow during conversation. True for every body. The bounded file
+ * snapshot is intentionally concrete here: this exact sentence is both what
+ * the owner authorizes and the version marker stored beside the encrypted
+ * key. Changing it pauses legacy connections until the owner reviews it. */
 const DATA_SCOPE =
-  "Your messages, this project's task records (PROJECT, the work log, recent briefs and reports), a summary of recent saved changes (the branch name and latest commit titles), and project file names. Never file contents. Never credentials. Cairn keeps conversation memory in a .cairn folder inside your project, kept out of git.";
+  "Your messages; the task records, recent saved-change summary, and file names for whichever project you are discussing; and a bounded snapshot of selected Git-tracked text-file contents (at most 8 files, 8,000 characters per file, and 32,000 characters total). Cairn excludes .env files, service-account keys, token stores, private keys, other credential-like files, Git-ignored files, dependencies, generated areas, binaries, links, the .git and .cairn areas, and anything outside the project. Never credentials. Cairn keeps conversation memory in the project's .cairn area, kept out of Git.";
+
+const FILE_CONTENTS_CHECKBOX =
+  "I separately allow Cairn to share the bounded project-file contents described above with this provider";
 
 /** Metered API accounts (OpenRouter and any custom OpenAI-compatible URL). */
 const API_COST =
@@ -51,5 +56,6 @@ export function consentCardFor(baseUrl: string, model: string): ConductorConsent
     data: DATA_SCOPE,
     cost: kimi ? KIMI_COST : API_COST,
     checkbox: kimi ? KIMI_CHECKBOX : API_CHECKBOX,
+    fileContentsCheckbox: FILE_CONTENTS_CHECKBOX,
   };
 }

@@ -25,6 +25,7 @@ import type { ConductorStatus, ConductorTurn } from "../src/shared/ipc.js";
 
 const STATUS: ConductorStatus = {
   connected: true,
+  consentRequired: false,
   baseUrl: "https://openrouter.ai/api/v1",
   model: "moonshotai/kimi-k2",
   provider: "openrouter.ai",
@@ -180,17 +181,49 @@ test("a paired phone reads the state snapshot — content only, no paths, no pro
   assert.ok(!body.includes(PROJECT_DIR), "the snapshot never carries the project's path");
   assert.ok(!body.includes(STATUS.baseUrl), "the snapshot never carries the provider URL");
   const snapshot = JSON.parse(body) as {
-    status: { connected: boolean; provider: string; model: string };
+    status: { connected: boolean; consentRequired: boolean; provider: string; model: string };
     project: { name: string };
     conversation: { id: string; turns: ConductorTurn[]; streaming: null };
     device: { name: string };
   };
-  assert.deepEqual(snapshot.status, { connected: true, provider: "openrouter.ai", model: "moonshotai/kimi-k2" });
+  assert.deepEqual(snapshot.status, {
+    connected: true,
+    consentRequired: false,
+    provider: "openrouter.ai",
+    model: "moonshotai/kimi-k2",
+  });
   assert.equal(snapshot.project.name, "Cairn");
   assert.equal(snapshot.conversation.id, "001");
   assert.equal(snapshot.conversation.turns.length, 2);
   assert.equal(snapshot.conversation.streaming, null);
   assert.equal(snapshot.device.name, "Test phone");
+  await bridge.close();
+});
+
+test("the phone names the updated-sharing pause and sends the owner to the computer", () => {
+  assert.match(
+    PHONE_PAGE,
+    /Cairn is paused until you review the updated project-file sharing permission on the computer\./,
+  );
+});
+
+test("a paired phone receives the saved-connection consent pause", async () => {
+  const paused = { ...STATUS, connected: false, consentRequired: true };
+  const { bridge, url } = await boot({ service: fakeService({ status: () => paused }) });
+  const { code } = bridge.beginPairing();
+  const cookie = cookieFrom(await pair(url, code));
+
+  const res = await fetch(`${url}/api/state`, { headers: { cookie } });
+  assert.equal(res.status, 200);
+  const snapshot = await res.json() as {
+    status: { connected: boolean; consentRequired: boolean; provider: string; model: string };
+  };
+  assert.deepEqual(snapshot.status, {
+    connected: false,
+    consentRequired: true,
+    provider: STATUS.provider,
+    model: STATUS.model,
+  });
   await bridge.close();
 });
 

@@ -53,7 +53,10 @@ test("the lantern sways, and stops swaying for reduced motion", () => {
   assert.ok(css.includes("@keyframes lantern-sway"), "the lantern does not sway");
   assert.ok(lanternRule().includes("lantern-sway"), "the sway is declared but never used");
   const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
-  assert.ok(reduced.includes(".chat-column-villager"), "the sway is not killed for reduced motion");
+  assert.ok(
+    reduced.includes(".chat-column.chat-column-villager"),
+    "the reduced-motion override is weaker than the two-class sway rule",
+  );
 });
 
 test("each disposition chip wears its own approved colour", () => {

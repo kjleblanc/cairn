@@ -104,7 +104,7 @@ test("an ordinary folder converts from the picker card and opens as a Cairn proj
     await card.locator('input[type="text"]').first().fill(fixtureUrl);
     await win.getByPlaceholder("e.g. moonshotai/kimi-k3").fill("convert-e2e-model");
     await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-test-key");
-    await card.locator('input[type="checkbox"]').check();
+    for (const checkbox of await card.locator('input[type="checkbox"]').all()) await checkbox.check();
     await win.getByRole("button", { name: "Connect" }).click();
     await expect(card).not.toBeVisible({ timeout: 10_000 });
 

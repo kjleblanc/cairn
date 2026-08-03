@@ -1033,7 +1033,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         </div>
 
         {status === null ? <p className="muted">Getting ready…</p> : null}
-        {status && !status.connected ? <ConnectCard onConnected={() => void refreshStatus()} /> : null}
+        {status && !status.connected ? <ConnectCard status={status} onConnected={() => void refreshStatus()} /> : null}
 
         {status?.connected ? (
           <>

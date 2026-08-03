@@ -29,6 +29,7 @@ const api: CairnApi = {
   conductorStatus: () => ipcRenderer.invoke("conductor:status"),
   conductorConsentCard: (baseUrl, model) => ipcRenderer.invoke("conductor:consentCard", baseUrl, model),
   conductorConnect: (request) => ipcRenderer.invoke("conductor:connect", request),
+  conductorRenewConsent: (request) => ipcRenderer.invoke("conductor:renewConsent", request),
   conductorOAuthBegin: (request) => ipcRenderer.invoke("conductor:oauthBegin", request),
   conductorOAuthCancel: () => ipcRenderer.invoke("conductor:oauthCancel"),
   onConductorOAuth: (callback) => {

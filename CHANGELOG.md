@@ -4,6 +4,27 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.7.0 — grounded in selected project files — 2026-08-03
+
+- Added a bounded, deterministic snapshot of selected current contents from
+  Git-tracked text files to the conductor briefing. It includes at most eight
+  files, 8,000 characters per file, and 32,000 characters total; the conductor
+  cites included files and still labels claims about unread files as guesses.
+- Kept file contents behind their own explicit authorization. Existing saved
+  conductor connections pause for renewal before the wider data scope can
+  flow, while Cairn preserves the encrypted key so the owner does not have to
+  paste or expose it again.
+- Restricted selection to the current project and excluded `.env` files,
+  service-account keys, token stores, private keys and other credential-like
+  paths, ignored or linked files, binary files, dependency or generated areas,
+  `.git`, `.cairn`, and anything outside the project. Selected text is untrusted
+  evidence, never instructions; credentials never flow.
+- Kept every existing safety gate: conversation consent does not approve a
+  worker dispatch, paid worker call, external write, deployment, or any other
+  concrete-risk action.
+- Advanced the contract, public companion, packages, and owner documentation to
+  Cairn Contract v0.7.0. Added no dependency.
+
 ## 0.6.0 — lanes, not two lanes — 2026-07-31
 
 - Expanded the two-lane protocol into an N-lane protocol, applying the

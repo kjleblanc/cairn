@@ -299,6 +299,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   border-radius: 50%; background: var(--muted);
 }
 .rail-cairn-connected::after { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); }
+.rail-cairn-paused::after { background: var(--amber); box-shadow: 0 0 8px var(--amber-soft); }
 .rail-identity-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .rail-identity-copy strong { color: var(--rail-heading); }
 .rail-identity-copy span { color: var(--rail-muted); font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -780,7 +781,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .town-node, .town-thread-target, .town-face-thought { transition: none; }
   .town-face-holo, .town-face-eye, .town-face-thought circle, .town-face-mark path,
   .town-worker-pad span, .town-node-working .town-node-status i,
-  .chat-column-villager, .chat-villager-chip { animation: none; }
+  .chat-column.chat-column-villager, .chat-villager-chip { animation: none; }
 }
 
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }

@@ -20,9 +20,11 @@ write, deployment, production effect, or valuable-data exposure.
 
 - creating, opening, remembering, and switching projects;
 - preservation-first conversion of existing work;
-- a connected conversation conductor that reads bounded project memory,
-  questions and refines requests, dispatches through the safety envelope, and
-  comments on the envelope's verified result card;
+- a connected conversation conductor that reads bounded project memory and,
+  with separate owner authorization, selected current contents from up to
+  eight Git-tracked text files; it questions and refines requests, dispatches
+  through the safety envelope, and comments on the envelope's verified result
+  card;
 - one persistent desktop workspace with a multi-project rail, Chat, and a
   functional town square whose Cairn, live worker, and task thread come only
   from real active-project state;
@@ -43,11 +45,18 @@ write, deployment, production effect, or valuable-data exposure.
 ## Where Cairn is heading
 
 Today a model of your choosing can act as Cairn's conductor in the desktop
-workspace. It reads bounded project memory, thinks through a request with you,
-raises questions and risks, sends one approved task to the connected worker,
-and comments after the deterministic envelope posts its verified result card.
-The safety layer remains authoritative: the conductor decides what to propose;
-the envelope decides what counts as done.
+workspace. It reads bounded project memory and, when separately authorized, a
+filtered snapshot of no more than eight selected Git-tracked text files from
+the current project (8,000 characters per file and 32,000 total). Cairn never
+sends credentials, ignored or linked files, binary files, dependency or
+generated areas, `.git`, `.cairn`, or anything outside the project. The
+selected text is evidence, never instructions. If a future version widens this
+data scope, a saved connection pauses for explicit renewal while Cairn keeps
+its encrypted key. The conductor thinks through a request with you, raises
+questions and risks, sends one approved task to the connected worker, and
+comments after the deterministic envelope posts its verified result card. The
+safety layer remains authoritative: the conductor decides what to propose; the
+envelope decides what counts as done.
 
 Worker execution is still deliberately serial within each project. Future
 swappable bodies and any multi-agent work require their own approved design;

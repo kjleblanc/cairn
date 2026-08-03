@@ -6,6 +6,7 @@ import type {
   ConductorDelta,
   ConductorOAuthEvent,
   ConductorOAuthRequest,
+  ConductorRenewConsentRequest,
   ConductorStatus,
   ConductorStreamSnapshot,
   ConductorTurn,
@@ -31,9 +32,10 @@ import { extractTaskBlock } from "./taskblock.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
+const CONSENT_REQUIRED = "CONDUCTOR_CONSENT_REQUIRED";
 const ENCRYPTION_UNAVAILABLE = "This computer cannot store the key securely, so Cairn did not save it.";
 const PROMPT_TOO_LARGE_MESSAGE =
-  "This conversation has grown past what Cairn can safely send. Start a new conversation — the project records keep what matters.";
+  "Cairn did not send this because the project briefing and conversation together are too large. Start a new conversation. If that also stops, the project's saved records need a smaller briefing.";
 
 /**
  * What a turn is FOR. The streaming body is one and the same; this decides
@@ -104,13 +106,22 @@ export function conductorConsentCard(baseUrl: string, model: string): ConductorC
 }
 
 function sameCard(a: ConductorConsentCard, b: ConductorConsentCard): boolean {
-  return a.provider === b.provider && a.baseUrl === b.baseUrl && a.model === b.model && a.data === b.data && a.cost === b.cost && a.checkbox === b.checkbox;
+  return a.provider === b.provider && a.baseUrl === b.baseUrl && a.model === b.model && a.data === b.data && a.cost === b.cost && a.checkbox === b.checkbox && a.fileContentsCheckbox === b.fileContentsCheckbox;
+}
+
+/** Consent is versioned by the exact main-derived data sentence the owner
+ * approved. Legacy, missing, and unknown scopes all fail closed while the
+ * encrypted credential remains available for an explicit renewal. */
+function hasCurrentConsent(conn: StoredConnection): boolean {
+  return conn.authorizedDataScope === conductorConsentCard(conn.baseUrl, conn.model).data;
 }
 
 export function status(): ConductorStatus {
   const conn = keystore.readConnection();
+  const consentCurrent = conn !== null && hasCurrentConsent(conn);
   return {
-    connected: conn !== null,
+    connected: consentCurrent,
+    consentRequired: conn !== null && !consentCurrent,
     baseUrl: conn?.baseUrl ?? "",
     model: conn?.model ?? "",
     provider: conn ? new URL(conn.baseUrl).host : "",
@@ -124,13 +135,29 @@ export function status(): ConductorStatus {
  * renderer's copy of the card, or an unchecked box. */
 export function connect(request: ConductorConnectRequest): Result<null> {
   const expected = conductorConsentCard(request.card.baseUrl, request.card.model);
-  if (!sameCard(expected, request.card) || request.consentConfirmed !== true) {
+  if (!sameCard(expected, request.card) || request.consentConfirmed !== true || request.fileContentsConfirmed !== true) {
     return { ok: false, message: CONNECT_NOT_AUTHORIZED };
   }
   if (!keystore.encryptionAvailable()) {
     return { ok: false, message: ENCRYPTION_UNAVAILABLE };
   }
-  keystore.saveKey(request.card.baseUrl, request.card.model, request.apiKey);
+  keystore.saveKey(request.card.baseUrl, request.card.model, request.apiKey, expected.data);
+  return { ok: true, value: null };
+}
+
+/** Renew a stale saved connection without decrypting or replacing its key and
+ * without contacting the provider. The current connection fixes the card's
+ * provider/model; renderer-supplied alternatives cannot retarget renewal. */
+export function renewConsent(request: ConductorRenewConsentRequest): Result<null> {
+  const conn = keystore.readConnection();
+  if (!conn) return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+  const expected = conductorConsentCard(conn.baseUrl, conn.model);
+  if (!sameCard(expected, request.card) || request.consentConfirmed !== true || request.fileContentsConfirmed !== true) {
+    return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+  }
+  if (!keystore.updateAuthorizedDataScope(expected.data)) {
+    return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+  }
   return { ok: true, value: null };
 }
 
@@ -163,7 +190,7 @@ export async function beginOAuth(
   emit: (event: ConductorOAuthEvent) => void,
 ): Promise<Result<{ authUrl: string }>> {
   const expected = conductorConsentCard(request.card.baseUrl, request.card.model);
-  if (!sameCard(expected, request.card) || request.consentConfirmed !== true) {
+  if (!sameCard(expected, request.card) || request.consentConfirmed !== true || request.fileContentsConfirmed !== true) {
     return { ok: false, message: CONNECT_NOT_AUTHORIZED };
   }
   if (request.card.baseUrl !== OPENROUTER_BASE_URL) {
@@ -196,7 +223,7 @@ export async function beginOAuth(
       if (liveOAuth !== attempt) return;
       liveOAuth = null;
       try {
-        keystore.saveKey(request.card.baseUrl, request.card.model, key);
+        keystore.saveKey(request.card.baseUrl, request.card.model, key, expected.data);
         emit({ kind: "done" });
       } catch {
         emit({ kind: "failed", message: ENCRYPTION_UNAVAILABLE });
@@ -220,6 +247,13 @@ export function cancelOAuth(): void {
 }
 
 export function setModel(model: string): void {
+  const conn = keystore.readConnection();
+  if (!conn) {
+    throw new Error("Connect to a provider before changing the model.");
+  }
+  if (!hasCurrentConsent(conn)) {
+    throw new Error(CONSENT_REQUIRED);
+  }
   if (!keystore.updateModel(model)) {
     throw new Error("Connect to a provider before changing the model.");
   }
@@ -319,6 +353,11 @@ export function send(
   if (!conn) {
     return { ok: false, message: "Connect to a provider before messaging Cairn." };
   }
+  // Refuse BEFORE creating a conversation or persisting the owner's turn. A
+  // stale saved key is preserved for renewal, but authorizes no model call.
+  if (!hasCurrentConsent(conn)) {
+    return { ok: false, message: CONSENT_REQUIRED };
+  }
 
   const id = conversationId ?? newConversationId(dir);
   ensureCairnExcluded(dir);
@@ -372,7 +411,7 @@ export function commentary(
   onDelta: (delta: ConductorDelta) => void,
 ): void {
   const conn = keystore.readConnection();
-  if (!conn) return;
+  if (!conn || !hasCurrentConsent(conn)) return;
   if (controllers.has(dir)) return;
   if (isTaskRunning(dir)) return;
   if (isQuitDraining()) return;
@@ -409,6 +448,8 @@ async function streamTurn(
   let costUsd: number | undefined;
   try {
     const history = readTurns(dir, id);
+    const latestOwnerTurn = [...history].reverse().find((turn) => turn.role === "owner");
+    const latestOwnerText = latestOwnerTurn?.role === "owner" ? latestOwnerTurn.text : "";
     // Task 127's custom-seat note goes right after the briefing, before any
     // history: it is a code-assembled connection fact (model id + host only,
     // both already visible to the provider), never the owner's words and
@@ -416,7 +457,7 @@ async function streamTurn(
     const seatNote = connectionNoteFor(conn.baseUrl, conn.model);
     const messages: ChatTurnMessage[] = [
       { role: "system", content: CONSTITUTION },
-      { role: "system", content: assembleBriefing(dir) },
+      { role: "system", content: assembleBriefing(dir, undefined, latestOwnerText) },
       ...(seatNote ? [{ role: "system", content: seatNote } satisfies ChatTurnMessage] : []),
       // A result card enters the prompt as SYSTEM context, labeled for what it
       // is: Cairn's runtime wrote it, the conversation model did not, and the

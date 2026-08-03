@@ -87,6 +87,21 @@ You connect a model provider through the provider's official interface or your
 operating system's credential store. The AI never asks for, observes, prints,
 copies, or logs the credential.
 
+The conversation conductor has standing consent only for the data named on its
+connect card. Project file contents are a separate choice. When you allow them,
+Cairn can send selected current contents from at most eight Git-tracked text
+files in the current project, limited to 8,000 characters per file and 32,000
+characters total. It excludes `.env` files, service-account keys, token stores,
+private keys and other credential-like paths, ignored files, links, binary
+files, dependency or generated areas, `.git`, `.cairn`, and anything outside
+the project. Credentials never flow, and selected text is evidence rather than
+instructions.
+
+If a future Cairn version widens the authorized data scope, a saved conductor
+connection pauses before the new data can flow. Cairn keeps the encrypted key
+while you review the change; the wider scope starts only after you explicitly
+renew the connection.
+
 Before a paid or data-bearing model call, the agent confirms:
 
 - provider and model;

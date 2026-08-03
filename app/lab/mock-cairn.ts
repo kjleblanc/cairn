@@ -115,6 +115,7 @@ const world = {
 
 const conductorStatus: ConductorStatus = {
   connected: true,
+  consentRequired: false,
   baseUrl: "https://lab.invalid",
   model: "lab-face-1",
   provider: "lab.invalid",
@@ -278,8 +279,10 @@ const mock: CairnApi = {
     data: "Nothing. The lab sends nothing anywhere — it is a design playground with canned data.",
     cost: "Free, always: the lab makes no model calls.",
     checkbox: "I understand the lab never connects to anything.",
+    fileContentsCheckbox: "I understand the lab never shares project-file contents.",
   })),
   conductorConnect: () => soon(ok(null)),
+  conductorRenewConsent: () => soon(ok(null)),
   // The lab never completes a sign-in: begin shows the waiting panel (so the
   // state is previewable) and no event ever arrives — Cancel is the way back.
   conductorOAuthBegin: () => soon(ok({ authUrl: "https://openrouter.ai/auth?callback_url=lab-demo" })),

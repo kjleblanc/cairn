@@ -107,6 +107,9 @@ export interface ConductorStreamSnapshot {
 
 export interface ConductorStatus {
   connected: boolean;
+  /** A saved credential exists, but its recorded sharing permission does not
+   * exactly match the disclosure Cairn would show today. */
+  consentRequired: boolean;
   baseUrl: string;
   model: string;
   provider: string;
@@ -123,12 +126,17 @@ export interface ConductorConsentCard {
    * card so a plan-based body never sits under a label that claims per-turn
    * billing. The renderer renders this string; it never writes one. */
   checkbox: string;
+  /** A second, explicit confirmation for the newly shared file-content
+   * snapshot. Main derives and verifies this text with the whole card. */
+  fileContentsCheckbox: string;
 }
 
 export interface ConductorConnectRequest {
   card: ConductorConsentCard;
   apiKey: string;
   consentConfirmed: boolean;
+  /** Main requires the value to be exactly true before it stores a connection. */
+  fileContentsConfirmed: boolean;
 }
 
 /**
@@ -141,6 +149,16 @@ export interface ConductorConnectRequest {
 export interface ConductorOAuthRequest {
   card: ConductorConsentCard;
   consentConfirmed: boolean;
+  /** See ConductorConnectRequest.fileContentsConfirmed. */
+  fileContentsConfirmed: boolean;
+}
+
+/** Re-authorize an already saved connection after Cairn's data scope changes.
+ * No key crosses IPC and no provider request is made. */
+export interface ConductorRenewConsentRequest {
+  card: ConductorConsentCard;
+  consentConfirmed: boolean;
+  fileContentsConfirmed: boolean;
 }
 
 /**
@@ -238,6 +256,7 @@ export interface CairnApi {
   conductorStatus(): Promise<ConductorStatus>;
   conductorConsentCard(baseUrl: string, model: string): Promise<Result<ConductorConsentCard>>;
   conductorConnect(request: ConductorConnectRequest): Promise<Result<null>>;
+  conductorRenewConsent(request: ConductorRenewConsentRequest): Promise<Result<null>>;
   conductorOAuthBegin(request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>>;
   conductorOAuthCancel(): Promise<Result<null>>;
   onConductorOAuth(cb: (event: ConductorOAuthEvent) => void): () => void;
