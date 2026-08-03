@@ -159,6 +159,7 @@ export function Workspace({
     // one never follows the owner across it, and neither does an open pond.
     setError(null);
     setPondOpen(false);
+    setChatNeedsYou(false);
     setTownTask(null);
     setTownStream(null);
     runtimeDirRef.current = null;

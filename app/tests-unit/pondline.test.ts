@@ -8,6 +8,7 @@ import {
   pondLineLabel,
   pondLineTone,
 } from "../src/renderer/town/presentation.js";
+import { TOWN_BOUNDS, TOWN_SHORE_BESIDE_CHAT, townShore } from "../src/renderer/town/layout.js";
 
 function session(overrides: Partial<RunSessionSnapshot> = {}): RunSessionSnapshot {
   return {
@@ -75,16 +76,48 @@ test("a decision waiting outranks everything else the water is doing", () => {
   }
 });
 
+test("the whole pond gives the cast the whole width", () => {
+  // Beside the conversation a villager stops at the shore; with the pond whole
+  // there is no conversation to stay clear of. Reverting this to a constant
+  // used to leave every other assertion green — the E2E checks containment in
+  // the pane, which a villager cannot escape whichever bound applies.
+  assert.equal(townShore(false), TOWN_SHORE_BESIDE_CHAT);
+  assert.equal(townShore(true), TOWN_BOUNDS.maxX);
+  assert.ok(townShore(true) > townShore(false), "the whole pond is no wider than the shore");
+});
+
 const css = readFileSync(join(__dirname, "..", "..", "src", "renderer", "app.css"), "utf8");
+
+/**
+ * The LAST `@media (max-width: 1260px)` block — the narrow-window block —
+ * brace-balanced.
+ *
+ * Slicing to end-of-file instead would reach past it into the Task 160 checkup
+ * rules AND the final reduced-motion block, so a `visibility: hidden` bound to
+ * some unrelated selector further down would satisfy the assertion below.
+ */
+function narrowBlock(): string {
+  const start = css.lastIndexOf("@media (max-width: 1260px)");
+  assert.notEqual(start, -1, "app.css has no narrow-window block");
+  let depth = 0;
+  for (let index = css.indexOf("{", start); index < css.length; index += 1) {
+    if (css[index] === "{") depth += 1;
+    else if (css[index] === "}" && --depth === 0) return css.slice(start, index + 1);
+  }
+  return assert.fail("app.css's narrow-window block never closes");
+}
 
 test("the pond is never reduced — it is whole, or it is a line", () => {
   // Wide: the line is not there at all. Narrow: the line is, and the pond's
   // contents wait behind it. Nothing anywhere shrinks the pond to fit.
   const base = css.slice(css.indexOf("\n.pond-line {"), css.indexOf("}", css.indexOf("\n.pond-line {")));
   assert.ok(base.includes("display: none"), "the line shows on the approved wide layout");
-  const narrow = css.slice(css.lastIndexOf("@media (max-width: 1260px)"));
+  const narrow = narrowBlock();
   assert.ok(narrow.includes(".pond-line { display: flex"), "the line never appears at any width");
-  assert.ok(narrow.includes("visibility: hidden"), "the pond's contents do not wait behind the line");
+  // The selector, not the bare property: hiding is only hiding if it is the
+  // pond's own ground that is hidden.
+  assert.match(narrow, /\.town-square-ground\s*[,{][^{}]*\{[^{}]*visibility:\s*hidden/,
+    "the pond's contents do not wait behind the line");
 });
 
 test("no new breakpoint was invented for the narrow window", () => {

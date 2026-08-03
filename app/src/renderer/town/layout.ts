@@ -18,6 +18,17 @@ export type TownLayoutOptions = {
 export const TOWN_CENTER: TownPoint = { x: 0.5, y: 0.43 };
 export const TOWN_BOUNDS = { minX: 0.13, maxX: 0.87, minY: 0.14, maxY: 0.78 } as const;
 
+/**
+ * The x a villager may not pass. Beside the conversation that is the shore of
+ * the pond; with the pond WHOLE (the narrow window, opened) there is no
+ * conversation to stay clear of, so the layout's own bound applies.
+ */
+export const TOWN_SHORE_BESIDE_CHAT = 0.52;
+
+export function townShore(wholePond: boolean): number {
+  return wholePond ? TOWN_BOUNDS.maxX : TOWN_SHORE_BESIDE_CHAT;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }

@@ -22,7 +22,12 @@ export function PondLine({ presentation, needsYou, open, onToggle }: {
         aria-expanded={open}
         onClick={() => onToggle(!open)}>
         <span className="pond-line-dot" aria-hidden="true" />
-        <span className="pond-line-text">{pondLineLabel(presentation, needsYou)}</span>
+        {/* The real live region for every width below 1260px, where the town
+            header — which carries it on the wide layout — is display:none.
+            A button's accessible name changing is not announced; this is. */}
+        <span className="pond-line-text" role="status" aria-live="polite" aria-atomic="true">
+          {pondLineLabel(presentation, needsYou)}
+        </span>
         <span className="pond-line-peek">
           look at the pond
           <span className="pond-line-chevron" aria-hidden="true">⌃</span>

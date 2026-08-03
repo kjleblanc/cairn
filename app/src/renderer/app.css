@@ -497,8 +497,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   --line: rgb(246 236 225 / 13%);
   color: var(--card-ink);
   /* The rise lands the panel; the sway begins where the rise ended, so the two
-     never fight over `transform`. Both die together under the reduced-motion
-     rule below, which already names this element. */
+     never fight over `transform`.
+     Killing these needs the reduced-motion block at the END of this file, not
+     the one above: a media query adds no specificity, so `.chat-column-villager`
+     up there is (0,1,0) and loses to this rule's (0,2,0). */
   animation: villager-rise .42s var(--spring) both, lantern-sway 8s ease-in-out .42s infinite;
 }
 /* Inside the dialog, only the message list gives. Before this, every child
@@ -1050,9 +1052,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .route-facts { grid-template-columns: repeat(3, 1fr); }
 
   /* Opening the pond puts the conversation away rather than shrinking it. */
+  /* Hidden from the keyboard too, not just the mouse: `pointer-events: none`
+     leaves the composer and every control tabbable off-screen, and focusing a
+     child translated 102% down can scroll this `overflow: hidden` pane and
+     shift the pond that is supposed to be whole. `visibility` is in the
+     transition list so the slide still plays before it goes. */
   .workspace-town-pane-pond-open .chat-column.chat-column-villager {
-    transform: translateY(102%); opacity: .35; pointer-events: none;
-    transition: transform .48s var(--pop), opacity .3s var(--ease);
+    transform: translateY(102%); opacity: .35; visibility: hidden; pointer-events: none;
+    transition: transform .48s var(--pop), opacity .3s var(--ease), visibility .48s;
   }
   .workspace-town-pane-pond-open .chat-villager-chip { display: none; }
 }

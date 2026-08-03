@@ -85,13 +85,18 @@ test("reduced motion WINS over the sway, rather than merely naming it", () => {
   // Equal specificity is settled by source order, so the property that
   // actually matters is that the LAST rule matching the sway's own selector is
   // the one that stops the animation.
-  const selectorAt = css.lastIndexOf(".chat-column.chat-column-villager");
   const reducedAt = css.lastIndexOf("@media (prefers-reduced-motion: reduce)");
-  assert.ok(reducedAt < selectorAt,
-    "the sway's selector is declared after the last reduced-motion block, so it wins");
-  const winner = css.slice(selectorAt, css.indexOf("}", selectorAt));
-  assert.ok(winner.includes("animation: none"),
-    "the last rule matching the sway's selector does not stop its animation");
+  const block = css.slice(reducedAt);
+  // Anchored to the start of a line, so the compound
+  // `.workspace-town-pane-pond-open .chat-column.chat-column-villager` — which
+  // is (0,3,0) and only applies while the pond is open — cannot stand in for
+  // the plain (0,2,0) selector that the sway is actually declared on.
+  assert.match(block, /^\s*\.chat-column\.chat-column-villager\s*[,{]/m,
+    "the last reduced-motion block does not carry the sway's own selector");
+  assert.ok(block.includes("animation: none"),
+    "the last reduced-motion block does not stop the lantern's animation");
+  assert.ok(reducedAt > css.indexOf("lantern-sway 8s"),
+    "the sway is declared after the last reduced-motion block, so it wins");
 });
 
 test("each disposition chip wears its own approved colour", () => {

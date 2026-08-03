@@ -9,7 +9,7 @@ import {
   type PointerEvent,
 } from "react";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../../shared/ipc";
-import { computeTownLayout, TOWN_BOUNDS, TOWN_CENTER } from "../town/layout";
+import { computeTownLayout, townShore, TOWN_BOUNDS, TOWN_CENTER } from "../town/layout";
 import { TOWN_FACES, faceForAdapter, type TownFaceDef, type TownFaceState } from "../town/faces";
 import { townModelFromRuntime, type TownEntity, type TownRelationship } from "../town/model";
 import { townPresentationStatus, type TownRuntimePresentation, type TownTruth } from "../town/presentation";
@@ -212,7 +212,7 @@ export function TownSquare({
   // breakpoint. When the narrow window shows the pond WHOLE there is no
   // conversation beside it, so the cast uses the layout's own full bound.
   // Stored coordinates are never rewritten either way.
-  const shore = wholePond ? TOWN_BOUNDS.maxX : 0.52;
+  const shore = townShore(wholePond);
   const points = useMemo(() => Object.fromEntries(
     Object.entries({ ...automaticPoints, ...dragPoints }).map(([id, point]) => [
       id,
