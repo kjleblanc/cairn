@@ -1116,9 +1116,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .pond-line, .pond-line-chevron, .pond-back { transition: none; }
   .pond-back:hover { transform: translateX(-50%); }
   /* Found while fixing the lantern's sway: these pre-date this work and lose
-     to the block at the top of the file the same way it did — the blink rules
-     are (0,2,0) against its (0,1,0), `-eye-l`/`-eye-r` are never matched by
-     `.town-face-eye` at any specificity, and the Gemini mark's
+     to the block at the top of the file the same way it did. Every one is a
+     specificity loss, not a miss — the eye groups carry both `town-face-eye`
+     and `town-face-eye-l`/`-r` (TownSquare.tsx:155-156), so that block's
+     `.town-face-eye` does match them and is simply outranked: the blink rules
+     are (0,2,0) against its (0,1,0), and the Gemini mark's
      `path:nth-child()` is (0,2,1) against its (0,1,1). The cast kept blinking
      for a user who asked it not to. */
   .town-face-blink-single .town-face-eye,
