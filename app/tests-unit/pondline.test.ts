@@ -86,6 +86,15 @@ test("the whole pond gives the cast the whole width", () => {
   assert.ok(townShore(true) > townShore(false), "the whole pond is no wider than the shore");
 });
 
+test("the whole-pond shore is wired to the prop, not pinned to a constant", () => {
+  // townShore's value table is pinned above, but a call site that passed a
+  // literal would keep every one of those assertions green.
+  const town = readFileSync(
+    join(__dirname, "..", "..", "src", "renderer", "components", "TownSquare.tsx"), "utf8");
+  assert.match(town, /const shore = townShore\(wholePond\)/,
+    "the render clamp is not wired to the wholePond prop");
+});
+
 const css = readFileSync(join(__dirname, "..", "..", "src", "renderer", "app.css"), "utf8");
 
 /**

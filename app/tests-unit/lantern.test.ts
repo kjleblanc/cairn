@@ -91,10 +91,15 @@ test("reduced motion WINS over the sway, rather than merely naming it", () => {
   // `.workspace-town-pane-pond-open .chat-column.chat-column-villager` — which
   // is (0,3,0) and only applies while the pond is open — cannot stand in for
   // the plain (0,2,0) selector that the sway is actually declared on.
-  assert.match(block, /^\s*\.chat-column\.chat-column-villager\s*[,{]/m,
-    "the last reduced-motion block does not carry the sway's own selector");
-  assert.ok(block.includes("animation: none"),
-    "the last reduced-motion block does not stop the lantern's animation");
+  // Bound to the sway's OWN rule, not to the block: the block now also carries
+  // the cast's blink rules, so a bare `block.includes("animation: none")` would
+  // be satisfied by a rule that has nothing to do with the lantern.
+  const match = block.match(/^\s*\.chat-column\.chat-column-villager\s*[,{]/m);
+  assert.ok(match, "the last reduced-motion block does not carry the sway's own selector");
+  const from = block.indexOf(match![0]);
+  const winner = block.slice(from, block.indexOf("}", from));
+  assert.ok(winner.includes("animation: none"),
+    "the rule carrying the sway's selector does not stop its animation");
   assert.ok(reducedAt > css.indexOf("lantern-sway 8s"),
     "the sway is declared after the last reduced-motion block, so it wins");
 });

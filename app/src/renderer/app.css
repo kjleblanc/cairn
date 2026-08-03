@@ -422,6 +422,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   text-align: left; cursor: pointer;
   transition: background-color .25s var(--ease);
 }
+.pond-line-live { display: none; }
 .pond-line:hover { background: rgb(43 51 74 / 82%); }
 .pond-line:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: -3px; }
 .pond-line-dot {
@@ -1016,9 +1017,21 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    This is a SECOND block at the SAME 1260px breakpoint, not a new one. It sits
    after the 621–1260 block because that block sets `left`, `width`, and
    `.town-square-ground { right }` at equal specificity and would otherwise win
-   on source order. */
+   on source order.
+   DO NOT let a CSS minifier merge these two same-condition blocks: a merged
+   block lands at the FIRST one's position, the 621–1260 block wins, and the
+   reduced pond the owner rejected comes back in production builds only.
+   conductor.spec.ts's `dialogTakesTheWindow` is what catches it. */
 @media (max-width: 1260px) {
   .pond-line { display: flex; }
+  /* Screen-reader-only, so the announcement exists at exactly the widths where
+     the town header's own `role="status"` is display:none — and nowhere else.
+     Above 1260px the base `display: none` prunes this from the accessibility
+     tree exactly as it prunes the button, so nothing is announced twice. */
+  .pond-line-live {
+    position: absolute; display: block; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
   .workspace-town-pane-pond-open .pond-back { display: block; }
 
   /* The town header is replaced by the line at this width. */
@@ -1102,4 +1115,18 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .workspace-town-pane-pond-open .chat-column.chat-column-villager { animation: none; transition: none; }
   .pond-line, .pond-line-chevron, .pond-back { transition: none; }
   .pond-back:hover { transform: translateX(-50%); }
+  /* Found while fixing the lantern's sway: these pre-date this work and lose
+     to the block at the top of the file the same way it did — the blink rules
+     are (0,2,0) against its (0,1,0), `-eye-l`/`-eye-r` are never matched by
+     `.town-face-eye` at any specificity, and the Gemini mark's
+     `path:nth-child()` is (0,2,1) against its (0,1,1). The cast kept blinking
+     for a user who asked it not to. */
+  .town-face-blink-single .town-face-eye,
+  .town-face-blink-double .town-face-eye-l,
+  .town-face-blink-slow .town-face-eye,
+  .town-face-blink-alternate .town-face-eye-l,
+  .town-face-blink-alternate .town-face-eye-r,
+  .town-face-blink-squeeze .town-face-eye,
+  .town-face-mark-gemini path:nth-child(1),
+  .town-face-mark-gemini path:nth-child(2) { animation: none; }
 }

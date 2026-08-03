@@ -9,7 +9,7 @@ import {
   type PointerEvent,
 } from "react";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../../shared/ipc";
-import { computeTownLayout, townShore, TOWN_BOUNDS, TOWN_CENTER } from "../town/layout";
+import { computeTownLayout, townShore, TOWN_BOUNDS, TOWN_CENTER, TOWN_SHORE_BESIDE_CHAT } from "../town/layout";
 import { TOWN_FACES, faceForAdapter, type TownFaceDef, type TownFaceState } from "../town/faces";
 import { townModelFromRuntime, type TownEntity, type TownRelationship } from "../town/model";
 import { townPresentationStatus, type TownRuntimePresentation, type TownTruth } from "../town/presentation";
@@ -315,7 +315,11 @@ export function TownSquare({
     const bounds = groundRef.current?.getBoundingClientRect();
     if (!bounds || bounds.width === 0 || bounds.height === 0) return TOWN_CENTER;
     return {
-      x: Math.max(TOWN_BOUNDS.minX, Math.min(shore, (clientX - bounds.left) / bounds.width)),
+      // The RENDER clamp relaxes with the whole pond so the cast can spread;
+      // what a drag SAVES does not. A pointer must not place a villager where
+      // the wide layout will clamp it back invisibly — the "Reset layout"
+      // control lives in the town header, which is hidden below 1260px.
+      x: Math.max(TOWN_BOUNDS.minX, Math.min(TOWN_SHORE_BESIDE_CHAT, (clientX - bounds.left) / bounds.width)),
       y: Math.max(TOWN_BOUNDS.minY, Math.min(TOWN_BOUNDS.maxY, (clientY - bounds.top) / bounds.height)),
     };
   }
