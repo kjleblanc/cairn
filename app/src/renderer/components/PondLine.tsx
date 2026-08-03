@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { pondLineLabel, pondLineTone, type TownRuntimePresentation } from "../town/presentation";
 
 /**
@@ -16,9 +17,14 @@ export function PondLine({ presentation, needsYou, open, onToggle }: {
   onToggle: (open: boolean) => void;
 }) {
   const tone = pondLineTone(presentation, needsYou);
+  // Closing the pond unmounts `.pond-back`, which would drop focus to <body>
+  // and lose the keyboard's place entirely. Focus goes back to the line that
+  // opened the pond — the control that now says what the water is doing.
+  const lineRef = useRef<HTMLButtonElement>(null);
   return (
     <>
       <button type="button" className={`pond-line pond-line-${tone}`}
+        ref={lineRef}
         aria-expanded={open}
         onClick={() => onToggle(!open)}>
         <span className="pond-line-dot" aria-hidden="true" />
@@ -37,7 +43,8 @@ export function PondLine({ presentation, needsYou, open, onToggle }: {
         {pondLineLabel(presentation, needsYou)}
       </span>
       {open ? (
-        <button type="button" className="pond-back" onClick={() => onToggle(false)}>
+        <button type="button" className="pond-back"
+          onClick={() => { onToggle(false); lineRef.current?.focus(); }}>
           Back to the conversation
         </button>
       ) : null}

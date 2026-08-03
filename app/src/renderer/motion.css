@@ -119,4 +119,17 @@
   .town-transfer-packet, .town-transfer-ripple, .town-terminal-ripple { display: none; }
   .town-node, .chat-composer button, .town-square-header button,
   .rail-action, .rail-collapse, .town-pond-layer { transition: none; }
+  /* `town-face-pop` is declared on eight COMPOUND selectors above — each
+     (0,2,0) — while `.town-face-svg` in the kill list is (0,1,0) and loses to
+     every one of them. Naming the element was never enough: the whole cast
+     still popped on every state change for a user who asked for no motion. The
+     eight are repeated verbatim so the tie is settled by source order instead. */
+  .town-node-ready .town-face-svg,
+  .town-node-thinking .town-face-svg,
+  .town-node-starting .town-face-svg,
+  .town-node-working .town-face-svg,
+  .town-node-checking .town-face-svg,
+  .town-node-done .town-face-svg,
+  .town-node-stopped .town-face-svg,
+  .town-node-error .town-face-svg { animation: none; }
 }

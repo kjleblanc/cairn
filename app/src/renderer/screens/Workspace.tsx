@@ -154,6 +154,14 @@ export function Workspace({
     return () => query.removeEventListener("change", update);
   }, []);
 
+  // The pond is a narrow-window state and nothing else. Widening past 1260px
+  // leaves the wide layout showing with `pondOpen` still true, so narrowing
+  // again would land on an open pond with the conversation already put away —
+  // a state the owner never asked for and cannot see coming.
+  useEffect(() => {
+    if (!narrow) setPondOpen(false);
+  }, [narrow]);
+
   useEffect(() => {
     // A new active project is a new context: a stale error card from the old
     // one never follows the owner across it, and neither does an open pond.

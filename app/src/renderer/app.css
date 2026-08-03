@@ -496,6 +496,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   --card-ink: var(--lantern-ink);
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);
+  /* The panel is dark paper in BOTH themes now, so the theme-paired warning
+     tokens have to come with it — in light theme --stop-soft is a bright pale
+     block on dark paper, and --stop text measures ~3:1 against the card. */
+  --stop: var(--pond-stop);
+  --stop-soft: color-mix(in srgb, var(--pond-stop) 18%, transparent);
   color: var(--card-ink);
   /* The rise lands the panel, and then it STAYS landed.
      The approved lantern-v3 mockup swayed the whole lantern on an 8s loop, and
@@ -550,8 +555,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: absolute; top: 30%; max-width: 250px;
   left: max(16px, min(calc(50% + 84px), calc(100% - 266px)));
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 16px; border: 0; border-radius: 18px 18px 18px 4px;
-  background: var(--card-solid); color: var(--card-ink); font: inherit;
+  /* The chip is the lantern's put-away form, but it sits OUTSIDE
+     `.chat-column-villager`, so it resolved the GLOBAL `--card-solid` /
+     `--card-ink` — the bright cream fill Decision 9 exists to remove, sitting
+     on the dark pond. It carries the lantern's own paper and border instead. */
+  padding: 9px 16px; border: 1px solid rgb(246 236 225 / 12%);
+  border-radius: 18px 18px 18px 4px;
+  background: linear-gradient(170deg, var(--lantern-paper-lit), var(--lantern-paper) 62%);
+  color: var(--lantern-ink); font: inherit;
   font-size: .84rem; text-align: left; cursor: pointer;
   box-shadow: 0 10px 28px rgb(0 0 0 / 24%);
   animation: villager-bob 5s ease-in-out infinite;
@@ -602,6 +613,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .chat-column-villager .chat-composer textarea { border-radius: 18px; padding: 12px 16px; }
 .chat-column-villager .bubble-system { border-radius: 16px; }
+/* A popover needs an opaque fill. `--card-solid` is re-pointed to a 7% wash on
+   the lantern (right for the composer field it came from, wrong for a panel
+   that drops over the conversation and would read straight through). */
+.chat-column-villager .body-pill-panel { background: var(--lantern-paper-lit); }
 
 /* The lantern's buttons. The globals above give every pill its chunky edge;
    these give the lantern's three the mockup's own colours. Specificity note:
@@ -642,7 +657,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;
   justify-content: space-between; gap: 16px; padding: 11px 16px;
-  border-bottom: 1px solid rgb(112 227 211 / 13%); background: rgb(17 23 42 / 78%);
+  /* Decision 9, rule 3: the pre-pastel teal and the retired --pond-deep both
+     survived here as raw literals. Same alphas, pastel hues — `163 221 208` is
+     Cairn's own #a3ddd0 and `22 27 44` is --lantern-deep, the substitution
+     .town-thread-target already makes. Only the hue moves. */
+  border-bottom: 1px solid rgb(163 221 208 / 13%); background: rgb(22 27 44 / 78%);
   backdrop-filter: blur(14px);
 }
 .town-project-label { display: flex; min-width: 0; flex-direction: column; }
@@ -655,9 +674,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   min-width: 0; max-width: min(42vw, 390px); margin: 0; overflow: hidden; color: var(--lantern-ink);
   font-size: .74rem; text-align: right; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 7% is the mockup's own ghost-button FILL (`.l3-ghost`, lantern-v3.html:80).
+   The 8% this carried came from a hairline BORDER declaration, which is not a
+   fill alpha; the rule it replaced used 7% too, so 7% is doubly sourced. */
 .town-square-header button {
   flex: none; padding: 6px 12px; border: 0; border-radius: 999px;
-  background: rgb(246 236 225 / 8%); color: var(--lantern-soft);
+  background: rgb(246 236 225 / 7%); color: var(--lantern-soft);
   font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
 /* 14% is the mockup's own hover fill (`.l3-ghost:hover`, lantern-v3.html:81). */
@@ -734,11 +756,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   align-items: center; justify-content: center; gap: 4px; touch-action: manipulation;
   transition: left 320ms var(--spring), top 320ms var(--spring), background-color 160ms ease;
 }
-.town-node:hover { background: rgb(112 227 211 / 7%); }
+.town-node:hover { background: rgb(163 221 208 / 7%); }
 .town-node:focus-visible, .town-thread-target:focus-visible, .town-detail-action:focus-visible {
   outline: 3px solid var(--town-focus); outline-offset: 3px;
 }
-.town-node[aria-pressed="true"] { background: rgb(112 227 211 / 11%); box-shadow: 0 0 0 1px rgb(112 227 211 / 38%); }
+.town-node[aria-pressed="true"] { background: rgb(163 221 208 / 11%); box-shadow: 0 0 0 1px rgb(163 221 208 / 38%); }
 .town-node-worker { cursor: grab; }
 .town-node-worker[data-dragging="true"] { cursor: grabbing; transition: none; }
 .town-node strong {
@@ -820,9 +842,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: absolute; inset: 3px 7px; border-radius: 50%;
   background: radial-gradient(ellipse, color-mix(in srgb, var(--agent-color) 16%, transparent), transparent 72%);
 }
+/* 7% for the same reason as the header's button above: the 9% here was a
+   hairline border's alpha spent as a fill. */
 .town-overflow-shape {
   width: 64px; height: 48px; display: grid; place-items: center; border: 0;
-  border-radius: 24px; background: rgb(246 236 225 / 9%); color: var(--lantern-ink);
+  border-radius: 24px; background: rgb(246 236 225 / 7%); color: var(--lantern-ink);
   font: inherit; font-size: .9rem; font-weight: 700;
 }
 .town-thread-target {
@@ -951,12 +975,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .log-row { align-items: flex-start; flex-direction: column; }
   .chat-column { width: calc(100% - 16px); height: calc(100% - 16px); margin: 8px auto 0; padding: 12px 14px; }
   .bubble { max-width: 92%; }
-  /* The villager dialog centers itself on narrow panes (its keyframe
-     transforms would otherwise override the centering). */
-  .chat-column.chat-column-villager {
-    left: 50%; top: 8%; transform: translateX(-50%);
-    width: min(520px, calc(100% - 24px)); max-height: 84%; animation: none;
-  }
   .chat-villager-chip {
     left: 50%; top: auto; bottom: 16%; transform: translateX(-50%);
     max-width: calc(100% - 32px); animation: none;
@@ -1055,6 +1073,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* Whole, not reduced: the ground fills the pane under the line. */
   .workspace-town-pane .town-square-ground { inset: 54px 12px 12px; }
   .workspace-town-pane .town-detail { inset: auto 12px 68px 12px; }
+  /* Clear of the "back to the conversation" pill, exactly as .town-detail is:
+     these two are the arms of one ternary and only the other was moved. */
+  .workspace-town-pane .town-empty-note { inset: auto 18px 68px; }
 
   /* The conversation takes the window. */
   .chat-column.chat-column-villager {
@@ -1062,6 +1083,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
     width: auto; height: auto; max-height: none; transform: none;
     border-radius: 26px; padding: 15px;
     animation: villager-rise .42s var(--spring) both;
+    /* The put-away transition belongs on the BASE rule, as narrow-v2.html:52
+       has it, so it is symmetric: declared only on the open-state rule, the
+       slide plays on the way out and the panel SNAPS back, because removing
+       the class leaves the after-change style with no transition to run. */
+    transition: transform .48s var(--pop), opacity .3s var(--ease), visibility .48s;
   }
   /* With the full width back, the top bar and run controls need none of the
      621–1260 block's cramping. */
@@ -1078,7 +1104,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      transition list so the slide still plays before it goes. */
   .workspace-town-pane-pond-open .chat-column.chat-column-villager {
     transform: translateY(102%); opacity: .35; visibility: hidden; pointer-events: none;
-    transition: transform .48s var(--pop), opacity .3s var(--ease), visibility .48s;
   }
   .workspace-town-pane-pond-open .chat-villager-chip { display: none; }
 }
