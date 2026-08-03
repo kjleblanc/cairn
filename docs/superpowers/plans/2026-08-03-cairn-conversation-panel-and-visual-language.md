@@ -496,14 +496,24 @@ test("still water: a spent ripple is never replayed by a later poll", () => {
     phase: "closed",
     result: { status: "done", disposition: "DONE" } as RunSessionSnapshot["result"],
   });
-  // One observation of a finished run earns exactly one landing.
+  // One observation of a finished run earns two landings: the result returning
+  // to Cairn, then DONE. The obsolete dispatch is dropped — a handoff that is
+  // already over is not news. (`a collapsed snapshot omits an obsolete dispatch
+  // but keeps return then DONE`, above, pins that ordering.)
   let state = observeTownPresentation(hydrateTownPresentation(null, null), closed, null, true);
-  const landed = state.activeCue;
-  assert.equal(landed?.kind, "done");
-  state = advanceTownCue(state, landed!.key);
-  assert.equal(state.activeCue, null);
+  assert.equal(state.activeCue?.kind, "return");
 
-  // Every later poll of the same snapshot leaves the water still.
+  // Drain every earned ripple, then the water must be still.
+  const spent: string[] = [];
+  for (let step = 0; state.activeCue && step < 10; step += 1) {
+    const key = state.activeCue.key;
+    if (!spent.includes(key)) spent.push(key);
+    state = advanceTownCue(state, key);
+  }
+  assert.equal(state.activeCue, null, "the water never went still");
+  assert.deepEqual(spent.map((key) => key.split(":").at(-1)), ["return", "done"]);
+
+  // Every later poll of the same snapshot leaves it still.
   for (let poll = 0; poll < 12; poll += 1) {
     state = observeTownPresentation(state, closed, null, true);
     assert.equal(state.activeCue, null, `poll ${poll} replayed a spent ripple`);
