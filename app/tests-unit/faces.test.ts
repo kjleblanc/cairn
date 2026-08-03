@@ -67,9 +67,11 @@ test("the owner-approved identity colors stay exact and separate from outcome co
     assert.doesNotMatch(face.color, /green|stop|moss|coral/i);
   }
 
+  // Decision 9, rule 3: the cast keeps its identity tokens; the values inside
+  // them moved to the owner's pastel set on 2026-08-02.
   const tokensCss = readFileSync(join(__dirname, "..", "..", "src", "renderer", "tokens.css"), "utf8");
-  assert.match(tokensCss, /--garden-cyan:\s*#7fd8c8;/);
-  assert.match(tokensCss, /--face-kimi:\s*#c9a7e8;/);
-  assert.match(tokensCss, /--face-codex:\s*#f2a35c;/);
-  assert.match(tokensCss, /--face-claude:\s*#9fb8d8;/);
+  assert.match(tokensCss, /--garden-cyan:\s*#a3ddd0;/);
+  assert.match(tokensCss, /--face-kimi:\s*#d5c0ec;/);
+  assert.match(tokensCss, /--face-codex:\s*#f3c49a;/);
+  assert.match(tokensCss, /--face-claude:\s*#b8c9de;/);
 });

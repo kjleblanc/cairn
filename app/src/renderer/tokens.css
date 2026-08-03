@@ -58,9 +58,13 @@
      transparent. */
   --garden-deep: #2c2842;
   --garden-ink: #35304f;
-  --garden-cyan: #7fd8c8;
-  --garden-cyan-dim: rgb(127 216 200 / 35%);
-  --garden-cyan-glow: rgb(127 216 200 / 9%);
+  /* Decision 9, rule 3 (owner, 2026-08-02): the muted pastels supersede the
+     saturated set. Cairn's is #a3ddd0; its dim and glow are that colour, not
+     a second choice. --neon below keeps the old teal — it is the project
+     rail's colour and is outside Decision 9. */
+  --garden-cyan: #a3ddd0;
+  --garden-cyan-dim: rgb(163 221 208 / 35%);
+  --garden-cyan-glow: rgb(163 221 208 / 9%);
   --garden-amber: #f2b95c;
   --garden-amber-soft: rgb(242 185 92 / 6%);
   --garden-amber-glow: rgb(242 185 92 / 8%);
@@ -72,19 +76,24 @@
   --pond-plum: #2c2644;
   --pond-water: rgb(76 174 177 / 12%);
   --pond-line: rgb(112 227 211 / 17%);
-  --pond-task: #ffb467;
-  --pond-result: #70e3d3;
-  --pond-done: #a9d39b;
-  --pond-stop: #ff8178;
+  --pond-task: #f7d3a8;
+  /* "The result is with Cairn" — Cairn's own approved colour, not an eighth.
+     TownSquare.tsx already paints a returning ripple with it; now the ripple
+     and the status text agree. */
+  --pond-result: #a3ddd0;
+  --pond-done: #c2ddb6;
+  --pond-stop: #f2aaa4;
   /* The cast (owner-approved, Task 152 board; ported Task 156): each worker
      model's signature color on the night garden. Cairn stays --garden-cyan
      and the fallback worker keeps --garden-amber. */
-  --face-kimi: #c9a7e8;
-  --face-kimi-glow: rgb(201 167 232 / 9%);
-  --face-codex: #f2a35c;
-  --face-codex-glow: rgb(242 163 92 / 9%);
-  --face-claude: #9fb8d8;
-  --face-claude-glow: rgb(159 184 216 / 9%);
+  --face-kimi: #d5c0ec;
+  --face-kimi-glow: rgb(213 192 236 / 9%);
+  --face-codex: #f3c49a;
+  --face-codex-glow: rgb(243 196 154 / 9%);
+  --face-claude: #b8c9de;
+  --face-claude-glow: rgb(184 201 222 / 9%);
+  /* Not part of Decision 9: the owner approved four cast colours, and Gemini
+     is not one of them. Left saturated deliberately rather than guessed at. */
   --face-gemini: #8ad8b0;
   --face-gemini-glow: rgb(138 216 176 / 9%);
   --garden-face-cairn: #ffe9d6;
@@ -110,6 +119,18 @@
     radial-gradient(1px 1px at 68% 78%, var(--garden-star-dim) 50%, transparent 51%),
     radial-gradient(1.5px 1.5px at 8% 82%, var(--garden-star) 50%, transparent 51%),
     radial-gradient(1px 1px at 30% 90%, var(--garden-star-dim) 50%, transparent 51%);
+  /* Lantern on Water (Decision 9). The panel's own warm paper and the water it
+     rests on, transcribed from the approved lantern-v3 mockup, plus its two
+     easing curves: --pop overshoots (New Horizons), --ease settles. */
+  --lantern-deep: #161b2c;
+  --lantern-mid: #212739;
+  --lantern-plum: #2f2946;
+  --lantern-paper: #332c3a;
+  --lantern-paper-lit: #3d3444;
+  --lantern-ink: #f6ece1;
+  --lantern-soft: #c3b3a6;
+  --pop: cubic-bezier(.34, 1.56, .64, 1);
+  --ease: cubic-bezier(.22, .9, .3, 1);
   --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
   --r: 22px;
   --r-sm: 14px;

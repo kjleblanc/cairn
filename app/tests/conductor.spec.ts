@@ -1018,13 +1018,13 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
     entry.motion === "dispatch-flight" && entry.receiver === "codex"
       && entry.packetText === "TASK" && entry.packet && !entry.ripple
-      && entry.cairnStroke === "rgb(127, 216, 200)"
-      && entry.workerStroke === "rgb(242, 163, 92)"), { timeout: 10_000 }).toBe(true);
+      && entry.cairnStroke === "rgb(163, 221, 208)"
+      && entry.workerStroke === "rgb(243, 196, 154)"), { timeout: 10_000 }).toBe(true);
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
     entry.motion === "dispatch-landing" && entry.receiver === "codex"
-      && entry.rippleColor === "rgb(242, 163, 92)"
+      && entry.rippleColor === "rgb(243, 196, 154)"
       && entry.rippleReceiverDistance !== null && entry.rippleReceiverDistance < 70
-      && entry.workerStroke === "rgb(242, 163, 92)"
+      && entry.workerStroke === "rgb(243, 196, 154)"
       && !entry.packet && entry.ripple), { timeout: 10_000 }).toBe(true);
 
   // Let this cue settle, then cross a full two-second workspace poll. The same
@@ -1376,8 +1376,8 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   { timeout: 15_000 }).toBe(true);
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
     entry.motion === "stopped-landing" && entry.outcome === "stopped"
-      && entry.rippleColor === "rgb(255, 129, 120)"
-      && entry.cairnStroke === "rgb(127, 216, 200)"
+      && entry.rippleColor === "rgb(242, 170, 164)"
+      && entry.cairnStroke === "rgb(163, 221, 208)"
       && entry.terminalRipple && entry.cairnFace === "thinking" && !entry.doneFace),
   { timeout: 15_000 }).toBe(true);
   const stoppedEntries = await townMotionProbe(win);
@@ -1391,7 +1391,7 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   await expect(town.locator(".town-node-cairn")).toHaveAttribute("data-face-state", "thinking");
   await expect(town.locator(".town-node-done")).toHaveCount(0);
   await expect.poll(() => town.locator(".town-face-cairn .town-face-svg path").first()
-    .evaluate((element) => getComputedStyle(element).stroke)).toBe("rgb(127, 216, 200)");
+    .evaluate((element) => getComputedStyle(element).stroke)).toBe("rgb(163, 221, 208)");
 
   // The card arrives from the SETTLED run promise, so by the time it is on
   // screen the send gate is already open — Task 9's commentary depends on that
@@ -1442,18 +1442,18 @@ test("a worker's claims render only inside the card's claims block, never as a v
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
     entry.motion === "return-flight" && entry.receiver === "cairn"
       && entry.packetText === "RESULT" && entry.packet && !entry.ripple
-      && entry.cairnStroke === "rgb(127, 216, 200)"), { timeout: 15_000 }).toBe(true);
+      && entry.cairnStroke === "rgb(163, 221, 208)"), { timeout: 15_000 }).toBe(true);
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
     entry.motion === "return-landing" && entry.receiver === "cairn"
-      && entry.rippleColor === "rgb(127, 216, 200)"
+      && entry.rippleColor === "rgb(163, 221, 208)"
       && entry.rippleReceiverDistance !== null && entry.rippleReceiverDistance < 70
       && !entry.packet && entry.ripple), { timeout: 15_000 }).toBe(true);
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
     entry.motion === "done-landing" && entry.outcome === "done"
-      && entry.rippleColor === "rgb(169, 211, 155)"
-      && entry.cairnStroke === "rgb(127, 216, 200)"
+      && entry.rippleColor === "rgb(194, 221, 182)"
+      && entry.cairnStroke === "rgb(163, 221, 208)"
       && entry.terminalRipple && (entry.cairnFace === "done" || entry.cairnFace === "thinking")),
   { timeout: 15_000 }).toBe(true);
 
@@ -1475,7 +1475,7 @@ test("a worker's claims render only inside the card's claims block, never as a v
   await expect(town.locator(".town-node-cairn.town-node-done")).toHaveCount(1);
   await expect(town.locator(".town-square-header [role=status]")).toContainText("DONE");
   await expect.poll(() => town.locator(".town-face-cairn .town-face-svg path").first()
-    .evaluate((element) => getComputedStyle(element).stroke)).toBe("rgb(127, 216, 200)");
+    .evaluate((element) => getComputedStyle(element).stroke)).toBe("rgb(163, 221, 208)");
   expect((await townMotionProbe(win)).some((entry) => entry.outcome === "stopped" || /STOPPED/.test(entry.status))).toBe(false);
 
   // Let the terminal ripple settle. Multiple task/conductor refreshes and at
