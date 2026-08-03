@@ -1079,3 +1079,20 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .checkup-finding p { margin: 0; }
 .checkup-finding .pill { margin-top: 6px; }
 .checkup-basis { margin-top: 14px; }
+
+/* Reduced motion, part two — placed LAST in the file, deliberately.
+   A media query adds no specificity, so the block near the top loses to every
+   `.chat-column.chat-column-villager` rule below it, including the one that
+   declares the lantern's infinite sway. Naming the element up there was never
+   enough; only source order settles a tie. Everything here reaches the SAME
+   final state as the motion it replaces — the chevron still points the other
+   way when the pond is open, the conversation is still put away, the lantern
+   still sits where it landed. Nothing travels to get there.
+   `.pond-back` keeps `translateX(-50%)` rather than taking `transform: none`,
+   because that transform is its centring, not its animation. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-column.chat-column-villager,
+  .workspace-town-pane-pond-open .chat-column.chat-column-villager { animation: none; transition: none; }
+  .pond-line, .pond-line-chevron, .pond-back { transition: none; }
+  .pond-back:hover { transform: translateX(-50%); }
+}

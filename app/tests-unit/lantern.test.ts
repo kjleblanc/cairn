@@ -75,6 +75,25 @@ test("the lantern sways, and stops swaying for reduced motion", () => {
     "the sway is not killed for reduced motion");
 });
 
+test("reduced motion WINS over the sway, rather than merely naming it", () => {
+  // The sway is declared on `.chat-column.chat-column-villager` — two classes,
+  // (0,2,0). The reduced-motion block above names `.chat-column-villager`,
+  // which is (0,1,0) and LOSES to it. So for a while the lantern swayed on
+  // under reduced motion and the test above passed anyway, which is why this
+  // second one exists: naming an element is not the same as beating it.
+  //
+  // Equal specificity is settled by source order, so the property that
+  // actually matters is that the LAST rule matching the sway's own selector is
+  // the one that stops the animation.
+  const selectorAt = css.lastIndexOf(".chat-column.chat-column-villager");
+  const reducedAt = css.lastIndexOf("@media (prefers-reduced-motion: reduce)");
+  assert.ok(reducedAt < selectorAt,
+    "the sway's selector is declared after the last reduced-motion block, so it wins");
+  const winner = css.slice(selectorAt, css.indexOf("}", selectorAt));
+  assert.ok(winner.includes("animation: none"),
+    "the last rule matching the sway's selector does not stop its animation");
+});
+
 test("each disposition chip wears its own approved colour", () => {
   for (const [selector, token] of [
     [".chat-column-villager .result-card-done", "var(--pond-done)"],
