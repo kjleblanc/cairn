@@ -553,7 +553,8 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   background: rgb(246 236 225 / 8%); color: var(--lantern-soft);
   font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
-.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 15%); color: var(--lantern-ink); }
+/* 14% is the mockup's own hover fill (`.l3-ghost:hover`, lantern-v3.html:81). */
+.town-square-header button:hover:not(:disabled) { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
 .town-square-header button:disabled { opacity: .38; cursor: default; }
 /* The sheen: the water breathes, it does not draw. Two soft pastel blooms from
    the approved lantern-v3 frame, blurred well past any edge. Its drift lives
@@ -596,13 +597,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 /* The packet keeps its word — the owner should be able to read what is
    crossing the water — but says it in the app's own rounded voice.
    `rgb(22 27 44 / …)` throughout this task is --lantern-deep (#161b2c) with an
-   alpha, the same shape the old rules used with the retired --pond-deep. It is
-   a derivation of an approved colour, not a new one. */
+   alpha, the same shape the old rules used with the retired --pond-deep — and
+   with the SAME alphas those rules carried (92% here, 88% and 62% on the thread
+   target below), so only the hue moves. It is a derivation of an approved
+   colour, not a new one. */
 .town-transfer-packet {
   position: absolute; left: var(--town-from-x); top: var(--town-from-y); display: flex; align-items: center; gap: 6px;
   min-width: 48px; max-width: 86px; padding: 5px 11px; transform: translate(-50%, -50%);
   border: 0; border-radius: 999px;
-  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 94%));
+  background: color-mix(in srgb, var(--town-packet-color) 22%, rgb(22 27 44 / 92%));
   color: var(--lantern-ink); box-shadow: 0 0 18px color-mix(in srgb, var(--town-packet-color) 28%, transparent);
   font: inherit; font-size: .68rem; font-weight: 700; white-space: nowrap;
 }
@@ -713,7 +716,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: absolute; z-index: 4; min-width: 74px; padding: 5px 10px; transform: translate(-50%, -50%);
   border: 0; border-radius: 999px; background: rgb(22 27 44 / 88%);
   color: var(--lantern-ink); font: inherit; cursor: pointer;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 28%);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 24%);
   transition: left 320ms var(--spring), top 320ms var(--spring), background-color 160ms ease;
 }
 .town-thread-target span { color: var(--pond-result); }
