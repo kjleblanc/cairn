@@ -323,13 +323,41 @@ Five rules follow from the owner's corrections:
    (600–850), never thin. `prefers-reduced-motion` still reaches the same
    final state.
 
-**Known unsolved, and not to be discovered late.** All four explored directions
-failed at the narrow supported window (760×620), each differently: content
-silently clipped, a responsive rule that never fired at the size it was written
-for, the direction's premise vanishing, and a hard-coded width with no
-responsive rule at all. **Narrow-window behaviour is the binding constraint on
-this work, not the aesthetic**, and the plan must treat it as a first-class
-requirement rather than a final polish pass.
+**The narrow window — resolved 2026-08-03, owner-approved.** All four explored
+directions failed at 760×620, each differently: content silently clipped, a
+responsive rule that never fired at the size it was written for, the premise
+vanishing, and a hard-coded width with no responsive rule at all. Four
+failures, one cause: **each tried to shrink its wide layout.**
+
+A first attempt kept a reduced pond as a horizontal band. The owner's verdict
+was that it *"reads more consolation prize"*, which settled the rule:
+
+> **A line is honest because it is a line. A small pond is dishonest because it
+> pretends to be a picture.**
+
+The resolution, approved on the interactive mockup:
+
+- **The pond is never reduced. At any width it is either its whole self or it
+  is a sentence.** No in-between exists to feel like a compromise.
+- **Below 1260px the conversation is the default and takes the window.** That
+  is where the owner acts; the pond is orientation, and orientation is
+  something you go and check.
+- **A status line sits at the top** carrying who is working and the water's
+  state, going amber when a decision waits — reusing Task 155's needs-you
+  machinery. Pressing it opens the pond **whole**, over the window; a "back to
+  the conversation" control returns.
+- **The before/after pair stacks below 1260px**, full width each. This is a
+  decision *about Decision 2*, made here so the evidence work does not
+  rediscover it — and stacking reads better here than the wide layout's
+  side-by-side pair, so narrow is not purely a sacrifice.
+- **No new breakpoints.** 1260px and 620px already exist in
+  `app/src/renderer/app.css`. Every failed direction invented its own, and
+  Terminal Glass's never fired at the size it was written for.
+- **Nothing above 1260px changes.** The approved wide layout is untouched.
+
+The recorded fallback, if the toggle proves wrong in the real app: no pond
+below 1260px at all, only the line. Worse product, still honest — and
+preferable to a half-pond.
 
 One process note worth keeping. Three of the four generated directions asserted
 in their own header comments that they had invented no colours — "Nothing
