@@ -584,11 +584,13 @@ wrapping, legacy sentence, and no horizontal overflow.
 - `core/src/intent.ts`
 - `core/src/index.ts`
 - `core/test/intent.test.ts`
+- `core/package.json`
 
 Add types, candidate/bound conversion helpers, canonical serialization,
 request view projection, source-span verification, deep freeze, and every
-hostile/boundary test. This step is additive and leaves shipped signatures
-green.
+hostile/boundary test. Append `dist/test/intent.test.js` to Core’s explicit
+`node --test` list in `package.json`; compilation alone is not evidence. This
+step is additive and leaves shipped signatures green.
 
 ### 2. Authenticated owner turns and inert structured actions
 
@@ -738,6 +740,10 @@ cd ..
 git diff --check
 git status --short
 ```
+
+The Core test output must explicitly list/charge the compiled intent suite;
+`npm.cmd test` passing while silently omitting `dist/test/intent.test.js` is a
+failed check.
 
 Visually inspect retained 1320×820, 760×620, and 390-pixel phone captures.
 Check source labels without color, raw whitespace/multiline wrapping, context
