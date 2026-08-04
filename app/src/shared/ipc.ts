@@ -389,16 +389,17 @@ export interface TaskBlock {
  * the structured record input Cairn composed its report from — never from the
  * conversation model, and never scraped from rendered Markdown.
  *
- * Every field here is either Cairn's own verification (Git-derived
+ * Result fields here are either Cairn's own verification (Git-derived
  * `filesChanged`, the real `protectedIntact` finding, the real commit result)
- * or a fixed code. The one exception is `claims`, which is the WORKER's own
- * account and must be rendered as a claim wherever it appears — never as
- * verified fact.
+ * or a fixed code. `claims` is the WORKER's own account and must be rendered
+ * as a claim wherever it appears. `acceptedRequest` is separately labelled
+ * source-marked context. Neither is a verified result fact.
  *
  * `disposition` carries a third state the runtime knows and the record files
  * do not: ERROR, for a run that threw instead of closing. That arm has no task
- * number, no route, and no verified facts to report — only `errorCode` and,
- * when the throw followed an accepted run, its opaque local evidence link.
+ * number, no route, and no verified facts to report. It retains only the fixed
+ * `errorCode`, any atomically accepted request context, and — when the throw
+ * followed an accepted run — its opaque local evidence link.
  */
 export interface ResultCard {
   kind: "result";
@@ -429,6 +430,16 @@ export interface ResultCard {
     milestone: string;
   } | null;
   route: { adapterLabel: string; provider: string; model: string } | null;
+  /**
+   * Output-only view of the request atomically accepted for this run.
+   *
+   * - absent: a legacy card whose original authenticated shape predates
+   *   request attribution;
+   * - null: a new card for which no task request was accepted; and
+   * - present: the ID/offset/context-free view derived from the accepted
+   *   intent. It is result context, never dispatch authority.
+   */
+  acceptedRequest?: TaskRequestView | null;
   /**
    * Opaque main-owned UUID linking local pictures to this exact accepted run.
    * Old cards do not carry it; blank/non-run cards use null. It is never a

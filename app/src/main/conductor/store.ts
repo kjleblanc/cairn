@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
+import { types as nodeTypes } from "node:util";
 import { isEvidenceRunId } from "../../shared/ipc.js";
 import type { ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
 import type { TaskIntentSourceInput } from "@cairn/core";
@@ -28,6 +29,11 @@ const IGNORE_LINE = "/.cairn/";
 const ATTRIBUTION_SOURCE_CAP = 200_000;
 const CONVERSATION_BYTE_CAP = 8 * 1024 * 1024;
 const FORBIDDEN_ATTRIBUTION_CONTROLS = /[\u0000\u202a-\u202e\u2066-\u2069]/u;
+const REQUEST_OUTCOME_CAP = 300;
+const REQUEST_REQUIREMENT_CAP = 500;
+const REQUEST_OWNER_TEXT_CAP = 2_000;
+const REQUEST_REQUIREMENT_COUNT_CAP = 8;
+const REQUEST_VISIBLE_TOTAL_CAP = 6_000;
 
 /** Once an append syscall starts, a later error cannot honestly prove that no
  * bytes reached disk. Callers that gate one-time authority must distinguish
@@ -350,15 +356,107 @@ export function appendCairnTurn(root: string, id: string, turn: ConductorChatTur
  * separately in `readTurns` — this guard would pass a worker's own perfectly
  * shaped forgery, which is exactly the hole the marker check closes.
  */
+function exactDataRecord(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> | null {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value) || nodeTypes.isProxy(value)) return null;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const ownKeys = Reflect.ownKeys(value);
+    if (ownKeys.length !== keys.length || ownKeys.some((key) => typeof key !== "string" || !keys.includes(key))) return null;
+    const inspected: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+    for (const key of keys) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return null;
+      inspected[key] = descriptor.value;
+    }
+    return inspected;
+  } catch {
+    return null;
+  }
+}
+
+function denseDataArray(value: unknown, cap: number): readonly unknown[] | null {
+  try {
+    if (!Array.isArray(value) || nodeTypes.isProxy(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > cap) return null;
+    const ownKeys = Reflect.ownKeys(value);
+    if (ownKeys.length !== value.length + 1 || !ownKeys.includes("length")) return null;
+    const inspected: unknown[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return null;
+      inspected.push(descriptor.value);
+    }
+    return inspected;
+  } catch {
+    return null;
+  }
+}
+
+function safeRequestText(value: unknown, cap: number): value is string {
+  if (typeof value !== "string" || value.length > cap || !value.trim() || FORBIDDEN_ATTRIBUTION_CONTROLS.test(value)) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function acceptedRequestRow(value: unknown, textCap: number): { readonly size: number; readonly key: string } | null {
+  const row = exactDataRecord(value, ["source", "text", "ownerText"]);
+  if (!row || !safeRequestText(row.text, textCap)) return null;
+  if (row.source === "cairn-chosen") {
+    if (row.ownerText !== null) return null;
+    return { size: row.text.length, key: JSON.stringify([row.source, row.text, null]) };
+  }
+  if (row.source !== "owner-stated" && row.source !== "owner-unsure") return null;
+  if (!safeRequestText(row.ownerText, REQUEST_OWNER_TEXT_CAP)) return null;
+  return {
+    size: row.text.length + row.ownerText.length,
+    key: JSON.stringify([row.source, row.text, row.ownerText]),
+  };
+}
+
+function validAcceptedRequestView(value: unknown): boolean {
+  const view = exactDataRecord(value, ["outcome", "requirements"]);
+  if (!view) return false;
+  const requirements = denseDataArray(view.requirements, REQUEST_REQUIREMENT_COUNT_CAP);
+  if (!requirements) return false;
+  const outcome = acceptedRequestRow(view.outcome, REQUEST_OUTCOME_CAP);
+  if (outcome === null) return false;
+  const seen = new Set<string>([outcome.key]);
+  let total = outcome.size;
+  for (const requirement of requirements) {
+    const row = acceptedRequestRow(requirement, REQUEST_REQUIREMENT_CAP);
+    if (row === null || seen.has(row.key)) return false;
+    seen.add(row.key);
+    total += row.size;
+    if (total > REQUEST_VISIBLE_TOTAL_CAP) return false;
+  }
+  return total <= REQUEST_VISIBLE_TOTAL_CAP;
+}
+
 function isResultCard(value: unknown): value is ResultCard {
-  if (typeof value !== "object" || value === null) return false;
-  const card = value as Partial<ResultCard>;
-  return card.kind === "result"
-    && (card.disposition === "DONE" || card.disposition === "STOPPED" || card.disposition === "ERROR")
-    && Array.isArray(card.filesChanged)
-    && (!Object.prototype.hasOwnProperty.call(card, "evidenceRunId")
-      || card.evidenceRunId === null
-      || isEvidenceRunId(card.evidenceRunId));
+  try {
+    if (typeof value !== "object" || value === null || nodeTypes.isProxy(value)) return false;
+    const card = value as Partial<ResultCard>;
+    const acceptedRequest = Object.getOwnPropertyDescriptor(value, "acceptedRequest");
+    if (acceptedRequest && (!("value" in acceptedRequest) || !acceptedRequest.enumerable
+      || (acceptedRequest.value !== null && !validAcceptedRequestView(acceptedRequest.value)))) return false;
+    return card.kind === "result"
+      && (card.disposition === "DONE" || card.disposition === "STOPPED" || card.disposition === "ERROR")
+      && Array.isArray(card.filesChanged)
+      && (!Object.prototype.hasOwnProperty.call(card, "evidenceRunId")
+        || card.evidenceRunId === null
+        || isEvidenceRunId(card.evidenceRunId));
+  } catch {
+    return false;
+  }
 }
 
 export interface ConductorHistoryEntry {

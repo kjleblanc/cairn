@@ -418,8 +418,45 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
 
     const outcome = pending.request.outcome.text;
     const conversationId = pending.source.kind === "proposal" ? pending.source.conversationId : null;
+    // Capture the output-only view at the acceptance point. Acknowledgement may
+    // remove the session before an asynchronous close, so ERROR cards never
+    // query renderer/session/conversation state for provenance later.
+    const acceptedRequest = pending.request;
     const routedAdapterId = pending.adapter.id;
     const routedWorker = pending.worker;
+    let cardEvidenceRunId: string | null = null;
+    // Hoisted across both accepted setup and Core/run errors: every accepted
+    // chat run attempts one authenticated envelope card even when setup throws
+    // before the settled promise can be installed. A custody/write failure is
+    // logged below and cannot rewrite the run's own terminal result.
+    const post = (build: () => ResultCard): void => {
+      if (conversationId === null) return;
+      let posted: ResultCard | null = null;
+      try {
+        const card = build();
+        const turn = postResultCard(dir, conversationId, card);
+        const delta: ConductorDelta = { dir, conversationId, kind: "envelope", turn };
+        win()?.webContents.send("conductor:delta", delta);
+        emitBridgeSync(); // a watching phone refreshes on the card too
+        posted = card;
+      } catch (error) {
+        // The card is an addition to a run that already closed. A failure to
+        // write it is logged and never allowed to change the run's own result.
+        logError("task:run result card", error);
+      }
+      // The card is written and announced; now — and only now — the conductor
+      // may add its one short comment. It sees the authenticated card through
+      // cardBriefing(), not a separately reconstructed request.
+      if (posted === null) return;
+      try {
+        commentary(dir, conversationId, posted, (delta) => {
+          win()?.webContents.send("conductor:delta", delta);
+          emitBridgeSync(); // the commentary stream is visible on the phone
+        });
+      } catch (error) {
+        logError("task:run commentary", error);
+      }
+    };
     let controller: AbortController;
     let evidenceRunId: string | null;
     let evidenceWindow: StageCaptureWindow | null;
@@ -459,13 +496,13 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       } catch {
         // Memory exhaustion can also prevent the retained error projection.
       }
+      post(() => composeErrorCard(message, acceptedRequest, null));
       return { ok: false, message } satisfies Result<never>;
     }
     // Evidence exists only for a real routed worker. Bind both pictures to the
     // BrowserWindow that showed the accepted project; a replacement window or
     // a switched project fails the capture helper's identity check.
     let evidenceCaptureCount = 0;
-    let cardEvidenceRunId: string | null = null;
 
     const captureEvidence = async (boundary: EvidenceBoundary, terminal: boolean): Promise<void> => {
       if (evidenceRunId === null || evidenceWindow === null) return;
@@ -583,47 +620,14 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     // one typed on the task screen posts nothing. Nothing here depends on the
     // run session surviving — `task:acknowledge` may have deleted it already.
     if (conversationId !== null) {
-      const post = (build: () => ResultCard): void => {
-        let posted: ResultCard | null = null;
-        try {
-          const card = build();
-          const turn = postResultCard(dir, conversationId, card);
-          const delta: ConductorDelta = { dir, conversationId, kind: "envelope", turn };
-          win()?.webContents.send("conductor:delta", delta);
-          emitBridgeSync(); // a watching phone refreshes on the card too
-          posted = card;
-        } catch (error) {
-          // The card is an addition to a run that already closed and already
-          // wrote its own records. A failure to write it is logged and never
-          // allowed to change what the run reported.
-          logError("task:run result card", error);
-        }
-        // Task 9: the card is written and announced; now — and only now — the
-        // conductor may add one short comment on it. The order is the point.
-        // This is an envelope-initiated PAID call, so it comes strictly after
-        // the card, never before and never in its way: `commentary` returns
-        // immediately, and it skips silently when there is no connection, when
-        // a reply is already streaming for this project, or when a new run has
-        // started meanwhile. A card that failed to post is not commented on at
-        // all — there would be nothing above for the comment to be about.
-        if (posted === null) return;
-        try {
-          commentary(dir, conversationId, posted, (delta) => {
-            win()?.webContents.send("conductor:delta", delta);
-            emitBridgeSync(); // the commentary stream is visible on the phone
-          });
-        } catch (error) {
-          logError("task:run commentary", error);
-        }
-      };
       void run.then(
         (outcome) => post(() => (outcome.ok
           ? composeResultCard(outcome.value, cardEvidenceRunId)
-          : composeErrorCard(outcome.message, cardEvidenceRunId))),
+          : composeErrorCard(outcome.message, acceptedRequest, cardEvidenceRunId))),
         // Unreachable by construction — the closure above catches everything
         // and returns a refusal. It is still handled, so that no terminal state
         // can go unspoken and no rejection can escape unhandled.
-        (error: unknown) => post(() => composeErrorCard(plainMessage(error), cardEvidenceRunId)),
+        (error: unknown) => post(() => composeErrorCard(plainMessage(error), acceptedRequest, cardEvidenceRunId)),
       );
     }
     return run;

@@ -1,4 +1,4 @@
-import type { SerialRunResult } from "@cairn/core";
+import type { SerialRunResult, TaskRequestView } from "@cairn/core";
 import { isEvidenceRunId } from "../../shared/ipc.js";
 import type { ConductorTurn, ResultCard } from "../../shared/ipc.js";
 import { appendTurn } from "./store.js";
@@ -26,11 +26,30 @@ import { appendTurn } from "./store.js";
  */
 const FIXED_CODE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
 const CODE_CAP = 64;
+const SOURCE_LABELS: Readonly<Record<TaskRequestView["outcome"]["source"], string>> = Object.freeze({
+  "owner-stated": "You said so",
+  "owner-unsure": "You weren’t sure",
+  "cairn-chosen": "Cairn chose",
+});
 
 function requireEvidenceRunId(evidenceRunId: string | null): void {
   if (evidenceRunId !== null && !isEvidenceRunId(evidenceRunId)) {
     throw new Error("INVALID_EVIDENCE_RUN_ID: Cairn refused a malformed local evidence identity.");
   }
+}
+
+/** Detach the durable projection from Core/main's retained object. The card is
+ * persisted and handed across IPC, so it owns every row and array it carries. */
+function copyAcceptedRequest(request: TaskRequestView): TaskRequestView {
+  const copyRow = (row: TaskRequestView["outcome"]): TaskRequestView["outcome"] => ({
+    source: row.source,
+    text: row.text,
+    ownerText: row.ownerText,
+  });
+  return {
+    outcome: copyRow(request.outcome),
+    requirements: request.requirements.map(copyRow),
+  };
 }
 
 /** The one card shape, with every "nothing to report" field already empty, so
@@ -50,6 +69,7 @@ function blankCard(disposition: ResultCard["disposition"]): ResultCard {
     processFailure: null,
     claims: null,
     route: null,
+    acceptedRequest: null,
     evidenceRunId: null,
   };
 }
@@ -91,6 +111,7 @@ export function composeResultCard(result: SerialRunResult, evidenceRunId: string
   }
   const composed = result.composed;
   const card = blankCard(composed.disposition);
+  card.acceptedRequest = copyAcceptedRequest(composed.acceptedRequest);
   card.evidenceRunId = evidenceRunId;
   card.taskNumber = composed.taskNumber;
   card.stopReason = composed.stopReason;
@@ -122,14 +143,19 @@ export function composeResultCard(result: SerialRunResult, evidenceRunId: string
  * Builds the card for a run that THREW — no records, no verified facts, and
  * nothing the envelope may claim about the workspace.
  *
- * Only the fixed code and an optional opaque local evidence link travel. The
- * rest of the message is deliberately dropped: a thrown error's text can
- * carry paths and provider output, and this card is written to disk inside
- * the project.
+ * Only the fixed code, the output-only accepted-request view (or explicit
+ * null), and an optional opaque local evidence link travel. The rest of the
+ * message is deliberately dropped: a thrown error's text can carry paths and
+ * provider output, and this card is written to disk inside the project.
  */
-export function composeErrorCard(message: string, evidenceRunId: string | null = null): ResultCard {
+export function composeErrorCard(
+  message: string,
+  acceptedRequest: TaskRequestView | null,
+  evidenceRunId: string | null = null,
+): ResultCard {
   requireEvidenceRunId(evidenceRunId);
   const card = blankCard("ERROR");
+  card.acceptedRequest = acceptedRequest === null ? null : copyAcceptedRequest(acceptedRequest);
   card.evidenceRunId = evidenceRunId;
   const head = message.split(":", 1)[0]?.trim() ?? "";
   card.errorCode = head.length <= CODE_CAP && FIXED_CODE.test(head) ? head : null;
@@ -139,14 +165,14 @@ export function composeErrorCard(message: string, evidenceRunId: string | null =
 /**
  * The card as the conductor reads it, for prompt assembly.
  *
- * The report's own separation is carried through verbatim, in two parts under
- * two labels: what Cairn's runtime verified, and — separately — the worker's
- * unverified account. This is why the claims are lifted OUT of the verified
- * object rather than left inside one JSON blob: a model reading a single object
- * headed "verified by Cairn's runtime" would be reading the worker's own
- * sentence under Cairn's guarantee, which is exactly the confusion the report's
- * two-section split exists to prevent. Task 9's commentary is built on this
- * seam, so the separation is structural, not a matter of wording.
+ * The report's own separation is carried through under two labels: what
+ * Cairn's runtime verified and — separately — the worker's unverified account.
+ * A present accepted request adds a third source-marked context block that is
+ * neither a result fact nor a worker claim. This is why claims and request are
+ * lifted OUT of the verified object rather than left inside one JSON blob: a
+ * model reading a single object headed "verified by Cairn's runtime" would be
+ * reading other speakers' words under Cairn's guarantee. Task 9's commentary
+ * is built on this seam, so the separation is structural, not wording alone.
  *
  * The no-claims sentence is `records.ts`'s own, so the conductor sees the same
  * words a reader of the report sees.
@@ -170,12 +196,34 @@ export function cardBriefing(card: ResultCard): string {
     processFailure: card.processFailure,
     route: card.route,
   };
-  return [
+  const blocks = [
     `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(verified)}`,
     `The worker's account (claims, not verified by Cairn):\n${
       claims ? JSON.stringify(claims) : "The worker returned no readable claims block."
     }`,
-  ].join("\n\n");
+  ];
+  if (card.acceptedRequest) {
+    // Rebuild rather than spread. The card's request is context for the
+    // conductor's comment, not a verified result fact or a worker claim, and
+    // only the three visible row fields may cross this provider seam.
+    const requestRow = (row: TaskRequestView["outcome"]): {
+      label: string;
+      interpretation: string;
+      ownerQuotation?: string;
+    } => ({
+      label: SOURCE_LABELS[row.source],
+      interpretation: row.text,
+      ...(row.ownerText !== null ? { ownerQuotation: row.ownerText } : {}),
+    });
+    const requestContext = {
+      outcome: requestRow(card.acceptedRequest.outcome),
+      requirements: card.acceptedRequest.requirements.map(requestRow),
+    };
+    blocks.push(
+      `The accepted request (source-marked; not a result fact):\n${JSON.stringify(requestContext)}`,
+    );
+  }
+  return blocks.join("\n\n");
 }
 
 /**
