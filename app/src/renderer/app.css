@@ -42,6 +42,11 @@ p:last-child { margin-bottom: 0; }
 }
 .pill:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .pill:disabled { opacity: .5; cursor: default; transform: none; }
+.pill[aria-disabled="true"],
+.pill[aria-disabled="true"]:hover,
+.pill[aria-disabled="true"]:active {
+  opacity: .5; cursor: default; transform: none; box-shadow: 0 4px 0 var(--pill-edge);
+}
 .pill-primary { background: var(--green); color: var(--green-ink); --pill-edge: color-mix(in srgb, var(--green-deep) 55%, transparent); }
 .pill-quiet { background: transparent; color: var(--card-muted); --pill-edge: transparent; }
 .pill-danger { background: var(--stop-soft); color: var(--stop); --pill-edge: color-mix(in srgb, var(--stop) 34%, transparent); }
@@ -249,6 +254,72 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-detail-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .result-card-milestone { margin: 12px 0 0; }
 .result-card-path { margin: 8px 0 0; color: var(--card-muted); overflow-wrap: anywhere; }
+/* Task 173: a checked result leads with pictures when — and only when — main
+ * can still read at least one image from the card's exact trusted run. The
+ * renderer receives opaque IDs, never paths. One surviving still owns the
+ * whole width; the approved pair shares it. */
+.result-evidence {
+  margin: 0 0 16px; padding: 0 0 16px; border-bottom: 1px solid var(--line);
+}
+.result-evidence-heading {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px;
+}
+.result-evidence-heading h2 { margin: 2px 0 0; font-size: 1.08rem; }
+.result-evidence-local {
+  flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; background: var(--card);
+  color: var(--card-muted); font-size: .72rem; font-weight: 650;
+}
+.result-evidence-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+}
+.result-evidence-grid-single { grid-template-columns: minmax(0, 1fr); }
+.result-evidence-figure,
+.evidence-album-figure { margin: 0; min-width: 0; }
+.result-evidence-figure img,
+.evidence-album-figure img {
+  display: block; width: 100%; height: auto; border-radius: 14px; background: var(--lantern-deep);
+}
+.result-evidence-figure figcaption,
+.evidence-album-figure figcaption {
+  padding: 7px 3px 0; color: var(--card-muted); font-size: .78rem; line-height: 1.35;
+}
+.result-evidence-open { margin-top: 10px; }
+
+/* The album reuses the app's established accessible Overlay: Escape, the
+ * scrim, and the close control all return to the same living conversation.
+ * Checked run history and the old ignored shot manifest are visibly separate;
+ * legacy review pictures never borrow the checked treatment. */
+.evidence-album { padding: 12px 12px 8px; }
+.evidence-album > .card-title { padding-right: 38px; }
+.evidence-album h2 { margin: 3px 38px 6px 0; font-size: 1.3rem; }
+.evidence-album-intro { margin: 0; color: var(--card-muted); line-height: 1.5; }
+.evidence-album-group { margin-top: 22px; }
+.evidence-album-group > h3 { margin: 0 0 8px; font-size: 1rem; }
+.evidence-album-note { margin: -3px 0 10px; }
+.evidence-album-entry {
+  margin-top: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 18px;
+  background: var(--card);
+}
+.evidence-album-entry-selected {
+  border-color: var(--garden-cyan); box-shadow: 0 0 0 2px color-mix(in srgb, var(--garden-cyan) 18%, transparent);
+}
+.evidence-album-entry-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px 10px; }
+.evidence-album-entry-heading h4 { margin: 0; flex: 1 1 220px; font-size: .95rem; }
+.evidence-album-current {
+  padding: 3px 8px; border-radius: 999px; background: var(--garden-cyan); color: var(--green-ink);
+  font-size: .7rem; font-weight: 750;
+}
+.evidence-album-caption { margin: 7px 0 10px; color: var(--card-muted); line-height: 1.45; }
+.evidence-album-images {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px;
+}
+.evidence-album-images-single { grid-template-columns: minmax(0, 1fr); }
+.evidence-album-image-slot {
+  min-width: 0; overflow: hidden; border-radius: 14px; background: color-mix(in srgb, var(--card-muted) 10%, transparent);
+}
+.evidence-album-image-slot .evidence-album-figure { background: var(--card-solid); }
+.evidence-album-image-slot .evidence-album-figure figcaption { padding: 7px 8px 8px; }
+.evidence-album-older { margin-top: 16px; }
 /* The push flow. The chip is a nudge and looks like one; the confirmation is
  * the contract's pause and looks like the other cards that ask for a decision
  * before something leaves this machine. */
@@ -644,6 +715,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .chat-column-villager .pill-quiet:hover:not(:disabled) {
   background: rgb(246 236 225 / 14%); color: var(--lantern-ink);
+}
+.chat-column-villager .pill-quiet[aria-disabled="true"]:hover,
+.chat-column-villager .pill-quiet[aria-disabled="true"]:active {
+  background: rgb(246 236 225 / 7%); color: var(--lantern-soft);
 }
 .chat-column-villager .chat-tuck { color: var(--lantern-soft); }
 .chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
@@ -1054,6 +1129,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    conductor.spec.ts's `dialogTakesTheWindow` is what catches it. */
 @media (max-width: 1260px) {
   .pond-line { display: flex; }
+  /* Decision 9 settled this before evidence existed: at the same narrow
+     boundary, the before/after pair becomes two full-width pictures. */
+  .result-evidence-grid,
+  .evidence-album-images { grid-template-columns: minmax(0, 1fr); }
   /* Screen-reader-only, so the announcement exists at exactly the widths where
      the town header's own `role="status"` is display:none — and nowhere else.
      Above 1260px the base `display: none` prunes this from the accessibility

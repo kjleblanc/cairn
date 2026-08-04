@@ -192,6 +192,11 @@ export const PHONE_PAGE = `<!doctype html>
       if (typeof c.filesChanged !== "undefined") facts.appendChild(el("li", null, "Files changed (checked with Git): " + (c.filesChanged.length === 0 ? "none" : c.filesChanged.length)));
       if (c.commit) facts.appendChild(el("li", null, "Saved snapshot: " + c.commit));
       card.appendChild(facts);
+      // Local evidence never crosses the phone bridge. The opaque field only
+      // lets this screen say where the pictures can be opened.
+      if (typeof c.evidenceRunId === "string") {
+        card.appendChild(el("p", "small muted", "Pictures for this run are available on the computer."));
+      }
       if (c.claims && c.claims.summary) {
         var claims = el("div", "claims");
         claims.appendChild(el("p", "small muted", "Worker\\u2019s account \\u2014 Cairn checked the files above, but not these descriptions"));

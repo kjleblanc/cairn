@@ -207,6 +207,11 @@ test("the phone names the updated-sharing pause and sends the owner to the compu
   );
 });
 
+test("the phone points to desktop evidence without requesting or embedding pictures", () => {
+  assert.match(PHONE_PAGE, /Pictures for this run are available on the computer\./);
+  assert.doesNotMatch(PHONE_PAGE, /evidence:image|data:image\/png|\/api\/evidence/);
+});
+
 test("a paired phone receives the saved-connection consent pause", async () => {
   const paused = { ...STATUS, connected: false, consentRequired: true };
   const { bridge, url } = await boot({ service: fakeService({ status: () => paused }) });

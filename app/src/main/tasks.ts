@@ -1,4 +1,5 @@
 import { ipcMain, type BrowserWindow } from "electron";
+import { randomUUID } from "node:crypto";
 import {
   previewSerialRoute,
   projectStatus,
@@ -8,9 +9,27 @@ import {
 } from "@cairn/core";
 import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
 import { emitBridgeSync } from "./bridge/hub.js";
-import type { ConductorDelta, Result, ResultCard, RunSessionSnapshot, TaskActivityEvent, TaskRunRequest } from "../shared/ipc.js";
+import type {
+  ConductorDelta,
+  EvidenceAlbum,
+  EvidenceImageData,
+  Result,
+  ResultCard,
+  RunSessionSnapshot,
+  TaskActivityEvent,
+  TaskRunRequest,
+} from "../shared/ipc.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
 import { commentary, consumeProposal, restoreProposal } from "./conductor/service.js";
+import {
+  discardUnfinalizedEvidenceRun,
+  finalizeEvidenceRun,
+  readEvidenceAlbum,
+  readEvidenceImage,
+  recordEvidenceCapture,
+  type EvidenceBoundary,
+} from "./evidence.js";
+import { captureBeforeWorkerStage, captureTerminalStage, type StageCaptureWindow } from "./evidencecapture.js";
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 import { runtimeWorkerIdentity } from "./workeridentity.js";
@@ -42,6 +61,10 @@ function sameDisclosure(actual: WorkerDisclosure | undefined, expected: WorkerDi
   return Boolean(actual) && actual?.provider === expected.provider && actual.model === expected.model &&
     actual.project === expected.project && actual.task === expected.task && actual.data === expected.data &&
     actual.quota === expected.quota;
+}
+
+function evidenceTitle(outcome: string): string {
+  return outcome.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
@@ -135,10 +158,18 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       cleanup();
       return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
     }
+    // Evidence exists only for a real routed worker. Bind both pictures to the
+    // BrowserWindow that showed the accepted project; a replacement window or
+    // a switched project fails the capture helper's identity check.
+    const evidenceRunId = routeReady && routedWorker ? randomUUID() : null;
+    const evidenceWindow: StageCaptureWindow | null = evidenceRunId === null ? null : win();
+    let evidenceCaptureCount = 0;
+    let cardEvidenceRunId: string | null = null;
     const acceptedSession = sessions.get(dir);
     if (acceptedSession) {
       acceptedSession.adapterId = routedAdapterId;
       acceptedSession.worker = routedWorker;
+      acceptedSession.evidenceRunId = evidenceRunId;
     }
     // Main has now accepted the run. Retire only a byte-matching proposal from
     // the same conversation before any task work begins, so a remounted Chat
@@ -152,8 +183,51 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         restoreProposal(dir, request.conversationId, consumedProposal);
       }
     };
+
+    const captureEvidence = async (boundary: EvidenceBoundary, terminal: boolean): Promise<void> => {
+      if (evidenceRunId === null || evidenceWindow === null) return;
+      try {
+        const captured = terminal
+          ? await captureTerminalStage(evidenceWindow, dir, evidenceRunId)
+          : await captureBeforeWorkerStage(evidenceWindow, dir, evidenceRunId);
+        if (captured === null) return;
+        recordEvidenceCapture({ root: dir, runId: evidenceRunId, boundary, ...captured });
+        evidenceCaptureCount += 1;
+      } catch (error) {
+        // Evidence is an honest optional account of the run. A GPU/profile
+        // failure must never rewrite the worker outcome it was documenting.
+        logError(`task:run evidence ${boundary}`, error);
+      }
+    };
+
+    const finishEvidence = async (
+      boundary: Exclude<EvidenceBoundary, "worker-not-started">,
+      disposition: "DONE" | "STOPPED" | "ERROR",
+      taskNumber: number | null,
+    ): Promise<void> => {
+      if (evidenceRunId === null) return;
+      await captureEvidence(boundary, true);
+      if (evidenceCaptureCount > 0) {
+        try {
+          finalizeEvidenceRun(dir, evidenceRunId, {
+            taskNumber,
+            title: evidenceTitle(outcome),
+            disposition,
+          });
+          cardEvidenceRunId = evidenceRunId;
+        } catch (error) {
+          logError("task:run evidence finalize", error);
+        }
+      }
+      const session = sessions.get(dir);
+      if (session) session.evidenceRunId = cardEvidenceRunId;
+    };
+
     const run: Promise<Result<SerialRunResult>> = (async () => {
       try {
+        // This await is the true pre-work barrier: runSerialTask — and therefore
+        // every adapter — is not invoked until the bounded attempt is over.
+        await captureEvidence("worker-not-started", false);
         const value = await runSerialTask(dir, outcome, {
           adapters: detected.adapters,
           adapterId,
@@ -176,6 +250,26 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         if (safeValue.status === "connection-required") restoreConsumedProposal();
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.result = safeValue; }
+        if (safeValue.status === "connection-required") {
+          // A readiness close did no work, so remove only this valid,
+          // unfinalized pre-work attempt rather than retaining an orphan or
+          // masquerading it as run evidence.
+          if (session) session.evidenceRunId = null;
+          if (evidenceRunId !== null) {
+            try {
+              discardUnfinalizedEvidenceRun(dir, evidenceRunId);
+            } catch (error) {
+              logError("task:run evidence discard", error);
+            }
+          }
+          return { ok: true, value: safeValue };
+        }
+        const disposition = safeValue.composed.disposition;
+        await finishEvidence(
+          disposition === "DONE" ? "done" : "stopped",
+          disposition,
+          safeValue.composed.taskNumber,
+        );
         return { ok: true, value: safeValue };
       } catch (error) {
         // The renderer keeps the proposal available when main returns a run
@@ -185,6 +279,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         logError("task:run", error);
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.error = plainMessage(error); }
+        await finishEvidence("error", "ERROR", null);
         return { ok: false, message: plainMessage(error) };
       } finally {
         clearRunning(dir);
@@ -244,11 +339,13 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         }
       };
       void run.then(
-        (outcome) => post(() => (outcome.ok ? composeResultCard(outcome.value) : composeErrorCard(outcome.message))),
+        (outcome) => post(() => (outcome.ok
+          ? composeResultCard(outcome.value, cardEvidenceRunId)
+          : composeErrorCard(outcome.message, cardEvidenceRunId))),
         // Unreachable by construction — the closure above catches everything
         // and returns a refusal. It is still handled, so that no terminal state
         // can go unspoken and no rejection can escape unhandled.
-        (error: unknown) => post(() => composeErrorCard(plainMessage(error))),
+        (error: unknown) => post(() => composeErrorCard(plainMessage(error), cardEvidenceRunId)),
       );
     }
     return run;
@@ -265,7 +362,38 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
 
   ipcMain.handle("task:acknowledge", (_event, dir: string): Result<null> => {
     const session = sessions.get(dir);
-    if (session && session.phase === "closed") sessions.delete(dir);
+    // A closed session becomes visible just before terminal capture. Keep its
+    // run identity until that bounded settlement finishes; an eager click on
+    // "Return" cannot erase the proof between capture's two identity checks.
+    if (session && session.phase === "closed" && !isTaskRunning(dir)) sessions.delete(dir);
     return { ok: true, value: null };
+  });
+
+  ipcMain.handle("evidence:album", (
+    _event,
+    dir: string,
+    selectedRunId: string | null = null,
+    cursor: string | null = null,
+  ): Result<EvidenceAlbum> => {
+    try {
+      projectStatus(dir);
+      return { ok: true, value: readEvidenceAlbum(dir, selectedRunId, cursor) };
+    } catch (error) {
+      logError("evidence:album", error);
+      return { ok: false, message: "Cairn couldn't open the local picture album." };
+    }
+  });
+
+  ipcMain.handle("evidence:image", (_event, dir: string, imageId: string): Result<EvidenceImageData> => {
+    try {
+      projectStatus(dir);
+      const value = readEvidenceImage(dir, imageId);
+      return value === null
+        ? { ok: false, message: "That local picture is missing or no longer matches Cairn's record." }
+        : { ok: true, value };
+    } catch (error) {
+      logError("evidence:image", error);
+      return { ok: false, message: "That local picture is unavailable." };
+    }
   });
 }

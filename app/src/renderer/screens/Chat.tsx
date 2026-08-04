@@ -7,6 +7,7 @@ import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
 import { ConnectCard } from "../components/ConnectCard";
 import { DisclosureConfirm } from "../components/DisclosureConfirm";
+import { ResultEvidence } from "../components/EvidenceAlbum";
 import { Md } from "../components/Md";
 import { Scene } from "../components/Scene";
 import { TaskCard } from "../components/TaskCard";
@@ -19,7 +20,8 @@ import { Pill } from "../components/Ui";
  * delta. Once locked, it never changes for this send. */
 type InFlight = { id: string | null };
 
-/** One dispatch the owner is deciding on, or has just started. `route` is
+/** One dispatch the owner is deciding on, has started, or is in the short
+ * main-owned terminal-picture barrier. `route` is
  * null until `taskRoute` answers (and stays null when it refuses, with the
  * plain reason in `error`); `disclosure` is null whenever the routed adapter
  * declares no real call to confirm — the offline demo, today. */
@@ -28,9 +30,26 @@ type Dispatch = {
   details: string;
   route: RouteResult | null;
   disclosure: WorkerDisclosure | null;
-  phase: "confirm" | "running";
+  phase: "confirm" | "running" | "settling";
   error: string | null;
 };
+
+type TaskSessionRefreshDetail = { dir: string; session: RunSessionSnapshot | null };
+
+/** Main dispatches this one local DOM event immediately before terminal
+ * evidence capture. Treat its detail as unknown: only the project identity and
+ * the small session spine Chat actually needs are accepted. */
+function taskSessionRefreshDetail(event: Event): TaskSessionRefreshDetail | null {
+  if (!(event instanceof CustomEvent) || typeof event.detail !== "object" || event.detail === null) return null;
+  const detail = event.detail as { dir?: unknown; session?: unknown };
+  if (typeof detail.dir !== "string") return null;
+  if (detail.session === null) return { dir: detail.dir, session: null };
+  if (typeof detail.session !== "object" || detail.session === null) return null;
+  const session = detail.session as Partial<RunSessionSnapshot>;
+  if (session.dir !== detail.dir || typeof session.outcome !== "string" || typeof session.startedAt !== "string" ||
+      (session.phase !== "running" && session.phase !== "closed") || !Array.isArray(session.activities)) return null;
+  return { dir: detail.dir, session: session as RunSessionSnapshot };
+}
 
 /**
  * The push flow — the one place in this screen that writes to the world
@@ -245,7 +264,7 @@ const ERROR_SENTENCE = "Cairn couldn't check your project, so nothing here is ve
  * that heading is the WORKER's claim, labeled as one, never merged into the
  * verified lines.
  */
-function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () => void }) {
+function ResultCardView({ card, dir, onOpenRun }: { card: ResultCard; dir: string; onOpenRun: () => void }) {
   const code = card.disposition === "ERROR" ? card.errorCode : card.stopReason;
   // A run with no task number wrote no records: the connection-required close
   // ends before a task number, a brief, or a log row exists. Such a card names
@@ -257,6 +276,7 @@ function ResultCardView({ card, onOpenRun }: { card: ResultCard; onOpenRun: () =
 
   return (
     <div className="card result-card">
+      <ResultEvidence dir={dir} runId={card.evidenceRunId} />
       <p className="card-title">result card — checked by Cairn, not written by the AI chat</p>
       <p className="result-card-headline">
         <span className={`result-card-disposition result-card-${card.disposition.toLowerCase()}`}>{card.disposition}</span>
@@ -592,12 +612,31 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     if (event.dir !== dir) return;
     void refreshSession();
   }), [dir, refreshSession]);
+  useEffect(() => {
+    const onRefresh = (event: Event) => {
+      const detail = taskSessionRefreshDetail(event);
+      if (!detail || detail.dir !== dir) return;
+      setSession(detail.session);
+      // Main sends this exact closed snapshot before its two-frame evidence
+      // barrier. Hide the matching in-flight panel in the same event turn, but
+      // retain a non-actionable busy sentinel until taskRun resolves. Otherwise
+      // the spent proposal and enabled composer can reappear inside the very
+      // terminal picture that is meant to show the settled result.
+      if (detail.session === null || detail.session.phase !== "running") {
+        setDispatch((current) => current?.phase === "running" ? { ...current, phase: "settling" } : current);
+        setRealCallConfirmed(false);
+      }
+    };
+    window.addEventListener("cairn:task-session-refresh", onRefresh);
+    return () => window.removeEventListener("cairn:task-session-refresh", onRefresh);
+  }, [dir]);
 
   const runActive = session?.phase === "running";
   // The dispatch panel knows synchronously that this Chat started a run;
   // main's shared session snapshot arrives a beat later. Treat both windows as
   // the same serial gate so no spent card or composer remains clickable.
-  const taskBusy = runActive || dispatch?.phase === "running";
+  const captureSettling = dispatch?.phase === "settling";
+  const taskBusy = runActive || dispatch?.phase === "running" || captureSettling;
   // While a run lives, the clock ticks and the snapshot is re-read once a
   // second. The re-read is what closes the run honestly for a renderer that
   // was reloaded mid-run and so holds no run promise of its own to await: a
@@ -870,6 +909,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   }
 
   async function newConversation() {
+    if (captureSettling) return;
     if (streaming || commentary) {
       // Stop the abandoned stream before clearing state, so it can't keep
       // running against a conversation the screen no longer shows. A comment
@@ -897,10 +937,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       setComposer((current) => (current.trim() ? `${current}\n${returned}` : returned));
       setPending([]);
     }
-    // A running dispatch belongs to the project, not to the conversation it
-    // was started from, so it stays on screen; an undecided one goes with the
-    // conversation that proposed it.
-    setDispatch((current) => (current !== null && current.phase === "running" ? current : null));
+    // A running dispatch â€” including its short terminal-picture barrier â€”
+    // belongs to the project, not to the conversation it was started from, so
+    // it stays on screen; an undecided one goes with the proposal.
+    setDispatch((current) => (current !== null
+      && (current.phase === "running" || current.phase === "settling") ? current : null));
     setRealCallConfirmed(false);
   }
 
@@ -1067,7 +1108,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                     </button>
                   ) : null}
                   {i === latestCardIndex || openedCards.has(i) ? (
-                    <ResultCardView card={turn.card} onOpenRun={onOpenRun} />
+                    <ResultCardView card={turn.card} dir={dir} onOpenRun={onOpenRun} />
                   ) : null}
                   {/* Under the card that prompted it, and under that card only
                     * — never under an older one, and never under a card whose
@@ -1109,7 +1150,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
                   onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onCardSend} />
               ) : null}
-              {dispatch ? (
+              {dispatch && dispatch.phase !== "settling" ? (
                 <div className="card dispatch-panel">
                   <p className="card-title">start this task</p>
                   <p className="dispatch-outcome">{dispatch.outcome}</p>
@@ -1221,8 +1262,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 </span>
               </div>
             ) : null}
-            {runActive ? (
-              <p className="small muted composer-closed">A task is running. You can type again when it finishes.</p>
+            {runActive || captureSettling ? (
+              <p className="small muted composer-closed">{captureSettling
+                ? "Cairn is finishing this result. You can type again when it is ready."
+                : "A task is running. You can type again when it finishes."}</p>
             ) : null}
             <div className="chat-composer">
               {/* Closed only while a task runs (its note above says why).
@@ -1233,7 +1276,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               <Pill kind="primary" onClick={() => void send(composer)} disabled={taskBusy || restoringConversation || !composer.trim()}>Send</Pill>
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <Pill kind="quiet" disabled={restoringConversation} onClick={() => void newConversation()}>New conversation</Pill>
+              <Pill kind="quiet" disabled={restoringConversation || captureSettling}
+                onClick={() => void newConversation()}>New conversation</Pill>
             </div>
           </>
         ) : null}

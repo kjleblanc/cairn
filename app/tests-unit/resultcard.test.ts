@@ -14,6 +14,7 @@ import { appendTurn, conversationsDir, listConversations, newConversationId, rea
 // fail-closed direction and exactly what an unconfigured app would do.
 const MARKER_DIR = mkdtempSync(join(tmpdir(), "cairn-card-markers-"));
 setCardMarkerDir(MARKER_DIR);
+const EVIDENCE_RUN_ID = "9b2de3f4-1a6c-4d7e-8f90-123456789abc";
 
 // The card is authored from `result.composed` — the very record input Cairn
 // rendered its own report from — so the card and the report can never
@@ -140,13 +141,14 @@ test("a done run composes a DONE card whose files changed come from composed, ne
   assert.deepEqual(card.route, { adapterLabel: "Codex Exec", provider: "OpenAI", model: "gpt-5-codex" });
   assert.equal(card.recordRecovery, null);
   assert.equal(card.processFailure, null);
+  assert.equal(card.evidenceRunId, null);
   // The card owns its own array: mutating it can never reach back into the
   // record input the report was composed from.
   assert.notEqual(card.filesChanged as unknown, result.status === "done" ? result.composed.filesChanged : null);
 });
 
 test("a stopped run carries its fixed stop reason, the real protected-work finding, and no commit", () => {
-  const card = composeResultCard(stoppedResult());
+  const card = composeResultCard(stoppedResult(), EVIDENCE_RUN_ID);
   assert.equal(card.disposition, "STOPPED");
   assert.equal(card.stopReason, "PROTECTED_WORK_CHANGED");
   assert.equal(card.taskNumber, 5);
@@ -160,6 +162,7 @@ test("a stopped run carries its fixed stop reason, the real protected-work findi
   // retained local debug path.
   assert.match(card.recordRecovery ?? "", /restored it from the task-start snapshot/);
   assert.deepEqual(card.processFailure, { code: "CODEX_EXEC_SPAWN_FAILED", debugPath: "C:/Users/owner/.cairn-debug/005" });
+  assert.equal(card.evidenceRunId, EVIDENCE_RUN_ID);
 });
 
 test("a connection-required close maps to a STOPPED card that claims no task, no files, and no records", () => {
@@ -167,7 +170,7 @@ test("a connection-required close maps to a STOPPED card that claims no task, no
     status: "connection-required",
     route: { status: "connection-required", candidates: [], reason: "Codex Exec is not installed, so no model route is available." },
     activities: [],
-  });
+  }, EVIDENCE_RUN_ID);
   assert.equal(card.disposition, "STOPPED");
   assert.equal(card.stopReason, "CONNECTION_REQUIRED");
   assert.equal(card.taskNumber, null);
@@ -177,6 +180,7 @@ test("a connection-required close maps to a STOPPED card that claims no task, no
   assert.equal(card.commit, null);
   assert.equal(card.route, null);
   assert.equal(card.evidenceSummary, "Codex Exec is not installed, so no model route is available.");
+  assert.equal(card.evidenceRunId, null, "a connection refusal has no accepted run to link");
 });
 
 test("an error card carries the fixed code and none of the raw message", () => {
@@ -192,18 +196,38 @@ test("an error card carries the fixed code and none of the raw message", () => {
   assert.equal(card.claims, null);
   assert.equal(card.route, null);
   assert.equal(card.evidenceSummary, null);
+  assert.equal(card.evidenceRunId, null);
   assert.ok(!JSON.stringify(card).includes("retained for inspection"), "the raw message must never ride the card");
+
+  const linked = composeErrorCard("RECORD_VERIFICATION_FAILED: retained locally", EVIDENCE_RUN_ID);
+  assert.equal(linked.evidenceRunId, EVIDENCE_RUN_ID, "an accepted run that throws keeps its local evidence link");
 
   // No fixed code, no claimed code. A raw runtime error's prefix is not a
   // Cairn code and must not be dressed as one.
   assert.equal(composeErrorCard("Cairn could not read this project.").errorCode, null);
   assert.equal(composeErrorCard("ENOENT: no such file or directory, open 'C:/secret/path'").errorCode, null);
+  assert.throws(
+    () => composeErrorCard("RECORD_VERIFICATION_FAILED", "not-a-uuid"),
+    /INVALID_EVIDENCE_RUN_ID/,
+  );
+});
+
+test("result-card composition refuses a malformed evidence run identity", () => {
+  assert.throws(
+    () => composeResultCard(doneResult(), "not-a-uuid"),
+    /INVALID_EVIDENCE_RUN_ID/,
+  );
+  assert.throws(
+    () => composeResultCard(doneResult(), "9b2de3f4-1a6c-1d7e-8f90-123456789abc"),
+    /INVALID_EVIDENCE_RUN_ID/,
+    "a canonical UUID from the wrong version is not a main-created randomUUID identity",
+  );
 });
 
 test("the store round-trips a valid envelope turn and drops every envelope line whose card is not a result card", () => {
   const root = mkdtempSync(join(tmpdir(), "cairn-resultcard-"));
   const id = newConversationId(root);
-  const card = composeResultCard(doneResult());
+  const card = composeResultCard(doneResult(), EVIDENCE_RUN_ID);
   appendTurn(root, id, { role: "envelope", card, ts: "2026-07-25T10:00:00.000Z" });
 
   // Every bad line below carries a VALID ts, so the card guard is the only
@@ -214,6 +238,8 @@ test("the store round-trips a valid envelope turn and drops every envelope line 
     { role: "envelope", card: { kind: "nope" }, ts },
     { role: "envelope", card: { ...card, disposition: "FINE" }, ts },
     { role: "envelope", card: { ...card, filesChanged: "docs/ai-work/LOG.md" }, ts },
+    { role: "envelope", card: { ...card, evidenceRunId: "not-a-uuid" }, ts },
+    { role: "envelope", card: { ...card, evidenceRunId: 42 }, ts },
     { role: "envelope", card: "a result card, honestly", ts },
     { role: "envelope", card: null, ts },
     { role: "envelope", ts },
@@ -235,7 +261,28 @@ test("the store round-trips a valid envelope turn and drops every envelope line 
   assert.equal(first.card.kind, "result");
   assert.equal(first.card.disposition, "DONE");
   assert.deepEqual(first.card.filesChanged, ["docs/ai-work/LOG.md", "visible.txt"]);
+  assert.equal(first.card.evidenceRunId, EVIDENCE_RUN_ID);
   assert.equal(turns[1].role, "owner");
+});
+
+test("the store accepts old cards with no evidence field and refuses malformed new cards before writing", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-resultcard-evidence-id-"));
+  const id = newConversationId(root);
+  const legacy = composeResultCard(doneResult());
+  delete legacy.evidenceRunId;
+
+  appendTurn(root, id, { role: "envelope", card: legacy, ts: "2026-07-25T10:00:00.000Z" });
+  const oldTurn = readTurns(root, id)[0];
+  assert.equal(oldTurn?.role, "envelope");
+  if (oldTurn?.role !== "envelope") return;
+  assert.ok(!Object.prototype.hasOwnProperty.call(oldTurn.card, "evidenceRunId"));
+
+  const malformed = { ...composeResultCard(doneResult()), evidenceRunId: "not-a-uuid" };
+  assert.throws(
+    () => appendTurn(root, id, { role: "envelope", card: malformed, ts: "2026-07-25T10:00:01.000Z" }),
+    /INVALID_RESULT_CARD/,
+  );
+  assert.equal(readTurns(root, id).length, 1, "the malformed card never reaches the conversation file");
 });
 
 // Phase 3 whole-branch review, Critical 1 (repo task 080). The conversation
@@ -338,7 +385,15 @@ test("a replayed copy of a genuine card renders once, and two real cards both su
 });
 
 test("the conductor reads a card as two separated parts: what Cairn verified, and what the worker claims", () => {
-  const briefing = cardBriefing(composeResultCard(doneResult()));
+  const card = Object.assign(composeResultCard(doneResult(), EVIDENCE_RUN_ID), {
+    evidence: {
+      imageId: "private-image-id",
+      label: "Private after picture",
+      path: "C:/private/evidence/after.png",
+      dataUrl: "data:image/png;base64,PRIVATE",
+    },
+  });
+  const briefing = cardBriefing(card);
   const [verified, claimed] = briefing.split("\n\n");
 
   assert.match(verified, /^Envelope result card \(verified by Cairn's runtime, not by the conversation model\):\n/);
@@ -354,6 +409,11 @@ test("the conductor reads a card as two separated parts: what Cairn verified, an
   // Cairn's own verified facts stay on the verified side.
   assert.ok(verified.includes("docs/ai-work/LOG.md"));
   assert.ok(verified.includes("Codex Exec"));
+  assert.ok(!briefing.includes(EVIDENCE_RUN_ID), "the opaque album link is local-only");
+  assert.ok(!briefing.includes("private-image-id"));
+  assert.ok(!briefing.includes("Private after picture"));
+  assert.ok(!briefing.includes("C:/private/evidence/after.png"));
+  assert.ok(!briefing.includes("data:image/png"));
 
   // No claims: the record's own sentence, not an empty object.
   const empty = cardBriefing(composeResultCard(stoppedResult()));

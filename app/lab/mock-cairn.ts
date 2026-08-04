@@ -265,6 +265,12 @@ const mock: CairnApi = {
   taskCancel: (_dir: string) => soon(ok(null)),
   taskCurrent: (_dir: string) => soon(world.session),
   taskAcknowledge: (_dir: string) => soon(ok(null)),
+  evidenceAlbum: (_dir: string, selectedRunId?: string | null, _cursor?: string | null) => soon(ok({
+    selectedRunId: selectedRunId ?? null,
+    entries: [],
+    nextCursor: null,
+  })),
+  evidenceImage: (_dir: string, _imageId: string) => soon(nope("the lab has no local evidence image")),
   updateCheck: (): Promise<UpdateInfo> => soon({ current: "lab", latest: null, newer: false }),
   openExternal: (_url: string) => soon(undefined),
   onTaskActivity: (cb: (event: TaskActivityEvent) => void) => {

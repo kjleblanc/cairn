@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
+import type { RunSessionSnapshot } from "../../shared/ipc";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { DisclosureConfirm } from "../components/DisclosureConfirm";
@@ -38,8 +39,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
     void cairn.updateCheck().then((update) => setCurrentVersion(update.current));
   }, []);
 
-  const refresh = useCallback(async () => {
-    const session = await cairn.taskCurrent(dir);
+  const applySession = useCallback((session: RunSessionSnapshot | null) => {
     if (!session) return;
     setOutcome(session.outcome);
     setSessionWorker(session.worker);
@@ -52,8 +52,13 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
       // A run that ended in a thrown error (e.g. RECORD_VERIFICATION_FAILED)
       // must surface on reattach, not vanish into a blank entry form.
       setError(session.error);
+      setPhase("route");
     }
-  }, [dir]);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    applySession(await cairn.taskCurrent(dir));
+  }, [applySession, dir]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -62,6 +67,18 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
     setActivities((current) => [...current, event.activity]);
     if (event.activity.stage === "Result") void refresh();
   }), [dir, refresh]);
+
+  useEffect(() => {
+    const onRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ dir?: unknown; session?: unknown }>).detail;
+      if (!detail || detail.dir !== dir) return;
+      const session = detail.session as RunSessionSnapshot | null;
+      if (session !== null && session?.dir !== dir) return;
+      applySession(session);
+    };
+    window.addEventListener("cairn:task-session-refresh", onRefresh);
+    return () => window.removeEventListener("cairn:task-session-refresh", onRefresh);
+  }, [applySession, dir]);
 
   async function findRoute() {
     if (outcome.trim().length < 5) { setError("Describe one visible outcome in a sentence."); return; }

@@ -1,4 +1,5 @@
 import type { SerialRunResult } from "@cairn/core";
+import { isEvidenceRunId } from "../../shared/ipc.js";
 import type { ConductorTurn, ResultCard } from "../../shared/ipc.js";
 import { appendTurn } from "./store.js";
 
@@ -26,6 +27,12 @@ import { appendTurn } from "./store.js";
 const FIXED_CODE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/;
 const CODE_CAP = 64;
 
+function requireEvidenceRunId(evidenceRunId: string | null): void {
+  if (evidenceRunId !== null && !isEvidenceRunId(evidenceRunId)) {
+    throw new Error("INVALID_EVIDENCE_RUN_ID: Cairn refused a malformed local evidence identity.");
+  }
+}
+
 /** The one card shape, with every "nothing to report" field already empty, so
  * each arm below states only what it actually knows. */
 function blankCard(disposition: ResultCard["disposition"]): ResultCard {
@@ -43,6 +50,7 @@ function blankCard(disposition: ResultCard["disposition"]): ResultCard {
     processFailure: null,
     claims: null,
     route: null,
+    evidenceRunId: null,
   };
 }
 
@@ -73,7 +81,8 @@ function blankCard(disposition: ResultCard["disposition"]): ResultCard {
  * readiness sentence rides `evidenceSummary`, the card's one free line, so the
  * render can say why without inventing a route that was never resolved.
  */
-export function composeResultCard(result: SerialRunResult): ResultCard {
+export function composeResultCard(result: SerialRunResult, evidenceRunId: string | null = null): ResultCard {
+  requireEvidenceRunId(evidenceRunId);
   if (result.status === "connection-required") {
     const card = blankCard("STOPPED");
     card.stopReason = "CONNECTION_REQUIRED";
@@ -82,6 +91,7 @@ export function composeResultCard(result: SerialRunResult): ResultCard {
   }
   const composed = result.composed;
   const card = blankCard(composed.disposition);
+  card.evidenceRunId = evidenceRunId;
   card.taskNumber = composed.taskNumber;
   card.stopReason = composed.stopReason;
   card.filesChanged = [...composed.filesChanged];
@@ -112,12 +122,15 @@ export function composeResultCard(result: SerialRunResult): ResultCard {
  * Builds the card for a run that THREW — no records, no verified facts, and
  * nothing the envelope may claim about the workspace.
  *
- * Only the fixed code travels. The rest of the message is deliberately dropped:
- * a thrown error's text can carry paths and provider output, and this card is
- * written to disk inside the project.
+ * Only the fixed code and an optional opaque local evidence link travel. The
+ * rest of the message is deliberately dropped: a thrown error's text can
+ * carry paths and provider output, and this card is written to disk inside
+ * the project.
  */
-export function composeErrorCard(message: string): ResultCard {
+export function composeErrorCard(message: string, evidenceRunId: string | null = null): ResultCard {
+  requireEvidenceRunId(evidenceRunId);
   const card = blankCard("ERROR");
+  card.evidenceRunId = evidenceRunId;
   const head = message.split(":", 1)[0]?.trim() ?? "";
   card.errorCode = head.length <= CODE_CAP && FIXED_CODE.test(head) ? head : null;
   return card;
@@ -139,7 +152,24 @@ export function composeErrorCard(message: string): ResultCard {
  * words a reader of the report sees.
  */
 export function cardBriefing(card: ResultCard): string {
-  const { claims, ...verified } = card;
+  const { claims } = card;
+  // This is deliberately a whitelist rather than a rest-spread. The opaque
+  // local run link is not provider context, and neither is any present or
+  // future album metadata accidentally attached to the in-memory object.
+  const verified = {
+    kind: card.kind,
+    disposition: card.disposition,
+    taskNumber: card.taskNumber,
+    stopReason: card.stopReason,
+    errorCode: card.errorCode,
+    filesChanged: card.filesChanged,
+    protectedIntact: card.protectedIntact,
+    commit: card.commit,
+    evidenceSummary: card.evidenceSummary,
+    recordRecovery: card.recordRecovery,
+    processFailure: card.processFailure,
+    route: card.route,
+  };
   return [
     `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(verified)}`,
     `The worker's account (claims, not verified by Cairn):\n${

@@ -92,7 +92,47 @@ export type RunSessionSnapshot = {
   phase: "running" | "closed";
   result: SerialRunResult | null;
   error: string | null;
+  /** Opaque main-owned identity used only to bind local captures to this run. */
+  evidenceRunId?: string | null;
 };
+
+/** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
+ * the shared contract so card composition and persisted-card reads enforce the
+ * same boundary. The optional card/session property remains the compatibility
+ * seam for data written before local evidence existed. */
+const EVIDENCE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isEvidenceRunId(value: unknown): value is string {
+  return typeof value === "string" && EVIDENCE_RUN_ID.test(value);
+}
+
+export type EvidenceImageRole = "before" | "after" | "moment";
+export type EvidenceImage = {
+  id: string;
+  role: EvidenceImageRole;
+  label: string;
+  mime: "image/png";
+  width: number;
+  height: number;
+  trusted: boolean;
+};
+export type EvidenceAlbumEntry = {
+  runId: string | null;
+  taskNumber: number | null;
+  title: string;
+  caption: string;
+  disposition: "DONE" | "STOPPED" | "ERROR" | null;
+  trusted: boolean;
+  images: EvidenceImage[];
+  pair: { beforeId: string; afterId: string } | null;
+};
+export type EvidenceAlbum = {
+  selectedRunId: string | null;
+  entries: EvidenceAlbumEntry[];
+  /** Opaque keyset cursor for older trusted runs; null means history is exhausted. */
+  nextCursor: string | null;
+};
+export type EvidenceImageData = { id: string; dataUrl: string };
 export type ConductorConversationSummary = { id: string; startedTs: string; preview: string };
 export type ConductorStreamKind = "reply" | "commentary";
 export interface ConductorStreamSnapshot {
@@ -250,6 +290,8 @@ export interface CairnApi {
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
   taskAcknowledge(dir: string): Promise<Result<null>>;
+  evidenceAlbum(dir: string, selectedRunId?: string | null, cursor?: string | null): Promise<Result<EvidenceAlbum>>;
+  evidenceImage(dir: string, imageId: string): Promise<Result<EvidenceImageData>>;
   updateCheck(): Promise<UpdateInfo>;
   openExternal(url: string): Promise<void>;
   onTaskActivity(cb: (event: TaskActivityEvent) => void): () => void;
@@ -306,7 +348,8 @@ export interface TaskBlock {
  *
  * `disposition` carries a third state the runtime knows and the record files
  * do not: ERROR, for a run that threw instead of closing. That arm has no task
- * number, no route, and no verified facts to report — only `errorCode`.
+ * number, no route, and no verified facts to report — only `errorCode` and,
+ * when the throw followed an accepted run, its opaque local evidence link.
  */
 export interface ResultCard {
   kind: "result";
@@ -337,6 +380,12 @@ export interface ResultCard {
     milestone: string;
   } | null;
   route: { adapterLabel: string; provider: string; model: string } | null;
+  /**
+   * Opaque main-owned UUID linking local pictures to this exact accepted run.
+   * Old cards do not carry it; blank/non-run cards use null. It is never a
+   * path, never image data, and never included in conductor context.
+   */
+  evidenceRunId?: string | null;
 }
 
 /** The two turns owner and Cairn take in the conversation itself. */

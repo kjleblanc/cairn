@@ -81,6 +81,13 @@ export function Workspace({
   const runtimePresentationRef = useRef(runtimePresentation);
   const statusRequestRef = useRef(0);
   const statusAppliedRef = useRef(0);
+  const captureProjectRef = useRef({ dir: activeDir, generation: 0 });
+  if (captureProjectRef.current.dir !== activeDir) {
+    captureProjectRef.current = {
+      dir: activeDir,
+      generation: captureProjectRef.current.generation + 1,
+    };
+  }
   activeDirRef.current = activeDir;
   townPresentationRef.current = townPresentation;
   centerViewRef.current = centerView;
@@ -231,6 +238,32 @@ export function Workspace({
     };
   }, [refreshActiveRuntime, refreshActiveStatus, refreshProjects]);
 
+  // Main dispatches this only after a worker has settled and before taking the
+  // terminal picture. Chat/TaskRun apply the closed session synchronously;
+  // Workspace also refreshes the town projection so its worker state follows.
+  useEffect(() => {
+    const onRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ dir?: unknown; session?: unknown }>).detail;
+      if (!detail || detail.dir !== activeDirRef.current) return;
+      const session = detail.session as RunSessionSnapshot | null;
+      if (!session || session.dir !== detail.dir || session.phase !== "closed" || !Array.isArray(session.activities)) return;
+      const current = runtimePresentationRef.current;
+      const next = observeTownPresentation(
+        current,
+        session,
+        null,
+        centerViewRef.current === "chat" && !reducedMotionRef.current,
+      );
+      runtimeDirRef.current = session.dir;
+      runtimePresentationRef.current = next;
+      setTownTask(session);
+      setTownStream(null);
+      setRuntimePresentation(next);
+    };
+    window.addEventListener("cairn:task-session-refresh", onRefresh);
+    return () => window.removeEventListener("cairn:task-session-refresh", onRefresh);
+  }, []);
+
   const orderedProjects = useMemo(() => {
     const active = projects.find((project) => project.dir === activeDir);
     const rest = projects.filter((project) => project.dir !== activeDir);
@@ -318,7 +351,11 @@ export function Workspace({
         onCreateProject={onCreateProject}
         onSettings={onSettings} />
 
-      <section className="workspace-stage">
+      {/* Main compares this trusted renderer value with the accepted run root
+          before capture, so switching projects cannot mislabel another
+          project's stage as evidence for the run that just settled. */}
+      <section className="workspace-stage" data-project-dir={activeDir}
+        data-project-generation={captureProjectRef.current.generation}>
         {centerView === "chat" ? (
           /* One world: the town fills the stage and the conversation lives
              inside it as the villager bubble anchored to Cairn. */

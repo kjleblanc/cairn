@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
+import { isEvidenceRunId } from "../../shared/ipc.js";
 import type { ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
 import { cardDigest, cardMarkers, recordCardMarker } from "./cardauth.js";
 import { sanitizeFollowups } from "./followups.js";
@@ -66,7 +67,12 @@ export function newConversationId(root: string): string {
  * — a card whose authorship Cairn cannot later prove is not a card it posts.
  */
 export function appendTurn(root: string, id: string, turn: ConductorTurn): void {
-  if (turn.role === "envelope") recordCardMarker(root, id, turn.ts, turn.card);
+  if (turn.role === "envelope") {
+    if (!isResultCard(turn.card)) {
+      throw new Error("INVALID_RESULT_CARD: Cairn refused to persist a malformed result card.");
+    }
+    recordCardMarker(root, id, turn.ts, turn.card);
+  }
   mkdirSync(conversationsDir(root), { recursive: true });
   appendFileSync(join(conversationsDir(root), `${id}.jsonl`), `${JSON.stringify(turn)}\n`, "utf8");
 }
@@ -87,7 +93,10 @@ function isResultCard(value: unknown): value is ResultCard {
   const card = value as Partial<ResultCard>;
   return card.kind === "result"
     && (card.disposition === "DONE" || card.disposition === "STOPPED" || card.disposition === "ERROR")
-    && Array.isArray(card.filesChanged);
+    && Array.isArray(card.filesChanged)
+    && (!Object.prototype.hasOwnProperty.call(card, "evidenceRunId")
+      || card.evidenceRunId === null
+      || isEvidenceRunId(card.evidenceRunId));
 }
 
 export function readTurns(root: string, id: string): ConductorTurn[] {

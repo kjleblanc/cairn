@@ -4,6 +4,7 @@ import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
 import { startPhoneBridge, stopPhoneBridge } from "./bridge/runtime.js";
 import { setCardMarkerDir } from "./conductor/cardauth.js";
+import { setEvidenceMarkerDir } from "./evidence.js";
 import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import { beginQuitDrain } from "./rungate.js";
 import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
@@ -121,6 +122,9 @@ function bootstrap(): void {
     // `--sandbox workspace-write --cd <project>` cannot write. Set before any
     // IPC is registered: until it is, `readTurns` vouches for no card at all.
     setCardMarkerDir(app.getPath("userData"));
+    // Trusted pictures use the same write boundary as card markers, but each
+    // run owns a separate bounded record and its own PNG files.
+    setEvidenceMarkerDir(app.getPath("userData"));
     registerProjectIpc();
     registerConductorIpc();
     registerBridgeIpc();
@@ -169,4 +173,3 @@ function bootstrap(): void {
     });
   });
 }
-
