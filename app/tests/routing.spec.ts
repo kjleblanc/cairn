@@ -3,7 +3,7 @@ import { test } from "./fixtures/isolated-profile";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { conductorFile, detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
@@ -78,6 +78,143 @@ test("normal mode shows connection-required and creates no task records", async 
   await app.close();
 });
 
+test("manual previews preserve 300, 301, and 2,000 code units and refuse 2,001 before work", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-preview-boundaries-"));
+  scaffold(proj);
+  const logPath = join(proj, "docs", "ai-work", "LOG.md");
+  const before = readFileSync(logPath, "utf8");
+  const app = await electron.launch({ args: ["."], env: { ...process.env, CAIRN_OPEN: proj, CAIRN_MOCK: "1" } });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+
+  for (const length of [300, 301, 2_000]) {
+    const raw = "x".repeat(length);
+    const response = await win.evaluate(
+      ({ project, text }) => window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: text } }),
+      { project: proj, text: raw },
+    );
+    expect(response.ok).toBe(true);
+    if (!response.ok) throw new Error(response.message);
+    expect(response.value.request.outcome.ownerText).toBe(raw);
+    expect(response.value.request.outcome.text).toBe(length <= 300
+      ? raw
+      : "Complete the owner’s exact direct request shown below");
+    expect(response.value.previewId).toMatch(/^[0-9a-f-]{36}$/);
+    await win.evaluate(
+      ({ project, previewId }) => window.cairn.taskPreviewDiscard(project, previewId),
+      { project: proj, previewId: response.value.previewId },
+    );
+  }
+
+  await app.close();
+  const barrierDir = mkdtempSync(join(tmpdir(), "cairn-boundary-barrier-"));
+  const release = join(barrierDir, "release");
+  const boundaryApp = await electron.launch({
+    args: ["."],
+    env: {
+      ...process.env,
+      CAIRN_OPEN: proj,
+      CAIRN_MOCK: "1",
+      CAIRN_TEST_LANE: "1",
+      CAIRN_TEST_ADAPTER_DETECTION_RELEASE: release,
+    },
+  });
+  const boundaryWindow = await boundaryApp.firstWindow();
+  await expect(boundaryWindow.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  const tooLong = await boundaryWindow.evaluate(
+    ({ project, text }) => window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: text } }),
+    { project: proj, text: "x".repeat(2_001) },
+  );
+  expect(tooLong.ok).toBe(false);
+  expect(JSON.stringify(tooLong)).toContain("TASK_REQUEST_TOO_LONG");
+  expect(existsSync(`${release}.waiting`)).toBe(false);
+  const tooShort = await boundaryWindow.evaluate(
+    (project) => window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: " a \n b " } }),
+    proj,
+  );
+  expect(tooShort.ok).toBe(false);
+  expect(await boundaryWindow.evaluate((project) => window.cairn.taskCurrent(project), proj)).toBeNull();
+  expect(existsSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  expect(readFileSync(logPath, "utf8")).toBe(before);
+  await boundaryApp.close();
+});
+
+test("a cancelled delayed route stays stale and cannot publish a preview", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-preview-delay-"));
+  scaffold(proj);
+  const releaseDir = mkdtempSync(join(tmpdir(), "cairn-route-barrier-"));
+  const release = join(releaseDir, "release");
+  const app = await electron.launch({
+    args: ["."],
+    env: {
+      ...process.env,
+      CAIRN_OPEN: proj,
+      CAIRN_MOCK: "1",
+      CAIRN_TEST_LANE: "1",
+      CAIRN_TEST_ADAPTER_DETECTION_RELEASE: release,
+    },
+  });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  const delayed = win.evaluate(
+    (project) => window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: "Keep this delayed preview stale" } }),
+    proj,
+  );
+  await expect.poll(() => existsSync(`${release}.waiting`), { timeout: 10_000 }).toBe(true);
+  await win.evaluate((project) => window.cairn.taskPreviewDiscard(project), proj);
+  writeFileSync(release, "release\n");
+  const result = await delayed;
+  expect(result.ok).toBe(false);
+  expect(JSON.stringify(result)).toContain("TASK_PREVIEW_STALE");
+  expect(await win.evaluate((project) => window.cairn.taskCurrent(project), proj)).toBeNull();
+  expect(existsSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  await app.close();
+});
+
+test("two simultaneous starts consume one fake-worker preview, session, evidence run, and task exactly once", async () => {
+  const proj = mkdtempSync(join(tmpdir(), "cairn-preview-once-"));
+  scaffold(proj);
+  const fakeCodex = fakeCodexEnvironment(proj, true);
+  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const win = await app.firstWindow();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  const lexicalAlias = `${proj}${sep}.`;
+  const result = await win.evaluate(async ({ project, alias }) => {
+    const preview = await window.cairn.taskRoute({
+      dir: project,
+      source: { kind: "manual", rawOutcome: "Create exactly one offline task record" },
+    });
+    if (!preview.ok || !preview.value.disclosure) return { preview, starts: [], replay: preview, album: null, session: null };
+    const request = {
+      dir: project,
+      previewId: preview.value.previewId,
+      realCallConfirmed: true,
+      disclosure: preview.value.disclosure,
+    };
+    const starts = await Promise.all([
+      window.cairn.taskRun(request),
+      window.cairn.taskRun({ ...request, dir: alias }),
+    ]);
+    const replay = await window.cairn.taskRun(request);
+    const album = await window.cairn.evidenceAlbum(project);
+    const session = await window.cairn.taskCurrent(project) ?? await window.cairn.taskCurrent(alias);
+    return { preview, starts, replay, album, session };
+  }, { project: proj, alias: lexicalAlias });
+  expect(result.preview.ok).toBe(true);
+  expect(result.starts.filter((value) => value.ok)).toHaveLength(1);
+  expect(result.starts.filter((value) => !value.ok)).toHaveLength(1);
+  expect(result.replay.ok).toBe(false);
+  expect(existsSync(fakeCodex.marker)).toBe(true);
+  expect(readFileSync(fakeCodex.marker, "utf8").trim().split(/\r?\n/)).toEqual(["started"]);
+  expect(result.session?.phase).toBe("closed");
+  expect(result.session?.evidenceRunId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(result.album?.ok).toBe(true);
+  if (result.album?.ok) expect(result.album.value.entries.filter((entry) => entry.runId !== null)).toHaveLength(1);
+  expect(existsSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(true);
+  expect(existsSync(join(proj, "docs", "ai-work", "tasks", "002-brief.md"))).toBe(false);
+  await app.close();
+});
+
 test("connected Codex requires confirmation then completes one fake-process real-call path", async () => {
   const proj = mkdtempSync(join(tmpdir(), "cairn-codex-real-path-"));
   scaffold(proj);
@@ -101,29 +238,30 @@ test("connected Codex requires confirmation then completes one fake-process real
   await expect(win.getByText(/Exactly one ephemeral Codex Exec process/i)).toBeVisible();
   const start = win.getByRole("button", { name: "Start one real Codex Exec call" });
   await expect(start).toBeDisabled();
-  const denied = await win.evaluate(async ({ project }) => window.cairn.taskRun({
-    dir: project,
-    outcome: "Improve Cairn safely",
-    details: "",
-    adapterId: "codex-exec",
-    realCallConfirmed: false,
-  }), { project: proj });
+  const denied = await win.evaluate(async ({ project }) => {
+    const preview = await window.cairn.taskRoute({
+      dir: project,
+      source: { kind: "manual", rawOutcome: "A separate unconfirmed request" },
+    });
+    if (!preview.ok) return preview;
+    return window.cairn.taskRun({ dir: project, previewId: preview.value.previewId });
+  }, { project: proj });
   expect(denied.ok).toBe(false);
   const mismatched = await win.evaluate(async ({ project }) => {
-    const preview = await window.cairn.taskRoute(project, "Improve Cairn safely", "");
+    const preview = await window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: "First reviewed request" } });
     if (!preview.ok || !preview.value.disclosure) return preview;
+    await window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: "Replacement reviewed request" } });
     return window.cairn.taskRun({
-      dir: project,
-      outcome: "A changed task instruction",
-      details: "",
-      adapterId: "codex-exec",
-      realCallConfirmed: true,
-      disclosure: preview.value.disclosure,
+      dir: project, previewId: preview.value.previewId, realCallConfirmed: true, disclosure: preview.value.disclosure,
     });
   }, { project: proj });
   expect(mismatched.ok).toBe(false);
+  expect(JSON.stringify(mismatched)).toContain("TASK_PREVIEW_STALE");
   expect(existsSync(fakeCodex.marker)).toBe(false);
   expect(existsSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  await win.getByRole("button", { name: "Edit the task" }).click();
+  await win.getByPlaceholder("Describe one visible outcome").fill("Improve Cairn safely");
+  await win.getByRole("button", { name: "Find a route" }).click();
   await win.getByLabel("I approve this one real Codex Exec call.").check();
   await expect(start).toBeEnabled();
   await start.click();
@@ -166,29 +304,37 @@ test("a details-bearing dispatch carries the owner's own data into the confirmed
 
   const outcome = "Add the shelf counts to the page";
   const details = "Use exactly 74, 477, 256 — do not round.";
+  const rawRequest = `${outcome}\n\n${details}`;
 
   // The card the owner reads names BOTH parts of the request, concatenated
   // by core. This is the string the confirmation panel renders verbatim.
   const preview = await win.evaluate(
-    ({ project, task, data }) => window.cairn.taskRoute(project, task, data),
-    { project: proj, task: outcome, data: details },
+    ({ project, raw }) => window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: raw } }),
+    { project: proj, raw: rawRequest },
   );
   expect(preview.ok).toBe(true);
   if (!preview.ok || !preview.value.disclosure) throw new Error("the codex lane must disclose its real call");
   const disclosure = preview.value.disclosure;
-  expect(disclosure.task).toBe(`${outcome}\n\nDetails (verbatim):\n${details}`);
+  expect(preview.value.request.outcome.ownerText).toBe(rawRequest);
+  expect(disclosure.task).toContain("Your exact words (authoritative if they conflict with the interpretation):");
+  expect(disclosure.task).toContain(`> ${outcome}\n> \n> ${details}`);
 
   // A card confirmed for the outcome alone cannot dispatch this request.
-  const stale = await win.evaluate(async ({ project, task, data }) => {
-    const outcomeOnly = await window.cairn.taskRoute(project, task, "");
+  const prepared = await win.evaluate(async ({ project, task, raw }) => {
+    const outcomeOnly = await window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: task } });
     if (!outcomeOnly.ok || !outcomeOnly.value.disclosure) return outcomeOnly;
-    return window.cairn.taskRun({
-      dir: project, outcome: task, details: data, adapterId: "codex-exec",
-      realCallConfirmed: true, disclosure: outcomeOnly.value.disclosure, conversationId: null,
+    const current = await window.cairn.taskRoute({ dir: project, source: { kind: "manual", rawOutcome: raw } });
+    if (!current.ok || !current.value.disclosure) return current;
+    const refusal = await window.cairn.taskRun({
+      dir: project, previewId: current.value.previewId,
+      realCallConfirmed: true, disclosure: outcomeOnly.value.disclosure,
     });
-  }, { project: proj, task: outcome, data: details });
-  expect(stale.ok).toBe(false);
-  expect(JSON.stringify(stale)).toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
+    return { ok: true as const, value: { refusal, preview: current.value } };
+  }, { project: proj, task: outcome, raw: rawRequest });
+  expect(prepared.ok).toBe(true);
+  if (!prepared.ok || !("preview" in prepared.value)) throw new Error("the confirmed preview must remain reviewable");
+  expect(prepared.value.refusal.ok).toBe(false);
+  expect(JSON.stringify(prepared.value.refusal)).toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
   expect(existsSync(fakeCodex.marker)).toBe(false);
 
   // The confirmed request runs: not refused, and the worker is handed the
@@ -201,11 +347,11 @@ test("a details-bearing dispatch carries the owner's own data into the confirmed
   // than assumed from a hook at the top of the file (repo task 080).
   expect(existsSync(conductorFile())).toBe(false);
   const run = await win.evaluate(
-    ({ project, task, data, card }) => window.cairn.taskRun({
-      dir: project, outcome: task, details: data, adapterId: "codex-exec",
-      realCallConfirmed: true, disclosure: card, conversationId: "conv-1",
+    ({ project, previewId, card }) => window.cairn.taskRun({
+      dir: project, previewId,
+      realCallConfirmed: true, disclosure: card,
     }),
-    { project: proj, task: outcome, data: details, card: disclosure },
+    { project: proj, previewId: prepared.value.preview.previewId, card: prepared.value.preview.disclosure },
   );
   expect(JSON.stringify(run)).not.toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
   expect(run.ok).toBe(true);
@@ -213,12 +359,13 @@ test("a details-bearing dispatch carries the owner's own data into the confirmed
   expect(existsSync(fakeCodex.marker)).toBe(true);
 
   const prompt = readFileSync(fakeCodex.prompt, "utf8");
-  expect(prompt).toContain("Details from the owner (use verbatim, do not restate):");
+  expect(prompt).toContain("Your exact words (authoritative if they conflict with the interpretation):");
+  expect(prompt).toContain(outcome);
   expect(prompt).toContain(details);
   const brief = readFileSync(join(proj, "docs", "ai-work", "tasks", "001-brief.md"), "utf8");
   expect(brief).toContain(details);
   const session = await win.evaluate((project) => window.cairn.taskCurrent(project), proj);
-  expect(session?.conversationId).toBe("conv-1");
+  expect(session?.conversationId).toBeNull();
   await app.close();
 });
 
@@ -389,18 +536,34 @@ test("the fake-kimi lane discloses, refuses cross-adapter confirmations, and com
   scaffold(proj);
   const fakeKimi = fakeKimiEnvironment(proj, true);
   const fakeCodex = fakeCodexEnvironment(proj, false);
-  const app = await electron.launch({ args: ["."], env: { ...process.env, ...fakeCodex.env, ...fakeKimi.env, CAIRN_OPEN: proj, CAIRN_MOCK: "0" } });
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  // Put both test shims before the inherited PATH. Each fixture's PATH already
+  // includes the inherited value, so concatenating the two whole strings
+  // would place a real Kimi executable before the fake Kimi shim.
+  const launchPath = `${dirname(fakeKimi.marker)}${delimiter}${fakeCodex.env[pathKey] ?? ""}`;
+  expect(launchPath.split(delimiter).slice(0, 2)).toEqual([dirname(fakeKimi.marker), dirname(fakeCodex.marker)]);
+  const app = await electron.launch({ args: ["."], env: {
+    ...process.env,
+    ...fakeCodex.env,
+    ...fakeKimi.env,
+    [pathKey]: launchPath,
+    CAIRN_OPEN: proj,
+    CAIRN_MOCK: "0",
+  } as Record<string, string> });
   const win = await app.firstWindow();
   await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
 
   const outcome = "Improve Cairn safely";
   const details = "Use exactly 74, 477, 256 — do not round.";
+  const rawRequest = `${outcome}\n\n${details}`;
 
   // The routed preview names kimi as the single candidate and discloses the
   // kimi six facts — the oauth membership wording, the named session record.
   const preview = await win.evaluate(
-    ({ project, task, data }) => window.cairn.taskRoute(project, task, data, "kimi-exec"),
-    { project: proj, task: outcome, data: details },
+    ({ project, raw }) => window.cairn.taskRoute({
+      dir: project, source: { kind: "manual", rawOutcome: raw }, adapterId: "kimi-exec",
+    }),
+    { project: proj, raw: rawRequest },
   );
   expect(preview.ok).toBe(true);
   if (!preview.ok || !preview.value.disclosure) throw new Error("the kimi lane must disclose its real call");
@@ -411,7 +574,8 @@ test("the fake-kimi lane discloses, refuses cross-adapter confirmations, and com
   const disclosure = preview.value.disclosure;
   expect(disclosure.provider).toBe("Moonshot AI");
   expect(disclosure.model).toBe("kimi-code/kimi-for-coding");
-  expect(disclosure.task).toBe(`${outcome}\n\nDetails (verbatim):\n${details}`);
+  expect(disclosure.task).toContain("Your exact words (authoritative if they conflict with the interpretation):");
+  expect(disclosure.task).toContain(`> ${outcome}\n> \n> ${details}`);
   expect(disclosure.data).toContain("~/.kimi-code/sessions/");
   expect(disclosure.quota).toContain("membership");
 
@@ -419,11 +583,11 @@ test("the fake-kimi lane discloses, refuses cross-adapter confirmations, and com
   // a connected candidate in this lane, so the override is refused and
   // nothing spawns.
   const wrongAdapter = await win.evaluate(
-    ({ project, task, data, card }) => window.cairn.taskRun({
-      dir: project, outcome: task, details: data, adapterId: "codex-exec",
-      realCallConfirmed: true, disclosure: card, conversationId: null,
-    }),
-    { project: proj, task: outcome, data: details, card: disclosure },
+    ({ project, previewId, card }) => window.cairn.taskRun({
+      dir: project, previewId, adapterId: "codex-exec",
+      realCallConfirmed: true, disclosure: card,
+    } as never),
+    { project: proj, previewId: preview.value.previewId, card: disclosure },
   );
   expect(wrongAdapter.ok).toBe(false);
   expect(existsSync(fakeKimi.marker)).toBe(false);
@@ -440,11 +604,11 @@ test("the fake-kimi lane discloses, refuses cross-adapter confirmations, and com
     quota: "codex quota",
   };
   const wrongCard = await win.evaluate(
-    ({ project, task, data, card }) => window.cairn.taskRun({
-      dir: project, outcome: task, details: data, adapterId: "kimi-exec",
-      realCallConfirmed: true, disclosure: card, conversationId: null,
+    ({ project, previewId, card }) => window.cairn.taskRun({
+      dir: project, previewId,
+      realCallConfirmed: true, disclosure: card,
     }),
-    { project: proj, task: outcome, data: details, card: codexShaped },
+    { project: proj, previewId: preview.value.previewId, card: codexShaped },
   );
   expect(wrongCard.ok).toBe(false);
   expect(JSON.stringify(wrongCard)).toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
@@ -452,11 +616,11 @@ test("the fake-kimi lane discloses, refuses cross-adapter confirmations, and com
 
   // The confirmed kimi request runs to DONE through the real-call path.
   const run = await win.evaluate(
-    ({ project, task, data, card }) => window.cairn.taskRun({
-      dir: project, outcome: task, details: data, adapterId: "kimi-exec",
-      realCallConfirmed: true, disclosure: card, conversationId: null,
+    ({ project, previewId, card }) => window.cairn.taskRun({
+      dir: project, previewId,
+      realCallConfirmed: true, disclosure: card,
     }),
-    { project: proj, task: outcome, data: details, card: disclosure },
+    { project: proj, previewId: preview.value.previewId, card: disclosure },
   );
   expect(JSON.stringify(run)).not.toContain("REAL_MODEL_CALL_NOT_AUTHORIZED");
   expect(run.ok).toBe(true);

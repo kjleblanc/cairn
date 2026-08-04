@@ -32,7 +32,9 @@ const received = [];
 process.stdin.on("data", (chunk) => received.push(chunk));
 process.stdin.resume();
 process.stdin.on("end", () => {
-  fs.writeFileSync(process.env.CAIRN_FAKE_CODEX_MARKER, "started\\n");
+  // Append one line per actual worker spawn. Most tests need only existence;
+  // the simultaneous-start gate additionally proves there was exactly one.
+  fs.appendFileSync(process.env.CAIRN_FAKE_CODEX_MARKER, "started\\n");
   fs.writeFileSync(process.env.CAIRN_FAKE_CODEX_PROMPT, Buffer.concat(received));
   const finish = () => {
     if (${JSON.stringify(behavior)} === "invalid-jsonl") {

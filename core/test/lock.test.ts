@@ -6,12 +6,19 @@ import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { acquireRunLock } from "../src/lock.js";
+import { createDirectTaskIntent } from "../src/intent.js";
 import { createOfflineDemoAdapter } from "../src/routing.js";
 import { runSerialTask } from "../src/serial.js";
 
 const LOG_HEADER =
   "| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |\n" +
   "|---|---|---|---|---|---|---|---|\n";
+
+function request() {
+  const intent = createDirectTaskIntent("A bounded outcome", "00000000-0000-4000-8000-000000000066");
+  assert.ok(intent);
+  return intent;
+}
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trimEnd();
@@ -71,7 +78,7 @@ test("a lock held by another live process refuses a second run", async () => {
   });
   try {
     await assert.rejects(
-      () => runSerialTask(root, "A bounded outcome", { adapters: [createOfflineDemoAdapter()] }),
+      () => runSerialTask(root, request(), { adapters: [createOfflineDemoAdapter()] }),
       /SERIAL_RUN_ACTIVE/,
     );
   } finally {
@@ -82,7 +89,7 @@ test("a lock held by another live process refuses a second run", async () => {
 test("a stale lock from a dead process self-heals", async () => {
   const root = project();
   writeFileSync(lockPath(root), JSON.stringify({ pid: 999_999_999, hostname: hostname(), startedAt: "2026-01-01T00:00:00.000Z" }), "utf8");
-  const result = await runSerialTask(root, "A bounded outcome", { adapters: [createOfflineDemoAdapter()] });
+  const result = await runSerialTask(root, request(), { adapters: [createOfflineDemoAdapter()] });
   assert.equal(result.status, "done");
   assert.equal(existsSync(lockPath(root)), false);
 });

@@ -1,4 +1,5 @@
 import type { WorkerClaims } from "./claims.js";
+import { taskRequestView, type TaskIntent, type TaskRequestRow, type TaskRequestView } from "./intent.js";
 import type { AdapterTaskContract } from "./routing.js";
 // Type-only, and it must stay that way: serial.ts already imports this module
 // as a value, so a runtime import back would create a cycle.
@@ -7,6 +8,10 @@ import type { SerialStopReason } from "./serial.js";
 export interface ComposedRecordInput {
   taskNumber: number;
   route: AdapterTaskContract["route"];
+  /** Output-only projection of the request accepted for this run. */
+  acceptedRequest: TaskRequestView;
+  /** Inert notes kept with that request; never owner-attributed requirements. */
+  requestContext: readonly string[];
   disposition: "DONE" | "STOPPED";
   stopReason: string | null; // SerialStopReason when STOPPED
   claims: WorkerClaims | null;
@@ -23,6 +28,72 @@ export interface ComposedRecordInput {
 }
 
 const ROW_CAP = 160;
+
+const SOURCE_LABELS: Readonly<Record<TaskRequestRow["source"], string>> = Object.freeze({
+  "owner-stated": "You said so",
+  "owner-unsure": "You weren’t sure",
+  "cairn-chosen": "Cairn chose",
+});
+
+/**
+ * Prefix every physical data line, including empty and whitespace-only lines,
+ * without normalizing line endings or changing any source code unit. Markdown
+ * headings, fences, tables, and disposition-looking text therefore remain
+ * quoted request data rather than Cairn-authored record structure.
+ */
+function quoteRequestData(text: string): string {
+  return `> ${text.replace(/\r\n|\r|\n/g, (lineBreak) => `${lineBreak}> `)}`;
+}
+
+function requestRowText(row: TaskRequestRow, role: string): string {
+  const sections = [
+    `### ${role}`,
+    `**${SOURCE_LABELS[row.source]}**`,
+    "Interpretation:",
+    quoteRequestData(row.text),
+  ];
+  if (row.source === "owner-stated") {
+    sections.push("Your exact words (authoritative if they conflict with the interpretation):");
+    sections.push(quoteRequestData(row.ownerText ?? ""));
+  } else if (row.source === "owner-unsure") {
+    sections.push("Your exact words (a starting point, not a rule):");
+    sections.push(quoteRequestData(row.ownerText ?? ""));
+  } else {
+    sections.push("No owner quotation — this is Cairn’s choice, not evidence of owner preference.");
+  }
+  return sections.join("\n\n");
+}
+
+/**
+ * The one durable source-safe rendering used by briefs and both report
+ * families. `acceptedRequest` is deliberately the ID/offset-free projection;
+ * context stays separate and receives no owner-source label.
+ */
+export function renderAcceptedRequestView(
+  acceptedRequest: TaskRequestView,
+  context: readonly string[],
+): string {
+  const rows = [
+    requestRowText(acceptedRequest.outcome, "Outcome"),
+    ...acceptedRequest.requirements.map((row, index) => requestRowText(row, `Requirement ${index + 1}`)),
+  ];
+  const contextText = context.length > 0
+    ? context.map((note) => quoteRequestData(note)).join("\n\n")
+    : "None.";
+  return [
+    "## What you asked for",
+    ...rows,
+    "## Context kept with the task — not a requirement",
+    contextText,
+  ].join("\n\n");
+}
+
+/** Render only a Core-validated branded intent; casts and hostile clones fail. */
+export function renderAcceptedTaskRequest(intent: TaskIntent): string {
+  const view = taskRequestView(intent);
+  if (!view) throw new Error("INVALID_TASK_INTENT");
+  return renderAcceptedRequestView(view, intent.context);
+}
 
 /**
  * The one privacy sentence every Cairn-authored report carries, worded to
@@ -228,6 +299,7 @@ export function composeWorkerReport(input: ComposedRecordInput): string {
   const stopped = stoppedParagraph(input);
   if (stopped) sections.push(stopped);
   sections.push(PRIVACY_PARAGRAPH);
+  sections.push(renderAcceptedRequestView(input.acceptedRequest, input.requestContext));
   sections.push("## The worker's account (claims, not verified by Cairn)");
   sections.push(workersAccountBlock(input.claims));
   sections.push(`Milestone movement: **${input.claims?.milestone ?? "NO"}**`);

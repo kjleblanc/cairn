@@ -5,7 +5,14 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
 import { CODEX_EXEC_ADAPTER_ID } from "./codex.js";
 import { KIMI_EXEC_ADAPTER_ID } from "./kimi.js";
-import { composeWorkerReport, composeWorkerRowSummary, stopReasonInPlainWords, type ComposedRecordInput } from "./records.js";
+import { taskRequestSha256, taskRequestView, type TaskIntent } from "./intent.js";
+import {
+  composeWorkerReport,
+  composeWorkerRowSummary,
+  renderAcceptedTaskRequest,
+  stopReasonInPlainWords,
+  type ComposedRecordInput,
+} from "./records.js";
 import { appendLogRow, canonicalPath, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
 import {
@@ -28,11 +35,6 @@ export interface SerialRunEvents { onActivity?: (activity: SerialActivity) => vo
 export interface SerialRunOptions {
   adapters: readonly TaskAdapter[];
   adapterId?: string;
-  /**
-   * The owner's own supplied data — numbers, names, exact wording — carried to
-   * the worker verbatim and bound into the contract digest. Defaults to "".
-   */
-  details?: string;
   commitRecords?: boolean;
   events?: SerialRunEvents;
   signal?: AbortSignal;
@@ -206,24 +208,6 @@ function emit(activities: SerialActivity[], events: SerialRunEvents | undefined,
   events?.onActivity?.(activity);
 }
 
-function sha256(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
-}
-
-function escapeLine(text: string): string {
-  return text.replace(/\r?\n/g, " ").trim();
-}
-
-/**
- * Owner-supplied text lands in the brief quarantined as a blockquote — the same
- * containment Cairn uses for worker text (Task 047). The words stay verbatim;
- * a heading or table row inside them can never become structure of Cairn's own
- * record.
- */
-function blockquote(text: string): string {
-  return text.split(/\r?\n/).map((line) => (line.trim() ? `> ${line}` : ">")).join("\n");
-}
-
 function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
   const label = contract.route.adapterLabel;
@@ -238,19 +222,14 @@ function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const stopped = demo
     ? "STOPPED means the serial demonstration or its protection checks did not complete."
     : "STOPPED means the call was not authorized, the model reported a stop, process evidence failed, protected work changed, or the result records could not be verified.";
-  // The owner's own data — numbers, names, exact wording — shown in the brief
-  // exactly as given, so what the worker was handed is readable afterwards.
-  const details = contract.details.trim()
-    ? `\n## Details (verbatim)\n\n${blockquote(contract.details)}\n`
-    : "";
   return `# Task ${pad(contract.taskNumber)} — ${title}
-
-Requested outcome: ${escapeLine(contract.requestedOutcome)}
 
 Supported outcome: ${contract.supportedOutcome}
 
 Lane: **Standard** — ${lane}.
-${details}
+
+${renderAcceptedTaskRequest(contract.intent)}
+
 ## Route
 
 - Adapter: ${contract.route.adapterLabel}
@@ -280,6 +259,12 @@ ${done}
 
 ${stopped}
 `;
+}
+
+function acceptedRequestForRecord(contract: AdapterTaskContract): Pick<ComposedRecordInput, "acceptedRequest" | "requestContext"> {
+  const acceptedRequest = taskRequestView(contract.intent);
+  if (!acceptedRequest) throw new Error("INVALID_TASK_INTENT");
+  return { acceptedRequest, requestContext: contract.intent.context };
 }
 
 /**
@@ -354,6 +339,7 @@ function reportText(
   orphanRisk = false,
 ): string {
   const taskNumber = contract.taskNumber;
+  const acceptedRequestText = renderAcceptedTaskRequest(contract.intent);
   // Task 119: brand every non-demo record from the ROUTED adapter — the idiom
   // `rowFor` already uses — so a kimi timeout or boundary stop never claims
   // Codex or OpenAI. Codex output stays byte-identical (label "Codex Exec",
@@ -378,6 +364,8 @@ The deterministic offline adapter completed the serial route. It received no pro
 - Only this brief, this report, and one append-only log row were written.
 - Protected starting Git work remained unchanged.
 - Automatic record commit: ${commitRequested ? "requested; the returned run result records whether exact-name isolation allowed it" : "not requested; the three record changes remain visible for inspection"}.
+
+${acceptedRequestText}
 
 ## Limitation
 
@@ -405,6 +393,8 @@ Cairn prepared one ephemeral, workspace-scoped ${label} request and stopped with
 - The real \`${invocationName(contract.route.adapterId)}\` process was not started.
 - Cairn did not retry, resume, continue, schedule, delegate, or choose another provider.
 - Existing work was not cleaned, reset, stashed, moved, or overwritten by Cairn.
+
+${acceptedRequestText}
 
 ## Limitation
 
@@ -444,6 +434,8 @@ ${processFailure ? `\nProcess failure: \`${processFailure.code}\`. Raw run evide
 - Existing work was not cleaned, reset, stashed, moved, or overwritten by Cairn.
 - Unexpected changes, if any, were retained as evidence.
 - No unverified product implementation or model work was claimed as complete.
+
+${acceptedRequestText}
 
 Milestone movement: **NO**
 
@@ -519,7 +511,7 @@ function validateWorkerResult(value: unknown, contract: AdapterTaskContract): va
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return false;
     const keys = Reflect.ownKeys(value);
-    const expected = ["claimsText", "evidence", "kind", "requestedOutcomeSha256", "status", "taskNumber"];
+    const expected = ["claimsText", "evidence", "kind", "requestSha256", "status", "taskNumber"];
     if (keys.some((key) => typeof key !== "string") || !sameLines((keys as string[]).sort(), expected)) return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     for (const key of expected) {
@@ -527,9 +519,9 @@ function validateWorkerResult(value: unknown, contract: AdapterTaskContract): va
       if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return false;
     }
     const claimsText = descriptors.claimsText.value;
-    return descriptors.kind.value === "worker-result/v1" &&
+    return descriptors.kind.value === "worker-result/v2" &&
       descriptors.taskNumber.value === contract.taskNumber &&
-      descriptors.requestedOutcomeSha256.value === contract.requestedOutcomeSha256 &&
+      descriptors.requestSha256.value === contract.requestSha256 &&
       (descriptors.status.value === "completed" || descriptors.status.value === "failed") &&
       (claimsText === null || (typeof claimsText === "string" && claimsText.length <= 262_144)) &&
       validEvidence(descriptors.evidence.value);
@@ -592,6 +584,7 @@ function cairnWorkerRecords(
   const input: ComposedRecordInput = {
     taskNumber: contract.taskNumber,
     route: contract.route,
+    ...acceptedRequestForRecord(contract),
     disposition,
     stopReason,
     claims,
@@ -674,6 +667,7 @@ function composedForClose(
   return {
     taskNumber: contract.taskNumber,
     route: contract.route,
+    ...acceptedRequestForRecord(contract),
     disposition,
     stopReason,
     claims: site.claims,
@@ -989,16 +983,19 @@ function recordVerificationFailed(detail: string, restored: boolean): Error {
   return new Error(`RECORD_VERIFICATION_FAILED: ${detail}${restored ? "" : unrestored}`);
 }
 
-export function previewSerialRoute(outcome: string, adapters: readonly TaskAdapter[], adapterId?: string): RouteResult {
-  return routeTask({ outcome, capability: "serial-task" }, adapters, adapterId);
+export function previewSerialRoute(intent: TaskIntent, adapters: readonly TaskAdapter[], adapterId?: string): RouteResult {
+  if (taskRequestSha256(intent) === null) throw new Error("INVALID_TASK_INTENT");
+  return routeTask({ outcome: intent.outcome.text, capability: "serial-task" }, adapters, adapterId);
 }
 
-export async function runSerialTask(root: string, outcome: string, options: SerialRunOptions): Promise<SerialRunResult> {
+export async function runSerialTask(root: string, intent: TaskIntent, options: SerialRunOptions): Promise<SerialRunResult> {
+  const requestSha256 = taskRequestSha256(intent);
+  if (requestSha256 === null) throw new Error("INVALID_TASK_INTENT");
   const projectRoot = resolve(root);
   if (activeRoots.has(projectRoot)) throw new Error("SERIAL_RUN_ACTIVE: One task is already running for this project.");
   assertGoverned(projectRoot);
   const activities: SerialActivity[] = [];
-  const route = previewSerialRoute(outcome, options.adapters, options.adapterId);
+  const route = routeTask({ outcome: intent.outcome.text, capability: "serial-task" }, options.adapters, options.adapterId);
   emit(activities, options.events, {
     stage: "Route",
     state: route.status === "ready" ? "done" : "stopped",
@@ -1024,7 +1021,6 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     const chosen = options.adapters.find((item) => item.descriptor.id === route.recommended.id);
     if (!chosen) throw new Error("ROUTE_ADAPTER_MISSING");
     const demo = chosen.descriptor.capabilities.includes("offline-demo");
-    const details = (options.details ?? "").trim();
     const start = snapshot(projectRoot);
     const taskNumber = nextTaskNumber(projectRoot);
     mkdirSync(paths.tasks(projectRoot), { recursive: true });
@@ -1035,15 +1031,10 @@ export async function runSerialTask(root: string, outcome: string, options: Seri
     ];
     const ownedSet = new Set(owned);
     const contract: AdapterTaskContract = {
-      version: "cairn-serial-task/v2",
+      version: "cairn-serial-task/v3",
       taskNumber,
-      requestedOutcome: outcome.trim(),
-      details,
-      // The digest binds the outcome AND the owner's details together, always
-      // as the two-part JSON array (an empty details string included). A result
-      // echoing the outcome-only digest cannot pass for a detailed request, and
-      // an authorization bound to one pair cannot dispatch the other.
-      requestedOutcomeSha256: sha256(JSON.stringify([outcome.trim(), details])),
+      intent,
+      requestSha256,
       supportedOutcome: demo ? OFFLINE_SUPPORTED_OUTCOME : WORKER_SUPPORTED_OUTCOME,
       lane: "Standard",
       route: {

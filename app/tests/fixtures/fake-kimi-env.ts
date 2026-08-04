@@ -14,9 +14,9 @@ import { delimiter, join } from "node:path";
  *   1. The prompt arrives as ONE `-p` argv element, never on stdin — so the
  *      shim records `process.argv` and writes its started-marker at spawn,
  *      not on stdin end.
- *   2. The env must set BOTH `CAIRN_TEST_LANE=1` and `CAIRN_FAKE_KIMI=1`:
- *      core's fail-closed guard resolves every kimi command to not-found when
- *      the test marker is present without the explicit fake opt-in.
+ *   2. The env must set `CAIRN_TEST_LANE=1`, `CAIRN_FAKE_KIMI=1`, and the
+ *      exact temporary `CAIRN_FAKE_KIMI_BIN`: core's fail-closed guard never
+ *      consults inherited PATH or the home fallback in a test lane.
  *
  * The `.cmd` shim ceiling (measured, Task 119): cmd.exe truncates a multi-line
  * argv element at the first newline, so on Windows the fake receives only the
@@ -131,10 +131,11 @@ setTimeout(finish, ${JSON.stringify(behavior === "slow" ? 8000 : 0)});
       CAIRN_FAKE_KIMI_ARGV: argvFile,
       CAIRN_FAKE_KIMI_PROMPT: prompt,
       LOCALAPPDATA: emptyLocalAppData,
-      // Both, always: the positive test marker without the fake opt-in makes
-      // core's fail-closed guard resolve every kimi command to not-found.
+      // All three, always: the test marker removes PATH/home resolution; the
+      // fake opt-in and exact temp bin authorize only this fixture command.
       CAIRN_TEST_LANE: "1",
       CAIRN_FAKE_KIMI: "1",
+      CAIRN_FAKE_KIMI_BIN: bin,
     },
   };
 }

@@ -11,24 +11,43 @@ import { createServer } from "node:http";
 // window to observe it in — never a wall-clock sleep in the test itself.
 const DELAY_MS = 300;
 
-// Task 5 (Phase 3): the full-loop reply carries details as well as a risk
+// Plan 4: ordinary proposal fixtures use the attributed task-intent protocol.
 // chip, so one test walks the whole path — chip resolved, inline
 // confirmation showing both parts, dispatch, records on disk.
 const RISK_TASK_BLOCK = JSON.stringify({
-  outcome: "Change the page title",
-  concerns: [{ kind: "risk", text: "Renaming the title may break bookmarked links." }],
-  details: "Keep the counts 74, 477, 256 exactly.",
+  intent: {
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Change the page title", ownerQuote: "title" },
+    requirements: [{ source: "cairn-chosen", text: "Keep the counts 74, 477, 256 exactly.", ownerQuote: null }],
+    context: [],
+  },
+  risks: [{ text: "Renaming the title may break bookmarked links." }],
+});
+
+const RISK_FREE_TASK_BLOCK = JSON.stringify({
+  intent: {
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Change the page title", ownerQuote: "title" },
+    requirements: [{ source: "cairn-chosen", text: "Keep the counts 74, 477, 256 exactly.", ownerQuote: null }],
+    context: [],
+  },
+  risks: [],
 });
 
 const TWO_CONCERN_TASK_BLOCK = JSON.stringify({
-  outcome: "Change the page title",
-  concerns: [
-    { kind: "question", text: "Should the old title still redirect?" },
-    { kind: "risk", text: "Renaming the title may break bookmarked links." },
+  intent: {
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Change the page title", ownerQuote: "title" },
+    requirements: [],
+    context: [],
+  },
+  risks: [
+    { text: "Should the old title still redirect?" },
+    { text: "Renaming the title may break bookmarked links." },
   ],
 });
 
-// "extra" is not one of the three allowed keys (outcome/concerns/notes), so
+// This is deliberately the obsolete pre-attribution shape, so
 // Cairn's own parser drops this block — the reply still shows as plain text.
 const GARBLED_TASK_BLOCK = JSON.stringify({
   outcome: "Change the page title",
@@ -36,15 +55,19 @@ const GARBLED_TASK_BLOCK = JSON.stringify({
   extra: "not allowed",
 });
 
-// Task 4 (Phase 3): the `details` channel carries data verbatim to the card
+// A separate fixture keeps the three counts as a Cairn-chosen requirement
 // and, later, into the confirmed disclosure — never reworded by the model.
 const DETAILS_TASK_BLOCK = JSON.stringify({
-  outcome: "Change the page title",
-  concerns: [],
-  details: "74, 477, 256",
+  intent: {
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Change the page title", ownerQuote: "detailtask" },
+    requirements: [{ source: "cairn-chosen", text: "74, 477, 256", ownerQuote: null }],
+    context: [],
+  },
+  risks: [],
 });
 
-// Task 176's additive action protocol. Production stays on the legacy block
+// Task 176's authenticated action protocol. Owner-attributed rows cite exact
 // until Task 3 migrates dispatch; these explicit fake-only triggers exercise
 // the authenticated, inert main-process path without a provider call.
 const ATTRIBUTED_TASK_BLOCK = JSON.stringify({
@@ -180,6 +203,9 @@ function scriptFor(content) {
   if (content.includes("plain redirect is enough")) {
     return { parts: ["One moment", ", checking the answer", ", done."], delayMs: 500 };
   }
+  if (content.includes("set it aside and keep the task as proposed")) {
+    return { parts: [`I removed that risk from the proposal.\n\n\`\`\`cairn-task\n${RISK_FREE_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
+  }
   if (content.includes("title")) {
     return { parts: [`Sure, here's the plan.\n\n\`\`\`cairn-task\n${RISK_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
@@ -283,7 +309,7 @@ export function start() {
         }
         const beforeDone = content.includes("detailtask third")
           ? thirdProposalGatePoint
-          : content.includes("plain redirect is enough")
+          : content.includes("plain redirect is enough") || content.includes("set it aside and keep the task as proposed")
             ? answerGatePoint
             : undefined;
         void streamReply(res, scriptFor(content), beforeDone);

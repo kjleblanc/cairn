@@ -130,6 +130,29 @@ type InternalAction =
 
 const currentActions = new Map<string, InternalAction>();
 
+/**
+ * Task routing keeps only an in-memory preview. Any conversation-side change
+ * to proposal authority retires that preview through this main-private seam;
+ * `null` means every project (used by app-wide disconnect/reset).
+ */
+type TaskProposalChangedListener = (dir: string | null) => void;
+const taskProposalChangedListeners = new Set<TaskProposalChangedListener>();
+
+export function onTaskProposalChanged(listener: TaskProposalChangedListener): () => void {
+  taskProposalChangedListeners.add(listener);
+  return () => taskProposalChangedListeners.delete(listener);
+}
+
+function notifyTaskProposalChanged(dir: string | null): void {
+  for (const listener of [...taskProposalChangedListeners]) {
+    try {
+      listener(dir);
+    } catch (error) {
+      logError("conductor:task-proposal-listener", error);
+    }
+  }
+}
+
 function actionKey(dir: string): string {
   return canonicalProjectKey(dir);
 }
@@ -288,6 +311,7 @@ export function disconnect(): void {
   keystore.clearConnection();
   proposals.clear();
   currentActions.clear();
+  notifyTaskProposalChanged(null);
 }
 
 /** One sign-in attempt at a time, app-wide — the loopback listener and the
@@ -410,6 +434,46 @@ export function action(dir: string, conversationId: string): ConductorAction | n
   return current?.conversationId === conversationId ? actionView(current) : null;
 }
 
+/**
+ * Main-private dispatch authority for Task 3. The renderer can name an action
+ * id, but only the exact still-current authenticated task action can yield the
+ * frozen intent that Core will receive. Project conversation files are never
+ * consulted and the intent never crosses IPC.
+ */
+export function currentTaskProposal(
+  dir: string,
+  conversationId: string,
+  proposalId: string,
+): { intent: TaskIntent; unresolvedRisks: number } | null {
+  if (!isConversationId(conversationId) || !ACTION_UUID.test(proposalId)) return null;
+  const current = currentActions.get(actionKey(dir));
+  if (!current || current.kind !== "task" || current.conversationId !== conversationId || current.actionId !== proposalId) {
+    return null;
+  }
+  return { intent: current.intent, unresolvedRisks: current.risks.length };
+}
+
+/**
+ * Atomically spend one exact, risk-free authenticated task proposal. A stale,
+ * replayed, corrected, or renderer-invented id changes nothing. Once consumed,
+ * no later readiness or process failure restores conversation authority.
+ */
+export function consumeCurrentTaskProposal(
+  dir: string,
+  conversationId: string,
+  proposalId: string,
+): { intent: TaskIntent } | null {
+  const current = currentTaskProposal(dir, conversationId, proposalId);
+  if (current === null || current.unresolvedRisks !== 0) return null;
+  const key = actionKey(dir);
+  const authoritative = currentActions.get(key);
+  if (!authoritative || authoritative.kind !== "task" || authoritative.intent !== current.intent) return null;
+  currentActions.delete(key);
+  proposals.delete(key);
+  notifyTaskProposalChanged(dir);
+  return { intent: current.intent };
+}
+
 /** Retire only the exact proposal main emitted and the owner is now sending.
  * A refused, stale, or renderer-invented request leaves the real proposal in
  * place. */
@@ -521,6 +585,7 @@ export function send(
     // that this one-time reply is reusable. Retire it, spend nothing, and keep
     // the owner's optimistic text visible with an explicitly uncertain status.
     currentActions.delete(key);
+    notifyTaskProposalChanged(dir);
     if (conversationId === null) proposals.delete(key);
     let recovered = false;
     try {
@@ -545,6 +610,7 @@ export function send(
   // the immediate custody readback below fails closed, this reply was stored
   // and the same action may never be targeted a second time.
   currentActions.delete(key);
+  notifyTaskProposalChanged(dir);
   // The legacy renderer deliberately retains a proposal across same-
   // conversation free-text chip replies until Task 3 migrates it. Starting a
   // different conversation must still retire the previous conversation's
@@ -818,6 +884,7 @@ async function streamTurn(
       // A new authenticated action replaces any legacy card still bridged for
       // the current renderer; the two authorities may never coexist.
       proposals.delete(actionKey(dir));
+      notifyTaskProposalChanged(dir);
     }
     // The parser above and this service are the trusted origin of dispatch
     // controls. Keep the latest well-formed reply proposal available across a

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskBlock, TaskBlockConcern } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -26,8 +26,9 @@ type InFlight = { id: string | null };
  * plain reason in `error`); `disclosure` is null whenever the routed adapter
  * declares no real call to confirm — the offline demo, today. */
 type Dispatch = {
-  outcome: string;
-  details: string;
+  previewId: string | null;
+  request: Extract<ConductorAction, { kind: "task" }>["request"];
+  context: readonly string[];
   route: RouteResult | null;
   disclosure: WorkerDisclosure | null;
   phase: "confirm" | "running" | "settling";
@@ -102,6 +103,20 @@ function sameTaskBlock(a: TaskBlock | null, b: TaskBlock | null): boolean {
   return a.outcome === b.outcome && a.notes === b.notes && a.details === b.details &&
     a.concerns.length === b.concerns.length &&
     a.concerns.every((concern, i) => concern.kind === b.concerns[i].kind && concern.text === b.concerns[i].text);
+}
+
+/** Temporary TaskCard-shaped display projection for the authenticated action.
+ * It contains no IDs and is never sent back as authority; `task:route` receives
+ * only the action UUID and main reopens the frozen intent itself. */
+function taskBlockFromAction(action: Extract<ConductorAction, { kind: "task" }>): TaskBlock {
+  return {
+    outcome: action.request.outcome.text,
+    concerns: action.risks.map((risk) => ({ kind: "risk", text: risk.text })),
+    notes: action.context.join("\n"),
+    details: action.request.requirements
+      .map((requirement) => requirement.ownerText ?? requirement.text)
+      .join("\n"),
+  };
 }
 
 /** Saved history may resolve after a live done/envelope event was already
@@ -432,6 +447,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // every time it's replaced, so `TaskCard` remounts with fresh chip state
   // instead of carrying over answers from the previous proposal.
   const [taskBlock, setTaskBlock] = useState<TaskBlock | null>(null);
+  const [taskAction, setTaskAction] = useState<Extract<ConductorAction, { kind: "task" }> | null>(null);
   const [taskBlockKey, setTaskBlockKey] = useState(0);
   // Main's conversation/proposal reads are asynchronous. If a live proposal or
   // result arrives while they are in flight, that event is newer and must win
@@ -495,10 +511,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
    * newer proposal is already current. */
   const reconcileProposal = useCallback(async (id: string): Promise<void> => {
     const requestedAt = taskBlockVersionRef.current;
-    const restored = await cairn.conductorProposal(dir, id);
+    const [restored, restoredAction] = await Promise.all([
+      cairn.conductorProposal(dir, id),
+      cairn.conductorAction(dir, id),
+    ]);
     if (conversationIdRef.current !== id || taskBlockVersionRef.current !== requestedAt) return;
     taskBlockVersionRef.current += 1;
-    applyTaskBlock(restored);
+    const task = restoredAction?.kind === "task" ? restoredAction : null;
+    applyTaskBlock(task ? taskBlockFromAction(task) : restored);
+    setTaskAction(task);
   }, [dir, applyTaskBlock]);
 
   // Villager bubble (Task 146): an explicit "talk" intent from the shell —
@@ -555,9 +576,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
           setCommentary(true);
         }
 
-        const [saved, restored] = await Promise.all([
+        const [saved, restored, restoredAction] = await Promise.all([
           cairn.conductorTurns(dir, id),
           cairn.conductorProposal(dir, id),
+          cairn.conductorAction(dir, id),
         ]);
         // Close the small gap where the initial stream snapshot said "live"
         // but its done event reached the renderer before the id was adopted.
@@ -572,7 +594,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         }
 
         setTurns(saved);
-        if (taskBlockVersionRef.current === proposalVersion) applyTaskBlock(restored);
+        if (taskBlockVersionRef.current === proposalVersion) {
+          const task = restoredAction?.kind === "task" ? restoredAction : null;
+          applyTaskBlock(task ? taskBlockFromAction(task) : restored);
+          setTaskAction(task);
+        }
         if (latestStream?.conversationId === id && latestStream.kind === "reply") {
           inFlightRef.current = { id };
           streamingRef.current = latestStream.text;
@@ -707,9 +733,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       // Only a reply that carries a new task block replaces the card — a
       // plain reply (e.g. answering a question in ordinary prose) leaves
       // whatever card is already showing right where it is.
-      if (event.taskBlock) {
+      if (event.taskBlock || event.action?.kind === "task") {
         taskBlockVersionRef.current += 1;
-        applyTaskBlock(event.taskBlock);
+        const task = event.action?.kind === "task" ? event.action : null;
+        applyTaskBlock(task ? taskBlockFromAction(task) : event.taskBlock ?? null);
+        setTaskAction(task);
       } else void reconcileProposal(event.conversationId);
       return;
     }
@@ -822,7 +850,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // delta), so the first attempt leaves no mark on a refusal and the caller
   // retries shortly. A loud refusal keeps the words in the composer with a
   // "Try again" (Task 153).
-  async function send(text: string, quiet = false): Promise<boolean> {
+  async function send(text: string, quiet = false, actionReply?: ConductorActionReply): Promise<boolean> {
     if (!text.trim() || taskBusy || restoringConversation) return false;
     setError(null);
     // Queue instead of bounce (Task 155): while a reply or the envelope's
@@ -830,6 +858,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // refuse. The message waits visibly in the pending row instead — never a
     // phantom turn, never lost words.
     if (streaming || commentary) {
+      // A one-time action reply cannot be downgraded into an ordinary queued
+      // message: its IDs are the authority. TaskCard is disabled while busy,
+      // and this closes the race if a stream begins between render and click.
+      if (actionReply !== undefined) return false;
       setPending((p) => [...p, text]);
       setComposer("");
       return true;
@@ -849,7 +881,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     const inFlight: InFlight = { id: startingId };
     inFlightRef.current = inFlight;
 
-    const response = await cairn.conductorSend({ dir, conversationId: startingId, text });
+    const response = await cairn.conductorSend({ dir, conversationId: startingId, text, ...(actionReply ? { actionReply } : {}) });
     if (inFlightRef.current !== inFlight) return true; // superseded by "New conversation" or another send meanwhile — this call still dispatched
     if (!response.ok) {
       // Main refused before persisting anything, so this message is not in the
@@ -879,6 +911,18 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       // The response resolved before any delta raced ahead of it — adopt now.
       inFlight.id = response.value.conversationId;
       setConvId(response.value.conversationId);
+    }
+    // Main retires every current action/preview at the accepted owner append.
+    // Advance the async-reconciliation guard and clear both projections as one
+    // local boundary: a proposal read that began before this append must never
+    // resurrect its retired action while the replacement reply is pending.
+    taskBlockVersionRef.current += 1;
+    applyTaskBlock(null);
+    setTaskAction(null);
+    if (dispatch?.phase === "confirm") {
+      dispatchToken.current += 1;
+      setDispatch(null);
+      setRealCallConfirmed(false);
     }
     return true;
   }
@@ -927,6 +971,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     conversationVersionRef.current += 1;
     taskBlockVersionRef.current += 1;
     applyTaskBlock(null);
+    setTaskAction(null);
     setOpenedCards(new Set());
     // Queued messages belonged to the conversation being left: they will
     // never send now, so their words come back to the composer rather than
@@ -936,6 +981,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       setComposer((current) => (current.trim() ? `${current}\n${returned}` : returned));
       setPending([]);
     }
+    if (dispatch?.phase === "confirm") {
+      dispatchToken.current += 1;
+      await cairn.taskPreviewDiscard(dir, dispatch.previewId ?? undefined);
+    }
     // A running dispatch â€” including its short terminal-picture barrier â€”
     // belongs to the project, not to the conversation it was started from, so
     // it stays on screen; an undecided one goes with the proposal.
@@ -944,27 +993,48 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setRealCallConfirmed(false);
   }
 
-  function onCardAnswer(_concern: TaskBlockConcern, answer: string): Promise<boolean> {
+  function onCardAnswer(_index: number, _concern: TaskBlockConcern, answer: string): Promise<boolean> {
     return send(`About your question — ${answer}`);
   }
 
-  function onCardSetAside(_concern: TaskBlockConcern): Promise<boolean> {
-    return send("I understand the risk you raised — set it aside and keep the task as proposed.");
+  function onCardSetAside(index: number, concern: TaskBlockConcern): Promise<boolean> {
+    const action = taskAction;
+    const risk = action?.risks[index];
+    if (action === null || action === undefined || concern.kind !== "risk" || risk === undefined || risk.text !== concern.text) {
+      setError("That risk is no longer current. Wait for Cairn's latest proposal.");
+      return Promise.resolve(false);
+    }
+    return send(
+      "I understand the risk you raised — set it aside and keep the task as proposed.",
+      false,
+      { kind: "set-risk-aside", actionId: action.actionId, riskId: risk.riskId },
+    );
   }
 
   // "Send to dispatch": open the confirmation panel for BOTH parts of the
   // request at once, then ask main which adapter would take it and what it
   // would disclose. The panel shows immediately so the press is never
   // silent; the route fills in when it answers.
-  function onCardSend(outcome: string, details: string): void {
+  function onCardSend(): void {
+    const action = taskAction;
+    if (action === null || action.conversationId !== conversationIdRef.current) {
+      setError("That proposed task is no longer current. Ask Cairn to propose it again.");
+      return;
+    }
     const token = dispatchToken.current + 1;
     dispatchToken.current = token;
     setRealCallConfirmed(false);
-    setDispatch({ outcome, details, route: null, disclosure: null, phase: "confirm", error: null });
-    void cairn.taskRoute(dir, outcome, details).then((response) => {
+    setDispatch({ previewId: null, request: action.request, context: action.context, route: null, disclosure: null, phase: "confirm", error: null });
+    void cairn.taskRoute({
+      dir,
+      source: { kind: "proposal", proposalId: action.actionId, conversationId: action.conversationId },
+    }).then((response) => {
       if (dispatchToken.current !== token) return; // a newer dispatch replaced this one
       setDispatch((current) => (current === null ? null : {
         ...current,
+        previewId: response.ok ? response.value.previewId : null,
+        request: response.ok ? response.value.request : current.request,
+        context: response.ok ? response.value.context : current.context,
         route: response.ok ? response.value.route : null,
         disclosure: response.ok ? response.value.disclosure ?? null : null,
         error: response.ok ? null : response.message,
@@ -980,37 +1050,42 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // takes a long time to answer, and a second dispatch opened meanwhile owns
   // the panel now. Without it, the first run's late answer would clear or
   // error-stamp a panel the owner is still reading.
-  async function startDispatch(request: Dispatch, adapterId: string, worker: boolean) {
+  async function startDispatch(request: Dispatch, worker: boolean) {
     if (worker && !realCallConfirmed) return;
+    if (request.previewId === null) return;
     const token = dispatchToken.current + 1;
     dispatchToken.current = token;
     setDispatch({ ...request, phase: "running", error: null });
-    const dispatchConversationId = conversationIdRef.current;
     const response = await cairn.taskRun({
       dir,
-      outcome: request.outcome,
-      details: request.details,
-      adapterId,
+      previewId: request.previewId,
       realCallConfirmed: worker && realCallConfirmed,
       disclosure: request.disclosure ?? undefined,
-      conversationId: dispatchConversationId,
     });
     if (dispatchToken.current !== token) return; // a newer dispatch owns the panel now
     if (!response.ok) {
-      if (dispatchConversationId) await reconcileProposal(dispatchConversationId);
+      const accepted = await cairn.taskCurrent(dir);
+      if (accepted?.acceptedPreviewId === request.previewId && accepted.phase === "closed" && accepted.error) {
+        if (accepted.conversationId) await reconcileProposal(accepted.conversationId);
+        setDispatch(null);
+        setRealCallConfirmed(false);
+        void refreshSession();
+        return;
+      }
       setDispatch({ ...request, phase: "confirm", error: response.message });
       return;
     }
     if (response.value.status === "connection-required") {
-      if (dispatchConversationId) await reconcileProposal(dispatchConversationId);
-      setDispatch({ ...request, route: response.value.route, phase: "confirm", error: "Codex's setup changed while you were deciding. Nothing was started or saved." });
+      setDispatch(null);
+      setRealCallConfirmed(false);
+      setError("The reviewed worker is no longer available. Nothing was started; review the proposal again.");
       void refreshSession(); // this close leaves a closed session too — the strip must not keep showing it as running
       return;
     }
     // The confirmation panel's work is done: the run's own records are on
     // disk, the status strip below carries its terminal state, and the
     // envelope posts its own result card into this conversation.
-    if (dispatchConversationId) await reconcileProposal(dispatchConversationId);
+    if (conversationIdRef.current) await reconcileProposal(conversationIdRef.current);
     setDispatch(null);
     setRealCallConfirmed(false);
     // Main's reconciliation removes only the proposal this dispatch spent:
@@ -1018,6 +1093,13 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // offer to re-run a task that is already running — and crowd the next
     // proposal out of the conversation's attention.
     void refreshSession();
+  }
+
+  function cancelDispatch(request: Dispatch): void {
+    dispatchToken.current += 1;
+    setDispatch(null);
+    setRealCallConfirmed(false);
+    void cairn.taskPreviewDiscard(dir, request.previewId ?? undefined);
   }
 
   const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
@@ -1028,7 +1110,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // Needs-you dot (Task 155): tucked away, the chip says when something
   // inside waits on the owner — a proposed task to decide, a dispatch to
   // confirm, or a push to approve.
-  const proposalNeedsYou = taskBlock !== null && !taskBusy;
+  const proposalNeedsYou = taskBlock !== null && taskAction !== null && !taskBusy;
   const needsYou = proposalNeedsYou
     || dispatch?.phase === "confirm"
     || pushFlow?.phase === "chip"
@@ -1145,18 +1227,32 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   ) : null}
                 </Fragment>
               )))}
-              {taskBlock && !taskBusy ? (
-                <TaskCard key={taskBlockKey} block={taskBlock} busy={streaming}
+              {taskBlock && taskAction && !taskBusy ? (
+                <TaskCard key={`${taskBlockKey}-${taskAction.actionId}`} block={taskBlock} busy={streaming || commentary}
                   onAnswer={onCardAnswer} onSetAside={onCardSetAside} onSend={onCardSend} />
               ) : null}
               {dispatch && dispatch.phase !== "settling" ? (
                 <div className="card dispatch-panel">
                   <p className="card-title">start this task</p>
-                  <p className="dispatch-outcome">{dispatch.outcome}</p>
-                  {dispatch.details ? (
+                  <p className="small muted">Interpretation ({dispatch.request.outcome.source})</p>
+                  <p className="dispatch-outcome">{dispatch.request.outcome.text}</p>
+                  {dispatch.request.outcome.ownerText !== null ? (
                     <div className="task-card-details">
-                      <p className="small muted task-card-details-label">Your details (sent word-for-word)</p>
-                      <p className="task-card-details-text">{dispatch.details}</p>
+                      <p className="small muted task-card-details-label">Your exact words</p>
+                      <p className="task-card-details-text">{dispatch.request.outcome.ownerText}</p>
+                    </div>
+                  ) : null}
+                  {dispatch.request.requirements.map((requirement, index) => (
+                    <div className="task-card-details" key={`${requirement.source}-${index}`}>
+                      <p className="small muted task-card-details-label">Requirement ({requirement.source})</p>
+                      <p className="task-card-details-text">{requirement.text}</p>
+                      {requirement.ownerText !== null ? <p className="task-card-details-text">Your exact words: {requirement.ownerText}</p> : null}
+                    </div>
+                  ))}
+                  {dispatch.context.length > 0 ? (
+                    <div className="task-card-details">
+                      <p className="small muted task-card-details-label">Context</p>
+                      {dispatch.context.map((note, index) => <p className="task-card-details-text" key={index}>{note}</p>)}
                     </div>
                   ) : null}
                   {dispatch.phase === "running" ? (
@@ -1182,11 +1278,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                       <div className="row" style={{ marginTop: 12 }}>
                         {dispatchReady ? (
                           <Pill kind="primary" disabled={dispatchWorker && !realCallConfirmed}
-                            onClick={() => void startDispatch(dispatch, dispatchReady.recommended.id, dispatchWorker)}>
+                            onClick={() => void startDispatch(dispatch, dispatchWorker)}>
                             {dispatchWorker ? `Start one real ${dispatchReady.recommended.label} call` : "Run offline demonstration"}
                           </Pill>
                         ) : null}
-                        <Pill kind="quiet" onClick={() => { setDispatch(null); setRealCallConfirmed(false); }}>Cancel</Pill>
+                        <Pill kind="quiet" onClick={() => cancelDispatch(dispatch)}>Cancel</Pill>
                       </div>
                     </>
                   )}

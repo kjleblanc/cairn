@@ -184,6 +184,10 @@ function setScenario(next: LabScenario): void {
     world.session = {
       dir: DIR,
       outcome: "make the workspace feel like a calm digital garden",
+      request: {
+        outcome: { source: "owner-stated", text: "make the workspace feel like a calm digital garden", ownerText: "make the workspace feel like a calm digital garden" },
+        requirements: [],
+      },
       // The lab's stand-in worker wears the Codex face (Task 156) so the lab
       // town shows the real cast treatment.
       adapterId: "codex-exec",
@@ -258,8 +262,9 @@ const mock: CairnApi = {
   })) : soon(nope("the lab has exactly one mock project")),
   townLoad: (_dir: string) => soon(ok(world.town)),
   townSave: (_dir: string, state: TownPresentationState) => { world.town = state; return soon(ok(world.town)); },
-  taskRoute: (_dir: string, _outcome: string, _details: string): Promise<Result<TaskRoutePreview>> =>
+  taskRoute: (_request): Promise<Result<TaskRoutePreview>> =>
     soon(nope("the lab does not simulate routing — pose runs from the lab panel instead")),
+  taskPreviewDiscard: (_dir: string, _previewId?: string): Promise<Result<null>> => soon(ok(null)),
   taskRun: (_request: TaskRunRequest): Promise<Result<SerialRunResult>> =>
     soon(nope("the lab never runs tasks — pose DONE or STOPPED from the lab panel")),
   taskCancel: (_dir: string) => soon(ok(null)),

@@ -128,7 +128,7 @@ async function waitStreamDone(win: Page): Promise<void> {
 }
 
 // `exact` for the same reason as "Stop" above: role-name matching is substring
-// by default, and a proposed-task card on screen puts a "Send to dispatch"
+// by default, and a proposed-task card on screen puts a "Review dispatch"
 // button in the same window as the composer's "Send".
 async function sendChat(win: Page, text: string): Promise<void> {
   await win.getByPlaceholder("Talk with Cairn").fill(text);
@@ -778,7 +778,7 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
   await expect(taskCard).toContainText("Change the page title");
-  const sendToDispatch = taskCard.getByRole("button", { name: "Send to dispatch" });
+  const sendToDispatch = taskCard.getByRole("button", { name: "Review dispatch" });
   await expect(sendToDispatch).toBeDisabled();
   expect(await win.evaluate((dir) => window.cairn.taskCurrent(dir), project)).toBeNull();
   expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
@@ -793,8 +793,134 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   await app.close();
 });
 
+test("dispatch preview accepts only the current risk-free proposal and a correction retires it", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-proposal-preview-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const risky = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(risky?.kind).toBe("task");
+  if (risky?.kind !== "task") throw new Error("expected the risk-bearing task action");
+
+  const blocked = await win.evaluate(({ dir, conversationId: id, proposalId }) => window.cairn.taskRoute({
+    dir,
+    source: { kind: "proposal", conversationId: id, proposalId },
+  }), { dir: project, conversationId, proposalId: risky.actionId });
+  expect(blocked).toEqual({ ok: false, message: "TASK_PROPOSAL_HAS_RISKS: Resolve or set aside every current risk before reviewing dispatch." });
+
+  await win.locator(".task-card .task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  const replacement = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(replacement?.kind).toBe("task");
+  if (replacement?.kind !== "task") throw new Error("expected the replacement task action");
+  expect(replacement.actionId).not.toBe(risky.actionId);
+  expect(replacement.risks).toEqual([]);
+
+  const oldProposal = await win.evaluate(({ dir, conversationId: id, proposalId }) => window.cairn.taskRoute({
+    dir,
+    source: { kind: "proposal", conversationId: id, proposalId },
+  }), { dir: project, conversationId, proposalId: risky.actionId });
+  expect(oldProposal).toEqual({ ok: false, message: "TASK_PROPOSAL_STALE: That proposed task is no longer current." });
+
+  const reviewed = await win.evaluate(({ dir, conversationId: id, proposalId }) => window.cairn.taskRoute({
+    dir,
+    source: { kind: "proposal", conversationId: id, proposalId },
+  }), { dir: project, conversationId, proposalId: replacement.actionId });
+  expect(reviewed.ok).toBe(true);
+  if (!reviewed.ok) throw new Error(reviewed.message);
+  expect(reviewed.value.request).toEqual(replacement.request);
+  expect(JSON.stringify(reviewed.value.request)).not.toContain(replacement.actionId);
+
+  const correction = await win.evaluate(({ dir, conversationId: id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "No, make it blue.",
+    actionReply: { kind: "correction", actionId },
+  }), { dir: project, conversationId, actionId: replacement.actionId });
+  expect(correction.ok).toBe(true);
+  const staleStart = await win.evaluate(({ dir, previewId }) => window.cairn.taskRun({ dir, previewId }), {
+    dir: project,
+    previewId: reviewed.value.previewId,
+  });
+  expect(staleStart).toEqual({ ok: false, message: "TASK_PREVIEW_STALE: That dispatch review is no longer current. Review the task again." });
+  expect(await win.evaluate((dir) => window.cairn.taskCurrent(dir), project)).toBeNull();
+  expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  // This send bypassed Chat, so the DOM Stop button may never have entered its
+  // visible state. Main's controller is already installed when conductorSend
+  // returns; wait for that exact stream to settle before closing the app.
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 15_000 }).toBeNull();
+  } finally {
+    await app.close();
+  }
+});
+
+test("a correction during delayed proposal routing invalidates the unpublished preview", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-delayed-proposal-"));
+  const barrierDir = mkdtempSync(join(tmpdir(), "cairn-proposal-detection-barrier-"));
+  const release = join(barrierDir, "release");
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: {
+    ...baseEnv(project),
+    CAIRN_TEST_LANE: "1",
+    CAIRN_TEST_ADAPTER_DETECTION_RELEASE: release,
+  } });
+  try {
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "Change the page title");
+  await waitStreamDone(win);
+  await win.locator(".task-card .task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const action = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(action?.kind).toBe("task");
+  if (action?.kind !== "task") throw new Error("expected the risk-free current action");
+  expect(action.risks).toEqual([]);
+
+  const delayedRoute = win.evaluate(({ dir, conversationId: id, proposalId }) => window.cairn.taskRoute({
+    dir,
+    source: { kind: "proposal", conversationId: id, proposalId },
+  }), { dir: project, conversationId, proposalId: action.actionId });
+  try {
+    await expect.poll(() => existsSync(`${release}.waiting`), { timeout: 10_000 }).toBe(true);
+    const correction = await win.evaluate(({ dir, conversationId: id, actionId }) => window.cairn.conductorSend({
+      dir,
+      conversationId: id,
+      text: "No, change the page title to blue.",
+      actionReply: { kind: "correction", actionId },
+    }), { dir: project, conversationId, actionId: action.actionId });
+    expect(correction.ok).toBe(true);
+  } finally {
+    writeFileSync(release, "release\n", "utf8");
+  }
+
+  expect(await delayedRoute).toEqual({
+    ok: false,
+    message: "TASK_PREVIEW_STALE: That dispatch review is no longer current. Review the task again.",
+  });
+  expect(await win.evaluate((dir) => window.cairn.taskCurrent(dir), project)).toBeNull();
+  expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  await expect.poll(async () => {
+    const current = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+    return current?.kind === "task" && current.actionId !== action.actionId;
+  }, { timeout: 15_000 }).toBe(true);
+  const replacement = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(replacement?.kind).toBe("task");
+  expect(replacement?.actionId).not.toBe(action.actionId);
+  } finally {
+    await app.close();
+  }
+});
+
 // Task 5 (Phase 3) rewrote this test: dispatch is now inline. The card's
-// "Send to dispatch" opens a confirmation panel inside the conversation —
+// "Review dispatch" opens a confirmation panel inside the conversation —
 // the app never navigates to the task screen and nothing is re-typed — and
 // the run starts from there. The landing assertions (report, LOG row, git
 // status) are the legacy test's, carried over unchanged.
@@ -811,15 +937,15 @@ test("the full loop: a proposed task with a risk chip dispatches inline and land
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
   await expect(taskCard).toContainText("Change the page title");
-  const sendToDispatch = taskCard.getByRole("button", { name: "Send to dispatch" });
+  const sendToDispatch = taskCard.getByRole("button", { name: "Review dispatch" });
   await expect(sendToDispatch).toBeDisabled();
 
   const riskChip = taskCard.locator(".task-chip-risk");
   await expect(riskChip).toContainText("Renaming the title may break bookmarked links.");
   await riskChip.getByRole("button", { name: "Set aside" }).click();
   await expect(win.getByText("I understand the risk you raised — set it aside and keep the task as proposed.")).toBeVisible();
-  await expect(sendToDispatch).toBeEnabled();
   await waitStreamDone(win);
+  await expect(sendToDispatch).toBeEnabled();
 
   await sendToDispatch.click();
 
@@ -850,9 +976,12 @@ test("the full loop: a proposed task with a risk chip dispatches inline and land
   expect(session?.conversationId).toBe(conversations[0].id);
   await expect(win.getByRole("heading", { name: "What should change?" })).toHaveCount(0);
 
-  // The owner's own data reached the task record verbatim, not just the card.
+  // The accepted request reached the source-labeled task record, not just the
+  // card. Cairn's chosen count requirement is never presented as owner words.
   const brief = readFileSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"), "utf8");
-  expect(brief).toContain("Details (verbatim)");
+  expect(brief).toContain("## What you asked for");
+  expect(brief).toContain("### Requirement 1");
+  expect(brief).toContain("**Cairn chose**");
   expect(brief).toContain("Keep the counts 74, 477, 256 exactly.");
   const report = readFileSync(join(project, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("Milestone movement: **NO**");
@@ -888,7 +1017,7 @@ test("the envelope posts a DONE result card into the conversation, and the card 
   // This opens an in-app panel; it never navigates the Electron page. Skip
   // Playwright's navigation waiter and prove the intended result explicitly
   // with the panel assertion below.
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click({ noWaitAfter: true });
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click({ noWaitAfter: true });
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -1416,7 +1545,7 @@ test("navigating back mid-stream releases the lock so the next send succeeds imm
 
 // Addition B (review finding): while one chip streams its reply, the other
 // chip's controls must stay disabled — coverage only, no code change.
-test("while one chip's reply streams, the other chip's controls stay disabled", async () => {
+test("a targeted risk reply retires the whole old action before a fresh proposal appears", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-busychip-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
@@ -1427,15 +1556,16 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   await waitStreamDone(win);
 
   const taskCard = win.locator(".task-card");
-  const questionChip = taskCard.locator(".task-chip-question");
-  const riskChip = taskCard.locator(".task-chip-risk");
-  await expect(questionChip).toBeVisible();
-  await expect(riskChip).toBeVisible();
-  await expect(taskCard.getByRole("button", { name: "Send to dispatch" })).toBeDisabled();
+  const riskChips = taskCard.locator(".task-chip-risk");
+  await expect(taskCard.locator(".task-chip-question")).toHaveCount(0);
+  await expect(riskChips).toHaveCount(2);
+  await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const oldAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(oldAction?.kind).toBe("task");
 
-  await questionChip.getByPlaceholder("Your answer").fill("No, a plain redirect is enough.");
   holdFixtureAnswer();
-  await questionChip.getByRole("button", { name: "Answer" }).click();
+  await riskChips.nth(0).getByRole("button", { name: "Set aside" }).click();
 
   // The locked state is transient — it ends the moment the answer's stream
   // finishes. Two sequential expects can straddle that end under load (the
@@ -1443,19 +1573,20 @@ test("while one chip's reply streams, the other chip's controls stay disabled", 
   // atomic observation per poll: a risk chip that both says the lock and
   // has its button disabled.
   try {
-    await expect(
-      riskChip
-        .filter({ hasText: "Wait for Cairn to finish answering." })
-        .locator('button:has-text("Set aside")[disabled]'),
-    ).toBeVisible();
+    await expect(taskCard).toHaveCount(0);
+    expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
   } finally {
     releaseFixtureAnswer();
   }
 
   await waitStreamDone(win);
-  await expect(riskChip.getByRole("button", { name: "Set aside" })).toBeEnabled();
-  await riskChip.getByRole("button", { name: "Set aside" }).click();
-  await expect(taskCard.getByRole("button", { name: "Send to dispatch" })).toBeEnabled();
+  const freshAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(freshAction?.kind).toBe("task");
+  expect(freshAction?.actionId).not.toBe(oldAction?.actionId);
+  expect(freshAction?.kind === "task" ? freshAction.risks : null).toEqual([]);
+  await expect(taskCard).toBeVisible();
+  await expect(taskCard.locator(".task-chip-risk")).toHaveCount(0);
+  await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeEnabled();
   await app.close();
 });
 
@@ -1470,7 +1601,7 @@ async function dispatchOneRealCall(win: Page, beforeStart?: () => void | Promise
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
 
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 20_000 });
@@ -2217,11 +2348,11 @@ test("a reload mid-run reattaches the conversation's strip and shows the finishe
   await app.close();
 });
 
-// Task 065 (review fix): the model goes away between the route and the
-// confirmed start. Two different closes come out of that race, and neither may
-// claim records that were never written — the run ends before a task number,
-// a brief, or a log row exists (core/src/serial.ts:841).
-test("a run that closes connection-required says so without inventing records", async () => {
+// Task 065 (review fix), tightened by Task 177: the model goes away between
+// route review and the confirmed start. Both proposal and manual starts stop
+// at main's acceptance boundary before a session, task number, brief, or log
+// row can exist.
+test("a route that becomes unavailable refuses before accepting or inventing records", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-strip-gone-"));
   scaffold(project);
   const fakeCodex = fakeCodexEnvironment(project, true, "slow");
@@ -2251,19 +2382,23 @@ test("a run that closes connection-required says so without inventing records", 
   await win.getByRole("button", { name: "Talk with Cairn" }).click();
   await expect(win.locator(".task-card")).toBeVisible();
 
-  // The other close: no named adapter, so core returns connection-required
-  // instead of throwing, and the session stays closed-but-present for chat to
-  // reattach to. THIS is the one the strip has to render honestly.
-  const closed = await win.evaluate((dir) => window.cairn.taskRun({
-    dir, outcome: "Add one visible result", details: "", realCallConfirmed: false, conversationId: null,
-  }), project);
-  expect(closed.ok).toBe(true);
-  if (closed.ok) expect(closed.value.status).toBe("connection-required");
-
-  const strip = win.locator(".run-strip");
-  await expect(strip).toBeVisible({ timeout: 30_000 });
-  await expect(strip).toContainText("No task was started, nothing was saved, and no AI was called.", { timeout: 30_000 });
-  await expect(strip).not.toContainText("docs/ai-work");
+  // The manual path uses the same preview boundary. A connection-required
+  // review may be shown, but trying to spend it cannot create a run session.
+  const closed = await win.evaluate(async (dir) => {
+    const routed = await window.cairn.taskRoute({
+      dir,
+      source: { kind: "manual", rawOutcome: "Add one visible result" },
+    });
+    if (!routed.ok) return { routed, started: null, session: null };
+    const started = await window.cairn.taskRun({ dir, previewId: routed.value.previewId });
+    const session = await window.cairn.taskCurrent(dir);
+    return { routed, started, session };
+  }, project);
+  expect(closed.routed.ok).toBe(true);
+  if (closed.routed.ok) expect(closed.routed.value.route.status).toBe("connection-required");
+  expect(closed.started?.ok).toBe(false);
+  expect(closed.session).toBeNull();
+  await expect(win.locator(".run-strip")).toHaveCount(0);
 
   // And the claim is true on disk: no process, no records, no row.
   expect(existsSync(fakeCodex.marker)).toBe(false);
@@ -2295,7 +2430,7 @@ test("the conductor comments on the card the envelope just posted, and the comme
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2371,7 +2506,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2455,7 +2590,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2488,7 +2623,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   const secondCard = win.locator(".task-card");
   await expect(secondCard).toBeVisible();
   await expect(secondCard.locator(".task-chip")).toHaveCount(2);
-  await expect(secondCard.getByRole("button", { name: "Send to dispatch" })).toBeDisabled();
+  await expect(secondCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
 
   // The reported conversation reached a third proposal after its first
   // dispatch. Leave Chat while that third reply is still live, then reattach:
@@ -2511,7 +2646,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(restoredCard).toBeVisible();
   await expect(restoredCard.locator(".task-chip")).toHaveCount(0);
   await expect(restoredCard).toContainText("74, 477, 256");
-  await expect(restoredCard.getByRole("button", { name: "Send to dispatch" })).toBeEnabled();
+  await expect(restoredCard.getByRole("button", { name: "Review dispatch" })).toBeEnabled();
   await expect.poll(() => win.evaluate(() => {
     const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
     return state.task166Blocks?.length ?? 0;
@@ -2534,7 +2669,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
 
   // Dispatch the restored third proposal. This remains the second run, so the
   // folding assertions below still prove the two-card history.
-  const restoredSend = restoredCard.getByRole("button", { name: "Send to dispatch" });
+  const restoredSend = restoredCard.getByRole("button", { name: "Review dispatch" });
   await restoredSend.click();
   await expect(win.locator(".dispatch-panel")).toBeVisible({ timeout: 15_000 });
   await win.locator(".dispatch-panel").getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2766,7 +2901,7 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2948,7 +3083,7 @@ test("a refused push reports the real reason and leaves the project exactly as i
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -3040,7 +3175,7 @@ test("the comment's follow-up suggestions render as chips, and a tap sends one a
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();

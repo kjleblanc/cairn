@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
+import type { RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 import type { RunSessionSnapshot } from "../../shared/ipc";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
@@ -20,6 +20,9 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   const [phase, setPhase] = useState<Phase>("entry");
   const [outcome, setOutcome] = useState("");
   const [route, setRoute] = useState<RouteResult | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [requestView, setRequestView] = useState<TaskRequestView | null>(null);
+  const [requestContext, setRequestContext] = useState<readonly string[]>([]);
   const [disclosure, setDisclosure] = useState<WorkerDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
   const [activities, setActivities] = useState<SerialActivity[]>([]);
@@ -42,6 +45,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   const applySession = useCallback((session: RunSessionSnapshot | null) => {
     if (!session) return;
     setOutcome(session.outcome);
+    setRequestView(session.request ?? null);
     setSessionWorker(session.worker);
     setActivities(session.activities);
     if (session.phase === "running") setPhase("running");
@@ -52,6 +56,8 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
       // A run that ended in a thrown error (e.g. RECORD_VERIFICATION_FAILED)
       // must surface on reattach, not vanish into a blank entry form.
       setError(session.error);
+      setPreviewId(null);
+      setRoute(null);
       setPhase("route");
     }
   }, []);
@@ -81,30 +87,35 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   }, [applySession, dir]);
 
   async function findRoute() {
-    if (outcome.trim().length < 5) { setError("Describe one visible outcome in a sentence."); return; }
     setError(null);
-    const response = await cairn.taskRoute(dir, outcome.trim(), "");
+    const response = await cairn.taskRoute({ dir, source: { kind: "manual", rawOutcome: outcome } });
     if (!response.ok) { setError(response.message); return; }
+    setPreviewId(response.value.previewId);
+    setRequestView(response.value.request);
+    setRequestContext(response.value.context);
     setRoute(response.value.route);
     setDisclosure(response.value.disclosure ?? null);
     setPhase("route");
   }
 
   async function run() {
-    if (!route || route.status !== "ready") return;
+    if (!route || route.status !== "ready" || previewId === null) return;
     if (workerRoute && !realCallConfirmed) { setError(`Confirm the displayed real-call boundary before starting ${route.recommended.label}.`); return; }
     setError(null); setActivities([]); setPhase("running");
     const response = await cairn.taskRun({
       dir,
-      outcome: outcome.trim(),
-      details: "",
-      adapterId: route.recommended.id,
+      previewId,
       realCallConfirmed: workerRoute && realCallConfirmed,
       disclosure: disclosure ?? undefined,
-      conversationId: null,
     });
-    if (!response.ok) { setError(response.message); setPhase("route"); return; }
+    if (!response.ok) {
+      const accepted = await cairn.taskCurrent(dir);
+      if (accepted?.acceptedPreviewId === previewId && accepted.phase === "closed" && accepted.error) applySession(accepted);
+      else { setError(response.message); setPhase("route"); }
+      return;
+    }
     if (response.value.status === "connection-required") {
+      setPreviewId(null);
       setRoute(response.value.route);
       setError("Codex Exec readiness changed. No task records or model call were created.");
       setPhase("route");
@@ -115,8 +126,14 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   }
 
   function tryAnother() {
+    void cairn.taskPreviewDiscard(dir, previewId ?? undefined);
     void cairn.taskAcknowledge(dir);
-    setPhase("entry"); setOutcome(""); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false); setSessionWorker(false);
+    setPhase("entry"); setOutcome(""); setPreviewId(null); setRequestView(null); setRequestContext([]); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false); setSessionWorker(false);
+  }
+
+  function leave(): void {
+    void cairn.taskPreviewDiscard(dir, previewId ?? undefined);
+    onBack();
   }
 
   return (
@@ -126,7 +143,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
           <p className="eyebrow">one serial task{currentVersion ? ` · Cairn v${currentVersion}` : ""}</p>
           <h1>What should change?</h1>
         </div>
-        <Pill kind="quiet" onClick={onBack}>← Project home</Pill>
+        <Pill kind="quiet" onClick={leave}>← Project home</Pill>
       </div>
       {error ? <ErrorCard message={error} /> : null}
 
@@ -148,13 +165,33 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
           <p className="small muted">Install or connect Codex yourself through official Codex controls. Cairn does not open login, read credential files, or choose another provider.</p>
           <div className="row" style={{ marginTop: 12 }}>
             <Pill onClick={tryAnother}>Edit the task</Pill>
-            <Pill kind="quiet" onClick={onBack}>Return to project</Pill>
+            <Pill kind="quiet" onClick={leave}>Return to project</Pill>
           </div>
         </Card>
       ) : null}
 
       {phase === "route" && route?.status === "ready" ? (
         <>
+          {requestView ? (
+            <Card title="what you asked for">
+              <p className="small muted">Interpretation ({requestView.outcome.source})</p>
+              <p>{requestView.outcome.text}</p>
+              {requestView.outcome.ownerText !== null ? <p className="task-card-details-text">Your exact words: {requestView.outcome.ownerText}</p> : null}
+              {requestView.requirements.map((requirement, index) => (
+                <div key={`${requirement.source}-${index}`}>
+                  <p className="small muted">Requirement ({requirement.source})</p>
+                  <p>{requirement.text}</p>
+                  {requirement.ownerText !== null ? <p className="task-card-details-text">Your exact words: {requirement.ownerText}</p> : null}
+                </div>
+              ))}
+              {requestContext.length > 0 ? (
+                <div>
+                  <p className="small muted">Context</p>
+                  {requestContext.map((note, index) => <p key={index}>{note}</p>)}
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
           <ModelRoute route={route.recommended} reason={route.reason} />
           {disclosure ? (
             <Card title="confirm one real model call">
@@ -209,7 +246,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
           </Card>
           <ActivityFeed activities={activities} />
           <div className="row" style={{ marginTop: 12 }}>
-            <Pill kind="primary" onClick={() => { void cairn.taskAcknowledge(dir); onBack(); }}>Return to project</Pill>
+            <Pill kind="primary" onClick={() => { void cairn.taskAcknowledge(dir); leave(); }}>Return to project</Pill>
             <Pill onClick={tryAnother}>Try another task</Pill>
           </div>
         </>

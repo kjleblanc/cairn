@@ -52,6 +52,11 @@ const ROW = {
   outcome: "DONE", decision: "completed", summary: "s", moved: "YES",
 };
 
+const ACCEPTED_REQUEST = {
+  outcome: { source: "owner-stated" as const, text: "Add the visible result", ownerText: "Add the visible result" },
+  requirements: [],
+};
+
 function doneResult(): SerialRunResult {
   return {
     status: "done",
@@ -67,6 +72,8 @@ function doneResult(): SerialRunResult {
     composed: {
       taskNumber: 4,
       route: CONTRACT_ROUTE,
+      acceptedRequest: ACCEPTED_REQUEST,
+      requestContext: [],
       disposition: "DONE",
       stopReason: null,
       claims: {
@@ -104,6 +111,8 @@ function stoppedResult(): SerialRunResult {
     composed: {
       taskNumber: 5,
       route: CONTRACT_ROUTE,
+      acceptedRequest: ACCEPTED_REQUEST,
+      requestContext: [],
       disposition: "STOPPED",
       stopReason: "PROTECTED_WORK_CHANGED",
       claims: null,

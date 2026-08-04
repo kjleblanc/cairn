@@ -6,10 +6,9 @@ type Resolution = "answered" | "set-aside";
 
 /** The proposed-task card: the outcome sentence plus one chip per concern.
  * A question chip's one-line answer and a risk chip's "Set aside" both go
- * back to `Chat` as callbacks — `Chat` turns them into ordinary owner
- * messages, so the conversation log stays the single record of what was
- * asked and decided. "Send to dispatch" stays disabled until every chip
- * here is resolved one way or the other.
+ * back to `Chat` as indexed callbacks. Chat binds a risk index and exact text
+ * to main's current action/risk UUID; an ordinary answer remains conversation
+ * text. "Review dispatch" stays disabled until every chip is resolved.
  *
  * `onAnswer`/`onSetAside` report back whether the message actually
  * dispatched (`Chat.send()` refuses outright while a reply is already
@@ -20,9 +19,9 @@ type Resolution = "answered" | "set-aside";
  * even attempts a call that would be refused. */
 export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
   block: TaskBlock;
-  onAnswer: (concern: TaskBlockConcern, answer: string) => boolean | Promise<boolean>;
-  onSetAside: (concern: TaskBlockConcern) => boolean | Promise<boolean>;
-  onSend: (outcome: string, details: string) => void;
+  onAnswer: (index: number, concern: TaskBlockConcern, answer: string) => boolean | Promise<boolean>;
+  onSetAside: (index: number, concern: TaskBlockConcern) => boolean | Promise<boolean>;
+  onSend: () => void;
   busy: boolean;
 }) {
   const [resolved, setResolved] = useState<Record<number, Resolution>>({});
@@ -31,13 +30,13 @@ export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
   async function submitAnswer(index: number, concern: TaskBlockConcern) {
     const answer = (drafts[index] ?? "").trim();
     if (!answer || busy) return;
-    const dispatched = await onAnswer(concern, answer);
+    const dispatched = await onAnswer(index, concern, answer);
     if (dispatched) setResolved((r) => ({ ...r, [index]: "answered" }));
   }
 
   async function setAside(index: number, concern: TaskBlockConcern) {
     if (busy) return;
-    const dispatched = await onSetAside(concern);
+    const dispatched = await onSetAside(index, concern);
     if (dispatched) setResolved((r) => ({ ...r, [index]: "set-aside" }));
   }
 
@@ -87,7 +86,7 @@ export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
         </div>
       ) : null}
       <div className="row" style={{ marginTop: 12 }}>
-        <Pill kind="primary" disabled={!allResolved} onClick={() => onSend(block.outcome, block.details)}>Send to dispatch</Pill>
+        <Pill kind="primary" disabled={!allResolved || busy} onClick={onSend}>Review dispatch</Pill>
       </div>
     </div>
   );

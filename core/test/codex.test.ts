@@ -22,6 +22,13 @@ import {
   type CodexStatusProbe,
   type CodexStatusProbeResult,
 } from "../src/codex.js";
+import {
+  bindTaskIntent,
+  createDirectTaskIntent,
+  taskRequestSha256,
+  taskRequestView,
+  type TaskIntent,
+} from "../src/intent.js";
 import type { AdapterTaskContract } from "../src/routing.js";
 
 const SECRET_SENTINEL = "sk-secret-auth-method-account-detail";
@@ -80,13 +87,39 @@ test("system readiness ignores a workspace-local Codex command under an aliased 
   }
 });
 
-function contract(details = ""): AdapterTaskContract {
+const DIRECT_INPUT_ID = "00000000-0000-4000-8000-000000000033";
+
+function directRequest(raw = "Add one visible result"): TaskIntent {
+  const value = createDirectTaskIntent(raw, DIRECT_INPUT_ID);
+  assert.ok(value);
+  return value;
+}
+
+function markedRequest(
+  inputId = "10000000-0000-4000-8000-000000000033",
+  requirementSource: "owner-stated" | "owner-unsure" = "owner-stated",
+  context: readonly string[] = ["Keep the existing order."],
+  sourcePrefix = "",
+): TaskIntent {
+  const ownerText = `${sourcePrefix}Please add one visible result.\nWord counts: 74, 477, 256`;
+  const value = bindTaskIntent({
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Add one visible result", ownerQuote: "Please add one visible result." },
+    requirements: [{ source: requirementSource, text: "Use 999 words", ownerQuote: "Word counts: 74, 477, 256" }],
+    context: [...context],
+  }, [{ kind: "conversation", inputId, text: ownerText }]);
+  assert.ok(value);
+  return value;
+}
+
+function contract(intent = directRequest()): AdapterTaskContract {
+  const requestSha256 = taskRequestSha256(intent);
+  assert.ok(requestSha256);
   return {
-    version: "cairn-serial-task/v2",
+    version: "cairn-serial-task/v3",
     taskNumber: 33,
-    requestedOutcome: "Add one visible result",
-    details,
-    requestedOutcomeSha256: "f".repeat(64),
+    intent,
+    requestSha256,
     supportedOutcome: "Prepare one fake Codex Exec request.",
     lane: "Standard",
     route: {
@@ -457,7 +490,7 @@ test("a mismatched confirmation cannot cross the process seam", async () => {
       throw new Error("must not run");
     },
   };
-  const mismatched = authorizeCodexExec(workspace, "A different task");
+  const mismatched = authorizeCodexExec(workspace, directRequest("A different task"));
   const adapter = createCodexExecAdapter(
     workspace,
     { installed: true, connected: true },
@@ -490,18 +523,15 @@ test("one authorized fake verifies the real-call request without a model", async
       };
     },
   };
-  const authorization = authorizeCodexExec(workspace, "Add one visible result");
+  const accepted = directRequest();
+  const authorization = authorizeCodexExec(workspace, accepted);
   assert.deepEqual(authorization, {
+    ...codexExecDisclosure(workspace, accepted),
     approved: true,
-    provider: "OpenAI",
-    model: CODEX_EXEC_MODEL,
-    project: workspace,
-    task: "Add one visible result",
-    data: CODEX_EXEC_DATA_SCOPE,
-    quota: CODEX_EXEC_QUOTA,
+    requestSha256: taskRequestSha256(accepted),
   });
   const adapter = createCodexExecAdapter(workspace, { installed: true, connected: true }, authorization, fake);
-  const result = await adapter.run(contract());
+  const result = await adapter.run(contract(accepted));
 
   assert.equal(requests.length, 1);
   // Task 002 proved non-interactive exec needs "never" (on-request writes are
@@ -531,7 +561,8 @@ test("one authorized fake verifies the real-call request without a model", async
   ]);
   assert.equal(requests[0].command, process.platform === "win32" ? "codex.exe" : "codex");
   assert.equal(requests[0].cwd, workspace);
-  assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
+  assert.match(requests[0].stdin, /\*\*You said so\*\*/);
+  assert.match(requests[0].stdin, /> Add one visible result/);
   assert.match(requests[0].stdin, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
   assert.match(requests[0].stdin, /grants no authority beyond this one call and in-scope local reversible work/i);
   // Task 048 (the inversion): the worker authors no record and speaks only
@@ -551,9 +582,9 @@ test("one authorized fake verifies the real-call request without a model", async
   assert.match(requests[0].stdin, /Cairn owns the exact-path local commit/);
   assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);
   assert.deepEqual(result, {
-    kind: "worker-result/v1",
+    kind: "worker-result/v2",
     taskNumber: 33,
-    requestedOutcomeSha256: "f".repeat(64),
+    requestSha256: taskRequestSha256(accepted),
     status: "completed",
     claimsText: null,
     evidence: {
@@ -629,14 +660,8 @@ test("a chattering codex child is killed by the absolute cap", async () => {
   });
 });
 
-// Phase 3 Task 3: the owner's supplied data must reach the worker unedited, be
-// named in the disclosure the owner byte-confirms, and be bound by the
-// authorization gate. An outcome-only confirmation can never dispatch a
-// details-bearing contract — otherwise the card the owner approved would not be
-// the request that ran.
-test("owner details reach the worker prompt, the disclosure, and the authorization gate (Phase 3 Task 3)", async () => {
+test("the full source-marked intent reaches disclosure and prompt, and every authority change refuses before spawn", async () => {
   const workspace = resolve("codex-details-workspace");
-  const details = "Word counts: 74, 477, 256";
   const requests: CodexExecRequest[] = [];
   const fake: CodexExecProcess = {
     kind: "fake",
@@ -657,37 +682,61 @@ test("owner details reach the worker prompt, the disclosure, and the authorizati
       };
     },
   };
-
-  // The disclosure the owner reads and byte-confirms carries the details.
-  assert.equal(codexExecDisclosure(workspace, "o", "d").task, "o\n\nDetails (verbatim):\nd");
-  assert.equal(codexExecDisclosure(workspace, "o").task, "o");
-
+  const accepted = markedRequest();
+  const disclosure = codexExecDisclosure(workspace, accepted);
+  assert.equal(
+    CODEX_EXEC_DATA_SCOPE,
+    "The task instructions, AGENTS.md, the generated task brief, and any file inside the selected project that Codex chooses to read.",
+  );
+  assert.match(disclosure.task, /\*\*You said so\*\*/);
+  assert.match(disclosure.task, /> Word counts: 74, 477, 256/);
+  assert.match(disclosure.task, /> Use 999 words/);
+  assert.match(disclosure.task, /Context kept with the task — not a requirement/);
   const bound = createCodexExecAdapter(
     workspace,
     { installed: true, connected: true },
-    authorizeCodexExec(workspace, "Add one visible result", details),
+    authorizeCodexExec(workspace, accepted),
     fake,
   );
-  // The adapter's own seam passes both parts through to that same disclosure.
-  assert.equal(bound.disclosure?.("o", "d").task, "o\n\nDetails (verbatim):\nd");
+  assert.deepEqual(bound.disclosure?.(accepted), disclosure);
 
-  const result = await bound.run(contract(details));
+  const result = await bound.run(contract(accepted));
   assert.equal(result.status, "completed");
   assert.equal(requests.length, 1);
-  assert.match(requests[0].stdin, /Requested visible outcome: Add one visible result/);
-  assert.match(requests[0].stdin, /Details from the owner \(use verbatim, do not restate\):/);
-  assert.match(requests[0].stdin, /Word counts: 74, 477, 256/);
+  assert.match(requests[0].stdin, /exact owner words govern if they conflict/);
+  assert.match(requests[0].stdin, /You weren’t sure is a starting point/);
+  assert.match(requests[0].stdin, /Cairn chose is Cairn’s choice, not evidence of owner preference/);
+  assert.match(requests[0].stdin, /> Word counts: 74, 477, 256/);
+  assert.match(requests[0].stdin, /> Use 999 words/);
 
-  // The refusal that protects the byte-confirmed card: an authorization bound to
-  // the outcome alone cannot dispatch a contract carrying details.
-  const outcomeOnly = createCodexExecAdapter(
+  const variants = [
+    markedRequest("20000000-0000-4000-8000-000000000033"),
+    markedRequest(undefined, "owner-unsure"),
+    markedRequest(undefined, "owner-stated", ["Different context."]),
+  ];
+  for (const changed of variants) {
+    assert.notEqual(taskRequestSha256(changed), taskRequestSha256(accepted));
+    const refused = createCodexExecAdapter(
+      workspace,
+      { installed: true, connected: true },
+      authorizeCodexExec(workspace, accepted),
+      fake,
+    );
+    await assert.rejects(() => refused.run(contract(changed)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  }
+  const movedSpan = markedRequest(undefined, "owner-stated", ["Keep the existing order."], "Earlier words. ");
+  assert.deepEqual(taskRequestView(movedSpan), taskRequestView(accepted), "offsets stay out of the output-only view");
+  assert.equal(movedSpan.outcome.owner?.inputId, accepted.outcome.owner?.inputId);
+  assert.notEqual(movedSpan.outcome.owner?.start, accepted.outcome.owner?.start);
+  assert.notEqual(taskRequestSha256(movedSpan), taskRequestSha256(accepted));
+  const spanRefused = createCodexExecAdapter(
     workspace,
     { installed: true, connected: true },
-    authorizeCodexExec(workspace, "Add one visible result"),
+    authorizeCodexExec(workspace, accepted),
     fake,
   );
-  await assert.rejects(() => outcomeOnly.run(contract(details)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
-  assert.equal(requests.length, 1, "no second process was started");
+  await assert.rejects(() => spanRefused.run(contract(movedSpan)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  assert.equal(requests.length, 1, "source, span, and context mismatches start no second process");
 });
 
 test("aborting the signal kills the codex child and rejects as cancelled", async () => {

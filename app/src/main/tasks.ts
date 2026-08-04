@@ -1,10 +1,14 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
 import {
+  createDirectTaskIntent,
   previewSerialRoute,
   projectStatus,
   runSerialTask,
+  taskRequestView,
+  type AdapterDescriptor,
   type SerialRunResult,
+  type TaskIntent,
   type WorkerDisclosure,
 } from "@cairn/core";
 import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
@@ -17,10 +21,19 @@ import type {
   ResultCard,
   RunSessionSnapshot,
   TaskActivityEvent,
+  TaskRouteRequest,
+  TaskRouteSource,
   TaskRunRequest,
 } from "../shared/ipc.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
-import { commentary, consumeProposal, restoreProposal } from "./conductor/service.js";
+import {
+  commentary,
+  consumeCurrentTaskProposal,
+  currentTaskProposal,
+  onTaskProposalChanged,
+} from "./conductor/service.js";
+import { isConversationId } from "./conductor/conversation-id.js";
+import { canonicalProjectKey } from "./conductor/turnauth.js";
 import {
   discardUnfinalizedEvidenceRun,
   finalizeEvidenceRun,
@@ -37,6 +50,31 @@ import { runtimeWorkerIdentity } from "./workeridentity.js";
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
 const sessions = new Map<string, RunSessionSnapshot>();
+const routeGenerations = new Map<string, number>();
+const previews = new Map<string, PendingPreview>();
+const starting = new Set<string>();
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const DIRECT_TASK_TOO_LONG = "TASK_REQUEST_TOO_LONG: Keep a direct task request to 2,000 characters or fewer.";
+const DIRECT_TASK_INVALID = "Describe one visible outcome using at least five non-whitespace characters.";
+const PREVIEW_STALE = "TASK_PREVIEW_STALE: That dispatch review is no longer current. Review the task again.";
+const PROPOSAL_STALE = "TASK_PROPOSAL_STALE: That proposed task is no longer current.";
+const PROPOSAL_RISKS = "TASK_PROPOSAL_HAS_RISKS: Resolve or set aside every current risk before reviewing dispatch.";
+const ROUTE_CHANGED = "TASK_ROUTE_CHANGED: The selected worker changed while you were deciding. Nothing was started.";
+const REAL_CALL_NOT_AUTHORIZED = "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting.";
+
+type PendingPreview = Readonly<{
+  previewId: string;
+  generation: number;
+  intent: TaskIntent;
+  request: NonNullable<ReturnType<typeof taskRequestView>>;
+  context: readonly string[];
+  route: ReturnType<typeof previewSerialRoute>;
+  adapter: AdapterDescriptor | null;
+  worker: boolean;
+  disclosure?: WorkerDisclosure;
+  source: TaskRouteSource;
+}>;
 
 /** Read-only runtime projection for workspace and IPC assembly. IPC callers
  * receive a structured clone; main-process callers must treat it as immutable. */
@@ -63,6 +101,99 @@ function sameDisclosure(actual: WorkerDisclosure | undefined, expected: WorkerDi
     actual.quota === expected.quota;
 }
 
+function disclosuresMatch(left: WorkerDisclosure | undefined, right: WorkerDisclosure | undefined): boolean {
+  return left === undefined ? right === undefined : sameDisclosure(right, left);
+}
+
+function sameAdapter(left: AdapterDescriptor | null, right: AdapterDescriptor): boolean {
+  return left !== null && left.id === right.id && left.label === right.label && left.provider === right.provider &&
+    left.model === right.model && left.connected === right.connected && left.priority === right.priority &&
+    left.capabilities.length === right.capabilities.length &&
+    left.capabilities.every((capability, index) => capability === right.capabilities[index]);
+}
+
+function exactRecord(value: unknown, required: readonly string[], optional: readonly string[] = []): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const keys = Object.keys(value);
+  if (required.some((key) => !keys.includes(key)) || keys.some((key) => !required.includes(key) && !optional.includes(key))) return null;
+  return value as Record<string, unknown>;
+}
+
+function checkedRouteRequest(value: unknown): TaskRouteRequest | null {
+  const request = exactRecord(value, ["dir", "source"], ["adapterId"]);
+  if (!request || typeof request.dir !== "string" || request.dir.length === 0 || request.dir.length > 32_767) return null;
+  if (request.adapterId !== undefined &&
+      (typeof request.adapterId !== "string" || request.adapterId.length === 0 || request.adapterId.length > 200)) return null;
+  const source = exactRecord(request.source, ["kind"], ["proposalId", "conversationId", "rawOutcome"]);
+  if (!source) return null;
+  let checkedSource: TaskRouteSource;
+  if (source.kind === "manual") {
+    const exact = exactRecord(request.source, ["kind", "rawOutcome"]);
+    if (!exact || typeof exact.rawOutcome !== "string") return null;
+    checkedSource = { kind: "manual", rawOutcome: exact.rawOutcome };
+  } else if (source.kind === "proposal") {
+    const exact = exactRecord(request.source, ["kind", "proposalId", "conversationId"]);
+    if (!exact || typeof exact.proposalId !== "string" || !UUID_V4.test(exact.proposalId) || !isConversationId(exact.conversationId)) return null;
+    checkedSource = { kind: "proposal", proposalId: exact.proposalId, conversationId: exact.conversationId };
+  } else {
+    return null;
+  }
+  return {
+    dir: request.dir,
+    source: checkedSource,
+    ...(typeof request.adapterId === "string" ? { adapterId: request.adapterId } : {}),
+  };
+}
+
+function checkedDisclosure(value: unknown): WorkerDisclosure | undefined | null {
+  if (value === undefined) return undefined;
+  const record = exactRecord(value, ["provider", "model", "project", "task", "data", "quota"]);
+  if (!record || Object.values(record).some((item) => typeof item !== "string")) return null;
+  return record as unknown as WorkerDisclosure;
+}
+
+function checkedRunRequest(value: unknown): TaskRunRequest | null {
+  const request = exactRecord(value, ["dir", "previewId"], ["realCallConfirmed", "disclosure"]);
+  if (!request || typeof request.dir !== "string" || request.dir.length === 0 || request.dir.length > 32_767 ||
+      typeof request.previewId !== "string" || !UUID_V4.test(request.previewId)) return null;
+  if (request.realCallConfirmed !== undefined && typeof request.realCallConfirmed !== "boolean") return null;
+  const disclosure = checkedDisclosure(request.disclosure);
+  if (disclosure === null) return null;
+  return {
+    dir: request.dir,
+    previewId: request.previewId,
+    ...(request.realCallConfirmed === true ? { realCallConfirmed: true } : {}),
+    ...(disclosure === undefined ? {} : { disclosure }),
+  };
+}
+
+function nextGeneration(key: string): number {
+  const generation = (routeGenerations.get(key) ?? 0) + 1;
+  routeGenerations.set(key, generation);
+  previews.delete(key);
+  return generation;
+}
+
+function invalidateProjectPreview(dir: string | null): void {
+  if (dir === null) {
+    for (const key of routeGenerations.keys()) nextGeneration(key);
+    previews.clear();
+    return;
+  }
+  try {
+    nextGeneration(canonicalProjectKey(dir));
+  } catch {
+    // A removed project cannot retain a usable preview. The listener is rare
+    // and main-only, so fail closed across all pending route attempts.
+    for (const key of routeGenerations.keys()) nextGeneration(key);
+    previews.clear();
+  }
+}
+
+let unsubscribeProposalChanges: (() => void) | null = null;
+
 function evidenceTitle(outcome: string): string {
   return outcome.replace(/\s+/g, " ").trim().slice(0, 500);
 }
@@ -70,28 +201,77 @@ function evidenceTitle(outcome: string): string {
 export function registerTaskIpc(win: () => BrowserWindow | null): void {
   const mock = process.env.CAIRN_MOCK === "1";
 
-  ipcMain.handle("task:route", async (_event, dir: string, outcome: string, details: string, adapterId?: string) => {
+  unsubscribeProposalChanges?.();
+  unsubscribeProposalChanges = onTaskProposalChanged(invalidateProjectPreview);
+
+  ipcMain.handle("task:route", async (_event, unsafeRequest: unknown) => {
+    const request = checkedRouteRequest(unsafeRequest);
+    if (request === null) return { ok: false, message: "TASK_ROUTE_INVALID: Cairn refused a malformed route request." } satisfies Result<never>;
+    const { dir, source, adapterId } = request;
     try {
       const status = projectStatus(dir);
       if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. Migrate it safely before starting another task.");
+      const key = canonicalProjectKey(dir);
+      const refusal = runRefusal(isTaskRunning(dir) || starting.has(key), isQuitDraining());
+      if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
+      const generation = nextGeneration(key);
+
+      let intent: TaskIntent | null = null;
+      if (source.kind === "manual") {
+        if (source.rawOutcome.length > 2_000) return { ok: false, message: DIRECT_TASK_TOO_LONG } satisfies Result<never>;
+        intent = createDirectTaskIntent(source.rawOutcome, randomUUID());
+        if (intent === null) return { ok: false, message: DIRECT_TASK_INVALID } satisfies Result<never>;
+      } else {
+        const current = currentTaskProposal(dir, source.conversationId, source.proposalId);
+        if (current === null) return { ok: false, message: PROPOSAL_STALE } satisfies Result<never>;
+        if (current.unresolvedRisks !== 0) return { ok: false, message: PROPOSAL_RISKS } satisfies Result<never>;
+        intent = current.intent;
+      }
+
       const detected = await detectedAdapters(mock, dir);
-      const route = previewSerialRoute(outcome, detected.adapters, adapterId);
+      if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
+      if (source.kind === "proposal") {
+        const current = currentTaskProposal(dir, source.conversationId, source.proposalId);
+        if (current === null || current.unresolvedRisks !== 0 || current.intent !== intent) {
+          nextGeneration(key);
+          return { ok: false, message: PROPOSAL_STALE } satisfies Result<never>;
+        }
+      }
+
+      const route = previewSerialRoute(intent, detected.adapters, adapterId);
       const value = route.status === "connection-required" && detected.status
         ? { ...route, reason: connectionRequiredReason(detected.status) }
         : route;
-      // The disclosure comes from the ROUTED adapter's own seam, not a codex-only
-      // ternary: any adapter that makes a real call declares its own six facts,
-      // and an offline (no-disclosure) adapter simply returns undefined.
       const routed = value.status === "ready"
         ? detected.adapters.find((adapter) => adapter.descriptor.id === value.recommended.id)
         : undefined;
+      const projection = taskRequestView(intent);
+      if (projection === null) throw new Error("TASK_INTENT_INVALID: Cairn could not project the authenticated task request.");
+      const identity = runtimeWorkerIdentity(routed);
+      const disclosure = routed?.disclosure?.(intent);
+      const previewId = randomUUID();
+      const pending: PendingPreview = Object.freeze({
+        previewId,
+        generation,
+        intent,
+        request: projection,
+        context: Object.freeze([...intent.context]),
+        route: value,
+        adapter: value.status === "ready" ? Object.freeze({ ...value.recommended, capabilities: Object.freeze([...value.recommended.capabilities]) }) : null,
+        worker: identity.worker,
+        ...(disclosure === undefined ? {} : { disclosure: Object.freeze({ ...disclosure }) }),
+        source: Object.freeze({ ...source }),
+      });
+      if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
+      previews.set(key, pending);
       return {
         ok: true,
         value: {
+          previewId,
+          request: projection,
+          context: [...intent.context],
           route: value,
-          // Both parts, always: the card the owner reads names the details it
-          // will send, so a confirmation can never cover less than the request.
-          disclosure: routed?.disclosure?.(outcome, details ?? ""),
+          ...(disclosure === undefined ? {} : { disclosure }),
         },
       };
     } catch (error) {
@@ -100,89 +280,192 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     }
   });
 
-  ipcMain.handle("task:run", async (_event, request: TaskRunRequest) => {
-    const { dir, outcome, adapterId, realCallConfirmed, disclosure } = request;
-    const details = request.details ?? "";
-    const refusal = runRefusal(isTaskRunning(dir), isQuitDraining());
-    if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
-    // Register the live session BEFORE the (single) detection so a reattach can
-    // always find the run, then detect once and reuse those adapters for both
-    // the disclosure gate and the run — a second detection would delay this
-    // registration and let a fast reattach miss the running session.
-    const controller = new AbortController();
-    markRunning(dir);
-    controllers.set(dir, controller);
-    sessions.set(dir, {
-      dir,
-      outcome,
-      // Request fields are not runtime identity. Detection below names the
-      // adapter that actually won the route and whether it owns a real-call
-      // disclosure seam before any Run activity can reach the renderer.
-      adapterId: null,
-      conversationId: request.conversationId ?? null,
-      worker: false,
-      startedAt: new Date().toISOString(),
-      activities: [],
-      phase: "running",
-      result: null,
-      error: null,
-    });
-    const cleanup = (): void => { clearRunning(dir); controllers.delete(dir); sessions.delete(dir); };
-    // The run-time disclosure gate follows the ROUTED adapter's own seam, not a
-    // codex-pinned check: resolve the route exactly as task:route does and take
-    // the expected disclosure from that adapter. A real worker adapter (codex)
-    // exposes disclosure() and must be confirmed with a byte-matching disclosure;
-    // a demo (no-disclosure) adapter returns undefined and needs no confirmation.
-    let detected: Awaited<ReturnType<typeof detectedAdapters>>;
-    let expected: WorkerDisclosure | undefined;
-    let routedAdapterId: string | null = null;
-    let routedWorker = false;
-    let routeReady = false;
+  ipcMain.handle("task:preview-discard", (_event, dir: unknown, previewId?: unknown): Result<null> => {
+    if (typeof dir !== "string" || dir.length === 0 || dir.length > 32_767 ||
+        (previewId !== undefined && (typeof previewId !== "string" || !UUID_V4.test(previewId)))) {
+      return { ok: false, message: "TASK_PREVIEW_DISCARD_INVALID: Cairn refused a malformed preview cancellation." };
+    }
     try {
-      detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? { outcome, details } : undefined);
-      const preview = previewSerialRoute(outcome, detected.adapters, adapterId);
-      routeReady = preview.status === "ready";
-      const routed = preview.status === "ready"
-        ? detected.adapters.find((adapter) => adapter.descriptor.id === preview.recommended.id)
-        : undefined;
-      const identity = runtimeWorkerIdentity(routed);
-      routedAdapterId = identity.adapterId;
-      routedWorker = identity.worker;
-      expected = routed?.disclosure?.(outcome, details);
+      const key = canonicalProjectKey(dir);
+      const current = previews.get(key);
+      // An exact id cannot retire a newer review. Omitting the id is the
+      // bounded cancellation for a route lookup that has not returned yet.
+      if (previewId === undefined || current?.previewId === previewId) nextGeneration(key);
+      return { ok: true, value: null };
     } catch (error) {
-      cleanup();
+      logError("task:preview-discard", error);
+      return { ok: false, message: plainMessage(error) };
+    }
+  });
+
+  ipcMain.handle("task:run", async (_event, unsafeRequest: unknown) => {
+    const request = checkedRunRequest(unsafeRequest);
+    if (request === null) return { ok: false, message: "TASK_RUN_INVALID: Cairn refused a malformed run request." } satisfies Result<never>;
+    const { dir, previewId, realCallConfirmed, disclosure } = request;
+    let key: string;
+    try {
+      projectStatus(dir);
+      key = canonicalProjectKey(dir);
+    } catch (error) {
       logError("task:run", error);
       return { ok: false, message: plainMessage(error) } satisfies Result<never>;
     }
-    if (expected && (realCallConfirmed !== true || !sameDisclosure(disclosure, expected))) {
-      cleanup();
-      return { ok: false, message: "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting." } satisfies Result<never>;
+    const refusal = runRefusal(isTaskRunning(dir) || starting.has(key), isQuitDraining());
+    if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
+
+    // Acquire this canonical-project gate before adapter detection's first
+    // await. Exactly one invocation can reach the consume boundary.
+    starting.add(key);
+    let acceptedRunOwnsGate = false;
+    let invalidateMatchedPreview: (() => void) | null = null;
+    try {
+    const pending = previews.get(key);
+    if (!pending || pending.previewId !== previewId || routeGenerations.get(key) !== pending.generation) {
+      return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
+    }
+    // Once this invocation has proved it owns the reviewed preview, every
+    // pre-acceptance uncertainty retires that authority. If another route or
+    // an explicit cancellation already replaced it while an await was in
+    // flight, do not let this stale invocation retire the newer preview.
+    invalidateMatchedPreview = () => {
+      if (previews.get(key) === pending && routeGenerations.get(key) === pending.generation) nextGeneration(key);
+    };
+    const refuseBeforeAcceptance = (message: string): Result<never> => {
+      invalidateMatchedPreview?.();
+      return { ok: false, message };
+    };
+    if (pending.route.status !== "ready" || pending.adapter === null) {
+      return refuseBeforeAcceptance("TASK_ROUTE_UNAVAILABLE: That route is no longer ready. Review the task again.");
+    }
+    if (pending.source.kind === "proposal") {
+      let current: ReturnType<typeof currentTaskProposal>;
+      try {
+        current = currentTaskProposal(dir, pending.source.conversationId, pending.source.proposalId);
+      } catch (error) {
+        logError("task:run proposal recheck", error);
+        return refuseBeforeAcceptance(PROPOSAL_STALE);
+      }
+      if (current === null || current.unresolvedRisks !== 0 || current.intent !== pending.intent) {
+        return refuseBeforeAcceptance(PROPOSAL_STALE);
+      }
+    }
+    let detected: Awaited<ReturnType<typeof detectedAdapters>>;
+    try {
+      detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? pending.intent : undefined);
+    } catch (error) {
+      logError("task:run", error);
+      return refuseBeforeAcceptance(plainMessage(error));
+    }
+
+    if (previews.get(key) !== pending || routeGenerations.get(key) !== pending.generation) {
+      return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
+    }
+    if (isQuitDraining()) {
+      return refuseBeforeAcceptance(runRefusal(false, true) ?? "QUIT_IN_PROGRESS");
+    }
+    if (pending.source.kind === "proposal") {
+      let current: ReturnType<typeof currentTaskProposal>;
+      try {
+        current = currentTaskProposal(dir, pending.source.conversationId, pending.source.proposalId);
+      } catch (error) {
+        logError("task:run proposal recheck", error);
+        return refuseBeforeAcceptance(PROPOSAL_STALE);
+      }
+      if (current === null || current.unresolvedRisks !== 0 || current.intent !== pending.intent) {
+        return refuseBeforeAcceptance(PROPOSAL_STALE);
+      }
+    }
+
+    const routed = detected.adapters.find((adapter) => adapter.descriptor.id === pending.adapter?.id);
+    if (!routed || !routed.descriptor.connected || !routed.descriptor.capabilities.includes("serial-task")) {
+      return refuseBeforeAcceptance("TASK_ROUTE_UNAVAILABLE: The reviewed worker is no longer available. Nothing was started.");
+    }
+    const identity = runtimeWorkerIdentity(routed);
+    if (!sameAdapter(pending.adapter, routed.descriptor) || identity.adapterId !== pending.adapter.id || identity.worker !== pending.worker) {
+      return refuseBeforeAcceptance(ROUTE_CHANGED);
+    }
+    let expected: WorkerDisclosure | undefined;
+    try {
+      expected = routed.disclosure?.(pending.intent);
+    } catch (error) {
+      logError("task:run disclosure recheck", error);
+      return refuseBeforeAcceptance(ROUTE_CHANGED);
+    }
+    if (!disclosuresMatch(pending.disclosure, expected)) {
+      return refuseBeforeAcceptance(ROUTE_CHANGED);
+    }
+    if ((expected !== undefined && (realCallConfirmed !== true || !sameDisclosure(disclosure, expected))) ||
+        (expected === undefined && (realCallConfirmed === true || disclosure !== undefined))) {
+      // This is the sole pre-acceptance survivor: the reviewed route is still
+      // exact, and the owner may return with the matching authorization.
+      return { ok: false, message: REAL_CALL_NOT_AUTHORIZED } satisfies Result<never>;
+    }
+
+    if (pending.source.kind === "proposal") {
+      let consumed: ReturnType<typeof consumeCurrentTaskProposal>;
+      try {
+        consumed = consumeCurrentTaskProposal(dir, pending.source.conversationId, pending.source.proposalId);
+      } catch (error) {
+        logError("task:run proposal consume", error);
+        return refuseBeforeAcceptance(PROPOSAL_STALE);
+      }
+      if (consumed === null || consumed.intent !== pending.intent) {
+        return refuseBeforeAcceptance(PROPOSAL_STALE);
+      }
+    } else {
+      previews.delete(key);
+    }
+
+    const outcome = pending.request.outcome.text;
+    const conversationId = pending.source.kind === "proposal" ? pending.source.conversationId : null;
+    const routedAdapterId = pending.adapter.id;
+    const routedWorker = pending.worker;
+    let controller: AbortController;
+    let evidenceRunId: string | null;
+    let evidenceWindow: StageCaptureWindow | null;
+    try {
+      controller = new AbortController();
+      markRunning(dir);
+      controllers.set(dir, controller);
+      evidenceRunId = routedWorker ? randomUUID() : null;
+      evidenceWindow = evidenceRunId === null ? null : win();
+      sessions.set(dir, {
+        dir,
+        outcome,
+        acceptedPreviewId: previewId,
+        request: pending.request,
+        adapterId: routedAdapterId,
+        conversationId,
+        worker: routedWorker,
+        startedAt: new Date().toISOString(),
+        activities: [],
+        phase: "running",
+        result: null,
+        error: null,
+        evidenceRunId,
+      });
+    } catch (error) {
+      starting.delete(key);
+      clearRunning(dir);
+      controllers.delete(dir);
+      logError("task:run accepted setup", error);
+      const message = plainMessage(error);
+      try {
+        sessions.set(dir, {
+          dir, outcome, acceptedPreviewId: previewId, request: pending.request, adapterId: routedAdapterId, conversationId,
+          worker: routedWorker, startedAt: new Date().toISOString(), activities: [],
+          phase: "closed", result: null, error: message, evidenceRunId: null,
+        });
+      } catch {
+        // Memory exhaustion can also prevent the retained error projection.
+      }
+      return { ok: false, message } satisfies Result<never>;
     }
     // Evidence exists only for a real routed worker. Bind both pictures to the
     // BrowserWindow that showed the accepted project; a replacement window or
     // a switched project fails the capture helper's identity check.
-    const evidenceRunId = routeReady && routedWorker ? randomUUID() : null;
-    const evidenceWindow: StageCaptureWindow | null = evidenceRunId === null ? null : win();
     let evidenceCaptureCount = 0;
     let cardEvidenceRunId: string | null = null;
-    const acceptedSession = sessions.get(dir);
-    if (acceptedSession) {
-      acceptedSession.adapterId = routedAdapterId;
-      acceptedSession.worker = routedWorker;
-      acceptedSession.evidenceRunId = evidenceRunId;
-    }
-    // Main has now accepted the run. Retire only a byte-matching proposal from
-    // the same conversation before any task work begins, so a remounted Chat
-    // cannot resurrect a spent dispatch card even if result-card posting later
-    // fails. Refusals above deliberately leave it actionable.
-    const consumedProposal = routeReady && request.conversationId
-      ? consumeProposal(dir, request.conversationId, outcome, details)
-      : null;
-    const restoreConsumedProposal = (): void => {
-      if (consumedProposal !== null && request.conversationId) {
-        restoreProposal(dir, request.conversationId, consumedProposal);
-      }
-    };
 
     const captureEvidence = async (boundary: EvidenceBoundary, terminal: boolean): Promise<void> => {
       if (evidenceRunId === null || evidenceWindow === null) return;
@@ -228,10 +511,9 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         // This await is the true pre-work barrier: runSerialTask — and therefore
         // every adapter — is not invoked until the bounded attempt is over.
         await captureEvidence("worker-not-started", false);
-        const value = await runSerialTask(dir, outcome, {
+        const value = await runSerialTask(dir, pending.intent, {
           adapters: detected.adapters,
-          adapterId,
-          details,
+          adapterId: routedAdapterId,
           signal: controller.signal,
           events: {
             onActivity: (activity) => {
@@ -244,10 +526,6 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         const safeValue = value.status === "connection-required" && detected.status
           ? { ...value, route: { ...value.route, reason: connectionRequiredReason(detected.status) } }
           : value;
-        // A route that closed before any task started is still the same
-        // actionable proposal. This is defensive when the earlier preview was
-        // ready but the run-time result says the connection changed.
-        if (safeValue.status === "connection-required") restoreConsumedProposal();
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.result = safeValue; }
         if (safeValue.status === "connection-required") {
@@ -272,22 +550,23 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         );
         return { ok: true, value: safeValue };
       } catch (error) {
-        // The renderer keeps the proposal available when main returns a run
-        // error, so trusted main state must make the same retry possible after
-        // a remount.
-        restoreConsumedProposal();
+        // Acceptance already consumed the preview/proposal. A Core-entry throw
+        // keeps this session's request view for the later ERROR surface, but it
+        // never resurrects either one-time authority.
         logError("task:run", error);
         const session = sessions.get(dir);
         if (session) { session.phase = "closed"; session.error = plainMessage(error); }
         await finishEvidence("error", "ERROR", null);
         return { ok: false, message: plainMessage(error) };
       } finally {
+        starting.delete(key);
         clearRunning(dir);
         controllers.delete(dir);
         settlements.delete(dir);
       }
     })();
     settlements.set(dir, run);
+    acceptedRunOwnsGate = true;
     // The envelope speaks the result, for EVERY terminal state — a verified
     // DONE, an honest STOPPED, a connection-required close, and a run that
     // threw. The card is composed from the run's own structured record input,
@@ -303,7 +582,6 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     // Only a run that carried a conversation id has a conversation to post to;
     // one typed on the task screen posts nothing. Nothing here depends on the
     // run session surviving — `task:acknowledge` may have deleted it already.
-    const conversationId = request.conversationId ?? null;
     if (conversationId !== null) {
       const post = (build: () => ResultCard): void => {
         let posted: ResultCard | null = null;
@@ -349,6 +627,26 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       );
     }
     return run;
+    } catch (error) {
+      // This is the final fail-closed net around every service/adapter getter
+      // and consume operation after acquiring the gate. Once the run promise
+      // owns cleanup, its own catch/finally remains authoritative.
+      if (!acceptedRunOwnsGate) {
+        invalidateMatchedPreview?.();
+        clearRunning(dir);
+        controllers.delete(dir);
+        settlements.delete(dir);
+        const session = sessions.get(dir);
+        if (session?.phase === "running") {
+          session.phase = "closed";
+          session.error = plainMessage(error);
+        }
+      }
+      logError("task:run pre-accept", error);
+      return { ok: false, message: plainMessage(error) } satisfies Result<never>;
+    } finally {
+      if (!acceptedRunOwnsGate) starting.delete(key);
+    }
   });
 
   ipcMain.handle("task:cancel", (_event, dir: string): Result<null> => {

@@ -7,8 +7,10 @@ import {
   KIMI_EXEC_MODEL,
   KIMI_EXEC_PROVIDER,
   KIMI_EXEC_QUOTA_OAUTH,
+  createDirectTaskIntent,
   type CodexStatusProbe,
   type KimiDetectionProbes,
+  type TaskIntent,
 } from "@cairn/core";
 import { CODEX_EXEC_MODEL } from "@cairn/core";
 import { connectionRequiredReason, detectedAdapters, type DetectionProbes } from "../src/main/adapters.js";
@@ -21,6 +23,12 @@ import { connectionRequiredReason, detectedAdapters, type DetectionProbes } from
 
 function dir(): string {
   return mkdtempSync(join(tmpdir(), "cairn-kimi-wiring-"));
+}
+
+function directIntent(text = "Improve Cairn safely\n\nUse 74."): TaskIntent {
+  const value = createDirectTaskIntent(text, "00000000-0000-4000-8000-000000000001");
+  assert.ok(value);
+  return value;
 }
 
 function codexProbe(installed: boolean, connected: boolean): CodexStatusProbe {
@@ -43,7 +51,8 @@ function kimiProbes(installed: boolean, connected: boolean, billing: "oauth" | "
 test("both connected: both adapters are constructed, codex first, each with its own authorization", async () => {
   const project = dir();
   const probes: DetectionProbes = { codex: codexProbe(true, true), kimi: kimiProbes(true, true) };
-  const detected = await detectedAdapters(false, project, { outcome: "Improve Cairn safely", details: "Use 74." }, probes);
+  const intent = directIntent();
+  const detected = await detectedAdapters(false, project, intent, probes);
   assert.deepEqual(detected.adapters.map((adapter) => adapter.descriptor.id), ["codex-exec", "kimi-exec"]);
   assert.equal(detected.adapters[0].descriptor.priority, 100);
   assert.equal(detected.adapters[1].descriptor.priority, 90);
@@ -51,12 +60,13 @@ test("both connected: both adapters are constructed, codex first, each with its 
   // The kimi adapter discloses its own six facts — provider, model, and the
   // oauth membership quota wording — carrying BOTH parts of the request.
   const kimi = detected.adapters[1];
-  const card = kimi.disclosure?.("Improve Cairn safely", "Use 74.");
+  const card = kimi.disclosure?.(intent);
   assert.equal(card?.provider, KIMI_EXEC_PROVIDER);
   assert.equal(card?.model, KIMI_EXEC_MODEL);
   assert.equal(card?.quota, KIMI_EXEC_QUOTA_OAUTH);
-  assert.equal(card?.task, "Improve Cairn safely\n\nDetails (verbatim):\nUse 74.");
-  const codexCard = detected.adapters[0].disclosure?.("Improve Cairn safely", "Use 74.");
+  assert.match(card?.task ?? "", /Improve Cairn safely/);
+  assert.match(card?.task ?? "", /Use 74\./);
+  const codexCard = detected.adapters[0].disclosure?.(intent);
   assert.equal(codexCard?.provider, "OpenAI");
   assert.equal(codexCard?.model, CODEX_EXEC_MODEL);
   assert.equal(detected.status?.codex?.connected, true);

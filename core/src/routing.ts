@@ -1,3 +1,5 @@
+import type { TaskIntent } from "./intent.js";
+
 export interface AdapterDescriptor {
   id: string;
   label: string;
@@ -9,18 +11,12 @@ export interface AdapterDescriptor {
 }
 
 export interface AdapterTaskContract {
-  version: "cairn-serial-task/v2";
+  version: "cairn-serial-task/v3";
   taskNumber: number;
-  requestedOutcome: string;
-  /**
-   * The owner's own supplied data — numbers, names, exact wording — carried to
-   * the worker unedited; "" when the owner supplied none. It is bound into
-   * `requestedOutcomeSha256` together with the outcome, so a worker can never
-   * be handed one request and authorized for another.
-   */
-  details: string;
-  /** sha256(JSON.stringify([requestedOutcome, details])) — always two-part. */
-  requestedOutcomeSha256: string;
+  /** The one Core-validated, deeply frozen request accepted for this run. */
+  intent: TaskIntent;
+  /** SHA-256 of Core's fixed-order canonical serialization of `intent`. */
+  requestSha256: string;
   supportedOutcome: string;
   lane: "Standard";
   route: {
@@ -48,9 +44,9 @@ export interface AdapterTaskContract {
  * and never special-cases which adapter produced it.
  */
 export interface WorkerRunResult {
-  kind: "worker-result/v1";
+  kind: "worker-result/v2";
   taskNumber: number;
-  requestedOutcomeSha256: string;
+  requestSha256: string;
   status: "completed" | "failed";
   claimsText: string | null;
   evidence: Record<string, number>;
@@ -103,13 +99,8 @@ export class WorkerProcessError extends Error {
 export interface TaskAdapter {
   descriptor: AdapterDescriptor;
   run(contract: AdapterTaskContract, signal?: AbortSignal): Promise<WorkerRunResult>;
-  /**
-   * The disclosure the owner reads and byte-confirms before a real call. It
-   * takes BOTH parts of the request: the outcome and the owner's details ("" for
-   * none). A card confirmed for the outcome alone must never dispatch a request
-   * carrying details, so both parts are named here.
-   */
-  disclosure?(outcome: string, details: string): WorkerDisclosure;
+  /** The disclosure the owner reads and byte-confirms for this whole intent. */
+  disclosure?(intent: TaskIntent): WorkerDisclosure;
 }
 
 export interface RouteRequest {
@@ -185,9 +176,9 @@ export function createOfflineDemoAdapter(): TaskAdapter {
     },
     async run(contract): Promise<WorkerRunResult> {
       return {
-        kind: "worker-result/v1",
+        kind: "worker-result/v2",
         taskNumber: contract.taskNumber,
-        requestedOutcomeSha256: contract.requestedOutcomeSha256,
+        requestSha256: contract.requestSha256,
         status: "completed",
         claimsText: null,
         evidence: {},

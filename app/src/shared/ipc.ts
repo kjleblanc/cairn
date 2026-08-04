@@ -35,7 +35,27 @@ export type ConvertResult = { status: ProjectStatus; outcome: ConvertOutcome };
 export type { ConvertInspection, ConvertOutcome };
 export type UpdateInfo = { current: string; latest: string | null; newer: boolean };
 export type TaskActivityEvent = { dir: string; activity: SerialActivity };
-export type TaskRoutePreview = { route: RouteResult; disclosure?: WorkerDisclosure };
+/** The only two authorities from which main may build a dispatch preview. */
+export type TaskRouteSource =
+  | { kind: "proposal"; proposalId: string; conversationId: string }
+  | { kind: "manual"; rawOutcome: string };
+
+export type TaskRouteRequest = {
+  dir: string;
+  source: TaskRouteSource;
+  adapterId?: string;
+};
+
+/** A renderer-safe projection of main's one pending frozen intent. The UUID is
+ * opaque and one-use; `request` and `context` are display output, never input
+ * authority for `task:run`. */
+export type TaskRoutePreview = {
+  previewId: string;
+  request: TaskRequestView;
+  context: readonly string[];
+  route: RouteResult;
+  disclosure?: WorkerDisclosure;
+};
 /** `pushPreview`'s local-only, network-free look at what a push would do:
  * null when the current branch has no upstream configured (there is
  * nothing to preview and nothing to push).
@@ -63,26 +83,25 @@ export type PushPreview = { remote: string; url: string; branch: string; ahead: 
 export type PushResult =
   | { ok: true; summary: string }
   | { ok: false; kind: "no-remote" | "auth" | "remote-ahead" | "other" | "refused"; message: string };
-/**
- * One dispatch request, whole. It travels as a single object because every
- * part of it is load-bearing at the gate: the outcome and the owner's own
- * `details` are BOTH re-derived into the expected disclosure card, so a
- * positional signature that quietly drops one would dispatch something the
- * owner never read. `conversationId` names the conversation the request came
- * from (null when it was typed on the task screen instead).
- */
+/** The final acceptance press carries no task text or adapter choice. Main
+ * looks up those authorities from its one-time preview and re-derives the
+ * disclosure before consuming it. */
 export type TaskRunRequest = {
   dir: string;
-  outcome: string;
-  details: string;
-  adapterId?: string;
+  previewId: string;
   realCallConfirmed?: boolean;
   disclosure?: WorkerDisclosure;
-  conversationId?: string | null;
 };
 export type RunSessionSnapshot = {
   dir: string;
   outcome: string;
+  /** The one-time preview this session actually consumed. It is output-only:
+   * renderers use it to distinguish a new accepted ERROR from an older
+   * retained error session after a pre-acceptance refusal. */
+  acceptedPreviewId?: string;
+  /** Main's output-only view of the accepted frozen request. It remains on an
+   * accepted ERROR session even when Core throws before returning a result. */
+  request?: TaskRequestView;
   adapterId: string | null;
   conversationId: string | null;
   // true when this run is a real confirmed worker call, not the offline demo; Task 10 re-keys lane wording off adapter capabilities
@@ -313,7 +332,8 @@ export interface CairnApi {
   projectForget(dir: string): Promise<Result<null>>;
   townLoad(dir: string): Promise<Result<TownPresentationState>>;
   townSave(dir: string, state: TownPresentationState): Promise<Result<TownPresentationState>>;
-  taskRoute(dir: string, outcome: string, details: string, adapterId?: string): Promise<Result<TaskRoutePreview>>;
+  taskRoute(request: TaskRouteRequest): Promise<Result<TaskRoutePreview>>;
+  taskPreviewDiscard(dir: string, previewId?: string): Promise<Result<null>>;
   taskRun(request: TaskRunRequest): Promise<Result<SerialRunResult>>;
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;

@@ -5,6 +5,8 @@ import {
   routeTask,
   type TaskAdapter,
 } from "../src/routing.js";
+import { createDirectTaskIntent, type TaskIntent } from "../src/intent.js";
+import { previewSerialRoute } from "../src/serial.js";
 
 function adapter(id: string, connected: boolean, capabilities: string[], priority = 0): TaskAdapter {
   return {
@@ -19,9 +21,9 @@ function adapter(id: string, connected: boolean, capabilities: string[], priorit
     },
     async run(contract) {
       return {
-        kind: "worker-result/v1",
+        kind: "worker-result/v2",
         taskNumber: contract.taskNumber,
-        requestedOutcomeSha256: contract.requestedOutcomeSha256,
+        requestSha256: contract.requestSha256,
         status: "completed",
         claimsText: null,
         evidence: {},
@@ -80,4 +82,21 @@ test("the explicit offline adapter remains an honest non-model demonstration", a
     capabilities: ["serial-task", "offline-demo"],
     priority: 0,
   });
+});
+
+test("serial route preview accepts only a Core-validated intent and routes from its interpretation", () => {
+  const intent = createDirectTaskIntent(
+    "  Show the exact raw result  ",
+    "00000000-0000-4000-8000-000000000077",
+  );
+  assert.ok(intent);
+  const result = previewSerialRoute(intent, [adapter("ready", true, ["serial-task"])]);
+  assert.equal(result.status, "ready");
+
+  let getterCalls = 0;
+  const hostile = new Proxy({}, {
+    get() { getterCalls += 1; throw new Error("must not read"); },
+  }) as TaskIntent;
+  assert.throws(() => previewSerialRoute(hostile, [adapter("ready", true, ["serial-task"])]), /INVALID_TASK_INTENT/);
+  assert.equal(getterCalls, 0);
 });

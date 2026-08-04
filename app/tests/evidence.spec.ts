@@ -185,7 +185,7 @@ async function beginRun(win: Page): Promise<void> {
   await win.getByRole("button", { name: "Send", exact: true }).click({ noWaitAfter: true });
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toContainText(OUTCOME, { timeout: 20_000 });
-  await taskCard.getByRole("button", { name: "Send to dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 20_000 });
   await panel.getByLabel("I approve this one real Codex Exec call.").check();

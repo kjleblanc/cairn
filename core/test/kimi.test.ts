@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import {
@@ -35,6 +35,13 @@ import {
   type KimiStatusProbeResult,
 } from "../src/kimi.js";
 import { createCodexExecAdapter, REAL_MODEL_CALL_NOT_AUTHORIZED } from "../src/codex.js";
+import {
+  bindTaskIntent,
+  createDirectTaskIntent,
+  taskRequestSha256,
+  taskRequestView,
+  type TaskIntent,
+} from "../src/intent.js";
 import { routeTask, type AdapterTaskContract } from "../src/routing.js";
 
 const SECRET_SENTINEL = "sk-secret-kimi-account-detail";
@@ -300,21 +307,144 @@ test("resolution falls back to ~/.kimi-code/bin when PATH misses", async () => {
   }
 });
 
-test("the test-lane guard refuses the real binary without the fake switch", async () => {
-  const fake = fakeKimiOnPath({ signedIn: true });
+test("the test-lane guard accepts only its explicit temporary fake bin and never PATH or home fallbacks", async () => {
+  const authorized = fakeKimiOnPath({ signedIn: true });
+  // This signed-out fake is deliberately earlier on PATH. If the test lane
+  // consults PATH instead of the explicit bin, the result becomes signed-out.
+  const pathDecoy = fakeKimiOnPath({ signedIn: false });
   try {
-    await withEnv({ CAIRN_TEST_LANE: "1", CAIRN_FAKE_KIMI: undefined }, async () => {
-      // A real (or any) kimi on PATH must be invisible to a suite that did
-      // not explicitly opt into the fake lane.
+    const refused = { installed: false, connected: false, billing: "unknown" } as const;
+    await withEnv({
+      CAIRN_TEST_LANE: "1",
+      CAIRN_FAKE_KIMI: undefined,
+      CAIRN_FAKE_KIMI_BIN: authorized.bin,
+    }, async () => {
+      // Even an explicit bin grants nothing without the positive fake switch.
       assert.deepEqual(await detectKimiExecStatus(ROOT), { installed: false, connected: false, billing: "unknown" });
     });
-    await withEnv({ CAIRN_TEST_LANE: "1", CAIRN_FAKE_KIMI: "1" }, async () => {
+
+    const invalidBins: Array<string | undefined> = [
+      undefined,
+      "relative-fake-bin",
+      join(tmpdir(), "cairn-fake-kimi-missing"),
+      mkdtempSync(join(tmpdir(), "not-an-authorized-kimi-fixture-")),
+      mkdtempSync(join(tmpdir(), "cairn-fake-kimi-empty-")),
+    ];
+    for (const fakeBin of invalidBins) {
+      await withEnv({
+        CAIRN_TEST_LANE: "1",
+        CAIRN_FAKE_KIMI: "1",
+        CAIRN_FAKE_KIMI_BIN: fakeBin,
+      }, async () => {
+        assert.deepEqual(await detectKimiExecStatus(ROOT), refused, String(fakeBin));
+      });
+    }
+
+    // Pin the other historical escape route independently: even with no Kimi
+    // on PATH, an installed-looking ~/.kimi-code/bin command must stay inert.
+    const fakeHome = mkdtempSync(join(tmpdir(), "cairn-kimi-home-decoy-"));
+    const homeBin = join(fakeHome, ".kimi-code", "bin");
+    const homeMarker = join(fakeHome, "home-command-was-selected.txt");
+    const homeDispatcher = join(homeBin, "home-decoy.cjs");
+    mkdirSync(homeBin, { recursive: true });
+    writeFileSync(homeDispatcher, `require("node:fs").writeFileSync(${JSON.stringify(homeMarker)}, "selected\\n");\n`);
+    if (process.platform === "win32") {
+      writeFileSync(join(homeBin, "kimi.cmd"), `@"${process.execPath}" "${homeDispatcher}" %*\r\n`);
+    } else {
+      const executable = join(homeBin, "kimi");
+      writeFileSync(executable, `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(homeMarker)}, "selected\\n");\n`);
+      chmodSync(executable, 0o755);
+    }
+    const emptyPath = mkdtempSync(join(tmpdir(), "cairn-kimi-empty-path-"));
+    const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+    const missingAuthorizedBin = join(mkdtempSync(join(tmpdir(), "cairn-fake-kimi-missing-parent-")), "missing");
+    await withEnv({
+      [pathKey]: emptyPath,
+      USERPROFILE: fakeHome,
+      HOME: fakeHome,
+      ComSpec: process.platform === "win32"
+        ? (process.env.ComSpec ?? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"))
+        : process.env.ComSpec,
+      CAIRN_TEST_LANE: "1",
+      CAIRN_FAKE_KIMI: "1",
+      CAIRN_FAKE_KIMI_BIN: missingAuthorizedBin,
+    }, async () => {
+      assert.deepEqual(await detectKimiExecStatus(ROOT), refused);
+      assert.equal(existsSync(homeMarker), false, "the home fallback command was never spawned");
+    });
+
+    const hostileComSpecRoot = mkdtempSync(join(tmpdir(), "cairn-hostile-comspec-"));
+    const hostileComSpecMarker = join(hostileComSpecRoot, "selected.txt");
+    const hostileComSpec = join(hostileComSpecRoot, "hostile-comspec.cmd");
+    writeFileSync(hostileComSpec, `@echo selected>"${hostileComSpecMarker}"\r\n@exit /b 97\r\n`);
+    if (process.platform === "win32") {
+      const hostileSystemRoot = join(hostileComSpecRoot, "Windows");
+      mkdirSync(join(hostileSystemRoot, "System32"), { recursive: true });
+      await withEnv({
+        CAIRN_TEST_LANE: "1",
+        CAIRN_FAKE_KIMI: "1",
+        CAIRN_FAKE_KIMI_BIN: authorized.bin,
+        SystemRoot: hostileSystemRoot,
+        windir: hostileSystemRoot,
+        ComSpec: hostileComSpec,
+      }, async () => {
+        assert.deepEqual(await detectKimiExecStatus(ROOT), refused, "a temp SystemRoot fails closed");
+        assert.equal(existsSync(hostileComSpecMarker), false, "the hostile command interpreter stayed inert");
+      });
+    }
+    await withEnv({
+      CAIRN_TEST_LANE: "1",
+      CAIRN_FAKE_KIMI: "1",
+      CAIRN_FAKE_KIMI_BIN: authorized.bin,
+      ComSpec: process.platform === "win32" ? hostileComSpec : process.env.ComSpec,
+    }, async () => {
       const detected = await detectKimiExecStatus(ROOT);
       assert.deepEqual(detected, { installed: true, connected: true, billing: "oauth" });
+      assert.equal(existsSync(hostileComSpecMarker), false, "the inherited ComSpec was never selected");
     });
   } finally {
-    fake.restore();
+    pathDecoy.restore();
+    authorized.restore();
   }
+});
+
+test("the test-lane strict identity refuses a linked fake-bin escape", async (t) => {
+  const target = mkdtempSync(join(tmpdir(), "cairn-linked-kimi-target-"));
+  const targetMarker = join(target, "linked-command-was-selected.txt");
+  if (process.platform === "win32") {
+    writeFileSync(join(target, "kimi.cmd"), `@echo selected>"${targetMarker}"\r\n@exit /b 0\r\n`);
+  } else {
+    const command = join(target, "kimi");
+    writeFileSync(command, `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(targetMarker)}, "selected\\n");\n`);
+    chmodSync(command, 0o755);
+  }
+  const linkParent = mkdtempSync(join(tmpdir(), "cairn-kimi-link-parent-"));
+  const configuredLink = join(linkParent, "cairn-fake-kimi-linked-bin");
+  try {
+    symlinkSync(target, configuredLink, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform === "win32" && ["EPERM", "EACCES", "EINVAL", "UNKNOWN"].includes(code ?? "")) {
+      t.skip(`Windows did not permit a temporary junction (${code ?? "unknown"})`);
+      return;
+    }
+    throw error;
+  }
+
+  const emptyPath = mkdtempSync(join(tmpdir(), "cairn-kimi-linked-empty-path-"));
+  const emptyHome = mkdtempSync(join(tmpdir(), "cairn-kimi-linked-empty-home-"));
+  const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  await withEnv({
+    [pathKey]: emptyPath,
+    USERPROFILE: emptyHome,
+    HOME: emptyHome,
+    CAIRN_TEST_LANE: "1",
+    CAIRN_FAKE_KIMI: "1",
+    CAIRN_FAKE_KIMI_BIN: configuredLink,
+  }, async () => {
+    assert.deepEqual(await detectKimiExecStatus(ROOT), { installed: false, connected: false, billing: "unknown" });
+    assert.equal(existsSync(targetMarker), false, "the linked target command was never spawned");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -734,13 +864,39 @@ test("raw stdout and stderr stream to redacted kimi-* debug copies outside the p
 // pins are on the request handed to it and the bytes the owner confirms.
 // ---------------------------------------------------------------------------
 
-function kimiContract(details = ""): AdapterTaskContract {
+const DIRECT_INPUT_ID = "00000000-0000-4000-8000-000000000044";
+
+function directRequest(raw = "Add one visible result"): TaskIntent {
+  const value = createDirectTaskIntent(raw, DIRECT_INPUT_ID);
+  assert.ok(value);
+  return value;
+}
+
+function markedRequest(
+  inputId = "10000000-0000-4000-8000-000000000044",
+  requirementSource: "owner-stated" | "owner-unsure" = "owner-stated",
+  context: readonly string[] = ["Keep the existing order."],
+  sourcePrefix = "",
+): TaskIntent {
+  const ownerText = `${sourcePrefix}Please add one visible result.\nWord counts: 74`;
+  const value = bindTaskIntent({
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Add one visible result", ownerQuote: "Please add one visible result." },
+    requirements: [{ source: requirementSource, text: "Use 999 words", ownerQuote: "Word counts: 74" }],
+    context: [...context],
+  }, [{ kind: "conversation", inputId, text: ownerText }]);
+  assert.ok(value);
+  return value;
+}
+
+function kimiContract(intent = directRequest()): AdapterTaskContract {
+  const requestSha256 = taskRequestSha256(intent);
+  assert.ok(requestSha256);
   return {
-    version: "cairn-serial-task/v2",
+    version: "cairn-serial-task/v3",
     taskNumber: 33,
-    requestedOutcome: "Add one visible result",
-    details,
-    requestedOutcomeSha256: "f".repeat(64),
+    intent,
+    requestSha256,
     supportedOutcome: "Prepare one fake Kimi exec request.",
     lane: "Standard",
     route: {
@@ -785,17 +941,21 @@ test("the Kimi adapter descriptor names provider, model, and priority 90", () =>
   assert.equal(disconnected.descriptor.connected, false);
 });
 
-test("the disclosure byte-pins both billing wordings and binds outcome plus details", () => {
+test("the disclosure byte-pins both billing wordings and carries the full source-marked intent", () => {
   const workspace = join(tmpdir(), "cairn-kimi-disclosure-ws");
-  const oauth = kimiExecDisclosure(workspace, "oauth", "Add one visible result", "Word counts: 74");
+  const accepted = markedRequest();
+  const oauth = kimiExecDisclosure(workspace, "oauth", accepted);
   assert.deepEqual(oauth, {
     provider: KIMI_EXEC_PROVIDER,
     model: KIMI_EXEC_MODEL,
     project: workspace,
-    task: "Add one visible result\n\nDetails (verbatim):\nWord counts: 74",
+    task: oauth.task,
     data: KIMI_EXEC_DATA_SCOPE,
     quota: KIMI_EXEC_QUOTA_OAUTH,
   });
+  assert.match(oauth.task, /\*\*You said so\*\*/);
+  assert.match(oauth.task, /> Word counts: 74/);
+  assert.match(oauth.task, /Context kept with the task — not a requirement/);
   // The membership wording is the spike's source=oauth truth.
   assert.match(oauth.quota, /membership this CLI is signed into/);
   assert.match(oauth.quota, /Exactly one ephemeral Kimi Code CLI process/);
@@ -804,9 +964,9 @@ test("the disclosure byte-pins both billing wordings and binds outcome plus deta
 
   // Anything not observed as source=oauth gets the honest generic floor.
   for (const billing of ["other", "unknown"] as const) {
-    const generic = kimiExecDisclosure(workspace, billing, "Add one visible result");
+    const generic = kimiExecDisclosure(workspace, billing, accepted);
     assert.equal(generic.quota, KIMI_EXEC_QUOTA_GENERIC);
-    assert.equal(generic.task, "Add one visible result", "no details, no details block");
+    assert.equal(generic.task, oauth.task);
     assert.match(generic.quota, /the account this CLI is signed into/);
     assert.match(generic.quota, /cannot tell which billing applies/);
     assert.doesNotMatch(generic.quota, /membership/);
@@ -815,9 +975,13 @@ test("the disclosure byte-pins both billing wordings and binds outcome plus deta
   // The data scope names the second at-rest copy the spike observed.
   assert.match(KIMI_EXEC_DATA_SCOPE, /~\/\.kimi-code\/sessions\//);
   assert.match(KIMI_EXEC_DATA_SCOPE, /static deny rules/);
+  assert.equal(
+    KIMI_EXEC_DATA_SCOPE,
+    "The task instructions, AGENTS.md, the generated task brief, and any file inside the selected project that Kimi chooses to read. Kimi runs shell commands under its own auto permission policy with its static deny rules, and writes a session record under ~/.kimi-code/sessions/.",
+  );
   // The adapter's own seam re-derives the same card from its status.
   const adapter = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH);
-  assert.deepEqual(adapter.disclosure?.("Add one visible result", "Word counts: 74"), oauth);
+  assert.deepEqual(adapter.disclosure?.(accepted), oauth);
 });
 
 test("the adapter stops before a real call without an authorization, with the shared boundary code", async () => {
@@ -839,7 +1003,7 @@ test("the adapter stops before a real call without an authorization, with the sh
   assert.equal(calls, 0, "no process was started");
 });
 
-test("authorization refuses mismatched outcome, details, or billing", async () => {
+test("authorization refuses changed outcome, source, span, context, or billing before spawn", async () => {
   const workspace = join(tmpdir(), "cairn-kimi-mismatch-ws");
   let calls = 0;
   const fake: KimiExecProcess = {
@@ -850,27 +1014,45 @@ test("authorization refuses mismatched outcome, details, or billing", async () =
     },
   };
 
-  // A different outcome.
+  const accepted = markedRequest();
   const wrongOutcome = createKimiExecAdapter(
     workspace, KIMI_CONNECTED_OAUTH,
-    authorizeKimiExec(workspace, "oauth", "A different task"), fake,
+    authorizeKimiExec(workspace, "oauth", directRequest("A different task")), fake,
   );
-  await assert.rejects(() => wrongOutcome.run(kimiContract()), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  await assert.rejects(() => wrongOutcome.run(kimiContract(accepted)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
 
-  // An outcome-only confirmation cannot dispatch a details-bearing contract.
-  const outcomeOnly = createKimiExecAdapter(
+  const variants = [
+    markedRequest("20000000-0000-4000-8000-000000000044"),
+    markedRequest(undefined, "owner-unsure"),
+    markedRequest(undefined, "owner-stated", ["Different context."]),
+  ];
+  for (const changed of variants) {
+    assert.notEqual(taskRequestSha256(changed), taskRequestSha256(accepted));
+    const mismatched = createKimiExecAdapter(
+      workspace, KIMI_CONNECTED_OAUTH,
+      authorizeKimiExec(workspace, "oauth", accepted), fake,
+    );
+    await assert.rejects(() => mismatched.run(kimiContract(changed)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  }
+
+  const movedSpan = markedRequest(undefined, "owner-stated", ["Keep the existing order."], "Earlier words. ");
+  assert.deepEqual(taskRequestView(movedSpan), taskRequestView(accepted), "offsets stay out of the output-only view");
+  assert.equal(movedSpan.outcome.owner?.inputId, accepted.outcome.owner?.inputId);
+  assert.notEqual(movedSpan.outcome.owner?.start, accepted.outcome.owner?.start);
+  assert.notEqual(taskRequestSha256(movedSpan), taskRequestSha256(accepted));
+  const spanMismatch = createKimiExecAdapter(
     workspace, KIMI_CONNECTED_OAUTH,
-    authorizeKimiExec(workspace, "oauth", "Add one visible result"), fake,
+    authorizeKimiExec(workspace, "oauth", accepted), fake,
   );
-  await assert.rejects(() => outcomeOnly.run(kimiContract("Word counts: 74")), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  await assert.rejects(() => spanMismatch.run(kimiContract(movedSpan)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
 
   // A card confirmed under one billing wording cannot run under another:
   // what ran is what the owner read.
   const wrongBilling = createKimiExecAdapter(
     workspace, { installed: true, connected: true, billing: "other" },
-    authorizeKimiExec(workspace, "oauth", "Add one visible result"), fake,
+    authorizeKimiExec(workspace, "oauth", accepted), fake,
   );
-  await assert.rejects(() => wrongBilling.run(kimiContract()), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
+  await assert.rejects(() => wrongBilling.run(kimiContract(accepted)), /REAL_MODEL_CALL_NOT_AUTHORIZED/);
 
   assert.equal(calls, 0, "no process was started for any mismatch");
 });
@@ -886,12 +1068,13 @@ test("one authorized fake verifies the request at the seam and translates the re
     failedToolItemCount: 1,
     finalMessage: "Done.\n\n```cairn-claims\n{ \"disposition\": \"DONE\" }\n```",
   }, requests);
+  const accepted = markedRequest();
   const adapter = createKimiExecAdapter(
     workspace, KIMI_CONNECTED_OAUTH,
-    authorizeKimiExec(workspace, "oauth", "Add one visible result", "Word counts: 74"),
+    authorizeKimiExec(workspace, "oauth", accepted),
     fake,
   );
-  const result = await adapter.run(kimiContract("Word counts: 74"));
+  const result = await adapter.run(kimiContract(accepted));
 
   assert.equal(requests.length, 1);
   assert.equal(requests[0].command, process.platform === "win32" ? "kimi.exe" : "kimi");
@@ -901,9 +1084,12 @@ test("one authorized fake verifies the request at the seam and translates the re
   assert.doesNotMatch(requests[0].args.join(" "), /Add one visible result|retry|resume|fallback|scheduler/);
   const prompt = requests[0].prompt;
   assert.match(prompt, /You are running as Kimi Code CLI in print mode\./);
-  assert.match(prompt, /Requested visible outcome: Add one visible result/);
-  assert.match(prompt, /Details from the owner \(use verbatim, do not restate\):/);
-  assert.match(prompt, /Word counts: 74/);
+  assert.match(prompt, /\*\*You said so\*\*/);
+  assert.match(prompt, /> Word counts: 74/);
+  assert.match(prompt, /> Use 999 words/);
+  assert.match(prompt, /exact owner words govern if they conflict/);
+  assert.match(prompt, /You weren’t sure is a starting point/);
+  assert.match(prompt, /Cairn chose is Cairn’s choice, not evidence of owner preference/);
   // The spec's sharpened lines: the CLI has subagents and background tasks,
   // and one serial call means one.
   assert.match(prompt, /[Dd]o not (start|use|spawn)[^\n]*subagents?[^\n]*background tasks?|subagents? or background tasks?/);
@@ -917,9 +1103,9 @@ test("one authorized fake verifies the request at the seam and translates the re
   assert.match(prompt, /owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota/i);
 
   assert.deepEqual(result, {
-    kind: "worker-result/v1",
+    kind: "worker-result/v2",
     taskNumber: 33,
-    requestedOutcomeSha256: "f".repeat(64),
+    requestSha256: taskRequestSha256(accepted),
     status: "completed",
     claimsText: "Done.\n\n```cairn-claims\n{ \"disposition\": \"DONE\" }\n```",
     evidence: {
@@ -933,7 +1119,8 @@ test("one authorized fake verifies the request at the seam and translates the re
 
 test("run() translates non-zero exit, missing final message, and terminal error as failed", async () => {
   const workspace = join(tmpdir(), "cairn-kimi-failed-ws");
-  const authorization = authorizeKimiExec(workspace, "oauth", "Add one visible result");
+  const accepted = directRequest();
+  const authorization = authorizeKimiExec(workspace, "oauth", accepted);
   const base = {
     agentMessageCount: 1,
     toolCallCount: 0,
@@ -948,7 +1135,7 @@ test("run() translates non-zero exit, missing final message, and terminal error 
   ];
   for (const { name, result: processResult } of cases) {
     const adapter = createKimiExecAdapter(workspace, KIMI_CONNECTED_OAUTH, authorization, fakeKimiProcess(processResult));
-    const translated = await adapter.run(kimiContract());
+    const translated = await adapter.run(kimiContract(accepted));
     assert.equal(translated.status, "failed", name);
   }
 });

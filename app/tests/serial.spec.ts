@@ -80,8 +80,14 @@ test("FIX 4: the demo lane runs through task:run with no disclosure because its 
   // The routed adapter (offline demo) has no disclosure() seam, so the run-time
   // gate takes no `expected` disclosure and needs no confirmation: task:run
   // succeeds with neither realCallConfirmed nor a disclosure argument.
-  const done = await win.evaluate(async ({ project }) =>
-    window.cairn.taskRun({ dir: project, outcome: "Create a welcome page", details: "" }), { project: proj });
+  const done = await win.evaluate(async ({ project }) => {
+    const routed = await window.cairn.taskRoute({
+      dir: project,
+      source: { kind: "manual", rawOutcome: "Create a welcome page" },
+    });
+    if (!routed.ok) return routed;
+    return window.cairn.taskRun({ dir: project, previewId: routed.value.previewId });
+  }, { project: proj });
   expect(done.ok).toBe(true);
   if (done.ok) expect(done.value.status).toBe("done");
   await app.close();
