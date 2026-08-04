@@ -1,93 +1,46 @@
-import { useState } from "react";
-import type { TaskBlock, TaskBlockConcern } from "../../shared/ipc";
+import type { Ref } from "react";
+import type { ConductorAction } from "../../shared/ipc";
 import { Pill } from "./Ui";
+import { TaskIntentList } from "./TaskIntentList";
 
-type Resolution = "answered" | "set-aside";
+type TaskAction = Extract<ConductorAction, { kind: "task" }>;
+type TaskRisk = TaskAction["risks"][number];
 
-/** The proposed-task card: the outcome sentence plus one chip per concern.
- * A question chip's one-line answer and a risk chip's "Set aside" both go
- * back to `Chat` as indexed callbacks. Chat binds a risk index and exact text
- * to main's current action/risk UUID; an ordinary answer remains conversation
- * text. "Review dispatch" stays disabled until every chip is resolved.
- *
- * `onAnswer`/`onSetAside` report back whether the message actually
- * dispatched (`Chat.send()` refuses outright while a reply is already
- * streaming). A chip marks itself resolved only when that comes back
- * `true` — never optimistically — so a concern can't look settled when its
- * message never reached the conductor. `busy` (the screen's own streaming
- * state) also disables both controls up front, so the common case never
- * even attempts a call that would be refused. */
-export function TaskCard({ block, onAnswer, onSetAside, onSend, busy }: {
-  block: TaskBlock;
-  onAnswer: (index: number, concern: TaskBlockConcern, answer: string) => boolean | Promise<boolean>;
-  onSetAside: (index: number, concern: TaskBlockConcern) => boolean | Promise<boolean>;
-  onSend: () => void;
+/** A pure view of main's one current proposed task. The renderer keeps no
+ * resolved-risk or accepted-request copy: responding retires this whole
+ * action, and only main's replacement action can make another card appear. */
+export function TaskCard({ action, busy, current, onSetAside, onSend, headingRef }: {
+  action: TaskAction;
   busy: boolean;
+  current: boolean;
+  onSetAside: (risk: TaskRisk) => boolean | Promise<boolean>;
+  onSend: () => void;
+  headingRef?: Ref<HTMLHeadingElement>;
 }) {
-  const [resolved, setResolved] = useState<Record<number, Resolution>>({});
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
-
-  async function submitAnswer(index: number, concern: TaskBlockConcern) {
-    const answer = (drafts[index] ?? "").trim();
-    if (!answer || busy) return;
-    const dispatched = await onAnswer(index, concern, answer);
-    if (dispatched) setResolved((r) => ({ ...r, [index]: "answered" }));
-  }
-
-  async function setAside(index: number, concern: TaskBlockConcern) {
-    if (busy) return;
-    const dispatched = await onSetAside(index, concern);
-    if (dispatched) setResolved((r) => ({ ...r, [index]: "set-aside" }));
-  }
-
-  const allResolved = block.concerns.every((_, i) => resolved[i] !== undefined);
-
   return (
-    <div className="card task-card">
-      <p className="task-card-outcome">{block.outcome}</p>
-      {block.details ? (
-        <div className="task-card-details">
-          <p className="small muted task-card-details-label">Your details (sent word-for-word)</p>
-          <p className="task-card-details-text">{block.details}</p>
-        </div>
+    <section className="card task-card">
+      <h2 className="task-card-heading" ref={headingRef} tabIndex={-1}>Review this task</h2>
+      <TaskIntentList request={action.request} context={action.context} heading="What Cairn proposes" />
+      {action.risks.length > 0 ? (
+        <section className="task-card-risks" aria-labelledby={`task-risks-${action.actionId}`}>
+          <h3 id={`task-risks-${action.actionId}`}>Risks to decide first</h3>
+          <ul>
+            {action.risks.map((risk) => (
+              <li className="task-risk" key={risk.riskId}>
+                <p>{risk.text}</p>
+                <Pill kind="quiet" disabled={busy || !current}
+                  onClick={() => void onSetAside(risk)}>Set aside</Pill>
+              </li>
+            ))}
+          </ul>
+          <p className="small muted">Any response retires this proposal. Cairn will show a fresh review before anything can start.</p>
+        </section>
       ) : null}
-      {block.concerns.length ? (
-        <div className="task-card-chips">
-          {block.concerns.map((concern, i) => {
-            const state = resolved[i];
-            return (
-              <div className={`task-chip task-chip-${concern.kind}${state ? " task-chip-resolved" : ""}`} key={i}>
-                <p className="task-chip-text">
-                  <span className="task-chip-kind">{concern.kind === "question" ? "Question" : "Risk"}</span>
-                  <span className={state ? "task-chip-strike" : undefined}>{concern.text}</span>
-                </p>
-                {state ? (
-                  <p className="small muted task-chip-status">{state === "answered" ? "Answered" : "Set aside"}</p>
-                ) : concern.kind === "question" ? (
-                  <div className="row task-chip-answer">
-                    <input
-                      type="text"
-                      value={drafts[i] ?? ""}
-                      onChange={(e) => setDrafts((d) => ({ ...d, [i]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submitAnswer(i, concern); } }}
-                      placeholder="Your answer"
-                    />
-                    <Pill onClick={() => void submitAnswer(i, concern)} disabled={busy || !(drafts[i] ?? "").trim()}>Answer</Pill>
-                  </div>
-                ) : (
-                  <div className="row task-chip-answer">
-                    <Pill onClick={() => void setAside(i, concern)} disabled={busy}>Set aside</Pill>
-                  </div>
-                )}
-                {!state && busy ? <p className="small muted task-chip-hint">Wait for Cairn to finish answering.</p> : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-      <div className="row" style={{ marginTop: 12 }}>
-        <Pill kind="primary" disabled={!allResolved || busy} onClick={onSend}>Review dispatch</Pill>
+      <div className="row task-card-actions">
+        <Pill kind="primary" disabled={busy || !current || action.risks.length > 0} onClick={onSend}>
+          Review dispatch
+        </Pill>
       </div>
-    </div>
+    </section>
   );
 }

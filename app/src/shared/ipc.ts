@@ -162,6 +162,9 @@ export interface ConductorStreamSnapshot {
   /** Visible assistant text accumulated so far; bounded by the conductor
    * client's existing prompt and output limits. */
   text: string;
+  /** Main-authored, output-only accessibility provenance for a live targeted
+   * reply. No action/risk ID or resend authority crosses this snapshot. */
+  settlementKind?: ConductorActionReply["kind"];
 }
 
 export interface ConductorStatus {

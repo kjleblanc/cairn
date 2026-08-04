@@ -16,6 +16,10 @@ p:last-child { margin-bottom: 0; }
 .muted { color: var(--card-muted); }
 .small { font-size: .87rem; }
 .mono { font-family: var(--mono); font-size: .84em; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 .eyebrow { color: var(--green-deep); font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .shell { width: min(860px, 100%); margin: 0 auto; padding: 18px 22px 40px; flex: 1; }
 
@@ -253,6 +257,8 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-section-title { margin: 12px 0 4px; font-size: .9rem; }
 .result-card-detail-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .result-card-milestone { margin: 12px 0 0; }
+.result-card-request-context { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
+.result-card-request-context > h2 { font-size: 1rem; }
 .result-card-path { margin: 8px 0 0; color: var(--card-muted); overflow-wrap: anywhere; }
 /* Task 173: a checked result leads with pictures when — and only when — main
  * can still read at least one image from the card's exact trusted run. The
@@ -343,7 +349,51 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .push-outcome { margin: 0; }
 .push-outcome.card { border: 1px solid var(--line); }
 .push-outcome-text { margin: 0; overflow-wrap: anywhere; }
-.task-card { align-self: stretch; margin: 0; }
+/* Task 179: attributed questions and requests share one calm, source-visible
+ * review language. The words name every source; color only reinforces it. */
+.question-card, .task-card { align-self: stretch; margin: 0; min-width: 0; }
+.question-card-heading, .task-card-heading { overflow-wrap: anywhere; }
+.question-card-heading:focus, .task-card-heading:focus,
+.bubble-system:focus { outline: 2px solid var(--garden-cyan); outline-offset: 3px; }
+.question-card-answer { margin-top: 12px; min-width: 0; }
+.question-card-answer > label { display: block; margin-bottom: 5px; font-size: .87rem; color: var(--card-muted); }
+.question-card-controls { align-items: flex-end; flex-wrap: wrap; }
+.question-card-controls input { flex: 1 1 260px; min-width: 0; }
+.question-card-defer, .task-card-actions { margin-top: 10px; flex-wrap: wrap; }
+.task-intent { margin-top: 10px; min-width: 0; }
+.task-intent-heading { margin-bottom: 8px; font-size: 1rem; }
+.task-intent-list, .task-card-risks > ul, .task-intent-context > ul {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px;
+}
+.task-intent-row {
+  min-width: 0; overflow-wrap: anywhere; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.task-intent-owner-stated { background: var(--garden-cyan); color: #17302b; }
+.task-intent-owner-stated .muted { color: #31544d; }
+.task-intent-owner-unsure {
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--amber) 60%, transparent);
+}
+.task-intent-cairn-chosen {
+  background: var(--card-solid);
+  border-color: color-mix(in srgb, var(--card-ink) 20%, transparent);
+}
+.task-intent-role { margin: 0 0 2px; }
+.task-intent-source { margin: 0 0 4px; font-size: .82rem; font-weight: 700; }
+.task-intent-interpretation { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-intent-owner-quote { margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent); min-width: 0; }
+.task-intent-owner-quote > p { margin: 0 0 3px; }
+.task-intent-owner-quote blockquote { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-intent-context { margin-top: 12px; min-width: 0; }
+.task-intent-context > h3 { font-size: .9rem; }
+.task-intent-context li { padding-left: 12px; border-left: 2px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-card-risks { margin-top: 14px; }
+.task-card-risks > h3 { font-size: .95rem; }
+.task-risk { padding: 10px 12px; border: 1px solid var(--amber); border-radius: var(--r-sm); min-width: 0; overflow-wrap: anywhere; }
+.task-risk p { white-space: pre-wrap; }
+.dispatch-acceptance { margin-top: 10px; overflow-wrap: anywhere; }
+.action-settled-status:empty { display: block; }
 .task-card-outcome { font-weight: 600; }
 .task-card-details { margin-top: 8px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--card-ink); }
 .task-card-details-label { margin: 0 0 2px; }
@@ -361,8 +411,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .task-chip-strike { text-decoration: line-through; color: var(--card-muted); }
 .task-chip-status { margin: 4px 0 0; }
 .task-chip-hint { margin: 6px 0 0; }
-.task-chip-answer { margin-top: 8px; flex-wrap: nowrap; }
+.task-chip-answer { margin-top: 8px; flex-wrap: wrap; }
 .task-chip-answer input { flex: 1; }
+/* Task 179 end. */
 .body-pill-wrap { position: relative; }
 .body-pill-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; width: 260px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: 0 6px 24px rgba(0, 0, 0, .14); padding: 14px; color: var(--card-ink); }
 
@@ -671,10 +722,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   border-radius: 20px 20px 7px 20px; box-shadow: 0 4px 15px rgb(247 211 168 / 20%);
 }
 .chat-column-villager .result-card,
+.chat-column-villager .question-card,
 .chat-column-villager .task-card,
 .chat-column-villager .push-confirm,
 .chat-column-villager .dispatch-panel { border-radius: 22px; }
 .chat-column-villager .result-card-claims,
+.chat-column-villager .result-card-request-context,
+.chat-column-villager .task-intent-row,
+.chat-column-villager .task-risk,
 .chat-column-villager .task-card-details,
 .chat-column-villager .task-chip { border-radius: 16px; }
 /* The disposition chips. DONE's moss and its ink are verbatim from the

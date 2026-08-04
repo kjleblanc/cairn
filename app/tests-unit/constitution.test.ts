@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ATTRIBUTED_ACTION_PROTOCOL, CONSTITUTION, CONSTITUTION_VERSION } from "../src/main/conductor/constitution.js";
 
 test("constitution version is pinned", () => {
-  assert.equal(CONSTITUTION_VERSION, "conductor-v6");
+  assert.equal(CONSTITUTION_VERSION, "conductor-v7");
 });
 
 const FLAT = CONSTITUTION.replace(/\s+/g, " ");
@@ -31,16 +31,15 @@ const LOAD_BEARING = [
   "A reply may contain at most one Cairn control fence.",
   "Never invent action IDs, risk IDs, source IDs, or source offsets.",
 
-  // v2. Each of the next four lines closes a failure this project watched
-  // happen, so each is pinned whole rather than by a fragment: a paraphrase
-  // that still contains the fragment would pass while losing the rule.
-  //
-  // Data fidelity. In the first milestone run (repo task 055) the owner gave
-  // three word counts, the conductor dropped them from the card, and the
-  // worker invented plausible ones. Phase 3 built the details channel to carry
-  // them verbatim; the schema line is what tells the conductor it exists.
-  `"details": "<owner-supplied specifics carried verbatim, if any>"`,
-  "Anything the owner supplies that the task needs — numbers, names, exact wording — goes into details verbatim; if it does not fit, ask. Never invent values.",
+  // v7 activates the source-marked protocol after the authenticated vertical
+  // dispatch path landed. These are the owner-only and source-honesty halves:
+  // a future schema edit may not turn delegation into consent or flatten a
+  // tentative owner value into Cairn's chosen value.
+  "Never use that control for credentials, consent, risk approval, cost or quota approval, payment, destructive or public action, legal or safety judgment, or an unknowable fact.",
+  "Use owner-stated only for firm exact owner wording, owner-unsure for a tentative owner candidate, and cairn-chosen only for a choice you supplied.",
+  "A tentative candidate and your chosen value are separate rows.",
+  "Anything the owner supplies that the task needs — numbers, names, exact wording — must appear in an owner-sourced outcome or requirement with that exact quotation; if it does not fit, ask. Never invent values.",
+  "A control proposes or asks; it never dispatches work or approves a risk, cost, data sharing, credential, public or destructive action, or provider call.",
   // Citation honesty. The first eval run (docs/superpowers/evals/conductor-v0.md)
   // scored a partial for citing "the log" for a file-content fact the briefing
   // could not contain. v5 keeps that boundary while allowing exact citations
@@ -68,7 +67,7 @@ const LOAD_BEARING = [
   // v4 plain language. The rule existed but governed chat only, so the owner
   // still met machine words in outcomes and on cards. Pinned whole because the
   // second sentence is the testable half.
-  "Everything you write is read by the owner, not only your replies: outcomes, details, and notes obey the same plain-words rule.",
+  "Everything you write is read by the owner, not only your replies: outcomes, interpretations, requirements, and context obey the same plain-words rule.",
   "Never put a code, a constant, or a file-format word in front of the owner without a plain sentence saying what it means.",
 ];
 
@@ -78,12 +77,18 @@ for (const line of LOAD_BEARING) {
   });
 }
 
-test("the staged attributed-action protocol is exact but not activated before dispatch migration", () => {
+test("the attributed-action protocol is exact and active in conductor v7", () => {
   assert.match(ATTRIBUTED_ACTION_PROTOCOL, /```cairn-question\n\{"question":"<one plain question>"\}\n```/);
   assert.match(ATTRIBUTED_ACTION_PROTOCOL, /```cairn-task\n\{"intent":\{"version":"cairn-task-intent\/v1"/);
+  assert.match(ATTRIBUTED_ACTION_PROTOCOL, /"source":"cairn-chosen","text":"<plain choice you supplied>","ownerQuote":null/);
+  assert.match(ATTRIBUTED_ACTION_PROTOCOL, /remove it when you supplied no choice, and include every real requirement/);
   assert.match(ATTRIBUTED_ACTION_PROTOCOL, /"risks":\[\{"text":"<one risk>"\}\]/);
-  assert.match(ATTRIBUTED_ACTION_PROTOCOL, /Do not emit this staged protocol in ordinary conversation yet/);
-  assert.doesNotMatch(CONSTITUTION, /"version":"cairn-task-intent\/v1"/);
+  assert.equal(CONSTITUTION.split(ATTRIBUTED_ACTION_PROTOCOL).length - 1, 1);
+  assert.match(CONSTITUTION, /"version":"cairn-task-intent\/v1"/);
+  assert.doesNotMatch(CONSTITUTION, /Staged attributed-action protocol|Do not emit this staged protocol/);
+  assert.doesNotMatch(CONSTITUTION, /"outcome": "<one plain sentence|"details": "<owner-supplied|"concerns": \[/);
+  assert.match(CONSTITUTION, /carry any set-aside concern\s+into your task proposal's context/);
+  assert.doesNotMatch(CONSTITUTION, /task proposal's notes/);
 });
 
 test("constitution has no emoji", () => {

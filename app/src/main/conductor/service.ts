@@ -104,6 +104,9 @@ type LiveStream = {
   conversationId: string;
   startedAt: string;
   text: string;
+  /** Present only after main validates and consumes an exact targeted reply.
+   * Renderer reattachment may announce/focus it, never resend from it. */
+  settlementKind?: ConductorActionReply["kind"];
 };
 
 const controllers = new Map<string, LiveStream>();
@@ -512,6 +515,7 @@ export function current(dir: string): ConductorStreamSnapshot | null {
     kind: live.kind,
     startedAt: live.startedAt,
     text: live.text,
+    ...(live.settlementKind === undefined ? {} : { settlementKind: live.settlementKind }),
   };
 }
 
@@ -647,6 +651,7 @@ export function send(
     conversationId: id,
     startedAt: new Date().toISOString(),
     text: "",
+    ...(request.actionReply === undefined ? {} : { settlementKind: request.actionReply.kind }),
   });
   void streamTurn(dir, id, conn, controller, onDelta, "reply", historySnapshot);
 

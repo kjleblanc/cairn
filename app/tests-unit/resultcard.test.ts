@@ -18,6 +18,7 @@ const MARKER_DIR = mkdtempSync(join(tmpdir(), "cairn-card-markers-"));
 setCardMarkerDir(MARKER_DIR);
 setTurnMarkerDir(MARKER_DIR);
 const EVIDENCE_RUN_ID = "9b2de3f4-1a6c-4d7e-8f90-123456789abc";
+const CHAT_SOURCE = readFileSync(join(__dirname, "..", "..", "src", "renderer", "screens", "Chat.tsx"), "utf8");
 
 // The card is authored from `result.composed` — the very record input Cairn
 // rendered its own report from — so the card and the report can never
@@ -776,4 +777,20 @@ test("a conversation whose first turn is a result card previews as Result card",
   // not the first turn of any kind.
   appendTurn(root, id, { role: "owner", text: "what happened there", ts: "2026-07-25T10:00:01.000Z" });
   assert.equal(listConversations(root)[0].preview, "what happened there");
+});
+
+test("the desktop card keeps accepted request context after claims with honest compatibility states", () => {
+  const card = CHAT_SOURCE.indexOf('<div className="card result-card">');
+  const evidence = CHAT_SOURCE.indexOf("<ResultEvidence", card);
+  const verified = CHAT_SOURCE.indexOf('className="result-card-facts"', card);
+  const claims = CHAT_SOURCE.indexOf('className="result-card-claims"', card);
+  const request = CHAT_SOURCE.indexOf('<TaskIntentList request={card.acceptedRequest} heading="What you asked for"', card);
+  const actions = CHAT_SOURCE.indexOf('className="row result-card-actions"', card);
+  assert.ok(card !== -1 && evidence > card && verified > evidence && claims > verified && request > claims && actions > request,
+    "result order must remain pictures, verified facts, worker claims, request context, actions");
+  assert.match(CHAT_SOURCE, /card\.acceptedRequest === undefined && wroteRecords/);
+  assert.match(CHAT_SOURCE, /This older result did not record where its requirements came from\./);
+  assert.match(CHAT_SOURCE, /card\.acceptedRequest !== undefined && card\.acceptedRequest !== null/);
+  assert.ok(!/card\.disposition !== "ERROR"[^?]*\?[\s\S]{0,120}<TaskIntentList request=\{card\.acceptedRequest\}/.test(CHAT_SOURCE),
+    "an accepted ERROR must not be excluded from request context");
 });
