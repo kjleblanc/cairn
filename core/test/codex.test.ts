@@ -142,8 +142,14 @@ test("the system process reduces JSONL items to numeric evidence without retaini
     `if (childEntries.includes(${JSON.stringify(parentToolShim)})) process.exit(86);`,
     `if (!childEntries.includes(${JSON.stringify(commandRoot)})) process.exit(87);`,
     `if (!childEntries.includes(${JSON.stringify(sandboxTools)})) process.exit(88);`,
-    `process.stderr.write(${JSON.stringify(SECRET_SENTINEL)});`,
-    `process.stdout.write(${JSON.stringify(jsonl)});`,
+    `let stdin = "";`,
+    `process.stdin.setEncoding("utf8");`,
+    `process.stdin.on("data", (chunk) => { stdin += chunk; });`,
+    `process.stdin.on("end", () => {`,
+    `  if (stdin !== "bounded fake request") process.exit(89);`,
+    `  process.stderr.write(${JSON.stringify(SECRET_SENTINEL)});`,
+    `  process.stdout.write(${JSON.stringify(jsonl)});`,
+    `});`,
     "",
   ].join("\n"), "utf8");
   const command = join(commandRoot, process.platform === "win32" ? "codex.cmd" : "codex");

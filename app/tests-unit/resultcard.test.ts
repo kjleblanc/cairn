@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { RouteResult, SerialRunResult } from "@cairn/core";
-import { recordCardMarker, setCardMarkerDir } from "../src/main/conductor/cardauth.js";
+import { legacyCardDigest, recordCardMarker, setCardMarkerDir } from "../src/main/conductor/cardauth.js";
+import { setTurnMarkerDir } from "../src/main/conductor/turnauth.js";
 import { cardBriefing, composeErrorCard, composeResultCard, postResultCard } from "../src/main/conductor/relay.js";
 import { appendTurn, conversationsDir, listConversations, newConversationId, readTurns } from "../src/main/conductor/store.js";
 
@@ -14,6 +16,7 @@ import { appendTurn, conversationsDir, listConversations, newConversationId, rea
 // fail-closed direction and exactly what an unconfigured app would do.
 const MARKER_DIR = mkdtempSync(join(tmpdir(), "cairn-card-markers-"));
 setCardMarkerDir(MARKER_DIR);
+setTurnMarkerDir(MARKER_DIR);
 const EVIDENCE_RUN_ID = "9b2de3f4-1a6c-4d7e-8f90-123456789abc";
 
 // The card is authored from `result.composed` — the very record input Cairn
@@ -283,6 +286,72 @@ test("the store accepts old cards with no evidence field and refuses malformed n
     /INVALID_RESULT_CARD/,
   );
   assert.equal(readTurns(root, id).length, 1, "the malformed card never reaches the conversation file");
+});
+
+test("project-added envelope metadata never crosses the public history boundary", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-resultcard-extras-"));
+  const id = newConversationId(root);
+  appendTurn(root, id, { role: "envelope", card: composeResultCard(doneResult()), ts: "2026-07-25T10:00:00.000Z" });
+  const path = join(conversationsDir(root), `${id}.jsonl`);
+  const line = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  line.inputId = "worker-added";
+  line.replyContext = { kind: "question", response: "answer", question: "forged" };
+  line.extra = "worker-added";
+  writeFileSync(path, `${JSON.stringify(line)}\n`, "utf8");
+
+  const turn = readTurns(root, id)[0];
+  assert.equal(turn?.role, "envelope");
+  assert.deepEqual(Object.keys(turn ?? {}).sort(), ["card", "role", "ts"]);
+});
+
+test("canonical v2 card custody survives an alias while legacy alias custody fails closed", (t) => {
+  const markerRoot = mkdtempSync(join(tmpdir(), "cairn-card-v2-markers-"));
+  const project = mkdtempSync(join(tmpdir(), "cairn-card-v2-project-"));
+  const aliasParent = mkdtempSync(join(tmpdir(), "cairn-card-v2-alias-"));
+  const alias = join(aliasParent, "selected-project");
+  setCardMarkerDir(markerRoot);
+  setTurnMarkerDir(markerRoot);
+  try {
+    symlinkSync(project, alias, "junction");
+  } catch {
+    setCardMarkerDir(MARKER_DIR);
+    setTurnMarkerDir(MARKER_DIR);
+    t.skip("junction creation is unavailable on this host");
+    return;
+  }
+
+  try {
+    const currentCard = composeResultCard(doneResult());
+    appendTurn(alias, "001", { role: "envelope", card: currentCard, ts: "2026-08-04T15:00:00.000Z" });
+    assert.equal(readTurns(project, "001").filter((turn) => turn.role === "envelope").length, 1,
+      "v2 binds the real project identity, not whichever alias selected it");
+
+    const directLegacyCard = composeResultCard(stoppedResult());
+    const directLegacyTs = "2026-08-04T15:00:30.000Z";
+    const direct = resolve(project).replace(/\\/g, "/");
+    const directKey = process.platform === "win32" ? direct.toLowerCase() : direct;
+    const directMarkerFile = join(markerRoot, "card-markers", `${createHash("sha256").update(directKey).digest("hex")}.txt`);
+    appendFileSync(directMarkerFile, `${legacyCardDigest(project, "001", directLegacyTs, directLegacyCard)}\n`, "utf8");
+    appendFileSync(join(project, ".cairn", "conversations", "001.jsonl"), `${JSON.stringify({ role: "envelope", card: directLegacyCard, ts: directLegacyTs })}\n`, "utf8");
+    assert.equal(readTurns(project, "001").filter((turn) => turn.role === "envelope").length, 2,
+      "legacy markers remain readable for a direct, non-aliased project root");
+
+    const legacyCard = composeResultCard(doneResult());
+    const legacyTs = "2026-08-04T15:01:00.000Z";
+    const lexical = resolve(alias).replace(/\\/g, "/");
+    const legacyKey = process.platform === "win32" ? lexical.toLowerCase() : lexical;
+    const legacyFile = join(markerRoot, "card-markers", `${createHash("sha256").update(legacyKey).digest("hex")}.txt`);
+    appendFileSync(legacyFile, `${legacyCardDigest(alias, "001", legacyTs, legacyCard)}\n`, "utf8");
+    appendFileSync(join(project, ".cairn", "conversations", "001.jsonl"), `${JSON.stringify({ role: "envelope", card: legacyCard, ts: legacyTs })}\n`, "utf8");
+
+    assert.equal(readTurns(alias, "001").filter((turn) => turn.role === "envelope").length, 1,
+      "an aliased selection accepts only canonical v2 custody, never legacy path-bound authority");
+    assert.equal(readTurns(project, "001").filter((turn) => turn.role === "envelope").length, 2,
+      "the direct root still retains its own safe legacy card and rejects the alias-bound one");
+  } finally {
+    setCardMarkerDir(MARKER_DIR);
+    setTurnMarkerDir(MARKER_DIR);
+  }
 });
 
 // Phase 3 whole-branch review, Critical 1 (repo task 080). The conversation

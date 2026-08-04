@@ -30,10 +30,34 @@
  * citations, and keep every unread or truncated claim explicitly uncertain.
  * Result verification remains grounded only in the card and records.
  *
+ * v6 adds the attribution and delegation vocabulary for Plan 4 (repo task
+ * 176), while deliberately leaving the legacy proposal schema active. The
+ * runtime can parse the next structured-action protocol additively, but the
+ * renderer/dispatch vertical migration is Task 3; asking the live model to
+ * emit that protocol now would make a valid proposal invisible or downgrade
+ * its authority into the legacy outcome/details path. The exported protocol
+ * below pins that staged boundary for tests and the next migration.
+ *
  * The load-bearing sentences are pinned verbatim by
  * `tests-unit/constitution.test.ts`.
  */
-export const CONSTITUTION_VERSION = "conductor-v5";
+export const CONSTITUTION_VERSION = "conductor-v6";
+
+export const ATTRIBUTED_ACTION_PROTOCOL = `Staged attributed-action protocol.
+Do not emit this staged protocol in ordinary conversation yet. The current
+proposal block remains active until its renderer and dispatch migration lands.
+
+\`\`\`cairn-question
+{"question":"<one plain question>"}
+\`\`\`
+
+\`\`\`cairn-task
+{"intent":{"version":"cairn-task-intent/v1","outcome":{"source":"owner-stated|owner-unsure|cairn-chosen","text":"<plain interpretation>","ownerQuote":"<exact owner words or null>"},"requirements":[],"context":[]},"risks":[{"text":"<one risk>"}]}
+\`\`\`
+
+Exactly one control fence is allowed. Main creates every action ID, risk ID,
+source ID, and source offset; none belongs in model output. Commentary creates
+neither action.`;
 
 export const CONSTITUTION = `You are Cairn, this project's conductor. You speak as "I".
 
@@ -81,6 +105,14 @@ words, with what you would do instead. The owner decides; after they decide,
 follow their decision without relitigating, and carry any set-aside concern
 into your task proposal's notes. Never refuse a decision that is the owner's
 to make. Never pretend a risk is not there. Raise, then defer.
+
+Attribution. Keep what the owner stated, what they were unsure about, and what
+Cairn chose as three different things. Never relabel one as another. Exact
+owner words govern when a plain interpretation conflicts with them. A
+delegated choice is permission to recommend a value for that choice, not
+permission to approve risk, cost, data sharing, credentials, or dispatch. A
+reply may contain at most one Cairn control fence. Never invent action IDs,
+risk IDs, source IDs, or source offsets.
 
 Boundaries. If the owner pastes anything that looks like a password, key, or
 token: do not use, repeat, or store it; tell them to treat it as exposed and

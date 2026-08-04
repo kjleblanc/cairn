@@ -823,24 +823,23 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // retries shortly. A loud refusal keeps the words in the composer with a
   // "Try again" (Task 153).
   async function send(text: string, quiet = false): Promise<boolean> {
-    const trimmed = text.trim();
-    if (!trimmed || taskBusy || restoringConversation) return false;
+    if (!text.trim() || taskBusy || restoringConversation) return false;
     setError(null);
     // Queue instead of bounce (Task 155): while a reply or the envelope's
     // comment streams, main holds the project's one stream lock and would
     // refuse. The message waits visibly in the pending row instead — never a
     // phantom turn, never lost words.
     if (streaming || commentary) {
-      setPending((p) => [...p, trimmed]);
+      setPending((p) => [...p, text]);
       setComposer("");
       return true;
     }
     conversationVersionRef.current += 1;
     setComposer("");
-    setLastOwnerText(trimmed);
+    setLastOwnerText(text);
     // Shown at once so typing feels answered, and held by identity so a refusal
     // can take back this exact turn and no other.
-    const optimistic: ConductorTurn = { role: "owner", text: trimmed, ts: new Date().toISOString() };
+    const optimistic: ConductorTurn = { role: "owner", text, ts: new Date().toISOString() };
     setTurns((t) => [...t, optimistic]);
     setStreaming(true);
     streamingRef.current = "";
@@ -850,7 +849,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     const inFlight: InFlight = { id: startingId };
     inFlightRef.current = inFlight;
 
-    const response = await cairn.conductorSend({ dir, conversationId: startingId, text: trimmed });
+    const response = await cairn.conductorSend({ dir, conversationId: startingId, text });
     if (inFlightRef.current !== inFlight) return true; // superseded by "New conversation" or another send meanwhile — this call still dispatched
     if (!response.ok) {
       // Main refused before persisting anything, so this message is not in the
@@ -871,7 +870,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       // Send was pressed, so without this a refused send reads as "my
       // message vanished". "Try again" resends this exact string.
       if (!quiet) {
-        setComposer(trimmed);
+        setComposer(text);
         setError(response.message);
       }
       return false;

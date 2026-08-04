@@ -1,19 +1,201 @@
+import {
+  parseTaskIntentCandidate,
+  parseTaskIntentCandidateEnvelopeJson,
+  type TaskIntentCandidate,
+} from "@cairn/core";
 import type { TaskBlock, TaskBlockConcern } from "../../shared/ipc.js";
 
-const FENCE = /```cairn-task\s*\n([\s\S]*?)\n```/;
+const FORBIDDEN_VISIBLE_CONTROLS = /[\u0000\u202a-\u202e\u2066-\u2069]/u;
+
+export type ConductorControlCandidate =
+  | Readonly<{ kind: "question"; question: string }>
+  | Readonly<{ kind: "task"; intent: TaskIntentCandidate; risks: readonly string[] }>;
+
+export interface ConductorControlResult {
+  candidate: ConductorControlCandidate | null;
+  /** Legacy proposal compatibility. Task 3 removes this path only when the
+   * attributed intent can travel through dispatch without being downgraded. */
+  block: TaskBlock | null;
+  text: string;
+}
 
 export interface TaskBlockResult {
   block: TaskBlock | null;
   text: string;
 }
 
-/** Cairn's code, not the model, decides what becomes a card. Anything that
- * fails the exact shape is dropped; the conversation text always survives. */
+type RawControlFence = {
+  kind: "cairn-question" | "cairn-task";
+  raw: string | null;
+  start: number;
+  end: number;
+};
+
+function controlFences(reply: string): RawControlFence[] {
+  const found: RawControlFence[] = [];
+  type Line = { start: number; end: number; after: number; text: string };
+  const lines: Line[] = [];
+  for (let start = 0; start < reply.length;) {
+    const newline = reply.indexOf("\n", start);
+    const end = newline === -1 ? reply.length : newline;
+    lines.push({ start, end, after: newline === -1 ? reply.length : newline + 1, text: reply.slice(start, end) });
+    start = newline === -1 ? reply.length : newline + 1;
+  }
+
+  let outer: { marker: "`" | "~"; length: number } | null = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (outer !== null) {
+      const close = /^( {0,3})(`+|~+)[ \t]*\r?$/.exec(line.text);
+      if (close && close[2][0] === outer.marker && close[2].length >= outer.length) outer = null;
+      continue;
+    }
+
+    const control = /^```(cairn-question|cairn-task)[ \t]*\r?$/.exec(line.text);
+    if (control) {
+      const kind = control[1] as RawControlFence["kind"];
+      const bodyStart = line.after;
+      let closingIndex = -1;
+      for (let candidate = index + 1; candidate < lines.length; candidate += 1) {
+        if (/^```[ \t]*\r?$/.test(lines[candidate].text)) {
+          closingIndex = candidate;
+          break;
+        }
+      }
+      if (closingIndex === -1) {
+        found.push({ kind, raw: null, start: line.start, end: reply.length });
+        break;
+      }
+      const closing = lines[closingIndex];
+      let raw = reply.slice(bodyStart, closing.start);
+      if (raw.endsWith("\r\n")) raw = raw.slice(0, -2);
+      else if (raw.endsWith("\n")) raw = raw.slice(0, -1);
+      found.push({ kind, raw, start: line.start, end: closing.end });
+      index = closingIndex;
+      continue;
+    }
+
+    const opening = /^( {0,3})(`{3,}|~{3,}).*\r?$/.exec(line.text);
+    if (opening) outer = { marker: opening[2][0] as "`" | "~", length: opening[2].length };
+  }
+  return found;
+}
+
+function stripControls(reply: string, controls: readonly RawControlFence[]): string {
+  let cursor = 0;
+  let visible = "";
+  for (const control of controls) {
+    visible += reply.slice(cursor, control.start);
+    cursor = control.end;
+  }
+  visible += reply.slice(cursor);
+  return visible.trim();
+}
+
+const CONTROL_OPENING_PREFIXES = ["```cairn-question", "```cairn-task"] as const;
+
+function couldBecomeControlOpening(line: string): boolean {
+  return CONTROL_OPENING_PREFIXES.some((opening) =>
+    opening.startsWith(line)
+    || (line.startsWith(opening) && /^[ \t]*\r?$/.test(line.slice(opening.length))));
+}
+
+/** A monotonic public view for an in-progress provider reply. Exact complete
+ * and unterminated controls are removed, while a trailing partial opener is
+ * held until it either becomes ordinary text or a recognized control. */
+export function controlSafeStreamingText(reply: string): string {
+  const controls = controlFences(reply);
+  let cursor = 0;
+  let visible = "";
+  for (const control of controls) {
+    visible += reply.slice(cursor, control.start);
+    cursor = control.end;
+  }
+  visible += reply.slice(cursor);
+  const lineStart = visible.lastIndexOf("\n") + 1;
+  const trailingLine = visible.slice(lineStart);
+  return couldBecomeControlOpening(trailingLine) ? visible.slice(0, lineStart) : visible;
+}
+
+function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const actual = Object.keys(value);
+  if (actual.length !== keys.length || actual.some((key) => !keys.includes(key))) return null;
+  return value as Record<string, unknown>;
+}
+
+function wellFormedUtf16(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function safeControlText(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length <= 300
+    && value.trim().length > 0
+    && !/[\r\n]/.test(value)
+    && !FORBIDDEN_VISIBLE_CONTROLS.test(value)
+    && wellFormedUtf16(value);
+}
+
+function parseQuestion(raw: string): ConductorControlCandidate | null {
+  if (raw.length > 1_000) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  const record = exactRecord(value, ["question"]);
+  if (!record || !safeControlText(record.question)) return null;
+  return Object.freeze({ kind: "question", question: record.question.trim() });
+}
+
+function parseAttributedTask(raw: string): ConductorControlCandidate | null {
+  const value = parseTaskIntentCandidateEnvelopeJson(raw);
+  const record = exactRecord(value, ["intent", "risks"]);
+  if (!record || !Array.isArray(record.risks) || record.risks.length > 3) return null;
+  const intent = parseTaskIntentCandidate(record.intent);
+  if (!intent) return null;
+  const risks: string[] = [];
+  for (const value of record.risks) {
+    const risk = exactRecord(value, ["text"]);
+    if (!risk || !safeControlText(risk.text)) return null;
+    risks.push(risk.text.trim());
+  }
+  return Object.freeze({ kind: "task", intent, risks: Object.freeze(risks) });
+}
+
+/** Scan the whole reply, remove every delimited control fence, and create a
+ * candidate only when exactly one such fence exists and validates. Malformed,
+ * mixed, or duplicated controls therefore leave readable prose but no power. */
+export function extractConductorControl(reply: string): ConductorControlResult {
+  const controls = controlFences(reply);
+  if (controls.length === 0) return { candidate: null, block: null, text: reply };
+  const text = stripControls(reply, controls);
+  if (controls.length !== 1 || controls[0].raw === null) return { candidate: null, block: null, text };
+  const { kind, raw } = controls[0];
+  if (kind === "cairn-question") {
+    return { candidate: parseQuestion(raw), block: null, text };
+  }
+  const candidate = parseAttributedTask(raw);
+  if (candidate !== null) return { candidate, block: null, text };
+  return { candidate: null, block: parseBlock(raw), text };
+}
+
+/** Compatibility wrapper for the still-live v2 proposal path. */
 export function extractTaskBlock(reply: string): TaskBlockResult {
-  const match = FENCE.exec(reply);
-  if (!match) return { block: null, text: reply };
-  const text = (reply.slice(0, match.index) + reply.slice(match.index + match[0].length)).trim();
-  return { block: parseBlock(match[1]), text };
+  const { block, text } = extractConductorControl(reply);
+  return { block, text };
 }
 
 function parseBlock(raw: string): TaskBlock | null {

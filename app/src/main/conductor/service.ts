@@ -1,5 +1,10 @@
 import { shell } from "electron";
+import { randomUUID } from "node:crypto";
+import { bindTaskIntent, taskRequestView, type TaskIntent } from "@cairn/core";
 import type {
+  ConductorAction,
+  ConductorActionReply,
+  ConductorChatTurn,
   ConductorConnectRequest,
   ConductorConsentCard,
   ConductorConversationSummary,
@@ -7,6 +12,7 @@ import type {
   ConductorOAuthEvent,
   ConductorOAuthRequest,
   ConductorRenewConsentRequest,
+  ConductorSendRequest,
   ConductorStatus,
   ConductorStreamSnapshot,
   ConductorTurn,
@@ -15,7 +21,7 @@ import type {
   TaskBlock,
 } from "../../shared/ipc.js";
 import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
-import { isQuitDraining, isTaskRunning } from "../rungate.js";
+import { isQuitDraining, runningDirs } from "../rungate.js";
 import { logError } from "../log.js";
 import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
 import { consentCardFor } from "./consent.js";
@@ -26,9 +32,11 @@ import { beginOpenRouterOAuth, createLoopbackListener, type OAuthAttempt } from 
 import { cardBriefing } from "./relay.js";
 import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
-import { appendTurn, ensureCairnExcluded, listConversations, newConversationId, readTurns } from "./store.js";
+import { appendCairnTurn, appendOwnerTurn, ConversationAppendUncertainError, ensureCairnExcluded, listConversations, newConversationId, readHistorySnapshot, readTurns, type ConductorHistorySnapshot } from "./store.js";
 import { extractFollowups } from "./followups.js";
-import { extractTaskBlock } from "./taskblock.js";
+import { controlSafeStreamingText, extractConductorControl, type ConductorControlCandidate } from "./taskblock.js";
+import { isConversationId } from "./conversation-id.js";
+import { canonicalProjectKey, validateOwnerReplyContext, type OwnerReplyContext } from "./turnauth.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
@@ -71,7 +79,19 @@ type TurnKind = "reply" | "commentary";
  * dispatches anything, and tapping one just starts the ordinary conversation
  * in which every gate still waits for the owner.
  */
-const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. Do two things. First, add one short plain-language comment for the owner: state result facts only from the card or the records in your briefing, and name your source. Second, offer one to three small next steps the records genuinely point to, in one fenced block of short imperative sentences the owner could tap to send as-is (\"Retry the stopped task with a narrower outcome\", \"Update the milestone line in PROJECT.md\"). If nothing genuinely follows, omit the block entirely.\n\n```cairn-followups\n[\"first small next step\", \"second small next step\"]\n```\n\nNever emit a cairn-task block in this turn: these suggestions are not a dispatch — the owner decides each one in conversation.";
+const COMMENTARY_INSTRUCTION = "The envelope just posted the result card above. Do two things. First, add one short plain-language comment for the owner: state result facts only from the card or the records in your briefing, and name your source. Second, offer one to three small next steps the records genuinely point to, in one fenced block of short imperative sentences the owner could tap to send as-is (\"Retry the stopped task with a narrower outcome\", \"Update the milestone line in PROJECT.md\"). If nothing genuinely follows, omit the block entirely.\n\n```cairn-followups\n[\"first small next step\", \"second small next step\"]\n```\n\nNever emit a cairn-task or cairn-question block in this turn: commentary creates no action. These suggestions are not a dispatch — the owner decides each one in conversation.";
+
+const INVALID_SEND = "CONDUCTOR_SEND_INVALID: Cairn refused a malformed conversation request.";
+const EMPTY_SEND = "Type a message before sending.";
+const STALE_ACTION_REPLY = "CONDUCTOR_ACTION_STALE: That question or task is no longer current.";
+const WRONG_ACTION_REPLY = "CONDUCTOR_ACTION_REPLY_INVALID: That response does not match the current question or task.";
+const OWNER_TURN_READBACK_FAILED = "CONDUCTOR_OWNER_TURN_READBACK_FAILED: Cairn saved the message but could not authenticate it for this provider call.";
+const OWNER_TURN_POSTWRITE_VERIFICATION_FAILED = "CONDUCTOR_OWNER_TURN_POSTWRITE_VERIFICATION_FAILED: Cairn saved and authenticated this message, but final append verification failed. It was not sent to the provider.";
+const OWNER_TURN_PERSISTENCE_UNCERTAIN = "CONDUCTOR_OWNER_TURN_PERSISTENCE_UNCERTAIN: Cairn could not confirm whether this message finished saving. It was not sent to the provider; copy it before reloading.";
+const CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED = "CONDUCTOR_CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED: Cairn saved this answer, but final append verification failed. No action was activated.";
+const CAIRN_TURN_PERSISTENCE_UNCERTAIN = "CONDUCTOR_CAIRN_TURN_PERSISTENCE_UNCERTAIN: Cairn could not confirm whether this answer finished saving. No action was activated; copy the visible text before reloading.";
+const UNBOUND_TASK = "Cairn could not link that proposal to an authenticated owner message. Please restate the needed detail.";
+const ACTION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** One live stream per project dir, so a stray second send can't stomp on a
  * stream already in flight and `stop` has something to abort. It carries its
@@ -95,6 +115,109 @@ const controllers = new Map<string, LiveStream>();
  * a full app restart safely forgets it. */
 type CurrentProposal = { conversationId: string; block: TaskBlock };
 const proposals = new Map<string, CurrentProposal>();
+
+type InternalAction =
+  | { kind: "question"; actionId: string; conversationId: string; question: string }
+  | {
+      kind: "task";
+      actionId: string;
+      conversationId: string;
+      intent: TaskIntent;
+      request: Extract<ConductorAction, { kind: "task" }>["request"];
+      context: readonly string[];
+      risks: readonly { riskId: string; text: string }[];
+    };
+
+const currentActions = new Map<string, InternalAction>();
+
+function actionKey(dir: string): string {
+  return canonicalProjectKey(dir);
+}
+
+function taskRunningForProject(dir: string): boolean {
+  const key = actionKey(dir);
+  return runningDirs().some((runningDir) => actionKey(runningDir) === key);
+}
+
+function exactRecord(value: unknown, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const actual = Object.keys(value);
+  if (keys.some((key) => !actual.includes(key)) || actual.some((key) => !keys.includes(key) && !optional.includes(key))) return null;
+  return value as Record<string, unknown>;
+}
+
+function checkedActionReply(value: unknown): ConductorActionReply | null {
+  const common = exactRecord(value, ["kind", "actionId"], ["riskId"]);
+  if (!common || typeof common.actionId !== "string" || !ACTION_UUID.test(common.actionId)) return null;
+  if (common.kind === "set-risk-aside") {
+    const record = exactRecord(value, ["kind", "actionId", "riskId"]);
+    return record && typeof record.riskId === "string" && ACTION_UUID.test(record.riskId)
+      ? { kind: "set-risk-aside", actionId: common.actionId, riskId: record.riskId }
+      : null;
+  }
+  if (common.kind !== "answer" && common.kind !== "defer" && common.kind !== "correction") return null;
+  if (Object.prototype.hasOwnProperty.call(common, "riskId")) return null;
+  return { kind: common.kind, actionId: common.actionId };
+}
+
+function checkedSendRequest(value: unknown): ConductorSendRequest | null {
+  const record = exactRecord(value, ["dir", "conversationId", "text"], ["actionReply"]);
+  if (!record || typeof record.dir !== "string" || !record.dir || typeof record.text !== "string") return null;
+  if (record.conversationId !== null && !isConversationId(record.conversationId)) return null;
+  const hasReply = Object.prototype.hasOwnProperty.call(record, "actionReply");
+  const actionReply = hasReply ? checkedActionReply(record.actionReply) : null;
+  if (hasReply && actionReply === null) return null;
+  return {
+    dir: record.dir,
+    conversationId: record.conversationId,
+    text: record.text,
+    ...(actionReply !== null ? { actionReply } : {}),
+  };
+}
+
+function actionView(value: InternalAction): ConductorAction {
+  if (value.kind === "question") {
+    return { kind: value.kind, actionId: value.actionId, conversationId: value.conversationId, question: value.question };
+  }
+  return {
+    kind: value.kind,
+    actionId: value.actionId,
+    conversationId: value.conversationId,
+    request: value.request,
+    context: [...value.context],
+    risks: value.risks.map((risk) => ({ ...risk })),
+  };
+}
+
+function actionReplyContext(
+  dir: string,
+  conversationId: string | null,
+  reply: ConductorActionReply | undefined,
+): Result<OwnerReplyContext | null> {
+  const current = currentActions.get(actionKey(dir));
+  if (reply === undefined) {
+    // Until the renderer action cards land, an ordinary composer message is
+    // still allowed to move the conversation on. It retires the action after
+    // append like every owner turn, but carries no claim that it answered a
+    // particular action. Targeted answer/defer/risk/correction paths below
+    // remain exact-ID only.
+    return { ok: true, value: null };
+  }
+  if (!current || current.actionId !== reply.actionId || current.conversationId !== conversationId) {
+    return { ok: false, message: STALE_ACTION_REPLY };
+  }
+  let candidate: unknown = null;
+  if (current.kind === "question" && (reply.kind === "answer" || reply.kind === "defer")) {
+    candidate = { kind: "question", response: reply.kind, question: current.question };
+  } else if (current.kind === "task" && reply.kind === "correction") {
+    candidate = { kind: "task", response: "correction", request: current.request, context: current.context };
+  } else if (current.kind === "task" && reply.kind === "set-risk-aside") {
+    const risk = current.risks.find((item) => item.riskId === reply.riskId);
+    if (risk) candidate = { kind: "risk", response: "set-aside", risk: risk.text };
+  }
+  const checked = validateOwnerReplyContext(candidate);
+  return checked === null ? { ok: false, message: WRONG_ACTION_REPLY } : { ok: true, value: checked };
+}
 
 /** The owner-facing disclosure Cairn shows before it may act on the
  * conversation without per-message approval. Main re-derives this from the
@@ -164,6 +287,7 @@ export function renewConsent(request: ConductorRenewConsentRequest): Result<null
 export function disconnect(): void {
   keystore.clearConnection();
   proposals.clear();
+  currentActions.clear();
 }
 
 /** One sign-in attempt at a time, app-wide — the loopback listener and the
@@ -264,6 +388,7 @@ export function conversations(dir: string): ConductorConversationSummary[] {
 }
 
 export function turns(dir: string, id: string): ConductorTurn[] {
+  if (!isConversationId(id)) return [];
   return readTurns(dir, id);
 }
 
@@ -271,8 +396,18 @@ export function turns(dir: string, id: string): ConductorTurn[] {
  * not already been accepted for dispatch. Project conversation files are not
  * consulted here. */
 export function proposal(dir: string, conversationId: string): TaskBlock | null {
-  const current = proposals.get(dir);
+  if (!isConversationId(conversationId)) return null;
+  const current = proposals.get(actionKey(dir));
   return current?.conversationId === conversationId ? current.block : null;
+}
+
+/** Main's inert structured action for an exact conversation. Conversation
+ * files are never consulted, so a renderer remount can recover it but a full
+ * app relaunch cannot recreate authority from project-owned history. */
+export function action(dir: string, conversationId: string): ConductorAction | null {
+  if (!isConversationId(conversationId)) return null;
+  const current = currentActions.get(actionKey(dir));
+  return current?.conversationId === conversationId ? actionView(current) : null;
 }
 
 /** Retire only the exact proposal main emitted and the owner is now sending.
@@ -284,24 +419,28 @@ export function consumeProposal(
   outcome: string,
   details: string,
 ): TaskBlock | null {
-  const current = proposals.get(dir);
+  if (!isConversationId(conversationId)) return null;
+  const key = actionKey(dir);
+  const current = proposals.get(key);
   if (current?.conversationId !== conversationId) return null;
   if (current.block.outcome !== outcome || current.block.details !== details) return null;
-  proposals.delete(dir);
+  proposals.delete(key);
   return current.block;
 }
 
 /** Put back a trusted proposal whose attempted run never started. Never
  * overwrite a newer proposal that may already have become current. */
 export function restoreProposal(dir: string, conversationId: string, block: TaskBlock): void {
-  if (!proposals.has(dir)) proposals.set(dir, { conversationId, block });
+  if (!isConversationId(conversationId)) return;
+  const key = actionKey(dir);
+  if (!proposals.has(key)) proposals.set(key, { conversationId, block });
 }
 
 /** Bounded visible state for renderer reattachment. The provider request,
  * credentials, raw events, and every other project's stream remain private to
  * the main process. */
 export function current(dir: string): ConductorStreamSnapshot | null {
-  const live = controllers.get(dir);
+  const live = controllers.get(actionKey(dir));
   if (!live) return null;
   return {
     dir,
@@ -315,17 +454,19 @@ export function current(dir: string): ConductorStreamSnapshot | null {
 /** Aborts the in-flight stream for `dir`, if any. The stream's own catch
  * block persists the partial turn and emits the stopped delta. */
 export function stop(dir: string): void {
-  controllers.get(dir)?.controller.abort();
+  controllers.get(actionKey(dir))?.controller.abort();
 }
 
 /** Starts (or continues) a conversation for `dir`. Returns immediately with
  * the conversation id; the reply streams afterward over `onDelta`. */
 export function send(
-  dir: string,
-  conversationId: string | null,
-  text: string,
+  requestValue: unknown,
   onDelta: (delta: ConductorDelta) => void,
 ): Result<{ conversationId: string }> {
+  const request = checkedSendRequest(requestValue);
+  if (request === null) return { ok: false, message: INVALID_SEND };
+  const { dir, conversationId, text } = request;
+  if (!text.trim()) return { ok: false, message: EMPTY_SEND };
   // Quitting is checked FIRST, and for the same reason `commentary` checks it:
   // inside the 8-second grace window the process is about to end, so a stream
   // started here is paid for, killed part-way, and never persisted or seen. The
@@ -337,13 +478,14 @@ export function send(
   if (isQuitDraining()) {
     return { ok: false, message: "QUIT_IN_PROGRESS: Cairn is stopping the current task and quitting. Send this after relaunch — the conversation is saved." };
   }
-  if (isTaskRunning(dir)) {
+  if (taskRunningForProject(dir)) {
     return { ok: false, message: "SERIAL_RUN_ACTIVE: A task is already running for this project. Wait for it to finish before messaging Cairn." };
   }
   // The refusal names the stream that is actually in flight. A reply the owner
   // started is on screen with a Stop control under it; a comment the envelope
   // started has neither, so telling the owner to stop it would point at nothing.
-  const live = controllers.get(dir);
+  const key = actionKey(dir);
+  const live = controllers.get(key);
   if (live) {
     return { ok: false, message: live.kind === "commentary"
       ? "Cairn is finishing a short comment on the result card. Try again in a moment."
@@ -359,23 +501,88 @@ export function send(
     return { ok: false, message: CONSENT_REQUIRED };
   }
 
-  const id = conversationId ?? newConversationId(dir);
-  ensureCairnExcluded(dir);
-  appendTurn(dir, id, { role: "owner", text, ts: new Date().toISOString() });
-  // Starting a different conversation retires the previous conversation's
-  // unspent card. Wait until its first turn is safely written, so a storage
-  // failure cannot discard the older actionable proposal.
-  if (conversationId === null) proposals.delete(dir);
+  const contextResult = actionReplyContext(dir, conversationId, request.actionReply);
+  if (!contextResult.ok) return contextResult;
 
+  const id = conversationId ?? newConversationId(dir);
+  const inputId = randomUUID();
+  ensureCairnExcluded(dir);
+  try {
+    appendOwnerTurn(dir, id, {
+      role: "owner",
+      inputId,
+      text,
+      ts: new Date().toISOString(),
+      replyContext: contextResult.value,
+    });
+  } catch (error) {
+    if (!(error instanceof ConversationAppendUncertainError)) throw error;
+    // The write syscall began, so even a failed immediate read cannot prove
+    // that this one-time reply is reusable. Retire it, spend nothing, and keep
+    // the owner's optimistic text visible with an explicitly uncertain status.
+    currentActions.delete(key);
+    if (conversationId === null) proposals.delete(key);
+    let recovered = false;
+    try {
+      recovered = readHistorySnapshot(dir, id).entries.some((entry) =>
+        entry.authenticatedOwner
+        && entry.inputId === inputId
+        && entry.turn.role === "owner"
+        && entry.turn.text === text);
+    } catch {
+      // The distinct uncertainty message below makes no persistence claim.
+    }
+    onDelta({
+      dir,
+      conversationId: id,
+      kind: "error",
+      message: recovered ? OWNER_TURN_POSTWRITE_VERIFICATION_FAILED : OWNER_TURN_PERSISTENCE_UNCERTAIN,
+      turnKind: "reply",
+    });
+    return { ok: true, value: { conversationId: id } };
+  }
+  // A successful project append is the one-way lifecycle boundary. Even if
+  // the immediate custody readback below fails closed, this reply was stored
+  // and the same action may never be targeted a second time.
+  currentActions.delete(key);
+  // The legacy renderer deliberately retains a proposal across same-
+  // conversation free-text chip replies until Task 3 migrates it. Starting a
+  // different conversation must still retire the previous conversation's
+  // proposal immediately after this owner turn is safely appended.
+  if (conversationId === null) proposals.delete(key);
+  // Task 3 will migrate the renderer from legacy proposals to authenticated
+  // actions. Until then, keep the legacy proposal alive across the free-text
+  // answer that resolves one of its chips: the existing renderer owns that
+  // resolution state and consumes the proposal only at dispatch. The new
+  // authenticated action above is still retired for every successful owner
+  // append, so this compatibility bridge grants no new action authority.
+  let historySnapshot: ConductorHistorySnapshot | null = null;
+  try {
+    historySnapshot = readHistorySnapshot(dir, id);
+  } catch {
+    // Handled by the same saved-but-not-sent result below.
+  }
+  const accepted = historySnapshot?.entries.some((entry) =>
+    entry.authenticatedOwner
+    && entry.inputId === inputId
+    && entry.turn.role === "owner"
+    && entry.turn.text === text);
+  if (!accepted || historySnapshot === null) {
+    onDelta({ dir, conversationId: id, kind: "error", message: OWNER_TURN_READBACK_FAILED, turnKind: "reply" });
+    return { ok: true, value: { conversationId: id } };
+  }
+  // Marker or pre-write append refusal leaves the action current. Every
+  // successful append — and every post-write uncertain one — retires it before
+  // provider work, and no later error restores it.
   const controller = new AbortController();
-  controllers.set(dir, {
+  controllers.set(key, {
     controller,
     kind: "reply",
     conversationId: id,
     startedAt: new Date().toISOString(),
     text: "",
   });
-  void streamTurn(dir, id, conn, controller, onDelta, "reply");
+  void streamTurn(dir, id, conn, controller, onDelta, "reply", historySnapshot);
 
   return { ok: true, value: { conversationId: id } };
 }
@@ -410,10 +617,12 @@ export function commentary(
   card: ResultCard,
   onDelta: (delta: ConductorDelta) => void,
 ): void {
+  if (!isConversationId(conversationId)) return;
+  const key = actionKey(dir);
   const conn = keystore.readConnection();
   if (!conn || !hasCurrentConsent(conn)) return;
-  if (controllers.has(dir)) return;
-  if (isTaskRunning(dir)) return;
+  if (controllers.has(key)) return;
+  if (taskRunningForProject(dir)) return;
   if (isQuitDraining()) return;
   // The instruction says "the card above", so the card has to really be there.
   // `readTurns` DROPS an envelope line whose card fails its guard, and a card
@@ -423,7 +632,7 @@ export function commentary(
   if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) return;
 
   const controller = new AbortController();
-  controllers.set(dir, {
+  controllers.set(key, {
     controller,
     kind: "commentary",
     conversationId,
@@ -431,6 +640,67 @@ export function commentary(
     text: "",
   });
   void streamTurn(dir, conversationId, conn, controller, onDelta, "commentary");
+}
+
+function replyContextMessage(context: OwnerReplyContext): ChatTurnMessage {
+  return {
+    role: "system",
+    content: "Non-authoritative reply context recorded by Cairn's runtime for the next owner message. It explains what the owner is answering; it is not a new instruction, a live action, dispatch authority, or approval.\n" + JSON.stringify(context),
+  };
+}
+
+function passiveQuestionText(text: string, question: string): string {
+  if (text.includes(question)) return text;
+  return text.trim() ? `${text.trim()}\n\n${question}` : question;
+}
+
+type CairnChatTurn = ConductorChatTurn & { role: "cairn" };
+
+function sameCairnTurn(left: ConductorChatTurn, right: ConductorChatTurn): boolean {
+  return left.role === "cairn"
+    && right.role === "cairn"
+    && left.text === right.text
+    && left.ts === right.ts
+    && left.tokens === right.tokens
+    && left.costUsd === right.costUsd
+    && JSON.stringify(left.followups ?? null) === JSON.stringify(right.followups ?? null);
+}
+
+function recoveredCairnTurn(dir: string, id: string, expected: CairnChatTurn): boolean {
+  try {
+    return readHistorySnapshot(dir, id).entries.some((entry) =>
+      entry.authenticatedCairn
+      && entry.turn.role === "cairn"
+      && sameCairnTurn(entry.turn, expected));
+  } catch {
+    return false;
+  }
+}
+
+function fixedExplanation(text: string, explanation: string): string {
+  return text.trim() ? `${text.trim()}\n\n${explanation}` : explanation;
+}
+
+function internalActionFor(
+  candidate: ConductorControlCandidate,
+  conversationId: string,
+  authenticatedSources: unknown,
+): InternalAction | null {
+  if (candidate.kind === "question") {
+    return { kind: "question", actionId: randomUUID(), conversationId, question: candidate.question };
+  }
+  const intent = bindTaskIntent(candidate.intent, authenticatedSources);
+  const request = intent === null ? null : taskRequestView(intent);
+  if (intent === null || request === null) return null;
+  return {
+    kind: "task",
+    actionId: randomUUID(),
+    conversationId,
+    intent,
+    request,
+    context: Object.freeze([...intent.context]),
+    risks: Object.freeze(candidate.risks.map((text) => Object.freeze({ riskId: randomUUID(), text }))),
+  };
 }
 
 /** The one streaming body, shared by both turns Cairn takes: the owner's reply
@@ -442,14 +712,18 @@ async function streamTurn(
   controller: AbortController,
   onDelta: (delta: ConductorDelta) => void,
   kind: TurnKind,
+  retainedHistory?: ConductorHistorySnapshot,
 ): Promise<void> {
   let full = "";
+  let publicFull = "";
   let tokens: number | undefined;
   let costUsd: number | undefined;
+  let completedTurn: CairnChatTurn | null = null;
   try {
-    const history = readTurns(dir, id);
-    const latestOwnerTurn = [...history].reverse().find((turn) => turn.role === "owner");
-    const latestOwnerText = latestOwnerTurn?.role === "owner" ? latestOwnerTurn.text : "";
+    const historySnapshot = retainedHistory ?? readHistorySnapshot(dir, id);
+    const latestOwnerEntry = [...historySnapshot.entries].reverse()
+      .find((entry) => entry.turn.role === "owner" && entry.authenticatedOwner);
+    const latestOwnerText = latestOwnerEntry?.turn.role === "owner" ? latestOwnerEntry.turn.text : "";
     // Task 127's custom-seat note goes right after the briefing, before any
     // history: it is a code-assembled connection fact (model id + host only,
     // both already visible to the provider), never the owner's words and
@@ -465,9 +739,19 @@ async function streamTurn(
       // carries the report's own separation — verified facts under one label,
       // the worker's claims under another — so the model can never read a
       // claim as something Cairn verified.
-      ...history.map((turn): ChatTurnMessage => (turn.role === "envelope"
-        ? { role: "system", content: cardBriefing(turn.card) }
-        : { role: turn.role === "owner" ? "user" : "assistant", content: turn.text })),
+      ...historySnapshot.entries.flatMap(({ turn, replyContext, authenticatedOwner, authenticatedCairn, authenticatedEnvelope }): ChatTurnMessage[] => {
+        if (turn.role === "envelope") return authenticatedEnvelope
+          ? [{ role: "system", content: cardBriefing(turn.card) }]
+          : [];
+        if (turn.role === "owner") {
+          if (!authenticatedOwner) return [];
+          return [
+            ...(replyContext === null ? [] : [replyContextMessage(replyContext)]),
+            { role: "user", content: turn.text },
+          ];
+        }
+        return authenticatedCairn ? [{ role: "assistant", content: turn.text }] : [];
+      }),
       // The envelope's instruction goes LAST, after the card it is about, so
       // "the card above" names the message immediately above it.
       ...(kind === "commentary" ? [{ role: "system", content: COMMENTARY_INSTRUCTION } satisfies ChatTurnMessage] : []),
@@ -491,23 +775,35 @@ async function streamTurn(
     for await (const event of streamChat(slot, messages, fetch, controller.signal)) {
       if (event.kind === "delta" && event.text) {
         full += event.text;
-        const live = controllers.get(dir);
-        if (live?.controller === controller) live.text = full;
-        onDelta({ dir, conversationId: id, kind: "delta", text: event.text, turnKind: kind });
+        const nextPublic = controlSafeStreamingText(full);
+        const publicDelta = nextPublic.startsWith(publicFull) ? nextPublic.slice(publicFull.length) : "";
+        if (nextPublic.startsWith(publicFull)) publicFull = nextPublic;
+        const live = controllers.get(actionKey(dir));
+        if (live?.controller === controller) live.text = publicFull;
+        if (publicDelta) onDelta({ dir, conversationId: id, kind: "delta", text: publicDelta, turnKind: kind });
       } else if (event.kind === "usage") {
         tokens = (event.promptTokens ?? 0) + (event.completionTokens ?? 0);
         costUsd = event.costUsd;
       }
     }
 
-    const { block, text: withoutTaskFence } = extractTaskBlock(full);
+    const { block, candidate, text: withoutTaskFence } = extractConductorControl(full);
     // Task 157: the suggestions ride the commentary turn only. A reply that
     // emits the fence anyway has it stripped and dropped — symmetric with the
     // commentary task-block drop below: neither voice may grow a control the
     // other turn's owner never asked for.
-    const { followups: found, text } = extractFollowups(withoutTaskFence);
+    const { followups: found, text: withoutFollowups } = extractFollowups(withoutTaskFence);
     const followups = kind === "commentary" ? found : null;
-    const cairnTurn: ConductorTurn = {
+    const nextAction = kind === "reply" && candidate !== null
+      ? internalActionFor(candidate, id, historySnapshot.authenticatedSources)
+      : null;
+    let text = withoutFollowups;
+    if (kind === "reply" && candidate?.kind === "question") {
+      text = passiveQuestionText(text, candidate.question);
+    } else if (kind === "reply" && candidate?.kind === "task" && nextAction === null) {
+      text = fixedExplanation(text, UNBOUND_TASK);
+    }
+    const cairnTurn: CairnChatTurn = {
       role: "cairn",
       text,
       ts: new Date().toISOString(),
@@ -515,17 +811,33 @@ async function streamTurn(
       ...(costUsd !== undefined ? { costUsd } : {}),
       ...(followups !== null ? { followups } : {}),
     };
-    appendTurn(dir, id, cairnTurn);
+    completedTurn = cairnTurn;
+    appendCairnTurn(dir, id, cairnTurn);
+    if (kind === "reply" && nextAction !== null) {
+      currentActions.set(actionKey(dir), nextAction);
+      // A new authenticated action replaces any legacy card still bridged for
+      // the current renderer; the two authorities may never coexist.
+      proposals.delete(actionKey(dir));
+    }
     // The parser above and this service are the trusted origin of dispatch
     // controls. Keep the latest well-formed reply proposal available across a
     // Chat remount; ordinary prose leaves the existing proposal in place, just
     // like the live renderer path. Commentary may never create one.
-    if (kind === "reply" && block !== null) proposals.set(dir, { conversationId: id, block });
+    if (kind === "reply" && block !== null) proposals.set(actionKey(dir), { conversationId: id, block });
     // "No cairn-task block" is enforced here as well as asked for above: a
     // model that emits one anyway has its fence stripped from the text like
     // any other, and the proposal is dropped rather than put on screen as a
     // card the owner never asked a question to get.
-    onDelta({ dir, conversationId: id, kind: "done", turn: cairnTurn, taskBlock: kind === "reply" ? block : null, followups, turnKind: kind });
+    onDelta({
+      dir,
+      conversationId: id,
+      kind: "done",
+      turn: cairnTurn,
+      taskBlock: kind === "reply" ? block : null,
+      ...(kind === "reply" ? { action: nextAction === null ? null : actionView(nextAction) } : {}),
+      followups,
+      turnKind: kind,
+    });
   } catch (err) {
     if (kind === "commentary") {
       // The envelope started this call, not the owner. A comment that failed is
@@ -537,12 +849,42 @@ async function streamTurn(
       logError("conductor:commentary", err);
       onDelta({ dir, conversationId: id, kind: "error", turnKind: kind });
     } else if (controller.signal.aborted) {
-      const cairnTurn: ConductorTurn = { role: "cairn", text: `${full}\n\n(stopped early)`, ts: new Date().toISOString() };
-      appendTurn(dir, id, cairnTurn);
-      // Carry the exact persisted turn so a renderer reattaching concurrently
-      // can deduplicate it by identity instead of fabricating a second turn
-      // with a different timestamp.
-      onDelta({ dir, conversationId: id, kind: "error", turn: cairnTurn, message: "Stopped.", turnKind: kind });
+      const cairnTurn: CairnChatTurn = { role: "cairn", text: `${publicFull}\n\n(stopped early)`, ts: new Date().toISOString() };
+      try {
+        appendCairnTurn(dir, id, cairnTurn);
+        // Carry the exact persisted turn so a renderer reattaching concurrently
+        // can deduplicate it by identity instead of fabricating a second turn
+        // with a different timestamp.
+        onDelta({ dir, conversationId: id, kind: "error", turn: cairnTurn, message: "Stopped.", turnKind: kind });
+      } catch (persistError) {
+        logError("conductor:stopped-partial", persistError);
+        const recovered = persistError instanceof ConversationAppendUncertainError
+          && recoveredCairnTurn(dir, id, cairnTurn);
+        // Persistence is fallible, but the renderer must always receive one
+        // terminal event and release its streaming state.
+        onDelta({
+          dir,
+          conversationId: id,
+          kind: "error",
+          ...(recovered ? { turn: cairnTurn } : {}),
+          message: recovered
+            ? "Stopped. Cairn saved the partial reply, but final append verification failed."
+            : persistError instanceof ConversationAppendUncertainError
+              ? "Stopped. Cairn could not confirm whether the partial reply finished saving."
+              : "Stopped. Cairn could not save the partial reply.",
+          turnKind: kind,
+        });
+      }
+    } else if (err instanceof ConversationAppendUncertainError && completedTurn !== null) {
+      const recovered = recoveredCairnTurn(dir, id, completedTurn);
+      onDelta({
+        dir,
+        conversationId: id,
+        kind: "error",
+        ...(recovered ? { turn: completedTurn } : {}),
+        message: recovered ? CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED : CAIRN_TURN_PERSISTENCE_UNCERTAIN,
+        turnKind: kind,
+      });
     } else if (err instanceof ConductorHttpError) {
       onDelta({ dir, conversationId: id, kind: "error", message: err.ownerMessage, turnKind: kind });
     } else {
@@ -550,6 +892,6 @@ async function streamTurn(
       onDelta({ dir, conversationId: id, kind: "error", message: "Cairn had a problem answering. Trying again in a moment usually works.", turnKind: kind });
     }
   } finally {
-    controllers.delete(dir);
+    controllers.delete(actionKey(dir));
   }
 }

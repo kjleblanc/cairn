@@ -44,6 +44,19 @@ const DETAILS_TASK_BLOCK = JSON.stringify({
   details: "74, 477, 256",
 });
 
+// Task 176's additive action protocol. Production stays on the legacy block
+// until Task 3 migrates dispatch; these explicit fake-only triggers exercise
+// the authenticated, inert main-process path without a provider call.
+const ATTRIBUTED_TASK_BLOCK = JSON.stringify({
+  intent: {
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Use the timing the owner named", ownerQuote: "Use 300 milliseconds" },
+    requirements: [{ source: "cairn-chosen", text: "Keep the control readable", ownerQuote: null }],
+    context: ["Desktop only"],
+  },
+  risks: [{ text: "The timing changes how the animation feels." }],
+});
+
 // Task 9 (Phase 3): the commentary turn. It is the one request that ends with
 // a SYSTEM message and adds no user turn at all, so keying off the last user
 // message would replay whatever the owner said before the dispatch and pass a
@@ -60,7 +73,7 @@ const DETAILS_TASK_BLOCK = JSON.stringify({
 // unchanged (the fence is stripped), and the usage frame is content-blind.
 const COMMENTARY_SCRIPT = {
   parts: ["The card says", " this task finished DONE", ", and the report", " is in docs/ai-work.",
-    "\n\n```cairn-followups\n[\"Show me how to try this myself\", \"Pick the next small improvement\"]\n```"],
+    "\n\n```cairn-question\n{\"question\":\"This commentary control must stay inert.\"}\n```\n\n```cairn-followups\n[\"Show me how to try this myself\", \"Pick the next small improvement\"]\n```"],
   delayMs: 400,
 };
 const STOPPED_COMMENTARY_SCRIPT = {
@@ -137,6 +150,15 @@ function answerGatePoint() {
 }
 
 function scriptFor(content) {
+  if (content.includes("action-malformed")) {
+    return { parts: ["I could not form this.\n\n```cairn-question\n{broken\n```"], delayMs: DELAY_MS };
+  }
+  if (content.includes("action-question")) {
+    return { parts: ["I need one detail.\n\n```cairn-question\n{\"question\":\"Which settling speed should Cairn use?\"}\n```"], delayMs: DELAY_MS };
+  }
+  if (content.includes("action-attributed")) {
+    return { parts: [`I kept each source separate.\n\n\`\`\`cairn-task\n${ATTRIBUTED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
+  }
   if (content.includes("garble")) {
     return { parts: [`Here's the plan.\n\n\`\`\`cairn-task\n${GARBLED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
@@ -207,6 +229,7 @@ let lastCommentaryBody = null;
 // note can only be proven by reading what the provider was actually sent, so
 // the raw body of the last non-commentary request is kept too.
 let lastReplyBody = null;
+let replyRequestCount = 0;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -251,12 +274,13 @@ export function start() {
           return;
         }
         const content = lastUserContent(messages);
+        lastReplyBody = rawBody;
+        replyRequestCount += 1;
         if (content.includes("fail-key")) {
           res.writeHead(401, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { message: "invalid api key" } }));
           return;
         }
-        lastReplyBody = rawBody;
         const beforeDone = content.includes("detailtask third")
           ? thirdProposalGatePoint
           : content.includes("plain redirect is enough")
@@ -277,6 +301,7 @@ export function start() {
         /** The raw body of the last ordinary reply request, or null if none
          * has arrived — same wire-honesty purpose as lastCommentaryBody. */
         lastReplyBody: () => lastReplyBody,
+        replyRequestCount: () => replyRequestCount,
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
         holdCommentary,
         releaseCommentary,

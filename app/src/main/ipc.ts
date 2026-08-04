@@ -306,7 +306,7 @@ export function registerConductorIpc(): void {
 
   ipcMain.handle("conductor:send", (event, request: ConductorSendRequest): Result<{ conversationId: string }> => {
     try {
-      return conductorService.send(request.dir, request.conversationId, request.text, (delta: ConductorDelta) => {
+      return conductorService.send(request, (delta: ConductorDelta) => {
         event.sender.send("conductor:delta", delta);
         emitBridgeSync(); // the same delta is what a watching phone refreshes on
       });
@@ -329,6 +329,8 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:turns", (_e, dir: string, id: string) => conductorService.turns(dir, id));
 
   ipcMain.handle("conductor:proposal", (_e, dir: string, id: string) => conductorService.proposal(dir, id));
+
+  ipcMain.handle("conductor:action", (_e, dir: string, id: string) => conductorService.action(dir, id));
 }
 
 /** Task 143: the desktop's side of the phone bridge — the settings surface

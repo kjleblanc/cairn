@@ -1,4 +1,4 @@
-import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, WorkerDisclosure } from "@cairn/core";
+import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required" };
@@ -214,7 +214,32 @@ export interface ConductorSendRequest {
   dir: string;
   conversationId: string | null;
   text: string;
+  /** Main validates this one-time target before writing the owner turn. The
+   * renderer never sends question, risk, request, source, or context content. */
+  actionReply?: ConductorActionReply;
 }
+
+export type ConductorActionReply =
+  | { kind: "answer"; actionId: string }
+  | { kind: "defer"; actionId: string }
+  | { kind: "correction"; actionId: string }
+  | { kind: "set-risk-aside"; actionId: string; riskId: string };
+
+export type ConductorAction =
+  | {
+      kind: "question";
+      actionId: string;
+      conversationId: string;
+      question: string;
+    }
+  | {
+      kind: "task";
+      actionId: string;
+      conversationId: string;
+      request: TaskRequestView;
+      context: readonly string[];
+      risks: readonly { riskId: string; text: string }[];
+    };
 
 export interface ConductorDelta {
   dir: string;
@@ -229,6 +254,9 @@ export interface ConductorDelta {
   text?: string;
   turn?: ConductorTurn;
   taskBlock?: TaskBlock | null;
+  /** Trusted main-owned projection. Null on a settled ordinary reply; omitted
+   * on streaming deltas, errors, envelope cards, and commentary. */
+  action?: ConductorAction | null;
   message?: string;
   /** Which of Cairn's two voices is streaming: the reply the owner asked
    * for, or the envelope's one short comment on a result card (Task 153).
@@ -310,6 +338,7 @@ export interface CairnApi {
   conductorConversations(dir: string): Promise<ConductorConversationSummary[]>;
   conductorTurns(dir: string, id: string): Promise<ConductorTurn[]>;
   conductorProposal(dir: string, id: string): Promise<TaskBlock | null>;
+  conductorAction(dir: string, id: string): Promise<ConductorAction | null>;
   onConductorDelta(cb: (event: ConductorDelta) => void): () => void;
   pushPreview(dir: string): Promise<PushPreview | null>;
   /** Takes the whole preview the owner approved — not values picked out of it

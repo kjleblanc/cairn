@@ -1,7 +1,7 @@
 import { _electron as electron, expect, type Locator, type Page } from "@playwright/test";
 import { test } from "./fixtures/isolated-profile";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -158,6 +158,7 @@ let lastCommentaryBody: () => string | null = () => null;
 /** The raw body of the last ordinary reply the fixture answered — what the
  * provider would actually have been sent (repo task 127). */
 let lastReplyBody: () => string | null = () => null;
+let replyRequestCount: () => number = () => 0;
 /** Task 131's fake OpenRouter: the auth URL and exchange endpoint the PKCE
  * dance touches, plus its own verdict on whether the verifier it received
  * hashes to the challenge it handed out. */
@@ -174,6 +175,7 @@ test.beforeAll(async () => {
       close: () => Promise<void>;
       lastCommentaryBody: () => string | null;
       lastReplyBody: () => string | null;
+      replyRequestCount: () => number;
       setCommentaryDelay: (delayMs: number) => void;
       holdCommentary: () => void;
       releaseCommentary: () => void;
@@ -188,6 +190,7 @@ test.beforeAll(async () => {
   fixtureClose = server.close;
   lastCommentaryBody = server.lastCommentaryBody;
   lastReplyBody = server.lastReplyBody;
+  replyRequestCount = server.replyRequestCount;
   setFixtureCommentaryDelay = server.setCommentaryDelay;
   holdFixtureCommentary = server.holdCommentary;
   releaseFixtureCommentary = server.releaseCommentary;
@@ -951,6 +954,387 @@ test("a conversation persists across a relaunch, and .cairn stays out of git", a
   expect(status).toBe("");
 });
 
+test("a structured question survives only as passive text after a full relaunch", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-question-action-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "action-question");
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const action = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(action).toMatchObject({ kind: "question", conversationId, question: "Which settling speed should Cairn use?" });
+  expect(action?.actionId).toMatch(/^[0-9a-f-]{36}$/);
+
+  const beforeReload = action;
+  await win.reload();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toEqual(beforeReload);
+  await expect(win.getByText("Which settling speed should Cairn use?", { exact: false })).toBeVisible();
+  expect(await win.locator("body").innerText()).not.toContain("cairn-question");
+
+  const wrongProject = mkdtempSync(join(tmpdir(), "cairn-conductor-wrong-project-"));
+  const beforeWrongProject = replyRequestCount();
+  const wrongProjectReply = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "answer in the wrong project",
+    actionReply: { kind: "answer", actionId },
+  }), { dir: wrongProject, id: conversationId, actionId: beforeReload?.actionId ?? "" });
+  expect(wrongProjectReply.ok).toBe(false);
+  expect(replyRequestCount()).toBe(beforeWrongProject);
+
+  // Task 3 will render explicit action controls. Until then the shipped
+  // composer must remain usable: an ordinary owner turn moves on without
+  // claiming it answered this question and retires the inert action. The
+  // fake's malformed replacement is stripped and creates no replacement.
+  await sendChat(win, "action-malformed continue without answering yet");
+  await waitStreamDone(win);
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+  const ordinaryWire = JSON.parse(lastReplyBody() ?? "{}") as { messages?: Array<{ role?: string; content?: string }> };
+  expect(ordinaryWire.messages?.some((message) => message.content?.includes('"response":"answer"'))).toBe(false);
+  expect(ordinaryWire.messages?.some((message) => message.content?.includes('"response":"defer"'))).toBe(false);
+  expect(await win.locator("body").innerText()).not.toContain("cairn-question");
+  await app.close();
+
+  const relaunched = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win2 = await relaunched.firstWindow();
+  await expect(win2.getByText("Which settling speed should Cairn use?", { exact: false })).toBeVisible({ timeout: 30_000 });
+  expect(await win2.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+  const turns = await win2.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId });
+  expect(turns.filter((turn) => turn.role === "cairn" && turn.text.includes("Which settling speed should Cairn use?")).length).toBe(1);
+  await relaunched.close();
+
+  const markerRoot = join(process.env.CAIRN_TEST_USER_DATA ?? "", "owner-turn-markers");
+  expect(existsSync(markerRoot)).toBe(true);
+  expect(readdirSync(markerRoot).length).toBeGreaterThan(0);
+});
+
+test("attributed task actions keep raw owner bytes, main ids, one-time replies, and ID-free context", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-task-action-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  const rawOwner = "  action-attributed Use 300 milliseconds\nsecond line  ";
+  await sendChat(win, rawOwner);
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const action = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(action?.kind).toBe("task");
+  if (action?.kind !== "task") throw new Error("expected the fake attributed task action");
+  expect(action.request.outcome).toEqual({ source: "owner-stated", text: "Use the timing the owner named", ownerText: "Use 300 milliseconds" });
+  expect(action.request.requirements).toEqual([{ source: "cairn-chosen", text: "Keep the control readable", ownerText: null }]);
+  expect(action.context).toEqual(["Desktop only"]);
+  expect(action.risks).toHaveLength(1);
+  expect(action.actionId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(action.risks[0].riskId).toMatch(/^[0-9a-f-]{36}$/);
+  const projected = JSON.stringify(action.request);
+  expect(projected).not.toContain("inputId");
+  expect(projected).not.toContain('"start"');
+  expect(projected).not.toContain('"end"');
+
+  const visibleTurns = await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId });
+  const visibleOwner = visibleTurns.find((turn) => turn.role === "owner");
+  expect(visibleOwner?.role === "owner" ? visibleOwner.text : null).toBe(rawOwner);
+  const initialWire = JSON.parse(lastReplyBody() ?? "{}") as { messages?: Array<{ role?: string; content?: string }> };
+  expect(initialWire.messages?.at(-1)).toEqual({ role: "user", content: rawOwner });
+
+  await win.reload();
+  await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toEqual(action);
+
+  const beforeCalls = replyRequestCount();
+  const beforeTurns = (await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId })).length;
+
+  // Force only this throwaway conversation's append path to fail. The marker
+  // is written first, but the project line cannot be; main must keep the
+  // action current and make no provider request. The exact test-owned file is
+  // restored in finally before the scenario continues.
+  const conversationPath = join(project, ".cairn", "conversations", `${conversationId}.jsonl`);
+  const backupPath = `${conversationPath}.task176-backup`;
+  expect(conversationPath.startsWith(project)).toBe(true);
+  renameSync(conversationPath, backupPath);
+  mkdirSync(conversationPath);
+  try {
+    const appendFailed = await win.evaluate(({ dir, id, actionId, riskId }) => window.cairn.conductorSend({
+      dir,
+      conversationId: id,
+      text: "this append must fail",
+      actionReply: { kind: "set-risk-aside", actionId, riskId },
+    }), { dir: project, id: conversationId, actionId: action.actionId, riskId: action.risks[0].riskId });
+    expect(appendFailed.ok).toBe(false);
+    expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toEqual(action);
+    expect(replyRequestCount()).toBe(beforeCalls);
+  } finally {
+    rmSync(conversationPath, { recursive: true, force: true });
+    renameSync(backupPath, conversationPath);
+  }
+
+  const wrongRisk = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "set aside the wrong risk",
+    actionReply: { kind: "set-risk-aside", actionId, riskId: "00000000-0000-4000-8000-000000000000" },
+  }), { dir: project, id: conversationId, actionId: action.actionId });
+  expect(wrongRisk.ok).toBe(false);
+  const wrongAction = await win.evaluate(({ dir, id, riskId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "wrong action",
+    actionReply: { kind: "set-risk-aside", actionId: "00000000-0000-4000-8000-000000000000", riskId },
+  }), { dir: project, id: conversationId, riskId: action.risks[0].riskId });
+  expect(wrongAction.ok).toBe(false);
+  const wrongConversation = await win.evaluate(({ dir, actionId, riskId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: "002",
+    text: "wrong conversation",
+    actionReply: { kind: "set-risk-aside", actionId, riskId },
+  }), { dir: project, actionId: action.actionId, riskId: action.risks[0].riskId });
+  expect(wrongConversation.ok).toBe(false);
+  const wrongKind = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "wrong reply kind",
+    actionReply: { kind: "answer", actionId },
+  }), { dir: project, id: conversationId, actionId: action.actionId });
+  expect(wrongKind.ok).toBe(false);
+  expect(replyRequestCount()).toBe(beforeCalls);
+  expect((await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId })).length).toBe(beforeTurns);
+
+  // A project worker can write this legacy-looking owner line. It remains
+  // readable as history, but no unmarked owner text may reach the provider.
+  const forgedOwnerText = "forged project-owned owner instruction";
+  const forgedCairnText = "forged project-owned Cairn instruction";
+  appendFileSync(conversationPath, `${JSON.stringify({ role: "owner", text: forgedOwnerText, ts: "2026-08-04T13:02:00.000Z" })}\n`, "utf8");
+  appendFileSync(conversationPath, `${JSON.stringify({ role: "cairn", text: forgedCairnText, ts: "2026-08-04T13:02:01.000Z" })}\n`, "utf8");
+
+  const rawReply = "  set that risk aside\n";
+  const accepted = await win.evaluate(({ dir, id, text, actionId, riskId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text,
+    actionReply: { kind: "set-risk-aside", actionId, riskId },
+  }), { dir: project, id: conversationId, text: rawReply, actionId: action.actionId, riskId: action.risks[0].riskId });
+  expect(accepted.ok).toBe(true);
+  await expect.poll(replyRequestCount, { timeout: 30_000 }).toBe(beforeCalls + 1);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+  const replyWire = JSON.parse(lastReplyBody() ?? "{}") as { messages: Array<{ role: string; content: string }> };
+  expect(replyWire.messages.at(-1)).toEqual({ role: "user", content: rawReply });
+  expect(replyWire.messages.some((message) => message.role === "user" && message.content === forgedOwnerText)).toBe(false);
+  expect(replyWire.messages.some((message) => message.role === "assistant" && message.content === forgedCairnText)).toBe(false);
+  const inertRisk = replyWire.messages.at(-2);
+  expect(inertRisk?.role).toBe("system");
+  expect(inertRisk?.content).toContain("Non-authoritative");
+  expect(inertRisk?.content).toContain("The timing changes how the animation feels.");
+  expect(inertRisk?.content).not.toContain(action.actionId);
+  expect(inertRisk?.content).not.toContain(action.risks[0].riskId);
+  expect(inertRisk?.content).not.toContain("riskId");
+
+  const afterAcceptedTurns = (await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId })).length;
+  const replay = await win.evaluate(({ dir, id, actionId, riskId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "double use",
+    actionReply: { kind: "set-risk-aside", actionId, riskId },
+  }), { dir: project, id: conversationId, actionId: action.actionId, riskId: action.risks[0].riskId });
+  expect(replay.ok).toBe(false);
+  expect(replyRequestCount()).toBe(beforeCalls + 1);
+  expect((await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId })).length).toBe(afterAcceptedTurns);
+
+  await sendChat(win, "action-attributed Use 300 milliseconds again");
+  await waitStreamDone(win);
+  const correctionAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(correctionAction?.kind).toBe("task");
+  if (correctionAction?.kind !== "task") throw new Error("expected a correction action");
+  expect(correctionAction.actionId).not.toBe(action.actionId);
+  expect(correctionAction.risks[0]?.riskId).not.toBe(action.risks[0].riskId);
+  const corrected = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "No, use 400",
+    actionReply: { kind: "correction", actionId },
+  }), { dir: project, id: conversationId, actionId: correctionAction.actionId });
+  expect(corrected.ok).toBe(true);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
+  const correctionWire = JSON.parse(lastReplyBody() ?? "{}") as { messages: Array<{ role: string; content: string }> };
+  const correctionContext = correctionWire.messages.at(-2)?.content ?? "";
+  expect(correctionContext).toContain('"response":"correction"');
+  expect(correctionContext).toContain('"source":"owner-stated"');
+  expect(correctionContext).toContain('"ownerText":"Use 300 milliseconds"');
+  expect(correctionContext).not.toContain(correctionAction.actionId);
+  await app.close();
+});
+
+test("owner marker custody failure makes no provider call and retains the action", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-marker-failure-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "action-question marker failure");
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const action = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(action?.kind).toBe("question");
+  if (action?.kind !== "question") throw new Error("expected question action");
+  const beforeCalls = replyRequestCount();
+  const beforeTurns = (await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId })).length;
+
+  const markerContainer = join(process.env.CAIRN_TEST_USER_DATA ?? "", "owner-turn-markers");
+  const backup = `${markerContainer}.task176-backup`;
+  expect(markerContainer.startsWith(process.env.CAIRN_TEST_USER_DATA ?? "missing-profile")).toBe(true);
+  renameSync(markerContainer, backup);
+  writeFileSync(markerContainer, "blocked", "utf8");
+  try {
+    const refused = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+      dir,
+      conversationId: id,
+      text: "300",
+      actionReply: { kind: "answer", actionId },
+    }), { dir: project, id: conversationId, actionId: action.actionId });
+    expect(refused.ok).toBe(false);
+    expect(replyRequestCount()).toBe(beforeCalls);
+    expect((await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId })).length).toBe(beforeTurns);
+    expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toEqual(action);
+  } finally {
+    rmSync(markerContainer, { force: true });
+    renameSync(backup, markerContainer);
+  }
+  await app.close();
+});
+
+test("a post-fsync owner append fault retires the action without a provider call or a false unsaved claim", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-postwrite-failure-"));
+  scaffold(project);
+  const uncertainText = "exact post-fsync answer";
+  const env = baseEnv(project);
+  env.CAIRN_E2E = "1";
+  env.CAIRN_TEST_APPEND_AFTER_FSYNC_TEXT = uncertainText;
+  const app = await electron.launch({ args: ["."], env });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "action-question postwrite failure");
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const action = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(action?.kind).toBe("question");
+  if (action?.kind !== "question") throw new Error("expected question action");
+  const beforeCalls = replyRequestCount();
+
+  const accepted = await win.evaluate(({ dir, id, text, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text,
+    actionReply: { kind: "answer", actionId },
+  }), { dir: project, id: conversationId, text: uncertainText, actionId: action.actionId });
+  expect(accepted.ok).toBe(true);
+  expect(replyRequestCount()).toBe(beforeCalls);
+  await expect(win.getByText("CONDUCTOR_OWNER_TURN_POSTWRITE_VERIFICATION_FAILED", { exact: false })).toBeVisible();
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+  const turns = await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId });
+  expect(turns.filter((turn) => turn.role === "owner" && turn.text === uncertainText)).toHaveLength(1);
+
+  const replay = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "try the same action again",
+    actionReply: { kind: "answer", actionId },
+  }), { dir: project, id: conversationId, actionId: action.actionId });
+  expect(replay.ok).toBe(false);
+  expect(replyRequestCount()).toBe(beforeCalls);
+  await app.close();
+});
+
+test("a post-fsync Cairn append fault keeps the saved prose but activates no control", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-cairn-postwrite-"));
+  scaffold(project);
+  const savedReply = "I need one detail.\n\nWhich settling speed should Cairn use?";
+  const env = baseEnv(project);
+  env.CAIRN_E2E = "1";
+  env.CAIRN_TEST_APPEND_AFTER_FSYNC_TEXT = savedReply;
+  const app = await electron.launch({ args: ["."], env });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  const beforeCalls = replyRequestCount();
+
+  await sendChat(win, "action-question Cairn postwrite failure");
+  await waitStreamDone(win);
+  await expect(win.getByText("CONDUCTOR_CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED", { exact: false })).toBeVisible();
+  expect(replyRequestCount()).toBe(beforeCalls + 1);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const turns = await win.evaluate(({ dir, id }) => window.cairn.conductorTurns(dir, id), { dir: project, id: conversationId });
+  expect(turns.filter((turn) => turn.role === "cairn" && turn.text === savedReply)).toHaveLength(1);
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+  await app.close();
+});
+
+test("an answered action stays retired after provider failure and retry keeps its inert context", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-action-retry-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+
+  await sendChat(win, "action-question for failure");
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const question = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(question?.kind).toBe("question");
+  if (question?.kind !== "question") throw new Error("expected question action");
+  const before = replyRequestCount();
+  const failed = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "  fail-key 300\n",
+    actionReply: { kind: "answer", actionId },
+  }), { dir: project, id: conversationId, actionId: question.actionId });
+  expect(failed.ok).toBe(true);
+  await expect.poll(replyRequestCount, { timeout: 30_000 }).toBe(before + 1);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+
+  const retried = await win.evaluate(({ dir, id }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "retry after action failure",
+  }), { dir: project, id: conversationId });
+  expect(retried.ok).toBe(true);
+  await expect.poll(replyRequestCount, { timeout: 30_000 }).toBe(before + 2);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
+  const retryWire = JSON.parse(lastReplyBody() ?? "{}") as { messages: Array<{ role: string; content: string }> };
+  const failedOwnerIndex = retryWire.messages.findIndex((message) => message.role === "user" && message.content === "  fail-key 300\n");
+  expect(failedOwnerIndex).toBeGreaterThan(0);
+  const retainedContext = retryWire.messages[failedOwnerIndex - 1]?.content ?? "";
+  expect(retainedContext).toContain('"response":"answer"');
+  expect(retainedContext).toContain("Which settling speed should Cairn use?");
+  expect(retainedContext).not.toContain(question.actionId);
+
+  const askAgain = await win.evaluate(({ dir, id }) => window.cairn.conductorSend({ dir, conversationId: id, text: "action-question defer" }), { dir: project, id: conversationId });
+  expect(askAgain.ok).toBe(true);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
+  const deferredQuestion = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(deferredQuestion?.kind).toBe("question");
+  if (deferredQuestion?.kind !== "question") throw new Error("expected deferred question");
+  const deferred = await win.evaluate(({ dir, id, actionId }) => window.cairn.conductorSend({
+    dir,
+    conversationId: id,
+    text: "I'm not sure — you decide",
+    actionReply: { kind: "defer", actionId },
+  }), { dir: project, id: conversationId, actionId: deferredQuestion.actionId });
+  expect(deferred.ok).toBe(true);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
+  const deferWire = JSON.parse(lastReplyBody() ?? "{}") as { messages: Array<{ role: string; content: string }> };
+  expect(deferWire.messages.at(-2)?.content).toContain('"response":"defer"');
+  await app.close();
+});
+
 test("a task block with details shows a details section on the card", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-details-"));
   scaffold(project);
@@ -1549,7 +1933,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // The terminal line arrived as a change INSIDE the live region marked above,
   // not as a new region carrying a message no one hears.
   await expect(strip.locator(".run-strip-state")).toHaveAttribute("data-live-region-probe", "same-node");
-  await expect(strip.locator(".run-strip-terminal")).toContainText("CANCELLED_BY_OWNER");
+  await expect(strip.locator(".run-strip-terminal")).toHaveText("STOPPED — you stopped it yourself");
   await expect(strip.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByText("A task is running. You can type again when it finishes.")).toHaveCount(0);
@@ -1716,9 +2100,8 @@ test("a worker's claims render only inside the card's claims block, never as a v
   writeFileSync(fakeCodex.release, "finish\n");
 
   const card = win.locator(".result-card");
-  await expect(town).toHaveAttribute("data-town-motion", "return-flight", { timeout: 15_000 });
   // The flight lasts less than a second. Read the transition observer instead
-  // of racing a second live poll against its tail: the same DOM mutation that
+  // of racing a live poll against its tail: the same DOM mutation that
   // paints `return-flight` records which Town control owned focus in that
   // frame.
   await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
@@ -2672,6 +3055,13 @@ test("the comment's follow-up suggestions render as chips, and a tap sends one a
   // The comment's visible text carries no fence, and nothing dispatched:
   // there is exactly the one card this run already had.
   await expect(win.locator(".chat-messages")).not.toContainText("cairn-followups");
+  await expect(win.locator(".chat-messages")).not.toContainText("cairn-question");
+  await expect(win.locator(".chat-messages")).not.toContainText("This commentary control must stay inert.");
+  const commentaryAction = await win.evaluate(async (dir) => {
+    const list = await window.cairn.conductorConversations(dir);
+    return window.cairn.conductorAction(dir, list.at(-1)?.id ?? "");
+  }, project);
+  expect(commentaryAction).toBeNull();
   await expect(win.locator(".result-card")).toHaveCount(1);
 
   // A tap sends the suggestion verbatim as the owner's own message. The

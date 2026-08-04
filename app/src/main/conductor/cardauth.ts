@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { appendVerifiedDigest, externalMarkerContainer, readDigestSequence } from "./custody.js";
+
+const CARD_DOMAIN = "cairn-result-card/v2";
 
 /**
  * Who wrote this result card.
@@ -55,9 +58,55 @@ export function setCardMarkerDir(dir: string | null): void {
 
 /** One spelling per project directory, so the same project always hashes to
  * the same marker file. Windows paths are case-insensitive; POSIX are not. */
-function projectKey(dir: string): string {
+function normalizedPath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+function legacyProjectKey(dir: string): string {
   const resolved = resolve(dir).replace(/\\/g, "/");
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function canonicalProjectKey(dir: string): string {
+  return normalizedPath(realpathSync.native(resolve(dir)));
+}
+
+function directProjectRoot(dir: string): boolean {
+  try {
+    const lexical = normalizedPath(resolve(dir));
+    const real = canonicalProjectKey(dir);
+    return process.platform === "win32" ? lexical.toLowerCase() === real.toLowerCase() : lexical === real;
+  } catch {
+    return false;
+  }
+}
+
+function sameDirectory(left: string, right: string): boolean {
+  const leftStat = lstatSync(left, { bigint: true });
+  const rightStat = lstatSync(right, { bigint: true });
+  return leftStat.isDirectory() && rightStat.isDirectory()
+    && leftStat.dev === rightStat.dev
+    && leftStat.ino !== 0n
+    && leftStat.ino === rightStat.ino;
+}
+
+/** Old Windows markers lowercased their project key. Preserve them only when
+ * lower- and upper-case probes both resolve to this exact directory. That is
+ * true on ordinary case-insensitive volumes, including Unicode paths, and
+ * fails closed when a case-sensitive directory could share the old key with
+ * a genuinely different project. New v2 markers never lowercase. */
+function legacyProjectIsUnambiguous(dir: string): boolean {
+  if (!directProjectRoot(dir)) return false;
+  if (process.platform !== "win32") return true;
+  try {
+    const real = realpathSync.native(resolve(dir));
+    const lexical = resolve(dir);
+    const lower = realpathSync.native(lexical.toLowerCase());
+    const upper = realpathSync.native(lexical.toUpperCase());
+    return sameDirectory(real, lower) && sameDirectory(real, upper);
+  } catch {
+    return false;
+  }
 }
 
 /** JSON with object keys sorted, so the digest depends on the VALUES a card
@@ -78,13 +127,39 @@ function canonical(value: unknown): string {
  * timestamp, and the card itself. A genuine card cannot be replayed into
  * another project or another conversation, and no field of it can be edited. */
 export function cardDigest(dir: string, conversationId: string, ts: string, card: unknown): string {
-  return createHash("sha256").update(canonical([projectKey(dir), conversationId, ts, card])).digest("hex");
+  return createHash("sha256")
+    .update(canonical([CARD_DOMAIN, canonicalProjectKey(dir), conversationId, ts, card]))
+    .digest("hex");
 }
 
-function markerFile(dir: string): string | null {
-  if (markerDir === null) return null;
-  const name = createHash("sha256").update(projectKey(dir)).digest("hex");
-  return join(markerDir, "card-markers", `${name}.txt`);
+/** Pre-v2 cards used the lexical selected path and no domain separator. They
+ * remain readable only when that spelling is already the real project root;
+ * an aliased path can later be retargeted and therefore cannot safely carry
+ * legacy authority into its new target. */
+export function legacyCardDigest(dir: string, conversationId: string, ts: string, card: unknown): string {
+  return createHash("sha256").update(canonical([legacyProjectKey(dir), conversationId, ts, card])).digest("hex");
+}
+
+export function cardDigestCandidates(dir: string, conversationId: string, ts: string, card: unknown): readonly string[] {
+  const current = cardDigest(dir, conversationId, ts, card);
+  return legacyProjectIsUnambiguous(dir)
+    ? Object.freeze([current, legacyCardDigest(dir, conversationId, ts, card)])
+    : Object.freeze([current]);
+}
+
+function markerFile(dir: string, create: boolean): string | null {
+  const container = externalMarkerContainer(markerDir, dir, "card-markers", create);
+  if (container === null) return null;
+  const name = createHash("sha256").update(canonicalProjectKey(dir)).digest("hex");
+  return join(container, `${name}.txt`);
+}
+
+function legacyMarkerFile(dir: string): string | null {
+  if (!legacyProjectIsUnambiguous(dir)) return null;
+  const container = externalMarkerContainer(markerDir, dir, "card-markers", false);
+  if (container === null) return null;
+  const name = createHash("sha256").update(legacyProjectKey(dir)).digest("hex");
+  return join(container, `${name}.txt`);
 }
 
 /**
@@ -95,22 +170,33 @@ function markerFile(dir: string): string | null {
  * than no card at all.
  */
 export function recordCardMarker(dir: string, conversationId: string, ts: string, card: unknown): void {
-  const file = markerFile(dir);
+  let file: string | null;
+  try {
+    file = markerFile(dir, true);
+  } catch {
+    throw new Error("CARD_MARKER_CUSTODY_UNSAFE: Cairn's card marker store must stay outside the selected project.");
+  }
   if (file === null) {
     throw new Error("CARD_MARKER_STORE_UNAVAILABLE: Cairn has no marker directory, so it cannot vouch for this result card.");
   }
-  mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, `${cardDigest(dir, conversationId, ts, card)}\n`, "utf8");
+  try {
+    appendVerifiedDigest(file, cardDigest(dir, conversationId, ts, card));
+  } catch {
+    throw new Error("CARD_MARKER_VERIFY_FAILED: Cairn could not verify result-card custody.");
+  }
 }
 
 /** Every marker recorded for `dir`, or an empty set when there is no marker
  * store, no file yet, or it cannot be read — all three of which mean the same
  * thing to the caller: nothing here is vouched for. */
 export function cardMarkers(dir: string): ReadonlySet<string> {
-  const file = markerFile(dir);
-  if (file === null || !existsSync(file)) return new Set();
   try {
-    return new Set(readFileSync(file, "utf8").split(/\r?\n/).filter((line) => line.length > 0));
+    const currentFile = markerFile(dir, false);
+    const legacyFile = legacyMarkerFile(dir);
+    return new Set([
+      ...readDigestSequence(currentFile),
+      ...(legacyFile !== currentFile ? readDigestSequence(legacyFile) : []),
+    ]);
   } catch {
     return new Set();
   }

@@ -314,6 +314,7 @@ const mock: CairnApi = {
   // The lab's canned reply emits no task block, so it has no actionable
   // proposal for a remounted Chat to restore.
   conductorProposal: (_dir: string, _id: string) => soon(null),
+  conductorAction: (_dir: string, _id: string) => soon(null),
   onConductorDelta: (cb: (event: ConductorDelta) => void) => {
     listeners.conductor.add(cb);
     return () => listeners.conductor.delete(cb);
