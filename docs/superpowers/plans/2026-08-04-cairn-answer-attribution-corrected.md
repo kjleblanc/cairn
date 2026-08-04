@@ -351,7 +351,6 @@ type TaskRoutePreview = {
 type TaskRunRequest = {
   dir: string;
   previewId: string;
-  adapterId?: string;
   realCallConfirmed?: boolean;
   disclosure?: WorkerDisclosure;
 };
@@ -374,22 +373,25 @@ panel.
 3. After the asynchronous detection returns, verify that its generation and
    proposal are still current. A correction/replacement/cancelled route cannot
    publish a late preview.
-4. Store one pending preview in main, invalidating the previous one, and return
-   its ID plus output-only view. The renderer never rebuilds the request.
+4. Store one pending preview in main, including the selected adapter ID and
+   exact expected disclosure, invalidate the previous preview, and return its
+   ID plus output-only view. The renderer never rebuilds the request.
 
 Cancel calls a bounded `task:preview-discard` IPC. Any owner turn, replacement
 action, newer route, relaunch, or successful run also invalidates the preview.
 
 The final existing **Start one real … call** or **Run offline demonstration**
 press is the only acceptance point. `task:run` carries only `previewId` and the
-existing adapter/disclosure confirmations:
+existing disclosure confirmation; the adapter comes from the main-held preview
+and cannot be switched at run time:
 
 1. Acquire the per-project start/run gate before the first asynchronous recheck
    so two manual or proposal runs cannot both pass detection.
-2. Re-detect route/worker identity and re-derive the complete disclosure from
-   the main-held intent. A real-call mismatch leaves the preview reviewable;
-   connection-required/no-route discards the stale preview but leaves the
-   proposal or manual editor available.
+2. Re-detect the preview’s exact adapter/worker identity and re-derive the
+   complete disclosure from the main-held intent. A missing/different adapter
+   or real-call mismatch refuses before work (an authorization mismatch leaves
+   the preview reviewable); connection-required/no-route discards the stale
+   preview but leaves the proposal or manual editor available.
 3. Atomically consume the still-current preview and, for chat, its exact
    current proposal. Only that successful consume changes the lifecycle name
    to accepted.
