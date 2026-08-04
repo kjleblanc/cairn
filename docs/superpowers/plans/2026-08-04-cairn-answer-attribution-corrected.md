@@ -365,9 +365,14 @@ panel.
 `task:route` in `app/src/main/tasks.ts`:
 
 1. For a proposal, capture the exact current main action with zero unresolved
-   risks. For manual input, reject only if `rawOutcome.trim()` is empty, retain
-   the raw string in a direct source span, and use a trimmed plain
-   interpretation for routing.
+   risks. Validate direct App/CLI input before adapter detection: keep the
+   existing at-least-five-non-whitespace-character rule, refuse more than 2,000
+   raw characters with one fixed owner-facing message, and retain every
+   accepted code unit in a direct source span. Up to 300 trimmed characters use
+   that text as the routing interpretation. For 301–2,000, use the fixed plain
+   interpretation “Complete the owner’s exact direct request shown below” and
+   show/carry the entire authoritative source span; never truncate or ask a
+   model to summarize it.
 2. Give every route attempt a generation. Detect adapters and derive the
    disclosure from the frozen intent.
 3. After the asynchronous detection returns, verify that its generation and
@@ -470,6 +475,10 @@ Core tests cover proxy/getter hostility, nested mutation, source-only digest
 changes, 2,000/2,001-character boundaries, raw whitespace/multiline round
 trip, both report families, all close paths, and both adapters.
 
+Direct App and CLI cases pin 300 and 301 characters as accepted, 2,000 as an
+exact round trip, and 2,001 as a pre-detection refusal that creates no preview,
+disclosure, session, evidence, record, or worker process.
+
 ## Desktop question, proposal, correction, and result
 
 Add:
@@ -513,10 +522,12 @@ accepted ERROR retains it.
 For accessibility, do not put `aria-live` on token streaming. When a reply
 settles after a QuestionCard/TaskCard action, publish one polite, atomic status
 announcement and move focus to the new QuestionCard/TaskCard heading
-(`tabIndex={-1}`); on failure, restore focus to the composer/error recovery.
-Ordinary composer replies do not steal focus. DOM tests pin the once-only
-announcement and focus path; a real screen-reader listen-through remains human
-judgment.
+(`tabIndex={-1}`). If a successful reply deliberately creates no replacement
+action—for example, Cairn cannot safely decide the deferred fact—focus the
+settled Cairn-reply/status heading and leave the composer next in tab order. On
+failure, restore focus to the composer/error recovery. Ordinary composer
+replies do not steal focus. DOM tests pin the once-only announcement and all
+three focus paths; a real screen-reader listen-through remains human judgment.
 
 CSS uses Task 171’s approved mint **You said so**, dashed amber **You weren’t
 sure**, and quiet neutral **Cairn chose** treatments. Preserve Lantern on
