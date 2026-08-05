@@ -29,7 +29,10 @@ const RISK_FREE_TASK_BLOCK = JSON.stringify({
     version: "cairn-task-intent/v1",
     outcome: { source: "owner-stated", text: "Change the page title", ownerQuote: "title" },
     requirements: [{ source: "cairn-chosen", text: "Keep the counts 74, 477, 256 exactly.", ownerQuote: null }],
-    context: [],
+    context: [
+      "Set aside by the owner: Renaming the title may break bookmarked links.",
+      "Fixture replacement detail",
+    ],
   },
   risks: [],
 });
@@ -104,6 +107,7 @@ const STOPPED_COMMENTARY_SCRIPT = {
   delayMs: 400,
 };
 let commentaryDelayMs = COMMENTARY_SCRIPT.delayMs;
+let proseOnlySetAside = false;
 
 // The comment-busy test's deterministic window (task 137's flake fix): while
 // held, a commentary stream pauses after its last content part until
@@ -204,6 +208,9 @@ function scriptFor(content) {
     return { parts: ["One moment", ", checking the answer", ", done."], delayMs: 500 };
   }
   if (content.includes("set it aside and keep the task as proposed")) {
+    if (proseOnlySetAside) {
+      return { parts: ["I carried that concern into the same task. The fresh review is ready."], delayMs: DELAY_MS };
+    }
     return { parts: [`I removed that risk from the proposal.\n\n\`\`\`cairn-task\n${RISK_FREE_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
   if (content.includes("title")) {
@@ -329,6 +336,7 @@ export function start() {
         lastReplyBody: () => lastReplyBody,
         replyRequestCount: () => replyRequestCount,
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
+        setProseOnlySetAside: (enabled) => { proseOnlySetAside = enabled; },
         holdCommentary,
         releaseCommentary,
         holdThirdProposal,

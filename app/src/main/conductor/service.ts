@@ -37,6 +37,7 @@ import { extractFollowups } from "./followups.js";
 import { controlSafeStreamingText, extractConductorControl, type ConductorControlCandidate } from "./taskblock.js";
 import { isConversationId } from "./conversation-id.js";
 import { canonicalProjectKey, validateOwnerReplyContext, type OwnerReplyContext } from "./turnauth.js";
+import { buildSetAsideReplacement, preservesSetAsideReplacement, type SetAsideReplacement } from "./setaside.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
@@ -91,6 +92,7 @@ const OWNER_TURN_PERSISTENCE_UNCERTAIN = "CONDUCTOR_OWNER_TURN_PERSISTENCE_UNCER
 const CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED = "CONDUCTOR_CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED: Cairn saved this answer, but final append verification failed. No action was activated.";
 const CAIRN_TURN_PERSISTENCE_UNCERTAIN = "CONDUCTOR_CAIRN_TURN_PERSISTENCE_UNCERTAIN: Cairn could not confirm whether this answer finished saving. No action was activated; copy the visible text before reloading.";
 const UNBOUND_TASK = "Cairn could not link that proposal to an authenticated owner message. Please restate the needed detail.";
+const SET_ASIDE_REPLACEMENT_UNAVAILABLE = "CONDUCTOR_SET_ASIDE_REPLACEMENT_UNAVAILABLE: Cairn kept this proposal current because its context cannot safely carry that set-aside concern. Ask Cairn to revise the task instead.";
 const ACTION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** One live stream per project dir, so a stray second send can't stomp on a
@@ -572,6 +574,31 @@ export function send(
   const contextResult = actionReplyContext(dir, conversationId, request.actionReply);
   if (!contextResult.ok) return contextResult;
 
+  // Task 181: prepare the safe replacement while the exact old action is
+  // still current. If Core cannot carry the selected concern within the
+  // existing intent bounds, refuse before append so the old card and its
+  // one-time authority remain available. The provider may still supply a
+  // valid fresh action; this value is used when its reply has no safe one.
+  let setAsideReplacement: SetAsideReplacement | undefined;
+  if (request.actionReply?.kind === "set-risk-aside") {
+    const current = currentActions.get(key);
+    if (conversationId === null || current?.kind !== "task") {
+      return { ok: false, message: STALE_ACTION_REPLY };
+    }
+    try {
+      const authenticatedSources = readHistorySnapshot(dir, conversationId).authenticatedSources;
+      const replacement = buildSetAsideReplacement(
+        current,
+        request.actionReply.riskId,
+        authenticatedSources,
+      );
+      if (replacement === null) return { ok: false, message: SET_ASIDE_REPLACEMENT_UNAVAILABLE };
+      setAsideReplacement = replacement;
+    } catch {
+      return { ok: false, message: SET_ASIDE_REPLACEMENT_UNAVAILABLE };
+    }
+  }
+
   const id = conversationId ?? newConversationId(dir);
   const inputId = randomUUID();
   ensureCairnExcluded(dir);
@@ -653,7 +680,7 @@ export function send(
     text: "",
     ...(request.actionReply === undefined ? {} : { settlementKind: request.actionReply.kind }),
   });
-  void streamTurn(dir, id, conn, controller, onDelta, "reply", historySnapshot);
+  void streamTurn(dir, id, conn, controller, onDelta, "reply", historySnapshot, setAsideReplacement);
 
   return { ok: true, value: { conversationId: id } };
 }
@@ -774,6 +801,24 @@ function internalActionFor(
   };
 }
 
+function internalActionFromSetAside(
+  replacement: SetAsideReplacement,
+  conversationId: string,
+): Extract<InternalAction, { kind: "task" }> {
+  return {
+    kind: "task",
+    actionId: randomUUID(),
+    conversationId,
+    intent: replacement.intent,
+    request: replacement.request,
+    context: replacement.context,
+    // A replacement action gets replacement risk identities too. An old chip
+    // can never target a risk that merely survived into the fresh review.
+    risks: Object.freeze(replacement.remainingRisks
+      .map((risk) => Object.freeze({ riskId: randomUUID(), text: risk.text }))),
+  };
+}
+
 /** The one streaming body, shared by both turns Cairn takes: the owner's reply
  * and the envelope's commentary. Everything they differ about is `kind`. */
 async function streamTurn(
@@ -784,6 +829,7 @@ async function streamTurn(
   onDelta: (delta: ConductorDelta) => void,
   kind: TurnKind,
   retainedHistory?: ConductorHistorySnapshot,
+  setAsideReplacement?: SetAsideReplacement,
 ): Promise<void> {
   let full = "";
   let publicFull = "";
@@ -865,11 +911,25 @@ async function streamTurn(
     // other turn's owner never asked for.
     const { followups: found, text: withoutFollowups } = extractFollowups(withoutTaskFence);
     const followups = kind === "commentary" ? found : null;
-    const nextAction = kind === "reply" && candidate !== null
+    const parsedAction = kind === "reply" && candidate !== null
       ? internalActionFor(candidate, id, historySnapshot.authenticatedSources)
       : null;
+    // A set-aside reply means "keep the task". A conductor-supplied task wins
+    // only when it preserves the exact request, every remaining risk, and the
+    // full main-prepared context prefix (including the selected concern).
+    // Otherwise main's deterministic replacement is the safe visible truth.
+    const candidateAction = setAsideReplacement === undefined
+      ? parsedAction
+      : parsedAction?.kind === "task" && preservesSetAsideReplacement(parsedAction, setAsideReplacement)
+        ? parsedAction
+        : null;
+    const fallbackAction = kind === "reply" && candidateAction === null && setAsideReplacement !== undefined
+      ? internalActionFromSetAside(setAsideReplacement, id)
+      : null;
+    const nextAction = candidateAction ?? fallbackAction;
+    const fallbackUsed = fallbackAction !== null;
     let text = withoutFollowups;
-    if (kind === "reply" && candidate?.kind === "question") {
+    if (kind === "reply" && candidate?.kind === "question" && !fallbackUsed) {
       text = passiveQuestionText(text, candidate.question);
     } else if (kind === "reply" && candidate?.kind === "task" && nextAction === null) {
       text = fixedExplanation(text, UNBOUND_TASK);
@@ -895,7 +955,9 @@ async function streamTurn(
     // controls. Keep the latest well-formed reply proposal available across a
     // Chat remount; ordinary prose leaves the existing proposal in place, just
     // like the live renderer path. Commentary may never create one.
-    if (kind === "reply" && block !== null) proposals.set(actionKey(dir), { conversationId: id, block });
+    if (kind === "reply" && block !== null && !fallbackUsed) {
+      proposals.set(actionKey(dir), { conversationId: id, block });
+    }
     // "No cairn-task block" is enforced here as well as asked for above: a
     // model that emits one anyway has its fence stripped from the text like
     // any other, and the proposal is dropped rather than put on screen as a
@@ -905,7 +967,7 @@ async function streamTurn(
       conversationId: id,
       kind: "done",
       turn: cairnTurn,
-      taskBlock: kind === "reply" ? block : null,
+      taskBlock: kind === "reply" && !fallbackUsed ? block : null,
       ...(kind === "reply" ? { action: nextAction === null ? null : actionView(nextAction) } : {}),
       followups,
       turnKind: kind,

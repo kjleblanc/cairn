@@ -140,6 +140,7 @@ test.describe.configure({ mode: "serial" });
 let fixtureUrl = "";
 let fixtureClose: () => Promise<void> = async () => {};
 let setFixtureCommentaryDelay: (delayMs: number) => void = () => {};
+let setFixtureProseOnlySetAside: (enabled: boolean) => void = () => {};
 /** Task 137's deterministic commentary window: while held, the fixture's
  * commentary stream pauses before its usage frame until released. */
 let holdFixtureCommentary: () => void = () => {};
@@ -177,6 +178,7 @@ test.beforeAll(async () => {
       lastReplyBody: () => string | null;
       replyRequestCount: () => number;
       setCommentaryDelay: (delayMs: number) => void;
+      setProseOnlySetAside: (enabled: boolean) => void;
       holdCommentary: () => void;
       releaseCommentary: () => void;
       holdThirdProposal: () => void;
@@ -192,6 +194,7 @@ test.beforeAll(async () => {
   lastReplyBody = server.lastReplyBody;
   replyRequestCount = server.replyRequestCount;
   setFixtureCommentaryDelay = server.setCommentaryDelay;
+  setFixtureProseOnlySetAside = server.setProseOnlySetAside;
   holdFixtureCommentary = server.holdCommentary;
   releaseFixtureCommentary = server.releaseCommentary;
   holdFixtureThirdProposal = server.holdThirdProposal;
@@ -231,6 +234,7 @@ test.beforeEach(() => {
   releaseFixtureThirdProposal();
   releaseFixtureAnswer();
   setFixtureCommentaryDelay(400);
+  setFixtureProseOnlySetAside(false);
   rmSync(conductorFile(), { force: true });
 });
 
@@ -814,13 +818,17 @@ test("dispatch preview accepts only the current risk-free proposal and a correct
   }), { dir: project, conversationId, proposalId: risky.actionId });
   expect(blocked).toEqual({ ok: false, message: "TASK_PROPOSAL_HAS_RISKS: Resolve or set aside every current risk before reviewing dispatch." });
 
-  await win.locator(".task-card .task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await win.locator(".task-card .task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   const replacement = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
   expect(replacement?.kind).toBe("task");
   if (replacement?.kind !== "task") throw new Error("expected the replacement task action");
   expect(replacement.actionId).not.toBe(risky.actionId);
   expect(replacement.risks).toEqual([]);
+  expect(replacement.context).toEqual([
+    "Set aside by the owner: Renaming the title may break bookmarked links.",
+    "Fixture replacement detail",
+  ]); // a valid conductor replacement may add context after main's required prefix
 
   const oldProposal = await win.evaluate(({ dir, conversationId: id, proposalId }) => window.cairn.taskRoute({
     dir,
@@ -855,6 +863,61 @@ test("dispatch preview accepts only the current risk-free proposal and a correct
   // visible state. Main's controller is already installed when conductorSend
   // returns; wait for that exact stream to settle before closing the app.
   await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 15_000 }).toBeNull();
+  } finally {
+    await app.close();
+  }
+});
+
+test("a prose-only set-aside reply still yields a fresh dispatch-ready proposal", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-setaside-fallback-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
+    const win = await app.firstWindow();
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+
+    await sendChat(win, "Change the page title");
+    await waitStreamDone(win);
+    const taskCard = win.locator(".task-card");
+    await expect(taskCard).toBeVisible();
+    const conversationId = await win.evaluate(async (dir) =>
+      (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+    const oldAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), {
+      dir: project,
+      id: conversationId,
+    });
+    expect(oldAction?.kind).toBe("task");
+    if (oldAction?.kind !== "task") throw new Error("expected the risk-bearing task action");
+    expect(oldAction.risks).toHaveLength(1);
+
+    setFixtureProseOnlySetAside(true);
+    await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
+    await waitStreamDone(win);
+
+    const replacement = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), {
+      dir: project,
+      id: conversationId,
+    });
+    expect(replacement?.kind).toBe("task");
+    if (replacement?.kind !== "task") throw new Error("expected main's fallback task action");
+    expect(replacement.actionId).not.toBe(oldAction.actionId);
+    expect(replacement.risks).toEqual([]);
+    expect(replacement.context).toEqual([
+      "Set aside by the owner: Renaming the title may break bookmarked links.",
+    ]);
+    await expect(taskCard).toBeVisible();
+    await expect(taskCard.locator(".task-risk")).toHaveCount(0);
+    await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeEnabled();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-181-setaside-fallback.png") });
+
+    const stale = await win.evaluate(({ dir, id, proposalId }) => window.cairn.taskRoute({
+      dir,
+      source: { kind: "proposal", conversationId: id, proposalId },
+    }), { dir: project, id: conversationId, proposalId: oldAction.actionId });
+    expect(stale).toEqual({
+      ok: false,
+      message: "TASK_PROPOSAL_STALE: That proposed task is no longer current.",
+    });
   } finally {
     await app.close();
   }
@@ -1251,7 +1314,16 @@ test("attributed task actions keep raw owner bytes, main ids, one-time replies, 
   expect(accepted.ok).toBe(true);
   await expect.poll(replyRequestCount, { timeout: 30_000 }).toBe(beforeCalls + 1);
   await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project), { timeout: 30_000 }).toBeNull();
-  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+  const fallbackAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(fallbackAction?.kind).toBe("task");
+  if (fallbackAction?.kind !== "task") throw new Error("expected main's prose-only set-aside fallback");
+  expect(fallbackAction.actionId).not.toBe(action.actionId);
+  expect(fallbackAction.request).toEqual(action.request);
+  expect(fallbackAction.context).toEqual([
+    "Desktop only",
+    "Set aside by the owner: The timing changes how the animation feels.",
+  ]);
+  expect(fallbackAction.risks).toEqual([]);
   const replyWire = JSON.parse(lastReplyBody() ?? "{}") as { messages: Array<{ role: string; content: string }> };
   expect(replyWire.messages.at(-1)).toEqual({ role: "user", content: rawReply });
   expect(replyWire.messages.some((message) => message.role === "user" && message.content === forgedOwnerText)).toBe(false);
@@ -1556,7 +1628,7 @@ test("a targeted risk reply retires the whole old action before a fresh proposal
   await waitStreamDone(win);
 
   const taskCard = win.locator(".task-card");
-  const riskChips = taskCard.locator(".task-chip-risk");
+  const riskChips = taskCard.locator(".task-risk");
   await expect(taskCard.locator(".task-chip-question")).toHaveCount(0);
   await expect(riskChips).toHaveCount(2);
   await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
@@ -1583,10 +1655,15 @@ test("a targeted risk reply retires the whole old action before a fresh proposal
   const freshAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
   expect(freshAction?.kind).toBe("task");
   expect(freshAction?.actionId).not.toBe(oldAction?.actionId);
-  expect(freshAction?.kind === "task" ? freshAction.risks : null).toEqual([]);
+  expect(freshAction?.kind === "task" ? freshAction.risks.map((risk) => risk.text) : null)
+    .toEqual(["Renaming the title may break bookmarked links."]);
+  expect(freshAction?.kind === "task" ? freshAction.risks[0]?.riskId : null)
+    .not.toBe(oldAction?.kind === "task" ? oldAction.risks[1]?.riskId : null);
+  expect(freshAction?.kind === "task" ? freshAction.context : null)
+    .toEqual(["Set aside by the owner: Should the old title still redirect?"]);
   await expect(taskCard).toBeVisible();
-  await expect(taskCard.locator(".task-chip-risk")).toHaveCount(0);
-  await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeEnabled();
+  await expect(taskCard.locator(".task-risk")).toHaveCount(1);
+  await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
   await app.close();
 });
 
