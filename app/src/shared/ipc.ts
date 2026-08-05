@@ -272,12 +272,14 @@ export interface ConductorDelta {
    * conversation can post it without a reload. It never touches the streaming
    * reply, and it never adopts a conversation id.
    */
-  kind: "delta" | "done" | "error" | "envelope";
+  /** "replace" resets a live reply to main's canonical proposal
+   * acknowledgement once main can validate that the stream carries a task. */
+  kind: "delta" | "replace" | "done" | "error" | "envelope";
   text?: string;
   turn?: ConductorTurn;
   taskBlock?: TaskBlock | null;
   /** Trusted main-owned projection. Null on a settled ordinary reply; omitted
-   * on streaming deltas, errors, envelope cards, and commentary. */
+   * on streaming deltas/replacements, errors, envelope cards, and commentary. */
   action?: ConductorAction | null;
   message?: string;
   /** Which of Cairn's two voices is streaming: the reply the owner asked

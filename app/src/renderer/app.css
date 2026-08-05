@@ -368,6 +368,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
  * review language. The words name every source; color only reinforces it. */
 .question-card, .task-card { align-self: stretch; margin: 0; min-width: 0; }
 .question-card-heading, .task-card-heading { overflow-wrap: anywhere; }
+.task-card-heading { width: fit-content; max-width: 100%; margin: 0 0 6px; font-size: 1rem; }
 .question-card-heading:focus, .task-card-heading:focus,
 .bubble-system:focus { outline: 2px solid var(--garden-cyan); outline-offset: 3px; }
 .question-card-answer { margin-top: 12px; min-width: 0; }
@@ -377,7 +378,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .question-card-defer, .task-card-actions { margin-top: 10px; flex-wrap: wrap; }
 .task-intent { margin-top: 10px; min-width: 0; }
 .task-intent-heading { margin-bottom: 8px; font-size: 1rem; }
-.task-intent-list, .task-card-risks > ul, .task-intent-context > ul {
+.task-intent-list, .task-card-risks, .task-intent-context > ul {
   list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px;
 }
 .task-intent-row {
@@ -403,14 +404,26 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .task-intent-context { margin-top: 12px; min-width: 0; }
 .task-intent-context > h3 { font-size: .9rem; }
 .task-intent-context li { padding-left: 12px; border-left: 2px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
-.task-card-risks { margin-top: 14px; }
-.task-card-risks > h3 { font-size: .95rem; }
-.task-risk { padding: 10px 12px; border: 1px solid var(--amber); border-radius: var(--r-sm); min-width: 0; overflow-wrap: anywhere; }
-.task-risk p { white-space: pre-wrap; }
+.task-card-risks { margin-top: 12px; }
+.task-risk {
+  padding: 10px 12px; border: 1px solid var(--amber); border-radius: var(--r-sm);
+  min-width: 0; overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+.task-risk p { margin: 0 0 8px; white-space: pre-wrap; }
+.task-card-actions { justify-content: flex-end; }
 .dispatch-acceptance { margin-top: 10px; overflow-wrap: anywhere; }
 .action-settled-status:empty { display: block; }
-.task-card-outcome { font-weight: 600; }
-.task-card-details { margin-top: 8px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--card-ink); }
+.task-card-outcome { margin: 0; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.task-card-details { margin-top: 8px; color: var(--card-ink); }
+.task-card-details > summary {
+  width: fit-content; padding: 4px 2px; border-radius: 8px; cursor: pointer;
+  color: var(--card-muted); font-size: .86rem; font-weight: 700;
+}
+.task-card-details > summary:hover { color: var(--card-ink); }
+.task-card-details > summary:focus-visible { outline: 2px solid var(--garden-cyan); outline-offset: 2px; }
+.task-card-details[open] > summary { color: var(--card-ink); }
+.task-card-details > .task-intent { padding-top: 10px; border-top: 1px solid var(--line); }
 .task-card-details-label { margin: 0 0 2px; }
 .task-card-details-text { margin: 0; white-space: pre-wrap; }
 .dispatch-panel { border: 1px solid var(--line); }

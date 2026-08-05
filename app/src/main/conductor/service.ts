@@ -93,6 +93,9 @@ const CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED = "CONDUCTOR_CAIRN_TURN_POSTWRITE
 const CAIRN_TURN_PERSISTENCE_UNCERTAIN = "CONDUCTOR_CAIRN_TURN_PERSISTENCE_UNCERTAIN: Cairn could not confirm whether this answer finished saving. No action was activated; copy the visible text before reloading.";
 const UNBOUND_TASK = "Cairn could not link that proposal to an authenticated owner message. Please restate the needed detail.";
 const SET_ASIDE_REPLACEMENT_UNAVAILABLE = "CONDUCTOR_SET_ASIDE_REPLACEMENT_UNAVAILABLE: Cairn kept this proposal current because its context cannot safely carry that set-aside concern. Ask Cairn to revise the task instead.";
+const PROPOSAL_ACKNOWLEDGEMENT = "Here's the plan.";
+const SET_ASIDE_PENDING_ACKNOWLEDGEMENT = "Updating the plan...";
+const SET_ASIDE_ACKNOWLEDGEMENT = "I carried that concern forward.";
 const ACTION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 /** One live stream per project dir, so a stray second send can't stomp on a
@@ -801,6 +804,24 @@ function internalActionFor(
   };
 }
 
+/** Read-only early classification for presentation. It creates no action IDs
+ * and grants no authority; final parsing below still owns the real action. */
+function actionableTaskCandidate(
+  candidate: ConductorControlCandidate | null,
+  authenticatedSources: unknown,
+  replacement?: SetAsideReplacement,
+): boolean {
+  if (candidate?.kind !== "task") return false;
+  const intent = bindTaskIntent(candidate.intent, authenticatedSources);
+  const request = intent === null ? null : taskRequestView(intent);
+  if (intent === null || request === null) return false;
+  return replacement === undefined || preservesSetAsideReplacement({
+    request,
+    context: intent.context,
+    risks: candidate.risks.map((text) => ({ text })),
+  }, replacement);
+}
+
 function internalActionFromSetAside(
   replacement: SetAsideReplacement,
   conversationId: string,
@@ -836,6 +857,7 @@ async function streamTurn(
   let tokens: number | undefined;
   let costUsd: number | undefined;
   let completedTurn: CairnChatTurn | null = null;
+  let proposalPreview = false;
   try {
     const historySnapshot = retainedHistory ?? readHistorySnapshot(dir, id);
     const latestOwnerEntry = [...historySnapshot.entries].reverse()
@@ -892,6 +914,25 @@ async function streamTurn(
     for await (const event of streamChat(slot, messages, fetch, controller.signal)) {
       if (event.kind === "delta" && event.text) {
         full += event.text;
+        const streamedCandidate = kind === "reply" ? extractConductorControl(full).candidate : null;
+        const acknowledgement = kind !== "reply"
+          ? null
+          : setAsideReplacement !== undefined
+            ? SET_ASIDE_PENDING_ACKNOWLEDGEMENT
+            : actionableTaskCandidate(streamedCandidate, historySnapshot.authenticatedSources)
+              ? PROPOSAL_ACKNOWLEDGEMENT
+              : null;
+        if (acknowledgement !== null) {
+          if (!proposalPreview) {
+            proposalPreview = true;
+            publicFull = acknowledgement;
+            const live = controllers.get(actionKey(dir));
+            if (live?.controller === controller) live.text = publicFull;
+            onDelta({ dir, conversationId: id, kind: "replace", text: publicFull, turnKind: kind });
+          }
+          continue;
+        }
+        if (proposalPreview) continue;
         const nextPublic = controlSafeStreamingText(full);
         const publicDelta = nextPublic.startsWith(publicFull) ? nextPublic.slice(publicFull.length) : "";
         if (nextPublic.startsWith(publicFull)) publicFull = nextPublic;
@@ -929,7 +970,12 @@ async function streamTurn(
     const nextAction = candidateAction ?? fallbackAction;
     const fallbackUsed = fallbackAction !== null;
     let text = withoutFollowups;
-    if (kind === "reply" && candidate?.kind === "question" && !fallbackUsed) {
+    // Once a valid task action exists, the card owns every task detail. Model
+    // prose is untrusted and may ignore its copy budget, so the settled and
+    // persisted proposal always gets one short acknowledgement owned by main.
+    if (kind === "reply" && nextAction?.kind === "task") {
+      text = setAsideReplacement === undefined ? PROPOSAL_ACKNOWLEDGEMENT : SET_ASIDE_ACKNOWLEDGEMENT;
+    } else if (kind === "reply" && candidate?.kind === "question" && !fallbackUsed) {
       text = passiveQuestionText(text, candidate.question);
     } else if (kind === "reply" && candidate?.kind === "task" && nextAction === null) {
       text = fixedExplanation(text, UNBOUND_TASK);

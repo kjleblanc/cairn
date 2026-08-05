@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ATTRIBUTED_ACTION_PROTOCOL, CONSTITUTION, CONSTITUTION_VERSION } from "../src/main/conductor/constitution.js";
 
 test("constitution version is pinned", () => {
-  assert.equal(CONSTITUTION_VERSION, "conductor-v7");
+  assert.equal(CONSTITUTION_VERSION, "conductor-v8");
 });
 
 const FLAT = CONSTITUTION.replace(/\s+/g, " ");
@@ -30,6 +30,9 @@ const LOAD_BEARING = [
   "A delegated choice is permission to recommend a value for that choice, not permission to approve risk, cost, data sharing, credentials, or dispatch.",
   "A reply may contain at most one Cairn control fence.",
   "Never invent action IDs, risk IDs, source IDs, or source offsets.",
+  "For any task-proposal reply, including a reply to a set-aside decision, put the task control fence before any prose.",
+  "After the fence, write at most one short sentence.",
+  "Do not repeat or summarize the outcome, requirements, context, risks, source labels, or what the card's controls do.",
 
   // v7 activates the source-marked protocol after the authenticated vertical
   // dispatch path landed. These are the owner-only and source-honesty halves:
@@ -77,7 +80,7 @@ for (const line of LOAD_BEARING) {
   });
 }
 
-test("the attributed-action protocol is exact and active in conductor v7", () => {
+test("the attributed-action protocol is exact and active in conductor v8", () => {
   assert.match(ATTRIBUTED_ACTION_PROTOCOL, /```cairn-question\n\{"question":"<one plain question>"\}\n```/);
   assert.match(ATTRIBUTED_ACTION_PROTOCOL, /```cairn-task\n\{"intent":\{"version":"cairn-task-intent\/v1"/);
   assert.match(ATTRIBUTED_ACTION_PROTOCOL, /"source":"cairn-chosen","text":"<plain choice you supplied>","ownerQuote":null/);
@@ -88,6 +91,9 @@ test("the attributed-action protocol is exact and active in conductor v7", () =>
   assert.doesNotMatch(CONSTITUTION, /Staged attributed-action protocol|Do not emit this staged protocol/);
   assert.doesNotMatch(CONSTITUTION, /"outcome": "<one plain sentence|"details": "<owner-supplied|"concerns": \[/);
   assert.match(CONSTITUTION, /carry any set-aside concern\s+into your task proposal's context/);
+  assert.match(ATTRIBUTED_ACTION_PROTOCOL, /For any task-proposal reply, including a reply to a set-aside decision, put the\s+task control fence before any prose\./);
+  assert.match(ATTRIBUTED_ACTION_PROTOCOL, /After the fence, write at most one short\s+sentence\./);
+  assert.match(ATTRIBUTED_ACTION_PROTOCOL, /Do not repeat or summarize\s+the outcome, requirements, context, risks, source labels, or what the card's\s+controls do\./);
   assert.doesNotMatch(CONSTITUTION, /task proposal's notes/);
 });
 

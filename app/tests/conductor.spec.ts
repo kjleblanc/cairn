@@ -128,7 +128,7 @@ async function waitStreamDone(win: Page): Promise<void> {
 }
 
 // `exact` for the same reason as "Stop" above: role-name matching is substring
-// by default, and a proposed-task card on screen puts a "Review dispatch"
+// by default, and a proposed-task card on screen puts a "Review"
 // button in the same window as the composer's "Send".
 async function sendChat(win: Page, text: string): Promise<void> {
   await win.getByPlaceholder("Talk with Cairn").fill(text);
@@ -145,6 +145,10 @@ let setFixtureProseOnlySetAside: (enabled: boolean) => void = () => {};
  * commentary stream pauses before its usage frame until released. */
 let holdFixtureCommentary: () => void = () => {};
 let releaseFixtureCommentary: () => void = () => {};
+/** Task 184's early proposal window: the fake pauses after its hidden task
+ * block and before deliberately repetitive prose so main's replacement is observable. */
+let holdFixtureInitialProposal: () => void = () => {};
+let releaseFixtureInitialProposal: () => void = () => {};
 /** Task 166's deterministic third-proposal window: the fixture pauses after
  * its content and before done until the remounted Chat has visibly attached. */
 let holdFixtureThirdProposal: () => void = () => {};
@@ -181,6 +185,8 @@ test.beforeAll(async () => {
       setProseOnlySetAside: (enabled: boolean) => void;
       holdCommentary: () => void;
       releaseCommentary: () => void;
+      holdInitialProposal: () => void;
+      releaseInitialProposal: () => void;
       holdThirdProposal: () => void;
       releaseThirdProposal: () => void;
       holdAnswer: () => void;
@@ -197,6 +203,8 @@ test.beforeAll(async () => {
   setFixtureProseOnlySetAside = server.setProseOnlySetAside;
   holdFixtureCommentary = server.holdCommentary;
   releaseFixtureCommentary = server.releaseCommentary;
+  holdFixtureInitialProposal = server.holdInitialProposal;
+  releaseFixtureInitialProposal = server.releaseInitialProposal;
   holdFixtureThirdProposal = server.holdThirdProposal;
   releaseFixtureThirdProposal = server.releaseThirdProposal;
   holdFixtureAnswer = server.holdAnswer;
@@ -283,6 +291,112 @@ test("New and Send share one narrow Cairn composer without changing their behavi
     await expect(composer).toBeVisible();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-182-cohesive-composer.png") });
   } finally {
+    await app.close();
+  }
+});
+
+test("one compact proposal carries its complete details through a set-aside replacement", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-compact-proposal-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
+    const win = await app.firstWindow();
+    await win.setViewportSize({ width: 760, height: 720 });
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+
+    holdFixtureInitialProposal();
+    try {
+      await sendChat(win, "Change the page title and explain every detail first");
+      const liveInitial = win.locator(".chat-messages .bubble-cairn:not(.bubble-commentary)").last();
+      await expect(win.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      await expect(liveInitial).toContainText("Here's the plan.");
+      await expect(liveInitial).not.toContainText("Change the page title remains the outcome");
+    } finally {
+      releaseFixtureInitialProposal();
+    }
+    await waitStreamDone(win);
+    const taskCard = win.locator(".task-card");
+    const details = taskCard.locator(".task-card-details");
+    const review = taskCard.getByRole("button", { name: "Review" });
+    await expect(taskCard).toBeVisible();
+    await expect(taskCard.getByRole("heading", { name: "One thing needs your call" })).toBeVisible();
+    await expect(taskCard.locator(".task-card-outcome")).toHaveText("Change the page title");
+    await expect(taskCard.locator(".task-risk")).toHaveText(/Renaming the title may break bookmarked links\.[\s\S]*Set aside/);
+    await expect(taskCard).not.toContainText("Any response retires this proposal");
+    await expect(review).toHaveText("Review");
+    await expect(review).toBeDisabled();
+    await expect(details).not.toHaveAttribute("open", "");
+    await expect(details.locator(".task-intent")).toBeHidden();
+    const proposalReply = win.locator(".bubble-cairn:not(.bubble-commentary)").last();
+    await expect(proposalReply.locator("p").first()).toHaveText("Here's the plan.");
+    await expect(proposalReply).not.toContainText("Change the page title");
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-184-compact-proposal.png") });
+
+    await details.locator("summary").click();
+    await expect(details).toHaveAttribute("open", "");
+    await expect(details.locator(".task-intent")).toBeVisible();
+    await expect(details).toContainText("You said so");
+    await expect(details).toContainText("Cairn chose");
+    await expect(details).toContainText("Keep the counts 74, 477, 256 exactly.");
+    await details.locator("summary").click();
+    await expect(details).not.toHaveAttribute("open", "");
+
+    setFixtureProseOnlySetAside(true);
+    holdFixtureAnswer();
+    try {
+      await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
+      const liveReply = win.locator(".chat-messages .bubble-cairn:not(.bubble-commentary)").last();
+      const stop = win.getByRole("button", { name: "Stop", exact: true });
+      await expect(stop).toBeVisible();
+      await expect(liveReply).toContainText("Updating the plan...");
+      await expect(liveReply).not.toContainText("Change the page title remains the outcome");
+      await stop.click();
+    } finally {
+      releaseFixtureAnswer();
+    }
+    await waitStreamDone(win);
+    await expect(taskCard).toHaveCount(0);
+    const stoppedReply = win.locator(".bubble-cairn:not(.bubble-commentary)").last();
+    await expect(stoppedReply).toContainText("Updating the plan...");
+    await expect(stoppedReply).toContainText("stopped early");
+    await expect(stoppedReply).not.toContainText("I carried that concern forward");
+
+    await sendChat(win, "Change the page title");
+    await waitStreamDone(win);
+    await expect(taskCard).toBeVisible();
+    await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
+    await waitStreamDone(win);
+    await expect(taskCard.getByRole("heading", { name: "Ready to review" })).toBeVisible();
+    await expect(taskCard.locator(".task-risk")).toHaveCount(0);
+    await expect(review).toBeEnabled();
+    await expect(details).not.toHaveAttribute("open", "");
+    const replacementReply = win.locator(".bubble-cairn:not(.bubble-commentary)").last();
+    await expect(replacementReply.locator("p").first()).toHaveText("I carried that concern forward.");
+    const providerRequest = JSON.parse(lastReplyBody() ?? "{}") as {
+      messages?: Array<{ content?: unknown }>;
+    };
+    const providerPrompt = (providerRequest.messages ?? [])
+      .map((message) => (typeof message.content === "string" ? message.content : ""))
+      .join("\n")
+      .replace(/\s+/g, " ");
+    expect(providerPrompt).toContain("put the task control fence before any prose");
+    expect(providerPrompt).toContain("After the fence, write at most one short sentence");
+    expect(providerPrompt).toContain("Do not repeat or summarize the outcome");
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-184-fresh-proposal.png") });
+
+    await details.locator("summary").click();
+    await expect(details).toContainText("Set aside by the owner: Renaming the title may break bookmarked links.");
+    await details.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-184-details.png") });
+    await details.locator("summary").click();
+    await review.click();
+    const panel = win.locator(".dispatch-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Set aside by the owner: Renaming the title may break bookmarked links.");
+  } finally {
+    setFixtureProseOnlySetAside(false);
+    releaseFixtureInitialProposal();
+    releaseFixtureAnswer();
     await app.close();
   }
 });
@@ -831,7 +945,7 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
   await expect(taskCard).toContainText("Change the page title");
-  const sendToDispatch = taskCard.getByRole("button", { name: "Review dispatch" });
+  const sendToDispatch = taskCard.getByRole("button", { name: "Review" });
   await expect(sendToDispatch).toBeDisabled();
   expect(await win.evaluate((dir) => window.cairn.taskCurrent(dir), project)).toBeNull();
   expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
@@ -956,7 +1070,7 @@ test("a prose-only set-aside reply still yields a fresh dispatch-ready proposal"
     ]);
     await expect(taskCard).toBeVisible();
     await expect(taskCard.locator(".task-risk")).toHaveCount(0);
-    await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeEnabled();
+    await expect(taskCard.getByRole("button", { name: "Review" })).toBeEnabled();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-181-setaside-fallback.png") });
 
     const stale = await win.evaluate(({ dir, id, proposalId }) => window.cairn.taskRoute({
@@ -1032,7 +1146,7 @@ test("a correction during delayed proposal routing invalidates the unpublished p
 });
 
 // Task 5 (Phase 3) rewrote this test: dispatch is now inline. The card's
-// "Review dispatch" opens a confirmation panel inside the conversation —
+// "Review" opens a confirmation panel inside the conversation —
 // the app never navigates to the task screen and nothing is re-typed — and
 // the run starts from there. The landing assertions (report, LOG row, git
 // status) are the legacy test's, carried over unchanged.
@@ -1049,7 +1163,7 @@ test("the full loop: a proposed task with a risk chip dispatches inline and land
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
   await expect(taskCard).toContainText("Change the page title");
-  const sendToDispatch = taskCard.getByRole("button", { name: "Review dispatch" });
+  const sendToDispatch = taskCard.getByRole("button", { name: "Review" });
   await expect(sendToDispatch).toBeDisabled();
 
   const riskChip = taskCard.locator(".task-chip-risk");
@@ -1129,7 +1243,7 @@ test("the envelope posts a DONE result card into the conversation, and the card 
   // This opens an in-app panel; it never navigates the Electron page. Skip
   // Playwright's navigation waiter and prove the intended result explicitly
   // with the panel assertion below.
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click({ noWaitAfter: true });
+  await taskCard.getByRole("button", { name: "Review" }).click({ noWaitAfter: true });
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -1680,7 +1794,7 @@ test("a targeted risk reply retires the whole old action before a fresh proposal
   const riskChips = taskCard.locator(".task-risk");
   await expect(taskCard.locator(".task-chip-question")).toHaveCount(0);
   await expect(riskChips).toHaveCount(2);
-  await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
+  await expect(taskCard.getByRole("button", { name: "Review" })).toBeDisabled();
   const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
   const oldAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
   expect(oldAction?.kind).toBe("task");
@@ -1712,7 +1826,7 @@ test("a targeted risk reply retires the whole old action before a fresh proposal
     .toEqual(["Set aside by the owner: Should the old title still redirect?"]);
   await expect(taskCard).toBeVisible();
   await expect(taskCard.locator(".task-risk")).toHaveCount(1);
-  await expect(taskCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
+  await expect(taskCard.getByRole("button", { name: "Review" })).toBeDisabled();
   await app.close();
 });
 
@@ -1727,7 +1841,7 @@ async function dispatchOneRealCall(win: Page, beforeStart?: () => void | Promise
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
 
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 20_000 });
@@ -2556,7 +2670,7 @@ test("the conductor comments on the card the envelope just posted, and the comme
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2632,7 +2746,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2716,7 +2830,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -2749,7 +2863,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   const secondCard = win.locator(".task-card");
   await expect(secondCard).toBeVisible();
   await expect(secondCard.locator(".task-chip")).toHaveCount(2);
-  await expect(secondCard.getByRole("button", { name: "Review dispatch" })).toBeDisabled();
+  await expect(secondCard.getByRole("button", { name: "Review" })).toBeDisabled();
 
   // The reported conversation reached a third proposal after its first
   // dispatch. Leave Chat while that third reply is still live, then reattach:
@@ -2772,7 +2886,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(restoredCard).toBeVisible();
   await expect(restoredCard.locator(".task-chip")).toHaveCount(0);
   await expect(restoredCard).toContainText("74, 477, 256");
-  await expect(restoredCard.getByRole("button", { name: "Review dispatch" })).toBeEnabled();
+  await expect(restoredCard.getByRole("button", { name: "Review" })).toBeEnabled();
   await expect.poll(() => win.evaluate(() => {
     const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
     return state.task166Blocks?.length ?? 0;
@@ -2795,7 +2909,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
 
   // Dispatch the restored third proposal. This remains the second run, so the
   // folding assertions below still prove the two-card history.
-  const restoredSend = restoredCard.getByRole("button", { name: "Review dispatch" });
+  const restoredSend = restoredCard.getByRole("button", { name: "Review" });
   await restoredSend.click();
   await expect(win.locator(".dispatch-panel")).toBeVisible({ timeout: 15_000 });
   await win.locator(".dispatch-panel").getByRole("button", { name: "Run offline demonstration" }).click();
@@ -3027,7 +3141,7 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -3209,7 +3323,7 @@ test("a refused push reports the real reason and leaves the project exactly as i
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();
@@ -3301,7 +3415,7 @@ test("the comment's follow-up suggestions render as chips, and a tap sends one a
   await expect(taskCard).toBeVisible();
   await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review dispatch" }).click();
+  await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   await panel.getByRole("button", { name: "Run offline demonstration" }).click();

@@ -38,10 +38,14 @@
  * The legacy outcome/details proposal shape is no longer requested from the
  * live conductor; native owner-only approval gates remain unchanged.
  *
+ * v8 gives the card ownership of proposal detail (repo task 184). Proposal
+ * prose is one short acknowledgement and never repeats the outcome, sources,
+ * concerns, context, or controls the owner can already see in the card.
+ *
  * The load-bearing sentences are pinned verbatim by
  * `tests-unit/constitution.test.ts`.
  */
-export const CONSTITUTION_VERSION = "conductor-v7";
+export const CONSTITUTION_VERSION = "conductor-v8";
 
 export const ATTRIBUTED_ACTION_PROTOCOL = `Questions and task proposals.
 
@@ -65,6 +69,12 @@ one block:
 \`\`\`cairn-task
 {"intent":{"version":"cairn-task-intent/v1","outcome":{"source":"owner-stated","text":"<plain interpretation of the owner's outcome>","ownerQuote":"<exact owner outcome words>"},"requirements":[{"source":"cairn-chosen","text":"<plain choice you supplied>","ownerQuote":null}],"context":[]},"risks":[{"text":"<one risk>"}]}
 \`\`\`
+
+For any task-proposal reply, including a reply to a set-aside decision, put the
+task control fence before any prose. After the fence, write at most one short
+sentence. Use it only to acknowledge the handoff. Do not repeat or summarize
+the outcome, requirements, context, risks, source labels, or what the card's
+controls do.
 
 The shown requirement only illustrates how a Cairn-chosen row uses null;
 remove it when you supplied no choice, and include every real requirement.

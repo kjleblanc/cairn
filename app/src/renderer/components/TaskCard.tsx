@@ -17,30 +17,35 @@ export function TaskCard({ action, busy, current, onSetAside, onSend, headingRef
   onSend: () => void;
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
+  const heading = action.risks.length === 0
+    ? "Ready to review"
+    : action.risks.length === 1
+      ? "One thing needs your call"
+      : `${action.risks.length} things need your call`;
+
   return (
     <section className="card task-card">
-      <h2 className="task-card-heading" ref={headingRef} tabIndex={-1}>Review this task</h2>
-      <TaskIntentList request={action.request} context={action.context} heading="What Cairn proposes" />
+      <h2 className="task-card-heading" ref={headingRef} tabIndex={-1}>{heading}</h2>
+      <p className="task-card-outcome">{action.request.outcome.text}</p>
       {action.risks.length > 0 ? (
-        <section className="task-card-risks" aria-labelledby={`task-risks-${action.actionId}`}>
-          <h3 id={`task-risks-${action.actionId}`}>Risks to decide first</h3>
-          <ul>
-            {action.risks.map((risk) => (
-              <li className="task-risk" key={risk.riskId}>
-                <p>{risk.text}</p>
-                <Pill kind="quiet" disabled={busy || !current}
-                  onClick={() => void onSetAside(risk)}>Set aside</Pill>
-              </li>
-            ))}
-          </ul>
-          <p className="small muted">Any response retires this proposal. Cairn will show a fresh review before anything can start.</p>
-        </section>
+        <ul className="task-card-risks" aria-label="Concerns to decide">
+          {action.risks.map((risk) => (
+            <li className="task-risk" key={risk.riskId}>
+              <p>{risk.text}</p>
+              <Pill kind="quiet" disabled={busy || !current}
+                onClick={() => void onSetAside(risk)}>Set aside</Pill>
+            </li>
+          ))}
+        </ul>
       ) : null}
       <div className="row task-card-actions">
-        <Pill kind="primary" disabled={busy || !current || action.risks.length > 0} onClick={onSend}>
-          Review dispatch
-        </Pill>
+        <button type="button" className="pill pill-primary"
+          disabled={busy || !current || action.risks.length > 0} onClick={onSend}>Review</button>
       </div>
+      <details className="task-card-details">
+        <summary>Details</summary>
+        <TaskIntentList request={action.request} context={action.context} heading="Task details" />
+      </details>
     </section>
   );
 }

@@ -116,6 +116,8 @@ let proseOnlySetAside = false;
 // before the stream reaches the gate simply lets it pass.
 let commentaryHeld = false;
 let commentaryGate = null;
+let initialProposalHeld = false;
+let initialProposalGate = null;
 let thirdProposalHeld = false;
 let thirdProposalGate = null;
 let answerHeld = false;
@@ -136,6 +138,23 @@ function releaseCommentary() {
 function commentaryGatePoint() {
   if (!commentaryHeld) return Promise.resolve();
   return new Promise((resolve) => { commentaryGate = resolve; });
+}
+
+function holdInitialProposal() {
+  initialProposalHeld = true;
+}
+
+function releaseInitialProposal() {
+  initialProposalHeld = false;
+  if (initialProposalGate !== null) {
+    initialProposalGate();
+    initialProposalGate = null;
+  }
+}
+
+function initialProposalGatePoint() {
+  if (!initialProposalHeld) return Promise.resolve();
+  return new Promise((resolve) => { initialProposalGate = resolve; });
 }
 
 function holdThirdProposal() {
@@ -186,6 +205,15 @@ function scriptFor(content) {
   if (content.includes("action-attributed")) {
     return { parts: [`I kept each source separate.\n\n\`\`\`cairn-task\n${ATTRIBUTED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
+  if (content.includes("explain every detail first")) {
+    return {
+      parts: [
+        `\`\`\`cairn-task\n${RISK_TASK_BLOCK}\n\`\`\``,
+        "\n\nChange the page title remains the outcome. Renaming it may break bookmarked links. Review will open the final task preview.",
+      ],
+      delayMs: DELAY_MS,
+    };
+  }
   if (content.includes("garble")) {
     return { parts: [`Here's the plan.\n\n\`\`\`cairn-task\n${GARBLED_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
@@ -209,7 +237,10 @@ function scriptFor(content) {
   }
   if (content.includes("set it aside and keep the task as proposed")) {
     if (proseOnlySetAside) {
-      return { parts: ["I carried that concern into the same task. The fresh review is ready."], delayMs: DELAY_MS };
+      // Deliberately violate the proposal copy budget. Main must replace this
+      // repeated detail with its own single acknowledgement before persisting
+      // or presenting the fresh proposal.
+      return { parts: ["I carried that concern forward. Change the page title remains the outcome, and renaming it may break bookmarked links. The new card is ready for Review."], delayMs: DELAY_MS };
     }
     return { parts: [`I removed that risk from the proposal.\n\n\`\`\`cairn-task\n${RISK_FREE_TASK_BLOCK}\n\`\`\``], delayMs: DELAY_MS };
   }
@@ -272,15 +303,16 @@ function sse(res, payload) {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
-async function streamReply(res, script, beforeDone) {
+async function streamReply(res, script, beforeDone, afterFirstPart) {
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
   const { parts, delayMs } = script;
-  for (const part of parts) {
-    sse(res, { choices: [{ delta: { content: part } }] });
+  for (let index = 0; index < parts.length; index += 1) {
+    sse(res, { choices: [{ delta: { content: parts[index] } }] });
+    if (index === 0 && afterFirstPart) await afterFirstPart();
     await sleep(delayMs);
   }
   if (beforeDone) await beforeDone();
@@ -319,7 +351,8 @@ export function start() {
           : content.includes("plain redirect is enough") || content.includes("set it aside and keep the task as proposed")
             ? answerGatePoint
             : undefined;
-        void streamReply(res, scriptFor(content), beforeDone);
+        const afterFirstPart = content.includes("explain every detail first") ? initialProposalGatePoint : undefined;
+        void streamReply(res, scriptFor(content), beforeDone, afterFirstPart);
       });
     });
     server.listen(0, "127.0.0.1", () => {
@@ -339,6 +372,8 @@ export function start() {
         setProseOnlySetAside: (enabled) => { proseOnlySetAside = enabled; },
         holdCommentary,
         releaseCommentary,
+        holdInitialProposal,
+        releaseInitialProposal,
         holdThirdProposal,
         releaseThirdProposal,
         holdAnswer,

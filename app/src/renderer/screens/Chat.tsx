@@ -847,6 +847,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       setStreamingText(streamingRef.current);
       return;
     }
+    if (event.kind === "replace") {
+      streamingRef.current = event.text ?? "";
+      setStreamingText(streamingRef.current);
+      return;
+    }
     if (event.kind === "done") {
       const settledFlight = inFlightRef.current;
       streamingRef.current = "";

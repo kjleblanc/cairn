@@ -138,10 +138,40 @@ test("one semantic intent list carries all three visible sources and keeps quota
 test("the proposal is a pure current-action view with no renderer-authored resolution", () => {
   assert.match(taskCard, /<TaskIntentList/);
   assert.match(taskCard, /risk\.riskId/);
-  assert.match(taskCard, /Review dispatch/);
+  assert.match(taskCard, /<button[^>]*className="pill pill-primary"[^>]*>[\s\S]*?Review<\/button>/);
+  assert.doesNotMatch(taskCard, /aria-label="Review dispatch"/);
   assert.match(taskCard, /disabled=\{busy \|\| !current \|\| action\.risks\.length > 0\}/);
   assert.ok(!taskCard.includes("useState"));
   assert.ok(!/const \[resolved|setResolved|task-chip-strike/.test(taskCard));
+});
+
+test("the proposal shows one decision and keeps its full evidence behind Details", () => {
+  const outcome = taskCard.indexOf("action.request.outcome.text");
+  const risks = taskCard.indexOf('className="task-card-risks"');
+  const actions = taskCard.indexOf('className="row task-card-actions"');
+  const details = taskCard.indexOf('<details className="task-card-details">');
+  const summary = taskCard.indexOf("<summary>Details</summary>", details);
+  const attributed = taskCard.indexOf("<TaskIntentList", summary);
+  assert.ok(outcome !== -1 && risks > outcome && actions > risks && details > actions
+      && summary > details && attributed > summary,
+    "the compact outcome, concern, action, and complete disclosure are not in decision order");
+  assert.match(taskCard, /action\.risks\.length === 0[\s\S]*?"Ready to review"[\s\S]*?action\.risks\.length === 1[\s\S]*?"One thing needs your call"/);
+  assert.match(taskCard, /heading="Task details"/);
+  assert.doesNotMatch(taskCard, /Any response retires this proposal|fresh review before anything can start/);
+  assert.match(css, /\.task-card-details > summary \{[^}]*cursor: pointer/);
+  assert.match(css, /\.task-card-outcome \{[^}]*font-weight:/);
+});
+
+test("main owns one concise acknowledgement for every settled task proposal", () => {
+  assert.match(conductorService, /const PROPOSAL_ACKNOWLEDGEMENT = "Here's the plan\."/);
+  assert.match(conductorService, /const SET_ASIDE_PENDING_ACKNOWLEDGEMENT = "Updating the plan\.\.\."/);
+  assert.match(conductorService, /const SET_ASIDE_ACKNOWLEDGEMENT = "I carried that concern forward\."/);
+  assert.match(conductorService, /nextAction\?\.kind === "task"[\s\S]*?text = setAsideReplacement === undefined \? PROPOSAL_ACKNOWLEDGEMENT : SET_ASIDE_ACKNOWLEDGEMENT/);
+  assert.match(conductorService, /setAsideReplacement !== undefined[\s\S]*?SET_ASIDE_PENDING_ACKNOWLEDGEMENT[\s\S]*?actionableTaskCandidate\(streamedCandidate, historySnapshot\.authenticatedSources\)[\s\S]*?kind: "replace", text: publicFull/);
+  assert.doesNotMatch(conductorService, /replyStreamingPreview|REPLY_STREAMING_PREVIEW_LIMIT/);
+  assert.match(conductorService, /const nextPublic = controlSafeStreamingText\(full\)/,
+    "ordinary conversational replies no longer use their unchanged streaming path");
+  assert.match(chat, /event\.kind === "replace"[\s\S]*?streamingRef\.current = event\.text \?\? ""[\s\S]*?setStreamingText\(streamingRef\.current\)/);
 });
 
 test("Chat sends exact authenticated question, defer, risk, and correction replies", () => {
