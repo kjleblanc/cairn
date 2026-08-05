@@ -1695,14 +1695,16 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               <textarea ref={composerRef} value={composer} onChange={(e) => setComposer(e.target.value)}
                 onKeyDown={onComposerKeyDown} placeholder="Talk with Cairn" rows={2}
                 disabled={taskBusy || restoringConversation || correctionPending || queueRetrying || conversationResetting} />
-              <Pill kind="primary" onClick={() => void sendComposer(composer)}
-                disabled={taskBusy || restoringConversation || correctionPending || queueRetrying
-                  || conversationResetting || !composer.trim()}>Send</Pill>
-            </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <Pill kind="quiet" disabled={restoringConversation || captureSettling || correctionPending
-                || queueRetrying || conversationResetting}
-                onClick={() => void newConversation()}>New conversation</Pill>
+              <div className="chat-composer-actions">
+                <button type="button" className="pill pill-quiet"
+                  disabled={restoringConversation || captureSettling || correctionPending
+                    || queueRetrying || conversationResetting}
+                  aria-label="New conversation"
+                  onClick={() => void newConversation()}>New</button>
+                <Pill kind="primary" onClick={() => void sendComposer(composer)}
+                  disabled={taskBusy || restoringConversation || correctionPending || queueRetrying
+                    || conversationResetting || !composer.trim()}>Send</Pill>
+              </div>
             </div>
           </>
         ) : null}

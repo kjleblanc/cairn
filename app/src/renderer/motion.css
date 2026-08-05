@@ -86,9 +86,9 @@
 
 /* Buttons respond under the pointer. Named classes only — town nodes are
    transform-positioned buttons and must keep their own transform.
-   `.chat-composer button` is deliberately absent: its only member is the Send
-   pill, and `.pill` in app.css now owns every pill's hover and press. Putting
-   it back would silently outrank that treatment, because this file loads last
+   `.chat-composer button` is deliberately absent: both composer actions are
+   pills, and `.pill` in app.css owns every pill's hover and press. Putting it
+   back would silently outrank that treatment, because this file loads last
    and the descendant selector is more specific. */
 .town-square-header button, .rail-action, .rail-collapse {
   transition: transform 140ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;

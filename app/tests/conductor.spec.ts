@@ -238,6 +238,55 @@ test.beforeEach(() => {
   rmSync(conductorFile(), { force: true });
 });
 
+test("New and Send share one narrow Cairn composer without changing their behavior", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-composer-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
+    const win = await app.firstWindow();
+    await win.setViewportSize({ width: 760, height: 720 });
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+
+    const composer = win.locator(".chat-composer");
+    const input = composer.getByPlaceholder("Talk with Cairn");
+    const startNew = composer.getByRole("button", { name: "New conversation" });
+    const send = composer.getByRole("button", { name: "Send", exact: true });
+    await expect(composer).toBeVisible();
+    await expect(composer.locator("button")).toHaveCount(2);
+    await expect(win.getByRole("button", { name: "New conversation" })).toHaveCount(1);
+    await expect(startNew).toHaveText("New");
+    await expect(send).toBeDisabled();
+    expect(await composer.evaluate((element) => {
+      const shell = element.getBoundingClientRect();
+      return [...element.querySelectorAll("textarea, button")].every((control) => {
+        const box = control.getBoundingClientRect();
+        return box.left >= shell.left - 1 && box.right <= shell.right + 1
+          && box.top >= shell.top - 1 && box.bottom <= shell.bottom + 1;
+      });
+    })).toBe(true);
+
+    await input.fill("Keep this first turn separate");
+    await input.press("Enter");
+    await waitStreamDone(win);
+    await expect(win.locator(".bubble-owner").filter({ hasText: "Keep this first turn separate" })).toBeVisible();
+
+    await input.fill("This unsent draft should stay local.");
+    await expect(send).toBeEnabled();
+    await startNew.click();
+    await expect(win.locator(".bubble-owner").filter({ hasText: "Keep this first turn separate" })).toHaveCount(0);
+    await expect(input).toHaveValue("This unsent draft should stay local.");
+
+    await input.fill("Change the page title");
+    await input.press("Enter");
+    await waitStreamDone(win);
+    await expect(win.locator(".bubble-owner").filter({ hasText: "Change the page title" })).toBeVisible();
+    await expect(composer).toBeVisible();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-182-cohesive-composer.png") });
+  } finally {
+    await app.close();
+  }
+});
+
 test("a live reply belongs to its project and reattaches after navigation", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-reattach-"));
   scaffold(project);
