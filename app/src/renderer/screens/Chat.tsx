@@ -300,11 +300,20 @@ function ResultCardView({ card, dir, onOpenRun }: { card: ResultCard; dir: strin
   const recordsPath = wroteRecords
     ? `docs/ai-work/tasks/${String(card.taskNumber).padStart(3, "0")}-report.md`
     : null;
+  const provenanceLine = card.disposition === "ERROR"
+    ? "Cairn could not complete verification"
+    : !wroteRecords
+      ? "Closed by Cairn before a task started"
+      : card.disposition === "DONE"
+        ? "Checked by Cairn after the builder finished"
+        : "Closed by Cairn when the task stopped";
 
   return (
-    <div className="card result-card">
+    <article className="card result-card"
+      aria-label={`${card.disposition} result receipt${wroteRecords ? ` for Task ${String(card.taskNumber).padStart(3, "0")}` : ""}`}>
       <ResultEvidence dir={dir} runId={card.evidenceRunId} />
-      <p className="card-title">result card — checked by Cairn, not written by the AI chat</p>
+      <p className="card-title">Cairn&apos;s receipt</p>
+      <p className="result-card-provenance">{provenanceLine}</p>
       <p className="result-card-headline">
         <span className={`result-card-disposition result-card-${card.disposition.toLowerCase()}`}>{card.disposition}</span>
         {code ? <span className="result-card-said"> — {codeInPlainWords(code)}</span> : null}
@@ -326,88 +335,134 @@ function ResultCardView({ card, dir, onOpenRun }: { card: ResultCard; dir: strin
       ) : null}
 
       {card.disposition !== "ERROR" && wroteRecords ? (
-        <ul className="result-card-facts">
-          {card.route ? <li>Who did the work: {card.route.adapterLabel} — {card.route.provider} / {card.route.model}</li> : null}
-          {card.protectedIntact !== null ? (
-            <li>Your starting work: {card.protectedIntact
-              ? "untouched"
-              : "CHANGED — the task stopped because of this, and the evidence was kept"}</li>
-          ) : null}
-          <li>
-            Files changed (checked with Git, not taken on faith):
-            {card.filesChanged.length === 0 ? " none" : (
-              <ul className="result-card-files">
-                {card.filesChanged.map((path) => <li key={path}><span className="mono">{path}</span></li>)}
-              </ul>
-            )}
-          </li>
-          <li>Saved snapshot (commit): {card.commit ?? "none — when a task stops, Cairn keeps the evidence for you but never saves it into your project's history"}</li>
-          {/* Cairn's own disclosure that a worker touched Cairn's own owned
-            * records and Cairn had to recover them. It is the loudest thing a
-            * card can carry, so it is never abbreviated away. */}
-          {card.recordRecovery ? <li className="result-card-recovery">{card.recordRecovery}</li> : null}
-          {card.evidenceSummary ? <li>{card.evidenceSummary}</li> : null}
-          {card.processFailure ? (
+        <section className="result-card-verification">
+          <h2 className="result-card-facts-title">What Cairn checked</h2>
+          <ul className="result-card-facts">
+            {card.protectedIntact !== null ? (
+              <li>Your starting work: {card.protectedIntact
+                ? "untouched"
+                : "CHANGED — the task stopped because of this, and the evidence was kept"}</li>
+            ) : null}
             <li>
-              The task process failed: <span className="mono">{card.processFailure.code}</span>. The raw evidence
-              stays on your own computer at: {card.processFailure.debugPath
-                ?? "unavailable (the folder for it could not be created)"}. It is never added to your project's
-              saved history.
+              Files changed (checked with Git, not taken on faith):
+              {card.filesChanged.length === 0 ? " none" : (
+                <ul className="result-card-files">
+                  {card.filesChanged.map((path) => <li key={path}><span className="mono">{path}</span></li>)}
+                </ul>
+              )}
             </li>
-          ) : null}
-        </ul>
+            <li>Saved snapshot (commit): {card.commit ?? "none — when a task stops, Cairn keeps the evidence for you but never saves it into your project's history"}</li>
+            {/* Cairn's own disclosure that a worker touched Cairn's own owned
+              * records and Cairn had to recover them. It is the loudest thing a
+              * card can carry, so it is never abbreviated away. */}
+            {card.recordRecovery ? <li className="result-card-recovery">{card.recordRecovery}</li> : null}
+            {card.processFailure ? (
+              <li>
+                The task process failed: <span className="mono">{card.processFailure.code}</span>. The raw evidence
+                stays on your own computer at: {card.processFailure.debugPath
+                  ?? "unavailable (the folder for it could not be created)"}. It is never added to your project's
+                saved history.
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+
+      {card.disposition !== "ERROR" && wroteRecords && (card.route || card.evidenceSummary) ? (
+        <details className="result-card-run-details">
+          <summary>
+            <span className="result-card-disclosure-heading">
+              <span className="result-card-disclosure-title">Run details</span>
+              <span className="result-card-disclosure-provenance">checked by Cairn</span>
+            </span>
+          </summary>
+          <ul className="result-card-run-facts">
+            {card.route ? <li>Who did the work: {card.route.adapterLabel} — {card.route.provider} / {card.route.model}</li> : null}
+            {card.evidenceSummary ? <li>{card.evidenceSummary}</li> : null}
+          </ul>
+        </details>
       ) : null}
 
       {card.disposition !== "ERROR" && wroteRecords ? (
-        <div className="result-card-claims">
-          <p className="small muted result-card-claims-label">Worker&apos;s account — Cairn checked the files above, but not these descriptions</p>
-          {card.claims ? (
-            <>
-              <h3 className="result-card-section-title">What was done</h3>
-              <p className="result-card-claims-text">{card.claims.summary}</p>
-              {Array.isArray(card.claims.changes) && card.claims.changes.length > 0 ? (
-                <ul className="result-card-detail-list">
-                  {card.claims.changes.map((change, index) => <li key={`${index}-${change}`}>{change}</li>)}
-                </ul>
-              ) : null}
-              <h3 className="result-card-section-title">What was checked</h3>
-              {Array.isArray(card.claims.checks) && card.claims.checks.length > 0 ? (
-                <ul className="result-card-detail-list">
-                  {card.claims.checks.map((check, index) => <li key={`${index}-${check.name}`}><strong>{check.name}:</strong> {check.result}</li>)}
-                </ul>
-              ) : <p className="result-card-claims-text">No checks were reported.</p>}
-              <h3 className="result-card-section-title">What to do next</h3>
-              <p className="result-card-claims-text">{card.claims.howToTry || "No trial steps were reported."}</p>
-              <h3 className="result-card-section-title">What still needs your judgment</h3>
-              <p className="result-card-claims-text">{card.claims.limitations || "The worker reported no remaining limitations."}</p>
-              <p className="small muted result-card-milestone">Milestone moved (worker&apos;s answer): {card.claims.milestone}</p>
-            </>
-          ) : (
-            <p className="result-card-claims-text">The worker didn&apos;t leave a readable summary of what it did.</p>
-          )}
-        </div>
+        <details className="result-card-claims">
+          <summary>
+            <span className="result-card-disclosure-heading">
+              <span className="result-card-disclosure-title">Builder&apos;s account</span>
+              <span className="result-card-disclosure-provenance">reported, not checked</span>
+            </span>
+            {card.claims ? (
+              <span className="result-card-claims-preview">{card.claims.summary}</span>
+            ) : (
+              <span className="result-card-claims-preview">No readable summary was reported.</span>
+            )}
+          </summary>
+          <div className="result-card-claims-body">
+            <p className="small muted result-card-claims-label">Cairn checked the files above, but not the builder&apos;s descriptions below.</p>
+            {card.claims ? (
+              <>
+                <h3 className="result-card-section-title">What the builder says it did</h3>
+                <p className="result-card-claims-text">{card.claims.summary}</p>
+                {Array.isArray(card.claims.changes) && card.claims.changes.length > 0 ? (
+                  <ul className="result-card-detail-list">
+                    {card.claims.changes.map((change, index) => <li key={`${index}-${change}`}>{change}</li>)}
+                  </ul>
+                ) : null}
+                <h3 className="result-card-section-title">Checks the builder reported</h3>
+                {Array.isArray(card.claims.checks) && card.claims.checks.length > 0 ? (
+                  <ul className="result-card-detail-list">
+                    {card.claims.checks.map((check, index) => <li key={`${index}-${check.name}`}><strong>{check.name}:</strong> {check.result}</li>)}
+                  </ul>
+                ) : <p className="result-card-claims-text">No checks were reported.</p>}
+                <h3 className="result-card-section-title">Builder&apos;s suggested next step</h3>
+                <p className="result-card-claims-text">{card.claims.howToTry || "No trial steps were reported."}</p>
+                <h3 className="result-card-section-title">Builder&apos;s remaining limitations</h3>
+                <p className="result-card-claims-text">{card.claims.limitations || "The worker reported no remaining limitations."}</p>
+                <p className="small muted result-card-milestone">Milestone moved (worker&apos;s answer): {card.claims.milestone}</p>
+              </>
+            ) : (
+              <p className="result-card-claims-text">The worker didn&apos;t leave a readable summary of what it did.</p>
+            )}
+          </div>
+        </details>
       ) : null}
 
       {card.acceptedRequest === undefined && wroteRecords ? (
-        <section className="result-card-request-context">
-          <h2>What you asked for</h2>
-          <p>This older result did not record where its requirements came from.</p>
-        </section>
+        <details className="result-card-request-context">
+          <summary>
+            <span className="result-card-disclosure-heading">
+              <span className="result-card-disclosure-title">Original request</span>
+              <span className="result-card-disclosure-provenance">reference, not a verified result</span>
+            </span>
+          </summary>
+          <div className="result-card-request-body">
+            <h2>What you asked for</h2>
+            <p>This older result did not record where its requirements came from.</p>
+          </div>
+        </details>
       ) : null}
       {card.acceptedRequest !== undefined && card.acceptedRequest !== null ? (
-        <div className="result-card-request-context">
-          <p className="small muted">Request context — shown for reference, not a verified result fact</p>
-          <TaskIntentList request={card.acceptedRequest} heading="What you asked for" />
-        </div>
+        <details className="result-card-request-context">
+          <summary>
+            <span className="result-card-disclosure-heading">
+              <span className="result-card-disclosure-title">Original request</span>
+              <span className="result-card-disclosure-provenance">reference, not a verified result</span>
+            </span>
+          </summary>
+          <div className="result-card-request-body">
+            <TaskIntentList request={card.acceptedRequest} heading="What you asked for" />
+          </div>
+        </details>
       ) : null}
 
-      <div className="row result-card-actions" style={{ marginTop: 12 }}>
-        <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
-      </div>
-      <p className="small mono result-card-path">
-        {recordsPath ?? "Anything this run kept is in your project's docs/ai-work folder."}
-      </p>
-    </div>
+      <footer className="result-card-footer">
+        <div className="row result-card-actions">
+          <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
+        </div>
+        <p className="small mono result-card-path">
+          {recordsPath ?? "Anything this run kept is in your project's docs/ai-work folder."}
+        </p>
+      </footer>
+    </article>
   );
 }
 

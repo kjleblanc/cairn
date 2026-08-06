@@ -22,9 +22,9 @@ function rule(selector: string): string {
 }
 
 test("checked pictures are the first content in an eligible result card", () => {
-  const card = chat.indexOf('<div className="card result-card">');
+  const card = chat.indexOf('<article className="card result-card"');
   const evidence = chat.indexOf("<ResultEvidence", card);
-  const title = chat.indexOf('<p className="card-title">result card', card);
+  const title = chat.indexOf('<p className="card-title">Cairn&apos;s receipt', card);
   assert.ok(card !== -1 && evidence > card && title > evidence,
     "the result card does not lead with its checked pictures");
   assert.match(chat, /<ResultEvidence dir=\{dir\} runId=\{card\.evidenceRunId\} \/>/);

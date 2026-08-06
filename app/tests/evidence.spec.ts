@@ -148,7 +148,19 @@ async function fakeProvider(): Promise<{ server: Server; baseUrl: string; bodies
     request.on("end", () => {
       bodies.push(Buffer.concat(chunks).toString("utf8"));
       const content = bodies.length === 1
-        ? `I can make that one visible result.\n\n\`\`\`cairn-task\n${JSON.stringify({ outcome: OUTCOME, details: "", concerns: [], notes: "" })}\n\`\`\``
+        ? `\`\`\`cairn-task\n${JSON.stringify({
+          intent: {
+            version: "cairn-task-intent/v1",
+            outcome: {
+              source: "owner-stated",
+              text: OUTCOME,
+              ownerQuote: "Propose the visible evidence fixture task.",
+            },
+            requirements: [],
+            context: [],
+          },
+          risks: [],
+        })}\n\`\`\`\n\nI can make that one visible result.`
         : "The checked result is ready.";
       response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
       response.end(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`);
@@ -252,7 +264,21 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
     writeFileSync(fakeCodex.release, "finish\n");
     const card = win.locator(".result-card");
     await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card).toHaveAccessibleName("DONE result receipt for Task 001");
+    await expect(card.locator(":scope > .card-title")).toHaveText("Cairn's receipt");
+    await expect(card.locator(".result-card-provenance")).toHaveText("Checked by Cairn after the builder finished");
+    const runDetails = card.locator(".result-card-run-details");
+    const claims = card.locator(".result-card-claims");
+    const request = card.locator(".result-card-request-context");
+    await expect(runDetails).not.toHaveAttribute("open", "");
+    await expect(claims).not.toHaveAttribute("open", "");
+    await expect(request).not.toHaveAttribute("open", "");
+    await expect(runDetails.locator(".result-card-run-facts")).toBeHidden();
+    await expect(claims.locator(".result-card-claims-body")).toBeHidden();
+    await expect(request.locator(".result-card-request-body")).toBeHidden();
     await expect.poll(() => currentRecord(project)?.value.completedAt, { timeout: 30_000 }).not.toBeNull();
+    await expect.poll(() => currentRecord(project)?.value.captures.some((capture) =>
+      capture.boundary === "done"), { timeout: 30_000 }).toBe(true);
     const terminalRecord = currentRecord(project);
     expect(terminalRecord?.value.disposition).toBe("DONE");
     expect(terminalRecord?.value.captures.map((capture) => capture.boundary)).toContain("done");
@@ -280,8 +306,12 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
     const wideColumns = await evidence.locator(".result-evidence-grid").evaluate((element) =>
       getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length);
     expect(wideColumns).toBe(2);
+    await setWindowSize(app, 1304, 1000);
     await evidence.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-173-evidence-wide.png") });
+    await card.locator(":scope > .card-title").evaluate((title) =>
+      title.scrollIntoView({ block: "start", behavior: "auto" }));
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-188-receipt-collapsed.png") });
 
     await evidence.getByRole("button", { name: "Open the local album" }).click();
     const album = win.locator(".evidence-album");
@@ -321,8 +351,40 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
     expect(narrowColumns).toBe(1);
     const narrowOverflow = await evidence.evaluate((element) => element.scrollWidth - element.clientWidth);
     expect(narrowOverflow).toBeLessThanOrEqual(1);
+    const receiptLayout = await card.evaluate((element) => {
+      const receipt = element.getBoundingClientRect();
+      const controls = [...element.querySelectorAll<HTMLElement>("button, summary")]
+        .filter((control) => getComputedStyle(control).display !== "none")
+        .map((control) => control.getBoundingClientRect());
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        controlsInside: controls.every((control) =>
+          control.left >= receipt.left - 1 && control.right <= receipt.right + 1),
+        animationName: getComputedStyle(element).animationName,
+      };
+    });
+    expect(receiptLayout.overflow).toBeLessThanOrEqual(1);
+    expect(receiptLayout.controlsInside).toBe(true);
+    expect(receiptLayout.animationName).toBe("none");
+    await setWindowSize(app, 760, 1000);
     await evidence.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-173-evidence-narrow.png") });
+    await card.locator(":scope > .card-title").evaluate((title) =>
+      title.scrollIntoView({ block: "start", behavior: "auto" }));
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-188-receipt-compact.png") });
+
+    await claims.locator(":scope > summary").click();
+    await request.locator(":scope > summary").click();
+    await expect(claims.locator(".result-card-claims-body")).toBeVisible();
+    await expect(request.locator(".result-card-request-body")).toBeVisible();
+    const expandedOverflow = await card.evaluate((element) => element.scrollWidth - element.clientWidth);
+    expect(expandedOverflow).toBeLessThanOrEqual(1);
+    await claims.locator(":scope > summary").evaluate((summary) =>
+      summary.scrollIntoView({ block: "start", behavior: "auto" }));
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-188-receipt-provenance.png") });
+    await request.locator(":scope > summary").click();
+    await claims.locator(":scope > summary").click();
+
     await evidence.getByRole("button", { name: "Open the local album" }).click();
     const narrowAlbum = win.locator(".evidence-album");
     await expect(narrowAlbum).toBeVisible();

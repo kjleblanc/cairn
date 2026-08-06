@@ -1026,7 +1026,7 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   expect(await win.evaluate((dir) => window.cairn.taskCurrent(dir), project)).toBeNull();
   expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
 
-  const riskChip = taskCard.locator(".task-chip-risk");
+  const riskChip = taskCard.locator(".task-risk");
   await riskChip.getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await expect(sendToDispatch).toBeEnabled();
@@ -1178,7 +1178,7 @@ test("a correction during delayed proposal routing invalidates the unpublished p
 
   await sendChat(win, "Change the page title");
   await waitStreamDone(win);
-  await win.locator(".task-card .task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await win.locator(".task-card .task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
   const action = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
@@ -1242,7 +1242,7 @@ test("the full loop: a proposed task with a risk chip dispatches inline and land
   const sendToDispatch = taskCard.getByRole("button", { name: "Review" });
   await expect(sendToDispatch).toBeDisabled();
 
-  const riskChip = taskCard.locator(".task-chip-risk");
+  const riskChip = taskCard.locator(".task-risk");
   await expect(riskChip).toContainText("Renaming the title may break bookmarked links.");
   await riskChip.getByRole("button", { name: "Set aside" }).click();
   await expect(win.getByText("I understand the risk you raised — set it aside and keep the task as proposed.")).toBeVisible();
@@ -1314,7 +1314,7 @@ test("the envelope posts a DONE result card into the conversation, and the card 
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click({ noWaitAfter: true });
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click({ noWaitAfter: true });
   await waitStreamDone(win);
   // This opens an in-app panel; it never navigates the Electron page. Skip
   // Playwright's navigation waiter and prove the intended result explicitly
@@ -1326,14 +1326,18 @@ test("the envelope posts a DONE result card into the conversation, and the card 
 
   const card = win.locator(".result-card");
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await expect(card).toContainText("checked by Cairn, not written by the AI chat");
+  await expect(card).toHaveAccessibleName("DONE result receipt for Task 001");
+  await expect(card.locator(":scope > .card-title")).toHaveText("Cairn's receipt");
+  await expect(card.locator(".result-card-provenance")).toHaveText("Checked by Cairn after the builder finished");
   await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
   await expect(card).toContainText("Task 001");
   // What changed is Git's answer, and it is labeled as Git's answer.
   await expect(card).toContainText("Files changed (checked with Git, not taken on faith)");
   await expect(card).toContainText("docs/ai-work/LOG.md");
-  // The worker's own words only ever appear under a heading that calls them claims.
-  await expect(card).toContainText("Worker's account — Cairn checked the files above, but not these descriptions");
+  // The builder's own words sit behind a native disclosure that calls out
+  // their different provenance before anything is opened.
+  await expect(card.locator(".result-card-claims > summary")).toContainText("Builder's account");
+  await expect(card.locator(".result-card-claims > summary")).toContainText("reported, not checked");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
 
   // A reload throws away every scrap of renderer state. What comes back was
@@ -2465,11 +2469,14 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
 
   const card = win.locator(".result-card");
   await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card).toHaveAccessibleName("STOPPED result receipt for Task 001");
+  await expect(card.locator(".result-card-provenance")).toHaveText("Closed by Cairn when the task stopped");
   await expect(card.locator(".result-card-disposition")).toHaveText("STOPPED");
   await expect(card).toContainText("CANCELLED_BY_OWNER");
   await expect(card).toContainText("Task 001");
   await expect(card).toContainText("Saved snapshot (commit): none — when a task stops, Cairn keeps the evidence for you but never saves it into your project's history");
-  await expect(card).toContainText("Worker's account — Cairn checked the files above, but not these descriptions");
+  await expect(card.locator(".result-card-claims > summary")).toContainText("Builder's account");
+  await expect(card.locator(".result-card-claims > summary")).toContainText("reported, not checked");
   await expect(card).toContainText("docs/ai-work/tasks/001-report.md");
   // The card carries no DONE anywhere, and the product change really did not land.
   await expect(card).not.toContainText("DONE");
@@ -2613,9 +2620,41 @@ test("a worker's claims render only inside the card's claims block, never as a v
   // Cairn's facts; the worker's own sentence and milestone answer stay inside
   // that labeled container, never in the verified fact list.
   const claims = card.locator(".result-card-claims");
-  await expect(claims).toContainText("Worker's account — Cairn checked the files above, but not these descriptions");
-  await expect(claims).toContainText("Added the visible result.");
-  await expect(claims).toContainText("Milestone moved (worker's answer): YES");
+  const claimsSummary = claims.locator(":scope > summary");
+  const claimsBody = claims.locator(".result-card-claims-body");
+  const request = card.locator(".result-card-request-context");
+  const requestSummary = request.locator(":scope > summary");
+  const runButton = card.getByRole("button", { name: "Open the run screen" });
+  await expect(claims).not.toHaveAttribute("open", "");
+  await expect(request).not.toHaveAttribute("open", "");
+  await expect(claimsBody).toBeHidden();
+  await expect(request.locator(".result-card-request-body")).toBeHidden();
+  await expect(claimsSummary).toContainText("Builder's account");
+  await expect(claimsSummary).toContainText("reported, not checked");
+
+  // Keyboard focus and native disclosure behavior stay intact. Returning with
+  // Shift+Tab puts the summary in keyboard modality before checking its ring.
+  await claimsSummary.focus();
+  await win.keyboard.press("Tab");
+  await win.keyboard.press("Shift+Tab");
+  await expect(claimsSummary).toBeFocused();
+  const disclosureFocus = await claimsSummary.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { style: style.outlineStyle, width: style.outlineWidth };
+  });
+  expect(disclosureFocus.style).toBe("solid");
+  expect(Number.parseFloat(disclosureFocus.width)).toBeGreaterThanOrEqual(2);
+  await win.keyboard.press("Enter");
+  await expect(claims).toHaveAttribute("open", "");
+  await expect(claimsBody).toBeVisible();
+  await expect(claimsBody).toContainText("Added the visible result.");
+  await expect(claimsBody).toContainText("Milestone moved (worker's answer): YES");
+  await win.keyboard.press("Enter");
+  await expect(claimsBody).toBeHidden();
+  await win.keyboard.press("Tab");
+  await expect(requestSummary).toBeFocused();
+  await win.keyboard.press("Tab");
+  await expect(runButton).toBeFocused();
   await expect(card.locator(".result-card-facts")).not.toContainText("Added the visible result.");
 
   // And the verified side is Git's, in the same card: the file the worker
@@ -2743,7 +2782,7 @@ test("the conductor comments on the card the envelope just posted, and the comme
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
@@ -2819,7 +2858,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
@@ -2903,7 +2942,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
@@ -3214,7 +3253,7 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
@@ -3396,7 +3435,7 @@ test("a refused push reports the real reason and leaves the project exactly as i
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
@@ -3488,7 +3527,7 @@ test("the comment's follow-up suggestions render as chips, and a tap sends one a
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");

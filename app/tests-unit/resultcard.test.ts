@@ -780,17 +780,29 @@ test("a conversation whose first turn is a result card previews as Result card",
 });
 
 test("the desktop card keeps accepted request context after claims with honest compatibility states", () => {
-  const card = CHAT_SOURCE.indexOf('<div className="card result-card">');
-  const evidence = CHAT_SOURCE.indexOf("<ResultEvidence", card);
-  const verified = CHAT_SOURCE.indexOf('className="result-card-facts"', card);
-  const claims = CHAT_SOURCE.indexOf('className="result-card-claims"', card);
-  const request = CHAT_SOURCE.indexOf('<TaskIntentList request={card.acceptedRequest} heading="What you asked for"', card);
-  const actions = CHAT_SOURCE.indexOf('className="row result-card-actions"', card);
-  assert.ok(card !== -1 && evidence > card && verified > evidence && claims > verified && request > claims && actions > request,
+  const start = CHAT_SOURCE.indexOf("function ResultCardView");
+  const end = CHAT_SOURCE.indexOf("/** Layout A", start);
+  const resultView = CHAT_SOURCE.slice(start, end);
+  const card = resultView.indexOf('<article className="card result-card"');
+  const evidence = resultView.indexOf("<ResultEvidence", card);
+  const verified = resultView.indexOf('className="result-card-facts"', card);
+  const recovery = resultView.indexOf('className="result-card-recovery"', card);
+  const processFailure = resultView.indexOf("card.processFailure ?", card);
+  const runDetails = resultView.indexOf('<details className="result-card-run-details">', card);
+  const claims = resultView.indexOf('<details className="result-card-claims">', card);
+  const request = resultView.indexOf('<details className="result-card-request-context">', claims);
+  const intent = resultView.indexOf('<TaskIntentList request={card.acceptedRequest} heading="What you asked for"', request);
+  const footer = resultView.indexOf('<footer className="result-card-footer">', request);
+  const actions = resultView.indexOf('className="row result-card-actions"', footer);
+  assert.ok(card !== -1 && evidence > card && verified > evidence && recovery > verified
+    && processFailure > recovery && runDetails > processFailure && claims > runDetails && request > claims
+    && intent > request && footer > intent && actions > footer,
     "result order must remain pictures, verified facts, worker claims, request context, actions");
-  assert.match(CHAT_SOURCE, /card\.acceptedRequest === undefined && wroteRecords/);
-  assert.match(CHAT_SOURCE, /This older result did not record where its requirements came from\./);
-  assert.match(CHAT_SOURCE, /card\.acceptedRequest !== undefined && card\.acceptedRequest !== null/);
-  assert.ok(!/card\.disposition !== "ERROR"[^?]*\?[\s\S]{0,120}<TaskIntentList request=\{card\.acceptedRequest\}/.test(CHAT_SOURCE),
+  assert.match(resultView, /<details className="result-card-claims">\s*<summary>/);
+  assert.match(resultView, /<details className="result-card-request-context">\s*<summary>/);
+  assert.match(resultView, /card\.acceptedRequest === undefined && wroteRecords/);
+  assert.match(resultView, /This older result did not record where its requirements came from\./);
+  assert.match(resultView, /card\.acceptedRequest !== undefined && card\.acceptedRequest !== null/);
+  assert.ok(!/card\.disposition !== "ERROR"[^?]*\?[\s\S]{0,120}<TaskIntentList request=\{card\.acceptedRequest\}/.test(resultView),
     "an accepted ERROR must not be excluded from request context");
 });

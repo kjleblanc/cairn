@@ -190,6 +190,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   cursor: pointer; text-align: left;
 }
 .result-card-folded:hover { background: var(--card); color: var(--card-ink); }
+.result-card-folded:focus-visible { outline: 2px solid var(--garden-cyan); outline-offset: 2px; }
 .result-card-folded-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-card-folded-hint { flex-shrink: 0; font-size: .74rem; }
 /* Task 157 (Cairn's follow-up suggestions): a small labeled row of tappable
@@ -811,20 +812,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   border: 0; border-radius: 10px 2px 3px 10px; box-shadow: none;
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
 }
-.chat-column-villager .result-card,
 .chat-column-villager .question-card,
 .chat-column-villager .task-card,
 .chat-column-villager .push-confirm,
 .chat-column-villager .dispatch-panel { border-radius: 22px; }
-.chat-column-villager .result-card-claims,
-.chat-column-villager .result-card-request-context,
 .chat-column-villager .task-intent-row,
 .chat-column-villager .task-risk,
 .chat-column-villager .task-card-details,
 .chat-column-villager .task-chip { border-radius: 16px; }
-/* Task 187's current proposal is one annotated folio. The envelope/result and
-   concrete dispatch pause deliberately keep their established card treatment;
-   those evidence-heavy surfaces need their own hierarchy pass. */
+/* Task 187's current proposal is one annotated folio. The concrete dispatch
+   pause deliberately keeps its established card treatment; Task 188 gives the
+   envelope result its own honest receipt hierarchy below. */
 .chat-column-villager .task-card {
   position: relative; flex-shrink: 0; overflow: visible; padding: 17px 18px 14px 21px;
   border: 0; border-radius: 5px 9px 7px 4px; box-shadow: none;
@@ -890,14 +888,172 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .task-card .task-intent-cairn-chosen {
   border-left-color: rgb(246 236 225 / 18%); background: rgb(246 236 225 / 3%);
 }
-/* The disposition chips. DONE's moss and its ink are verbatim from the
-   approved mockup, as is STOPPED's amber pair (the mockup's own warm button).
-   ERROR has no mockup precedent: its coral is approved, its ink #4a201c is
-   derived the same way the mockup derives its own — the chip colour, heavily
-   darkened. That is the ONE derived value in this plan; look at it. */
-.chat-column-villager .result-card-done { background: var(--pond-done); color: #1e2e18; }
-.chat-column-villager .result-card-stopped { background: var(--pond-task); color: #4a3520; }
-.chat-column-villager .result-card-error { background: var(--pond-stop); color: #4a201c; }
+/* Result states keep the pond's approved semantic colours, but Task 188 uses
+   them as printed words and geometric marks rather than another row of pills. */
+.chat-column-villager .result-card-done { background: transparent; color: var(--pond-done); }
+.chat-column-villager .result-card-stopped { background: transparent; color: var(--pond-task); }
+.chat-column-villager .result-card-error { background: transparent; color: var(--pond-stop); }
+/* Task 188: the envelope closes a run with one paper receipt, not a compact
+   dashboard. Pictures and Cairn-checked facts stay open; the builder's account
+   and original request remain complete behind separate native disclosures. */
+.chat-column-villager .result-card {
+  position: relative; flex-shrink: 0; overflow: visible; min-width: 0;
+  padding: 18px 18px 15px 21px; border: 0; border-radius: 5px 9px 7px 4px;
+  box-shadow: none;
+  background-color: rgb(246 236 225 / 3%);
+  background-image:
+    var(--paper-grain),
+    linear-gradient(108deg, rgb(163 221 208 / 7%), transparent 58%);
+  background-size: 160px 160px, auto;
+  background-blend-mode: soft-light, normal;
+}
+.chat-column-villager .result-card::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 2px; border-radius: 0 2px 2px 0;
+  background: var(--garden-cyan); opacity: .76;
+}
+.chat-column-villager .result-card:has(.result-card-stopped)::before { background: var(--garden-amber); }
+.chat-column-villager .result-card:has(.result-card-error)::before { background: var(--pond-stop); }
+.chat-column-villager .result-card > .card-title {
+  margin: 0; color: var(--garden-cyan); font-size: .76rem; letter-spacing: .075em;
+  text-transform: uppercase;
+}
+.chat-column-villager .result-card-provenance {
+  margin: 3px 0 10px; color: var(--lantern-soft); font-size: .76rem; line-height: 1.35;
+}
+.chat-column-villager .result-card-headline {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 6px;
+  margin: 0 0 12px; color: var(--lantern-ink); font-size: 1rem;
+}
+.chat-column-villager .result-card-headline,
+.chat-column-villager .result-card-headline > *,
+.chat-column-villager .result-card-code { min-width: 0; overflow-wrap: anywhere; }
+.chat-column-villager .result-card-disposition {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0;
+  border-radius: 0; background: transparent; font-size: .92rem; letter-spacing: .08em;
+}
+.chat-column-villager .result-card-disposition::before {
+  content: ""; width: 8px; height: 2px; border-radius: 2px; background: currentColor;
+}
+.chat-column-villager .result-card-done::before {
+  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+}
+.chat-column-villager .result-card-stopped::before {
+  width: 9px; height: 2px; border-radius: 0; background: currentColor;
+}
+.chat-column-villager .result-card-error::before {
+  width: 7px; height: 7px; border: 2px double currentColor;
+  border-radius: 0; background: transparent;
+}
+.chat-column-villager .result-card-code { margin: -8px 0 10px; }
+.chat-column-villager .result-card-verification { min-width: 0; margin-top: 2px; }
+.chat-column-villager .result-card-facts-title {
+  margin: 0 0 5px; color: var(--lantern-soft); font-size: .78rem;
+  font-weight: 650; letter-spacing: .04em;
+}
+.chat-column-villager .result-card-facts {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0;
+}
+.chat-column-villager .result-card-facts > li {
+  min-width: 0; padding: 7px 2px; border-top: 1px solid rgb(246 236 225 / 8%);
+  overflow-wrap: anywhere;
+}
+.chat-column-villager .result-card-files { margin-top: 4px; }
+.chat-column-villager .result-card-recovery {
+  padding-left: 10px; border-left: 2px solid var(--pond-stop);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--pond-stop) 9%, transparent), transparent 70%);
+}
+.chat-column-villager .result-card-claims {
+  min-width: 0; margin: 11px 0 0; padding: 0;
+  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
+  border-radius: 0; background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .result-card-run-details {
+  min-width: 0; margin: 11px 0 0; padding: 0;
+  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
+  border-radius: 0; background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .result-card-request-context {
+  min-width: 0; margin: 11px 0 0; padding: 0;
+  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
+  border-radius: 0; background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .result-card details > summary {
+  min-width: 0; padding: 10px 2px 9px; color: var(--lantern-soft);
+  cursor: pointer; overflow-wrap: anywhere;
+}
+.chat-column-villager .result-card details > summary:hover { color: var(--lantern-ink); }
+.chat-column-villager .result-card details > summary:focus-visible {
+  outline: 2px solid var(--garden-cyan); outline-offset: 2px;
+}
+.chat-column-villager .result-card details[open] > summary { color: var(--lantern-ink); }
+.chat-column-villager .result-card-disclosure-heading {
+  display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px;
+}
+.chat-column-villager .result-card-disclosure-title { color: inherit; font-weight: 700; }
+.chat-column-villager .result-card-disclosure-provenance {
+  color: var(--garden-cyan); font-size: .72rem; font-weight: 650; letter-spacing: .025em;
+}
+.chat-column-villager .result-card-claims-preview {
+  display: -webkit-box; margin: 4px 0 0; overflow: hidden;
+  color: var(--lantern-ink); font-size: .9rem; line-height: 1.42;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.chat-column-villager .result-card details[open] > summary .result-card-claims-preview { display: none; }
+.chat-column-villager .result-card-claims-body,
+.chat-column-villager .result-card-request-body {
+  min-width: 0; margin: 0 0 8px 3px; padding: 2px 4px 6px 13px;
+  border-left: 2px solid rgb(246 236 225 / 11%); overflow-wrap: anywhere;
+}
+.chat-column-villager .result-card-run-facts {
+  list-style: none; min-width: 0; margin: 0 0 8px 3px; padding: 2px 4px 6px 13px;
+  border-left: 2px solid rgb(246 236 225 / 11%); overflow-wrap: anywhere;
+}
+.chat-column-villager .result-card-run-facts > li { padding: 6px 0; }
+.chat-column-villager .result-card-run-facts > li + li {
+  border-top: 1px solid rgb(246 236 225 / 8%);
+}
+.chat-column-villager .result-card-claims-label { color: var(--garden-cyan); }
+.chat-column-villager .result-card-request-body .task-intent { margin-top: 2px; }
+.chat-column-villager .result-card-request-body .task-intent-row {
+  padding: 8px 0 8px 12px; border: 0; border-left: 2px solid rgb(246 236 225 / 16%);
+  border-radius: 0; background: transparent;
+  color: var(--lantern-ink);
+}
+.chat-column-villager .result-card-request-body .task-intent-owner-stated {
+  border-left-color: var(--garden-cyan); background: transparent;
+}
+.chat-column-villager .result-card-request-body .task-intent-owner-stated .muted {
+  color: var(--garden-cyan);
+}
+.chat-column-villager .result-card-request-body .task-intent-owner-unsure {
+  border-left-color: var(--garden-amber); background: transparent;
+}
+.chat-column-villager .result-card-request-body .task-intent-cairn-chosen {
+  border-left-color: rgb(246 236 225 / 16%); background: transparent;
+}
+.chat-column-villager .result-card-footer {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px 12px; margin-top: 11px; padding-top: 10px;
+  border-top: 1px solid rgb(246 236 225 / 10%);
+}
+.chat-column-villager .result-card-actions { margin: 0; }
+.chat-column-villager .result-card-path {
+  flex: 1 1 190px; min-width: 0; margin: 0; text-align: right;
+}
+.chat-column-villager .result-card .result-evidence-figure img { border-radius: 5px 8px 6px 4px; }
+.chat-column-villager .result-card .result-evidence { margin-bottom: 12px; padding-bottom: 12px; }
+.chat-column-villager .result-card .result-evidence-heading { flex-wrap: wrap; }
+.chat-column-villager .result-card .result-evidence-heading > * { min-width: 0; }
+.chat-column-villager .result-card .result-evidence-local {
+  padding: 2px 0 2px 8px; border-left: 1px solid var(--line);
+  border-radius: 0; background: transparent;
+}
+@media (max-width: 620px) {
+  .chat-column-villager .result-card { padding: 14px 12px 12px 16px; }
+  .chat-column-villager .result-card-footer { align-items: flex-start; }
+  .chat-column-villager .result-card-path { flex-basis: 100%; text-align: left; }
+}
 .chat-column-villager .chat-composer {
   border-radius: 15px 18px 14px 16px;
   background-color: rgb(246 236 225 / 6%);

@@ -123,7 +123,7 @@ test("reduced motion WINS over the lantern's entrance, rather than merely naming
     "the entrance is declared after the last reduced-motion block, so it wins");
 });
 
-test("each disposition chip wears its own approved colour", () => {
+test("each receipt disposition word keeps its approved pond colour", () => {
   for (const [selector, token] of [
     [".chat-column-villager .result-card-done", "var(--pond-done)"],
     [".chat-column-villager .result-card-stopped", "var(--pond-task)"],
