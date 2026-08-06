@@ -36,20 +36,21 @@ test("the cast springs when touched", () => {
   assert.ok(css.includes(".town-node:active .town-face"), "the cast does not compress when touched");
 });
 
-test("suggestions stagger in and slide on hover", () => {
-  assert.ok(css.includes("@keyframes lantern-arrive"), "there is no arrival to stagger");
-  for (const nth of [1, 2, 3, 4]) {
+test("suggestion notes settle in gently and respond without scaling", () => {
+  assert.ok(css.includes("@keyframes followup-note-arrive"), "there is no restrained note arrival");
+  for (const nth of [1, 2, 3]) {
     assert.ok(
-      css.includes(`.followup-chip:nth-child(${nth})`),
+      css.includes(`.followup-note:nth-child(${nth})`),
       `suggestion ${nth} does not take its own turn`,
     );
   }
-  assert.ok(rule(".followup-chip:hover:not(:disabled)").includes("translateX(5px)"),
-    "a suggestion does not slide under the pointer");
+  const hover = rule(".chat-column-villager .followup-note:hover:not(:disabled)");
+  assert.ok(hover.includes("translateX(2px)") && !hover.includes("scale("),
+    "a suggestion does not make its restrained paper response");
   // `both` would leave the final keyframe's `transform: none` pinned over the
   // hover slide forever. `backwards` fills only the delay, which is the half
   // the stagger actually needs.
-  assert.ok(/animation:[^;]*lantern-arrive[^;]*backwards/.test(css),
+  assert.ok(/animation:[^;]*followup-note-arrive[^;]*backwards/.test(css),
     "the staggered arrival would freeze the hover slide");
 });
 
@@ -77,7 +78,7 @@ test("every added motion stops for reduced motion", () => {
   }
   assert.notEqual(end, -1, "app.css's reduced-motion block never closes");
   const reduced = css.slice(start, end);
-  for (const selector of [".pill", ".town-face", ".followup-chip"]) {
+  for (const selector of [".pill", ".town-face", ".followup-note"]) {
     assert.ok(reduced.includes(selector), `${selector} keeps moving under reduced motion`);
   }
   // The rule is the same FINAL STATE, not merely less motion: a pill must
@@ -88,7 +89,7 @@ test("every added motion stops for reduced motion", () => {
   for (const selector of [
     ".pill:hover:not(:disabled)",
     ".town-node:hover .town-face",
-    ".followup-chip:hover:not(:disabled)",
+    ".followup-note:hover:not(:disabled)",
   ]) {
     assert.ok(reduced.includes(selector), `${selector} keeps its transform under reduced motion`);
   }

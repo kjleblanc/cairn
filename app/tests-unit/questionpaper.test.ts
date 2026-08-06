@@ -124,7 +124,7 @@ test("the late compact cascade stacks long response content without travel", () 
 
 test("question paper adds no decorative motion and final reduced motion wins", () => {
   const taskStart = css.indexOf("/* Task 192:");
-  const sliceEnd = css.indexOf("/* Reduced motion, part two", taskStart);
+  const sliceEnd = css.indexOf("/* Task 193:", taskStart);
   const taskCss = css.slice(taskStart, sliceEnd);
   assert.ok(taskStart !== -1 && sliceEnd > taskStart, "the Task 192 paper slice is missing");
   assert.doesNotMatch(taskCss, /@keyframes|animation:/, "question paper adds decorative travel");

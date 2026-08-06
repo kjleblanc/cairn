@@ -169,8 +169,8 @@ test("main owns one concise acknowledgement for every settled task proposal", ()
   assert.match(conductorService, /nextAction\?\.kind === "task"[\s\S]*?text = setAsideReplacement === undefined \? PROPOSAL_ACKNOWLEDGEMENT : SET_ASIDE_ACKNOWLEDGEMENT/);
   assert.match(conductorService, /setAsideReplacement !== undefined[\s\S]*?SET_ASIDE_PENDING_ACKNOWLEDGEMENT[\s\S]*?actionableTaskCandidate\(streamedCandidate, historySnapshot\.authenticatedSources\)[\s\S]*?kind: "replace", text: publicFull/);
   assert.doesNotMatch(conductorService, /replyStreamingPreview|REPLY_STREAMING_PREVIEW_LIMIT/);
-  assert.match(conductorService, /const nextPublic = controlSafeStreamingText\(full\)/,
-    "ordinary conversational replies no longer use their unchanged streaming path");
+  assert.match(conductorService, /const nextPublic = followupSafeStreamingText\(controlSafeStreamingText\(full\)\)/,
+    "ordinary replies and commentary must share the complete private-control-safe streaming projection");
   assert.match(chat, /event\.kind === "replace"[\s\S]*?streamingRef\.current = event\.text \?\? ""[\s\S]*?setStreamingText\(streamingRef\.current\)/);
 });
 

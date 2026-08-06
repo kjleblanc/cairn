@@ -193,32 +193,29 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-folded:focus-visible { outline: 2px solid var(--garden-cyan); outline-offset: 2px; }
 .result-card-folded-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-card-folded-hint { flex-shrink: 0; font-size: .74rem; }
-/* Task 157 (Cairn's follow-up suggestions): a small labeled row of tappable
- * chips under the comment. Each chip is the whole suggestion — one tap makes
- * it the owner's own message, so it reads and behaves like a send, not a
- * dispatch. */
-.followups { align-self: stretch; margin: -2px 0 4px; }
-.followups-label { margin: 0 0 6px; }
-.followups-row { display: flex; flex-wrap: wrap; gap: 8px; }
-/* Suggestions stagger in and slide under the pointer (Decision 9, rule 5).
-   The arrival fills BACKWARDS, not both: a forwards fill would pin the final
-   keyframe's `transform: none` over the hover slide for good. */
-.followup-chip {
-  padding: 6px 12px; border: 1px dashed var(--line); border-radius: 999px;
-  background: transparent; color: var(--card-ink); font: inherit; font-size: .85rem;
-  cursor: pointer; text-align: left; max-width: 100%;
-  animation: lantern-arrive .5s var(--pop) backwards;
-  transition: transform .3s var(--pop), background-color .2s, border-color .2s;
+/* Task 157's safe tap-to-send behavior remains; Task 194 replaces its old
+ * dashed chip material with flat notes. The late lantern block below supplies
+ * the scene-specific paper treatment. */
+.followups { align-self: stretch; min-width: 0; margin: -2px 0 4px; }
+.followups-heading { min-width: 0; }
+.followups-label, .followups-hint { margin: 0; }
+.followups-list { display: flex; flex-direction: column; min-width: 0; }
+.followup-note {
+  width: 100%; min-width: 0; min-height: 44px; padding: 8px 10px;
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 1px;
+  background: transparent; color: var(--card-ink); box-shadow: none;
+  font: inherit; font-size: .85rem; cursor: pointer; text-align: left;
+  white-space: normal; overflow-wrap: anywhere;
+  animation: followup-note-arrive .38s var(--pop) backwards;
+  transition: transform .24s var(--pop), color .2s, border-color .2s;
 }
-.followup-chip:nth-child(1) { animation-delay: .05s; }
-.followup-chip:nth-child(2) { animation-delay: .11s; }
-.followup-chip:nth-child(3) { animation-delay: .17s; }
-.followup-chip:nth-child(4) { animation-delay: .23s; }
-.followup-chip:hover:not(:disabled) { background: var(--card); border-style: solid; transform: translateX(5px) scale(1.02); }
-.followup-chip:active:not(:disabled) { transform: translateX(5px) scale(.98); }
-.followup-chip:disabled { opacity: .5; cursor: default; }
-@keyframes lantern-arrive {
-  from { opacity: 0; transform: translateY(10px) scale(.94); }
+.followup-note:nth-child(1) { animation-delay: .04s; }
+.followup-note:nth-child(2) { animation-delay: .09s; }
+.followup-note:nth-child(3) { animation-delay: .14s; }
+.followup-note:hover:not(:disabled), .followup-note:active:not(:disabled) { transform: translateX(2px); }
+.followup-note:disabled { opacity: .5; cursor: default; }
+@keyframes followup-note-arrive {
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
@@ -1433,16 +1430,16 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 @media (prefers-reduced-motion: reduce) {
   .town-node, .town-thread-target, .town-face-thought, .town-face, .pill,
-  .followup-chip, .town-pond-layer { transition: none; }
+  .followup-note, .town-pond-layer { transition: none; }
   .town-face-holo, .town-face-eye, .town-face-thought circle, .town-face-mark path,
   .town-worker-pad span, .town-node-working .town-node-status i,
-  .chat-column-villager, .chat-villager-chip, .followup-chip { animation: none; }
+  .chat-column-villager, .chat-villager-chip, .followup-note { animation: none; }
   /* Reduced motion reaches the same final state, so a pill still sits on its
      edge and a suggestion is still fully arrived — they simply get there
      without travelling. */
   .pill:hover:not(:disabled), .pill:active:not(:disabled),
   .town-node:hover .town-face, .town-node:active .town-face,
-  .followup-chip:hover:not(:disabled), .followup-chip:active:not(:disabled) { transform: none; }
+  .followup-note:hover:not(:disabled), .followup-note:active:not(:disabled) { transform: none; }
 }
 
 .md h1 { font-size: 1.22rem; margin: .2em 0 .4em; }
@@ -2123,6 +2120,81 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .push-confirm-actions .pill { text-align: left; }
 }
 
+/* Task 194: Cairn's optional next steps are marginal notes beneath its settled
+   result comment, not a new row of dashed pills. The private control that
+   creates them is filtered in main; this block gives only the validated native
+   buttons a quiet cyan-ruled paper presence. */
+.chat-column-villager .bubble-commentary { opacity: .92; }
+.chat-column-villager .commentary-stream-note {
+  min-width: 0; margin: 9px 0 0; padding: 7px 0 0;
+  border-top: 1px solid rgb(246 236 225 / 9%);
+  color: var(--lantern-soft); line-height: 1.45; overflow-wrap: anywhere;
+}
+.chat-column-villager .followups {
+  position: relative; align-self: stretch; min-width: 0; overflow: visible;
+  margin: 1px 3px 5px; padding: 11px 4px 6px 17px;
+  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
+  border-bottom: 1px solid rgb(246 236 225 / 7%); border-radius: 0;
+  background: transparent; box-shadow: none;
+}
+.chat-column-villager .followups::before {
+  content: ""; position: absolute; left: 2px; top: 12px;
+  width: 2px; height: 25px; border-radius: 0 2px 2px 0;
+  background: var(--garden-cyan); opacity: .52;
+}
+.chat-column-villager .followups-heading { min-width: 0; padding: 0 3px; }
+.chat-column-villager .followups-label {
+  margin: 0; color: var(--garden-cyan); font-size: .74rem;
+  font-weight: 700; letter-spacing: .055em; line-height: 1.35;
+  text-transform: uppercase; overflow-wrap: anywhere;
+}
+.chat-column-villager .followups-hint {
+  margin: 3px 0 0; color: var(--lantern-soft); line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.chat-column-villager .followups-list {
+  display: flex; flex-direction: column; gap: 0; min-width: 0;
+  margin-top: 8px; border-top: 1px solid rgb(246 236 225 / 8%);
+}
+.chat-column-villager .followup-note {
+  position: relative; display: block; width: 100%; min-width: 0; min-height: 44px;
+  max-width: 100%; padding: 10px 4px 10px 22px;
+  border: 0; border-bottom: 1px solid rgb(246 236 225 / 9%);
+  border-radius: 1px; background: transparent; color: var(--lantern-ink);
+  box-shadow: none; font: inherit; font-size: .88rem; font-weight: 600;
+  line-height: 1.45; cursor: pointer; text-align: left;
+  white-space: normal; overflow-wrap: anywhere;
+  animation: followup-note-arrive .38s var(--pop) backwards;
+  transition: transform .24s var(--pop), color .2s, border-color .2s, opacity .15s;
+}
+.chat-column-villager .followup-note::before {
+  content: ""; position: absolute; left: 3px; top: calc(10px + .62em);
+  width: 8px; height: 2px; border-radius: 2px;
+  background: var(--garden-cyan); opacity: .46;
+}
+.chat-column-villager .followup-note:nth-child(1) { animation-delay: .04s; }
+.chat-column-villager .followup-note:nth-child(2) { animation-delay: .09s; }
+.chat-column-villager .followup-note:nth-child(3) { animation-delay: .14s; }
+.chat-column-villager .followup-note:hover:not(:disabled) {
+  transform: translateX(2px); border-bottom-color: rgb(163 221 208 / 30%);
+  background: transparent; color: var(--garden-cyan); box-shadow: none;
+}
+.chat-column-villager .followup-note:active:not(:disabled) {
+  transform: translateX(2px); background: transparent; box-shadow: none;
+}
+.chat-column-villager .followup-note:focus-visible {
+  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
+}
+.chat-column-villager .followup-note:disabled { opacity: .5; cursor: default; }
+@media (max-width: 620px) {
+  .chat-column-villager .followups { margin-inline: 0; padding: 10px 1px 5px 14px; }
+  .chat-column-villager .followups::before { left: 0; }
+  .chat-column-villager .followup-note {
+    max-width: 100%; padding: 10px 2px 10px 20px; text-align: left;
+  }
+  .chat-column-villager .followup-note::before { left: 2px; }
+}
+
 /* Reduced motion, part two — placed LAST in the file, deliberately.
    A media query adds no specificity, so the block near the top loses to every
    `.chat-column.chat-column-villager` rule below it, including the one that
@@ -2146,10 +2218,13 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .question-card-actions .pill { transition: none; }
   .chat-column-villager .push-chip .pill,
   .chat-column-villager .push-confirm-actions .pill { transition: none; }
+  .chat-column-villager .followup-note { animation: none; transition: none; }
   .chat-column-villager .pill:hover:not(:disabled),
   .chat-column-villager .pill:active:not(:disabled),
   .chat-column-villager .chat-composer-actions .pill:hover:not(:disabled),
-  .chat-column-villager .chat-composer-actions .pill:active:not(:disabled) { transform: none; }
+  .chat-column-villager .chat-composer-actions .pill:active:not(:disabled),
+  .chat-column-villager .followup-note:hover:not(:disabled),
+  .chat-column-villager .followup-note:active:not(:disabled) { transform: none; }
   /* Found while fixing the lantern's entrance: these pre-date this work and lose
      to the block at the top of the file the same way it did. Every one is a
      specificity loss, not a miss — the eye groups carry both `town-face-eye`

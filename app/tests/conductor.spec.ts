@@ -145,6 +145,10 @@ let setFixtureProseOnlySetAside: (enabled: boolean) => void = () => {};
  * commentary stream pauses before its usage frame until released. */
 let holdFixtureCommentary: () => void = () => {};
 let releaseFixtureCommentary: () => void = () => {};
+/** True only after the current held commentary has emitted every content
+ * chunk and reached the pre-DONE gate. This distinguishes a genuinely hidden
+ * final control block from a test that inspected one chunk too early. */
+let fixtureCommentaryReachedGate: () => boolean = () => false;
 /** Task 184's early proposal window: the fake pauses after its hidden task
  * block and before deliberately repetitive prose so main's replacement is observable. */
 let holdFixtureInitialProposal: () => void = () => {};
@@ -185,6 +189,7 @@ test.beforeAll(async () => {
       setProseOnlySetAside: (enabled: boolean) => void;
       holdCommentary: () => void;
       releaseCommentary: () => void;
+      commentaryReachedGate: () => boolean;
       holdInitialProposal: () => void;
       releaseInitialProposal: () => void;
       holdThirdProposal: () => void;
@@ -203,6 +208,7 @@ test.beforeAll(async () => {
   setFixtureProseOnlySetAside = server.setProseOnlySetAside;
   holdFixtureCommentary = server.holdCommentary;
   releaseFixtureCommentary = server.releaseCommentary;
+  fixtureCommentaryReachedGate = server.commentaryReachedGate;
   holdFixtureInitialProposal = server.holdInitialProposal;
   releaseFixtureInitialProposal = server.releaseInitialProposal;
   holdFixtureThirdProposal = server.holdThirdProposal;
@@ -3293,7 +3299,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   // Task 153: the comment is VISIBLE while it streams — a labeled bubble with
   // no Stop — which is what makes the enabled composer honest. Before this,
   // it accumulated invisibly and every send bounced for no visible reason.
-  await expect(win.getByText(/A short comment on the result card above/)).toBeVisible();
+  await expect(win.getByText(/Commenting on the result above/)).toBeVisible();
 
   // A send while the comment streams does not bounce — it waits. Two sends
   // queue in order, each a dimmed bubble carrying its exact words; the
@@ -3324,7 +3330,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   // what keeps the flush after the lock has really been released. The
   // waiting message then becomes a real owner turn with a real answer.
   releaseFixtureCommentary();
-  await expect(win.getByText(/A short comment on the result card above/)).toHaveCount(0, { timeout: 30_000 });
+  await expect(win.getByText(/Commenting on the result above/)).toHaveCount(0, { timeout: 30_000 });
   await expect(win.locator(".bubble-pending")).toHaveCount(0, { timeout: 30_000 });
   await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(1, { timeout: 30_000 });
   await waitStreamDone(win);
@@ -4034,68 +4040,146 @@ test("a stopped run never evaluates the push chip, with a real local commit wait
   await app.close();
 });
 
-// Task 157 (the owner's request): when a task completes, Cairn's comment is
-// followed by up to three follow-up suggestions as tappable chips. A tap is
-// not a dispatch — it sends the suggestion as the owner's own message, so the
-// ordinary conversation (and every one of its gates) decides what happens
-// next. Mock lane, offline demonstration.
-test("the comment's follow-up suggestions render as chips, and a tap sends one as the owner's message", async () => {
+// Task 194: the model's private follow-up fence never belongs in the public
+// stream. Once settled, its validated values become quiet paper notes; a press
+// is still only the owner's ordinary message, never dispatch authority. The
+// fixture stops after its final control chunk so both live and reattached
+// projections are inspected after the exact moment that used to leak JSON.
+test("private commentary settles into contained paper next steps and one sends as the owner's message", async () => {
+  holdFixtureCommentary();
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-followups-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
-  const win = await app.firstWindow();
-  await connectToFixture(win, fixtureUrl, "fixture-model");
+  try {
+    const win = await app.firstWindow();
+    await win.setViewportSize({ width: 1304, height: 1000 });
+    await useStableOwnerActions(win);
+    await connectToFixture(win, fixtureUrl, "fixture-model");
 
-  await sendChat(win, "Change the page title");
-  await waitStreamDone(win);
-  const taskCard = win.locator(".task-card");
-  await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
-  await waitStreamDone(win);
-  await taskCard.getByRole("button", { name: "Review" }).click();
-  const panel = win.locator(".dispatch-panel");
-  await expect(panel).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+    await sendChat(win, "Change the page title");
+    await waitStreamDone(win);
+    const taskCard = win.locator(".task-card");
+    await expect(taskCard).toBeVisible();
+    await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
+    await waitStreamDone(win);
+    await taskCard.getByRole("button", { name: "Review" }).click();
+    const panel = win.locator(".dispatch-panel");
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await panel.getByRole("button", { name: "Run offline demonstration" }).click();
 
-  // The card, then the settled comment, then — under it — the chips.
-  await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
-  await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
-  const chips = win.locator(".followup-chip");
-  await expect(chips).toHaveCount(2, { timeout: 15_000 });
-  await expect(chips.nth(0)).toHaveText("Show me how to try this myself");
-  await expect(chips.nth(1)).toHaveText("Pick the next small improvement");
-  // The comment's visible text carries no fence, and nothing dispatched:
-  // there is exactly the one card this run already had.
-  await expect(win.locator(".chat-messages")).not.toContainText("cairn-followups");
-  await expect(win.locator(".chat-messages")).not.toContainText("cairn-question");
-  await expect(win.locator(".chat-messages")).not.toContainText("This commentary control must stay inert.");
-  const commentaryAction = await win.evaluate(async (dir) => {
-    const list = await window.cairn.conductorConversations(dir);
-    return window.cairn.conductorAction(dir, list.at(-1)?.id ?? "");
-  }, project);
-  expect(commentaryAction).toBeNull();
-  await expect(win.locator(".result-card")).toHaveCount(1);
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
+    await expect.poll(fixtureCommentaryReachedGate, { timeout: 30_000 }).toBe(true);
+    const liveComment = win.locator(".bubble-commentary");
+    await expect(liveComment).toContainText("The card says this task finished DONE, and the report is in docs/ai-work.");
+    for (const privateFragment of ["```", "cairn-followups", "cairn-question", "[\"Show me",
+      "Show me how to try this myself", "This commentary control must stay inert."]) {
+      await expect(liveComment).not.toContainText(privateFragment);
+    }
+    const liveSnapshot = await win.evaluate((dir) => window.cairn.conductorCurrent(dir), project);
+    expect(liveSnapshot?.kind).toBe("commentary");
+    expect(liveSnapshot?.text).toContain("The card says this task finished DONE");
+    expect(liveSnapshot?.text).not.toMatch(/```|cairn-followups|cairn-question|Show me how/);
+    await liveComment.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-194-comment-stream-safe.png") });
 
-  // A tap sends the suggestion verbatim as the owner's own message. The
-  // chips step aside the moment the conversation moves on — they only ever
-  // hang on the latest word.
-  await chips.nth(0).click();
-  const sent = win.locator(".bubble-owner", { hasText: "Show me how to try this myself" });
-  await expect(sent).toHaveCount(1);
-  await expect(win.locator(".followup-chip")).toHaveCount(0);
-  await waitStreamDone(win);
+    // A renderer thrown away mid-comment must receive the same public view
+    // from main, not regain the untouched provider response on reattachment.
+    await win.reload();
+    await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+    const restoredComment = win.locator(".bubble-commentary");
+    await expect(restoredComment).toContainText("The card says this task finished DONE, and the report is in docs/ai-work.");
+    await expect(restoredComment).not.toContainText("cairn-followups");
+    await expect(restoredComment).not.toContainText("Show me how to try this myself");
 
-  // On disk: the commentary turn carries the suggestions (so a reload can
-  // re-render them), and the tapped one is an ordinary owner turn, verbatim.
-  const turns = await win.evaluate(async (dir) => {
-    const list = await window.cairn.conductorConversations(dir);
-    return window.cairn.conductorTurns(dir, list[list.length - 1].id);
-  }, project);
-  const comment = turns.find((turn) => turn.role === "cairn" && turn.text.includes("The card says this task finished DONE"));
-  expect(comment?.role).toBe("cairn");
-  if (comment?.role === "cairn") {
-    expect(comment.followups).toEqual(["Show me how to try this myself", "Pick the next small improvement"]);
+    releaseFixtureCommentary();
+    await expect(restoredComment).toHaveCount(0, { timeout: 30_000 });
+    await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
+    const notes = win.locator(".followup-note");
+    const longSuggestion = "Pick the next small improvement and explain why it is the gentlest useful step before changing anything else";
+    await expect(notes).toHaveCount(2, { timeout: 15_000 });
+    await expect(notes.nth(0)).toHaveText("Show me how to try this myself");
+    await expect(notes.nth(1)).toHaveText(longSuggestion);
+    await expect(win.locator(".followups-label")).toHaveText("Where we could go next");
+    await expect(win.locator(".followups-hint")).toHaveText("Tap one to send it as your message.");
+    await expect(notes.nth(0)).not.toBeFocused();
+    await expect(notes.nth(1)).not.toBeFocused();
+
+    const commentaryAction = await win.evaluate(async (dir) => {
+      const list = await window.cairn.conductorConversations(dir);
+      return window.cairn.conductorAction(dir, list.at(-1)?.id ?? "");
+    }, project);
+    expect(commentaryAction).toBeNull();
+    await expect(win.locator(".result-card")).toHaveCount(1);
+    await expect(win.locator(".chat-messages")).not.toContainText("cairn-followups");
+
+    const group = win.locator(".followups");
+    expect(await group.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { radius: style.borderRadius, background: style.backgroundColor, shadow: style.boxShadow };
+    })).toEqual({ radius: "0px", background: "rgba(0, 0, 0, 0)", shadow: "none" });
+    expect(await notes.nth(0).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { radius: style.borderRadius, background: style.backgroundColor, shadow: style.boxShadow, minHeight: style.minHeight };
+    })).toEqual({ radius: "1px", background: "rgba(0, 0, 0, 0)", shadow: "none", minHeight: "44px" });
+    await group.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-194-followups-wide.png") });
+
+    await notes.nth(0).focus();
+    await expect(notes.nth(0)).toBeFocused();
+    await win.keyboard.press("Tab");
+    await expect(notes.nth(1)).toBeFocused();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-194-followup-focus.png") });
+
+    // The settled authenticated turn owns the controls, so a reload before a
+    // press recreates them from disk with their exact text and order.
+    await win.reload();
+    await expect(win.getByRole("button", { name: "← Project home" })).toBeVisible({ timeout: 30_000 });
+    await expect(win.locator(".followup-note")).toHaveCount(2, { timeout: 15_000 });
+    await expect(win.locator(".followup-note").nth(1)).toHaveText(longSuggestion);
+
+    await win.setViewportSize({ width: 540, height: 900 });
+    const compactNotes = win.locator(".followup-note");
+    await win.locator(".followups").scrollIntoViewIfNeeded();
+    expect(await win.locator(".followups").evaluate((element) => {
+      const messages = element.closest<HTMLElement>(".chat-messages")!.getBoundingClientRect();
+      const groupBounds = element.getBoundingClientRect();
+      const controls = [...element.querySelectorAll<HTMLElement>(".followup-note")];
+      return groupBounds.left >= messages.left - 1 && groupBounds.right <= messages.right + 1
+        && element.scrollWidth <= element.clientWidth
+        && controls.every((control) => {
+          const bounds = control.getBoundingClientRect();
+          return bounds.left >= messages.left - 1 && bounds.right <= messages.right + 1
+            && control.scrollWidth <= control.clientWidth;
+        });
+    })).toBe(true);
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-194-followups-compact.png") });
+
+    // Enter follows the native button path. The accepted owner turn retires
+    // the notes, appears exactly once, and hands focus back to the composer.
+    await compactNotes.nth(0).focus();
+    await expect(compactNotes.nth(0)).toBeFocused();
+    await win.keyboard.press("Enter");
+    const sent = win.locator(".bubble-owner", { hasText: "Show me how to try this myself" });
+    await expect(sent).toHaveCount(1);
+    await expect(win.locator(".followup-note")).toHaveCount(0);
+    await expect(win.getByPlaceholder("Talk with Cairn")).toBeFocused();
+    await waitStreamDone(win);
+
+    const turns = await win.evaluate(async (dir) => {
+      const list = await window.cairn.conductorConversations(dir);
+      return window.cairn.conductorTurns(dir, list[list.length - 1].id);
+    }, project);
+    const comment = turns.find((turn) => turn.role === "cairn" && turn.text.includes("The card says this task finished DONE"));
+    expect(comment?.role).toBe("cairn");
+    if (comment?.role === "cairn") {
+      expect(comment.followups).toEqual(["Show me how to try this myself", longSuggestion]);
+    }
+    expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Show me how to try this myself")).toHaveLength(1);
+    await win.reload();
+    await expect(win.locator(".bubble-owner", { hasText: "Show me how to try this myself" })).toHaveCount(1);
+    await expect(win.locator(".followup-note")).toHaveCount(0);
+  } finally {
+    releaseFixtureCommentary();
+    await app.close();
   }
-  expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Show me how to try this myself")).toHaveLength(1);
-  await app.close();
 });

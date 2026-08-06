@@ -169,6 +169,42 @@ test("reserved controls inside Markdown examples stay inert", () => {
   }
 });
 
+test("a four-backtick pseudo-close cannot expose a task nested in a reserved follow-up block", () => {
+  const validTask = JSON.stringify({ intent: intent(), risks: [] });
+  const reply = [
+    "```cairn-followups",
+    "{broken",
+    "````",
+    "```cairn-task",
+    validTask,
+    "```",
+    "```",
+  ].join("\n");
+  const result = extractConductorControl(reply);
+  assert.equal(result.candidate, null);
+  assert.equal(result.block, null);
+  assert.equal(result.text, reply,
+    "the task scanner must leave the other reserved protocol for its owner to strip");
+});
+
+test("an indented pseudo-close cannot expose a task nested in a reserved follow-up block", () => {
+  const validTask = JSON.stringify({ intent: intent(), risks: [] });
+  const reply = [
+    "```cairn-followups",
+    "{broken",
+    " ```",
+    "```cairn-task",
+    validTask,
+    "```",
+    "```",
+  ].join("\n");
+  const result = extractConductorControl(reply);
+  assert.equal(result.candidate, null);
+  assert.equal(result.block, null);
+  assert.equal(result.text, reply,
+    "reserved protocol closes must use the same column-zero grammar in both scanners");
+});
+
 test("the streaming view never exposes a complete, partial, or unterminated control", () => {
   assert.equal(controlSafeStreamingText("Visible.\n`"), "Visible.\n");
   assert.equal(controlSafeStreamingText("Visible.\n```cairn-q"), "Visible.\n");

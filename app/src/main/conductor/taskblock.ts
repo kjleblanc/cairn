@@ -42,12 +42,24 @@ function controlFences(reply: string): RawControlFence[] {
     start = newline === -1 ? reply.length : newline + 1;
   }
 
-  let outer: { marker: "`" | "~"; length: number } | null = null;
+  let outer: { marker: "`" | "~"; length: number; exactClose: boolean } | null = null;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (outer !== null) {
       const close = /^( {0,3})(`+|~+)[ \t]*\r?$/.exec(line.text);
-      if (close && close[2][0] === outer.marker && close[2].length >= outer.length) outer = null;
+      const closesOuter = outer.exactClose
+        ? /^```[ \t]*\r?$/.test(line.text)
+        : close && close[2][0] === outer.marker && close[2].length >= outer.length;
+      if (closesOuter) outer = null;
+      continue;
+    }
+
+    // Follow-up controls are reserved by the same column-zero exact-close
+    // grammar as the task/question controls this scanner owns. Otherwise a
+    // Markdown pseudo-close can make the two protocol scanners disagree about
+    // nesting and expose a task candidate from a malformed follow-up block.
+    if (/^```cairn-followups[ \t]*\r?$/.test(line.text)) {
+      outer = { marker: "`", length: 3, exactClose: true };
       continue;
     }
 
@@ -76,7 +88,7 @@ function controlFences(reply: string): RawControlFence[] {
     }
 
     const opening = /^( {0,3})(`{3,}|~{3,}).*\r?$/.exec(line.text);
-    if (opening) outer = { marker: opening[2][0] as "`" | "~", length: opening[2].length };
+    if (opening) outer = { marker: opening[2][0] as "`" | "~", length: opening[2].length, exactClose: false };
   }
   return found;
 }

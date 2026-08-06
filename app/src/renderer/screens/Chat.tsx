@@ -606,6 +606,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const streamingRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const followupsRef = useRef<HTMLDivElement | null>(null);
   const replacementActionRef = useRef<HTMLHeadingElement | null>(null);
   const dispatchHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const dispatchFocusReturnPendingRef = useRef(false);
@@ -1184,6 +1185,22 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     return true;
   }
 
+  /** A suggested next step is still the owner's ordinary message. Keep its
+   * draft out of the composer on a refusal so the pressed note remains the
+   * recovery control; once main accepts the send and that note steps aside,
+   * return the owner to the shared writing field. */
+  async function sendFollowup(suggestion: string): Promise<void> {
+    const sent = await send(suggestion, false, undefined, false);
+    if (!sent) {
+      window.requestAnimationFrame(() => {
+        const notes = followupsRef.current?.querySelectorAll<HTMLButtonElement>(".followup-note") ?? [];
+        [...notes].find((note) => note.textContent === suggestion)?.focus();
+      });
+      return;
+    }
+    window.requestAnimationFrame(() => composerRef.current?.focus());
+  }
+
   /** Retire the exact main-owned final review before a typed correction can
    * become an owner turn. Clearing the local panel first closes duplicate
    * presses; awaiting main closes the authority boundary before send(). */
@@ -1660,13 +1677,16 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                     * like typed text, and it can never dispatch anything by
                     * itself — the proposal card and its gates still decide. */}
                   {turn.role === "cairn" && i === turns.length - 1 && turn.followups && turn.followups.length > 0 ? (
-                    <div className="followups" role="group" aria-label="Cairn's suggestions for what to do next">
-                      <p className="small muted followups-label">Where we could go next — tap one and it becomes your message to Cairn:</p>
-                      <div className="followups-row">
+                    <div className="followups" ref={followupsRef} data-followups-state="ready" role="group" aria-label="Cairn's suggestions for what to do next">
+                      <div className="followups-heading">
+                        <p className="followups-label">Where we could go next</p>
+                        <p className="small muted followups-hint">Tap one to send it as your message.</p>
+                      </div>
+                      <div className="followups-list">
                         {turn.followups.map((suggestion) => (
-                          <button key={suggestion} type="button" className="followup-chip"
+                          <button key={suggestion} type="button" className="followup-note"
                             disabled={runActive || conversationResetting}
-                            onClick={() => void send(suggestion)}>{suggestion}</button>
+                            onClick={() => void sendFollowup(suggestion)}>{suggestion}</button>
                         ))}
                       </div>
                     </div>
@@ -1752,7 +1772,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               {commentary ? (
                 <div className="bubble bubble-cairn bubble-commentary">
                   <Md text={streamingText || "…"} />
-                  <p className="small muted" style={{ margin: "8px 0 0" }}>A short comment on the result card above — not an answer to a message. Anything you send while this streams waits its turn below.</p>
+                  <p className="small muted commentary-stream-note">Commenting on the result above. Messages sent now wait below.</p>
                 </div>
               ) : null}
               {/* The queue, made visible (Task 155): each message waiting for

@@ -96,12 +96,12 @@ const LONG_QUESTION = "Which settling speed should Cairn use when the shoreline 
 // it lasts longer than a click. Same words, more room.
 //
 // Task 157 added the follow-up suggestions: a well-formed cairn-followups
-// fence rides the final part, so the whole loop — parse, persist, chips on
-// screen, tap-to-send — is provable offline. The visible comment text is
+// fence rides the final part, so the whole loop — parse, persist, paper notes
+// on screen, tap-to-send — is provable offline. The visible comment text is
 // unchanged (the fence is stripped), and the usage frame is content-blind.
 const COMMENTARY_SCRIPT = {
   parts: ["The card says", " this task finished DONE", ", and the report", " is in docs/ai-work.",
-    "\n\n```cairn-question\n{\"question\":\"This commentary control must stay inert.\"}\n```\n\n```cairn-followups\n[\"Show me how to try this myself\", \"Pick the next small improvement\"]\n```"],
+    "\n\n```cairn-question\n{\"question\":\"This commentary control must stay inert.\"}\n```\n\n```cairn-followups\n[\"Show me how to try this myself\", \"Pick the next small improvement and explain why it is the gentlest useful step before changing anything else\"]\n```"],
   delayMs: 400,
 };
 const STOPPED_COMMENTARY_SCRIPT = {
@@ -118,6 +118,7 @@ let proseOnlySetAside = false;
 // before the stream reaches the gate simply lets it pass.
 let commentaryHeld = false;
 let commentaryGate = null;
+let commentaryReachedGate = false;
 let initialProposalHeld = false;
 let initialProposalGate = null;
 let thirdProposalHeld = false;
@@ -126,6 +127,7 @@ let answerHeld = false;
 let answerGate = null;
 
 function holdCommentary() {
+  commentaryReachedGate = false;
   commentaryHeld = true;
 }
 
@@ -138,6 +140,7 @@ function releaseCommentary() {
 }
 
 function commentaryGatePoint() {
+  commentaryReachedGate = true;
   if (!commentaryHeld) return Promise.resolve();
   return new Promise((resolve) => { commentaryGate = resolve; });
 }
@@ -383,6 +386,7 @@ export function start() {
         setProseOnlySetAside: (enabled) => { proseOnlySetAside = enabled; },
         holdCommentary,
         releaseCommentary,
+        commentaryReachedGate: () => commentaryReachedGate,
         holdInitialProposal,
         releaseInitialProposal,
         holdThirdProposal,

@@ -120,7 +120,7 @@ test("the final compact cascade wraps the ledger without adding motion", () => {
   const compact = css.slice(compactStart, compactEnd + 1);
   assert.match(compact, /\.chat-column-villager \.dispatch-panel \.route-facts p[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/,
     "compact routed facts do not collapse to one wrapping column");
-  const sliceEnd = css.indexOf("/* Reduced motion, part two", taskStart);
+  const sliceEnd = css.indexOf("/* Task 192:", taskStart);
   const taskCss = css.slice(taskStart, sliceEnd);
   assert.doesNotMatch(taskCss, /@keyframes|animation:/, "dispatch paper adds decorative motion");
   const reduced = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)", sliceEnd));

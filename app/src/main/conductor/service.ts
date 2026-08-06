@@ -33,7 +33,7 @@ import { cardBriefing } from "./relay.js";
 import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
 import { appendCairnTurn, appendOwnerTurn, ConversationAppendUncertainError, ensureCairnExcluded, listConversations, newConversationId, readHistorySnapshot, readTurns, type ConductorHistorySnapshot } from "./store.js";
-import { extractFollowups } from "./followups.js";
+import { extractFollowups, followupSafeStreamingText } from "./followups.js";
 import { controlSafeStreamingText, extractConductorControl, type ConductorControlCandidate } from "./taskblock.js";
 import { isConversationId } from "./conversation-id.js";
 import { canonicalProjectKey, validateOwnerReplyContext, type OwnerReplyContext } from "./turnauth.js";
@@ -933,7 +933,7 @@ async function streamTurn(
           continue;
         }
         if (proposalPreview) continue;
-        const nextPublic = controlSafeStreamingText(full);
+        const nextPublic = followupSafeStreamingText(controlSafeStreamingText(full));
         const publicDelta = nextPublic.startsWith(publicFull) ? nextPublic.slice(publicFull.length) : "";
         if (nextPublic.startsWith(publicFull)) publicFull = nextPublic;
         const live = controllers.get(actionKey(dir));
@@ -945,12 +945,13 @@ async function streamTurn(
       }
     }
 
-    const { block, candidate, text: withoutTaskFence } = extractConductorControl(full);
+    const { block, candidate } = extractConductorControl(full);
     // Task 157: the suggestions ride the commentary turn only. A reply that
     // emits the fence anyway has it stripped and dropped — symmetric with the
     // commentary task-block drop below: neither voice may grow a control the
     // other turn's owner never asked for.
-    const { followups: found, text: withoutFollowups } = extractFollowups(withoutTaskFence);
+    const { followups: found, text: withoutFollowups } = extractFollowups(full);
+    const { text: withoutPrivateControls } = extractConductorControl(withoutFollowups);
     const followups = kind === "commentary" ? found : null;
     const parsedAction = kind === "reply" && candidate !== null
       ? internalActionFor(candidate, id, historySnapshot.authenticatedSources)
@@ -969,7 +970,7 @@ async function streamTurn(
       : null;
     const nextAction = candidateAction ?? fallbackAction;
     const fallbackUsed = fallbackAction !== null;
-    let text = withoutFollowups;
+    let text = withoutPrivateControls;
     // Once a valid task action exists, the card owns every task detail. Model
     // prose is untrusted and may ignore its copy budget, so the settled and
     // persisted proposal always gets one short acknowledgement owned by main.
