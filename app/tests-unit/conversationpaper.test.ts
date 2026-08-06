@@ -18,6 +18,8 @@ test("the owner speaks on one flat clipped memo", () => {
   const owner = rule(".chat-column-villager .bubble-owner");
   assert.ok(owner.includes("box-shadow: none"), "the owner's note still glows like a bubble");
   assert.ok(owner.includes("clip-path: polygon"), "the owner's note has no controlled paper-cut corner");
+  assert.ok(owner.includes("min-width: 0") && owner.includes("overflow-wrap: anywhere"),
+    "an exact long owner answer can escape its clipped paper memo");
   assert.ok(!owner.includes("border-radius: 20px"), "the owner's note still has the inflated bubble silhouette");
 });
 

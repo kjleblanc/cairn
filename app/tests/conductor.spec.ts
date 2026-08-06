@@ -1484,6 +1484,200 @@ test("a structured question survives only as passive text after a full relaunch"
   expect(readdirSync(markerRoot).length).toBeGreaterThan(0);
 });
 
+test("a compact paper question keeps exact Answer and defer decisions honest", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-question-paper-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  await useStableOwnerActions(win);
+  await win.setViewportSize({ width: 540, height: 900 });
+
+  await sendChat(win, "action-question-long");
+  await waitStreamDone(win);
+  const conversationId = await win.evaluate(async (dir) =>
+    (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+  const initialAction = await win.evaluate(({ dir, id }) =>
+    window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(initialAction?.kind).toBe("question");
+  if (initialAction?.kind !== "question") throw new Error("expected long paper question");
+  await expect(win.getByText(initialAction.question, { exact: true })).toHaveCount(1);
+
+  const card = win.locator(".question-card");
+  const heading = card.getByRole("heading");
+  const input = card.getByLabel("Your answer");
+  const answer = card.getByRole("button", { name: "Answer", exact: true });
+  const defer = card.getByRole("button", { name: "I'm not sure — you decide", exact: true });
+  await expect(card).toBeVisible();
+  await expect(heading).toContainText("Which settling speed should Cairn use");
+  await expect(answer).toBeDisabled();
+  await expect(defer).toBeEnabled();
+
+  const paper = await card.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const messages = element.closest<HTMLElement>(".chat-messages")!.getBoundingClientRect();
+    const bounds = element.getBoundingClientRect();
+    const controls = [...element.querySelectorAll<HTMLElement>("input, button")];
+    const contains = (box: DOMRect) => box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
+    const headingElement = element.querySelector<HTMLElement>(".question-card-heading")!;
+    const headingStyle = getComputedStyle(headingElement);
+    return {
+      overflow: element.scrollWidth - element.clientWidth,
+      withinMessages: bounds.left >= messages.left - 1 && bounds.right <= messages.right + 1,
+      controlsFit: controls.every((control) => contains(control.getBoundingClientRect())),
+      border: style.borderTopWidth,
+      radius: style.borderTopLeftRadius,
+      shadow: style.boxShadow,
+      grain: style.backgroundImage === "none" ? "none" : "paper",
+      animation: style.animationName,
+      headingWraps: headingElement.getBoundingClientRect().height
+        > Number.parseFloat(headingStyle.lineHeight) * 1.5,
+    };
+  });
+  expect(paper).toEqual({
+    overflow: 0, withinMessages: true, controlsFit: true,
+    border: "0px", radius: "4px", shadow: "none", grain: "paper",
+    animation: "none", headingWraps: true,
+  });
+  for (const action of [answer, defer]) {
+    expect(await action.evaluate((element) => getComputedStyle(element).transitionDuration
+      .split(",").every((duration) => Number.parseFloat(duration) === 0))).toBe(true);
+  }
+  await card.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-192-question-blank.png") });
+
+  const beforeWhitespace = replyRequestCount();
+  await input.fill("   ");
+  await expect(answer).toBeDisabled();
+  await input.press("Enter");
+  expect(replyRequestCount()).toBe(beforeWhitespace);
+
+  const prefix = "  action-question-long plain redirect is enough ";
+  const rawAnswer = `${prefix}${"x".repeat(300 - prefix.length - 2)}  `;
+  expect(rawAnswer).toHaveLength(300);
+  await input.fill(rawAnswer);
+  await expect(answer).toBeEnabled();
+  await input.focus();
+  await win.keyboard.press("Tab");
+  await expect(answer).toBeFocused();
+  const actionFocus = await answer.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
+  });
+  expect(actionFocus).toEqual({ style: "solid", width: "2px", offset: "3px" });
+  await win.keyboard.press("Tab");
+  await expect(defer).toBeFocused();
+  await win.keyboard.press("Shift+Tab");
+  await expect(answer).toBeFocused();
+  await card.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-192-question-filled.png") });
+  await win.keyboard.press("Shift+Tab");
+  await expect(input).toBeFocused();
+
+  await win.evaluate(() => {
+    const root = document.documentElement;
+    root.dataset.questionSubmitLock = "waiting";
+    const observe = () => {
+      const answerInput = document.querySelector<HTMLInputElement>(".question-card input");
+      const decisions = [...document.querySelectorAll<HTMLButtonElement>(".question-card-actions button")];
+      if (answerInput?.disabled && decisions.length === 2 && decisions.every((button) => button.disabled)) {
+        root.dataset.questionSubmitLock = "seen";
+      }
+    };
+    const observer = new MutationObserver(observe);
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["disabled"] });
+    observe();
+  });
+
+  const beforeAnswer = replyRequestCount();
+  holdFixtureAnswer();
+  try {
+    await input.press("Enter");
+    await expect.poll(() => win.evaluate(() => document.documentElement.dataset.questionSubmitLock))
+      .toBe("seen");
+    await expect.poll(replyRequestCount).toBe(beforeAnswer + 1);
+    await expect(card).toHaveCount(0);
+    expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id),
+      { dir: project, id: conversationId })).toBeNull();
+    await expect(win.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    const submittedMemo = win.locator(".bubble-owner").last();
+    expect(await submittedMemo.textContent()).toBe(rawAnswer);
+    expect(await submittedMemo.evaluate((element) => {
+      const memo = element.getBoundingClientRect();
+      const messages = element.closest<HTMLElement>(".chat-messages")!.getBoundingClientRect();
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        contained: memo.left >= messages.left - 1 && memo.right <= messages.right + 1,
+      };
+    })).toEqual({ overflow: 0, contained: true });
+    await expect.poll(() => {
+      const raw = lastReplyBody();
+      if (raw === null) return null;
+      const wire = JSON.parse(raw) as { messages?: Array<{ content?: string }> };
+      return wire.messages?.at(-1)?.content ?? null;
+    }).toBe(rawAnswer);
+    const answerWire = JSON.parse(lastReplyBody() ?? "{}") as { messages?: Array<{ content?: string }> };
+    expect(answerWire.messages?.at(-2)?.content).toContain('"response":"answer"');
+    expect(answerWire.messages?.at(-2)?.content).toContain(initialAction.question);
+    expect(answerWire.messages?.at(-2)?.content).not.toContain(initialAction.actionId);
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-192-question-pending.png") });
+  } finally {
+    releaseFixtureAnswer();
+  }
+  await waitStreamDone(win);
+
+  const replacement = win.locator(".question-card");
+  const replacementHeading = replacement.getByRole("heading");
+  await expect(replacement).toBeVisible();
+  await expect(replacementHeading).toBeFocused();
+  expect(await replacementHeading.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { outline: style.outlineStyle, decoration: style.textDecorationLine };
+  })).toEqual({ outline: "none", decoration: "underline" });
+  const replacementAction = await win.evaluate(({ dir, id }) =>
+    window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(replacementAction?.kind).toBe("question");
+  expect(replacementAction?.actionId).not.toBe(initialAction.actionId);
+  await expect(replacement.getByLabel("Your answer")).toHaveValue("");
+  await replacement.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-192-question-replacement.png") });
+
+  const replacementDefer = replacement.getByRole("button", { name: "I'm not sure — you decide", exact: true });
+  const beforeDefer = replyRequestCount();
+  await replacementDefer.focus();
+  await replacementDefer.press("Space");
+  await expect.poll(replyRequestCount).toBe(beforeDefer + 1);
+  await expect(replacement).toHaveCount(0);
+  await waitStreamDone(win);
+  expect(await win.locator(".bubble-owner").last().textContent()).toBe("I'm not sure — you decide");
+  const deferWire = JSON.parse(lastReplyBody() ?? "{}") as { messages?: Array<{ content?: string }> };
+  expect(deferWire.messages?.at(-2)?.content).toContain('"response":"defer"');
+  expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id),
+    { dir: project, id: conversationId })).toBeNull();
+  await expect(win.locator(".settled-reply-heading")).toBeFocused();
+
+  await sendChat(win, "action-question-only");
+  await waitStreamDone(win);
+  const questionOnlyAction = await win.evaluate(({ dir, id }) =>
+    window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(questionOnlyAction?.kind).toBe("question");
+  if (questionOnlyAction?.kind !== "question") throw new Error("expected question-only action");
+  await expect(win.locator(".bubble-active-question-only")).toBeHidden();
+  await expect(win.getByText(questionOnlyAction.question, { exact: true })).toHaveCount(1);
+
+  await win.locator(".question-card").getByRole("button", { name: "I'm not sure — you decide", exact: true }).click();
+  await waitStreamDone(win);
+  await sendChat(win, "action-question-embedded");
+  await waitStreamDone(win);
+  const embeddedAction = await win.evaluate(({ dir, id }) =>
+    window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+  expect(embeddedAction?.kind).toBe("question");
+  if (embeddedAction?.kind !== "question") throw new Error("expected embedded question action");
+  await expect(win.locator(".question-card").getByText(embeddedAction.question, { exact: true })).toHaveCount(1);
+  await expect(win.locator(".bubble-cairn").last()).not.toContainText(embeddedAction.question);
+  await app.close();
+});
+
 test("attributed task actions keep raw owner bytes, main ids, one-time replies, and ID-free context", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-task-action-"));
   scaffold(project);

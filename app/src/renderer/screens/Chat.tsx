@@ -151,6 +151,17 @@ function appendTurnOnce(turns: readonly ConductorTurn[], turn: ConductorTurn): C
   return turns.some((current) => JSON.stringify(current) === key) ? [...turns] : [...turns, turn];
 }
 
+/** Main keeps the exact question in the Cairn turn so it survives after its
+ * one-time action retires. While that same question is current, its adjacent
+ * answer field already repeats it as the visible heading. Remove exact display
+ * occurrences wherever the model placed them; never mutate the saved turn.
+ * A question-only turn returns an empty display lead, whose prose row is hidden
+ * while the adjacent active heading carries the same accessible words. */
+function activeQuestionLead(text: string, question: string): string {
+  if (!text.includes(question)) return text;
+  return text.split(question).map((fragment) => fragment.trim()).filter(Boolean).join("\n\n");
+}
+
 /**
  * The chip, the pause, and the outcome — one element at a time, under the
  * DONE card that prompted it. Nothing here is routed through the conductor:
@@ -1608,11 +1619,18 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 </Fragment>
               ) : (
                 <Fragment key={i}>
-                  <div className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}`}>
+                  <div className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}${
+                    turn.role === "cairn" && turn === lastReply && action?.kind === "question" && actionCurrent
+                      && activeQuestionLead(turn.text, action.question) === "" ? " bubble-active-question-only" : ""
+                  }`}>
                     {turn.role === "cairn" && turn === lastReply ? (
                       <h2 className="sr-only settled-reply-heading" ref={settledReplyRef} tabIndex={-1}>Cairn replied</h2>
                     ) : null}
-                    {turn.role === "owner" ? turn.text : <Md text={turn.text} />}
+                    {turn.role === "owner" ? turn.text : (
+                      <Md text={turn === lastReply && action?.kind === "question" && actionCurrent
+                        ? activeQuestionLead(turn.text, action.question)
+                        : turn.text} />
+                    )}
                   </div>
                   {/* Task 157: the commentary's follow-up suggestions, offered
                     * only while they are the conversation's latest word — once

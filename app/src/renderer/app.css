@@ -376,7 +376,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .question-card-answer > label { display: block; margin-bottom: 5px; font-size: .87rem; color: var(--card-muted); }
 .question-card-controls { align-items: flex-end; flex-wrap: wrap; }
 .question-card-controls input { flex: 1 1 260px; min-width: 0; }
-.question-card-defer, .task-card-actions { margin-top: 10px; flex-wrap: wrap; }
+.task-card-actions { margin-top: 10px; flex-wrap: wrap; }
 .task-intent { margin-top: 10px; min-width: 0; }
 .task-intent-heading { margin-bottom: 8px; font-size: 1rem; }
 .task-intent-list, .task-card-risks, .task-intent-context > ul {
@@ -800,12 +800,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 /* The owner's own voice keeps a fill so the two stay scannable — the mockup's
    warm peach, which is the one bright thing on the dark paper. */
 .chat-column-villager .bubble-owner {
-  max-width: 78%; padding: 9px 17px 10px 13px;
+  min-width: 0; max-width: 78%; padding: 9px 17px 10px 13px;
   background: linear-gradient(165deg, #fae3c8, #f3d0a8); color: #453120;
   border: 0; border-radius: 10px 2px 3px 10px; box-shadow: none;
+  overflow-wrap: anywhere;
   clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
 }
-.chat-column-villager .question-card,
 .chat-column-villager .task-card,
 .chat-column-villager .push-confirm { border-radius: 22px; }
 .chat-column-villager .task-intent-row,
@@ -1882,6 +1882,98 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .dispatch-actions { align-items: flex-start; }
 }
 
+/* Task 192: a current structured question is one cyan-ruled annotation with
+   one shallow response field, not a rounded form card followed by a second
+   decision row. Main still owns the action; these rules only change material. */
+.chat-column-villager .bubble-active-question-only { display: none; }
+.chat-column-villager .question-card {
+  position: relative; flex-shrink: 0; min-width: 0; overflow: visible;
+  padding: 16px 17px 14px 21px; border: 0;
+  border-radius: 4px 8px 6px 5px; box-shadow: none;
+  background-color: rgb(246 236 225 / 3%);
+  background-image: var(--paper-grain); background-size: 160px 160px;
+  background-blend-mode: soft-light; color: var(--lantern-ink);
+}
+.chat-column-villager .question-card::before {
+  content: ""; position: absolute; left: 1px; top: 16px;
+  width: 2px; height: 29px; border-radius: 0 2px 2px 0;
+  background: var(--garden-cyan); opacity: .58;
+}
+.chat-column-villager .question-card-heading {
+  width: fit-content; max-width: 100%; margin: 0;
+  color: var(--lantern-ink); font-size: 1rem; line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.chat-column-villager .question-card-heading:focus {
+  outline: none; text-decoration-line: underline;
+  text-decoration-color: var(--garden-cyan); text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.chat-column-villager .question-card-answer {
+  min-width: 0; margin: 12px 0 0; padding: 10px 11px 11px;
+  border: 0; border-top: 1px solid rgb(246 236 225 / 12%);
+  border-bottom: 1px solid rgb(246 236 225 / 10%);
+  border-radius: 3px 5px 4px 2px; box-shadow: none;
+  background: color-mix(in srgb, var(--garden-cyan) 3%, transparent);
+}
+.chat-column-villager .question-card-answer > label {
+  margin: 0 0 6px; color: var(--garden-cyan);
+  font-size: .76rem; letter-spacing: .035em;
+}
+.chat-column-villager .question-card-controls {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end; gap: 8px 12px; min-width: 0;
+}
+.chat-column-villager .question-card-controls input {
+  width: 100%; min-width: 0; padding: 7px 2px 6px;
+  border: 0; border-bottom: 1px solid rgb(246 236 225 / 22%);
+  border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--lantern-ink); font-weight: 600;
+}
+.chat-column-villager .question-card-controls input:focus {
+  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
+  border: 0; border-bottom: 1px solid var(--garden-cyan);
+  background: transparent; box-shadow: none;
+}
+.chat-column-villager .question-card-controls input:disabled { opacity: .5; }
+.chat-column-villager .question-card-actions {
+  display: flex; align-items: center; justify-content: flex-start;
+  flex-wrap: wrap; gap: 8px 11px; min-width: 0;
+}
+.chat-column-villager .question-card-actions .pill {
+  flex: none; min-width: 0; min-height: 40px; max-width: 100%; padding: 4px 3px;
+  border: 0; border-bottom: 1px solid transparent; border-radius: 1px;
+  background: transparent; color: var(--lantern-soft); box-shadow: none;
+  line-height: 1.35; white-space: normal; overflow-wrap: anywhere;
+  transition: border-color .2s, color .2s, opacity .15s;
+}
+.chat-column-villager .question-card-actions > .pill:first-child {
+  border-bottom-color: color-mix(in srgb, var(--garden-cyan) 58%, transparent);
+  color: var(--garden-cyan);
+}
+.chat-column-villager .question-card-actions .pill:hover:not(:disabled) {
+  transform: none; border-bottom-color: rgb(246 236 225 / 38%);
+  background: transparent; color: var(--lantern-ink); box-shadow: none;
+}
+.chat-column-villager .question-card-actions .pill:active:not(:disabled) {
+  transform: none; background: transparent; box-shadow: none;
+}
+.chat-column-villager .question-card-actions .pill:focus-visible {
+  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
+}
+.chat-column-villager .question-card-actions .pill:disabled {
+  border-bottom-color: rgb(246 236 225 / 10%); background: transparent;
+}
+@media (max-width: 620px) {
+  .chat-column-villager .question-card { padding: 14px 12px 12px 16px; }
+  .chat-column-villager .question-card-answer { padding: 9px 8px 10px; }
+  .chat-column-villager .question-card-controls {
+    grid-template-columns: minmax(0, 1fr); align-items: start;
+  }
+  .chat-column-villager .question-card-actions { align-items: flex-start; }
+  .chat-column-villager .question-card-actions .pill { text-align: left; }
+}
+
 /* Reduced motion, part two — placed LAST in the file, deliberately.
    A media query adds no specificity, so the block near the top loses to every
    `.chat-column.chat-column-villager` rule below it, including the one that
@@ -1902,6 +1994,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .pill,
   .chat-column-villager .chat-composer-actions .pill { transition: none; }
   .chat-column-villager .dispatch-actions .pill { transition: none; }
+  .chat-column-villager .question-card-actions .pill { transition: none; }
   .chat-column-villager .pill:hover:not(:disabled),
   .chat-column-villager .pill:active:not(:disabled),
   .chat-column-villager .chat-composer-actions .pill:hover:not(:disabled),

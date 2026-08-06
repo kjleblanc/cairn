@@ -63,13 +63,13 @@ export function QuestionCard({ question, busy, onAnswer, onDefer, headingRef }: 
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onAnswerKeyDown}
           />
-          <Pill disabled={answerDisabled} onClick={() => void submitAnswer()}>Answer</Pill>
+          <div className="row question-card-actions">
+            <Pill disabled={answerDisabled} onClick={() => void submitAnswer()}>Answer</Pill>
+            <Pill kind="quiet" disabled={disabled} onClick={() => void deferAnswer()}>
+              I'm not sure — you decide
+            </Pill>
+          </div>
         </div>
-      </div>
-      <div className="row question-card-defer">
-        <Pill kind="quiet" disabled={disabled} onClick={() => void deferAnswer()}>
-          I'm not sure — you decide
-        </Pill>
       </div>
     </section>
   );

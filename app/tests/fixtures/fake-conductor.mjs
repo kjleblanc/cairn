@@ -83,6 +83,8 @@ const ATTRIBUTED_TASK_BLOCK = JSON.stringify({
   risks: [{ text: "The timing changes how the animation feels." }],
 });
 
+const LONG_QUESTION = "Which settling speed should Cairn use when the shoreline is already busy, the project name is long, and the owner needs the choice to stay readable without losing the exact timing?";
+
 // Task 9 (Phase 3): the commentary turn. It is the one request that ends with
 // a SYSTEM message and adds no user turn at all, so keying off the last user
 // message would replay whatever the owner said before the dispatch and pass a
@@ -198,6 +200,15 @@ function answerGatePoint() {
 function scriptFor(content) {
   if (content.includes("action-malformed")) {
     return { parts: ["I could not form this.\n\n```cairn-question\n{broken\n```"], delayMs: DELAY_MS };
+  }
+  if (content.includes("action-question-only")) {
+    return { parts: ["```cairn-question\n{\"question\":\"Which settling speed should Cairn use?\"}\n```"], delayMs: DELAY_MS };
+  }
+  if (content.includes("action-question-embedded")) {
+    return { parts: [`I need a concrete choice before I settle the page.\n\n${LONG_QUESTION}\n\nOnce you answer, I can tune the motion around it.\n\n\`\`\`cairn-question\n${JSON.stringify({ question: LONG_QUESTION })}\n\`\`\``], delayMs: DELAY_MS };
+  }
+  if (content.includes("action-question-long")) {
+    return { parts: [`I need one careful detail.\n\n\`\`\`cairn-question\n${JSON.stringify({ question: LONG_QUESTION })}\n\`\`\``], delayMs: DELAY_MS };
   }
   if (content.includes("action-question")) {
     return { parts: ["I need one detail.\n\n```cairn-question\n{\"question\":\"Which settling speed should Cairn use?\"}\n```"], delayMs: DELAY_MS };
