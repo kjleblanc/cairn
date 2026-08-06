@@ -468,7 +468,44 @@ test("one compact proposal carries its complete details through a set-aside repl
     await review.click();
     const panel = win.locator(".dispatch-panel");
     await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute("data-dispatch-phase", "confirm");
+    const dispatchHeading = panel.getByRole("heading", { name: "Start this task" });
+    await expect(dispatchHeading).toBeFocused();
+    expect(await dispatchHeading.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { outline: style.outlineStyle, decoration: style.textDecorationLine };
+    })).toEqual({ outline: "none", decoration: "underline" });
     await expect(panel).toContainText("Set aside by the owner: Renaming the title may break bookmarked links.");
+    await expect(panel.getByRole("button", { name: "Run offline demonstration" })).toBeEnabled();
+    await expect(panel.locator(".route-facts, .dispatch-approval")).toHaveCount(0);
+    const offlinePaper = await panel.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const intentRows = [...element.querySelectorAll<HTMLElement>(".task-intent-row")];
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        border: style.borderTopWidth,
+        radius: style.borderTopLeftRadius,
+        shadow: style.boxShadow,
+        intentRowsFlat: intentRows.every((row) => {
+          const rowStyle = getComputedStyle(row);
+          return rowStyle.borderTopWidth === "0px" && rowStyle.borderLeftWidth === "2px"
+            && rowStyle.borderTopLeftRadius === "0px" && rowStyle.backgroundColor === "rgba(0, 0, 0, 0)";
+        }),
+      };
+    });
+    expect(offlinePaper).toEqual({ overflow: 0, border: "0px", radius: "5px", shadow: "none", intentRowsFlat: true });
+    for (const action of [
+      panel.getByRole("button", { name: "Run offline demonstration" }),
+      panel.getByRole("button", { name: "Cancel" }),
+    ]) {
+      expect(await action.evaluate((element) => getComputedStyle(element).transitionDuration
+        .split(",").every((duration) => Number.parseFloat(duration) === 0))).toBe(true);
+    }
+    await panel.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-offline.png") });
+    await panel.getByRole("button", { name: "Cancel" }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(readyHeading).toBeFocused();
   } finally {
     setFixtureProseOnlySetAside(false);
     releaseFixtureInitialProposal();
@@ -1914,7 +1951,11 @@ test("a targeted risk reply retires the whole old action before a fresh proposal
 // proposes, the risk chip is set aside, the confirmation panel discloses the
 // six facts, and the confirmed run starts. From there the run has to live in
 // the conversation itself.
-async function dispatchOneRealCall(win: Page, beforeStart?: () => void | Promise<void>): Promise<void> {
+async function dispatchOneRealCall(
+  win: Page,
+  beforeStart?: () => void | Promise<void>,
+  inspectConfirmation?: (panel: Locator) => void | Promise<void>,
+): Promise<void> {
   await sendChat(win, "Change the page title");
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
@@ -1929,9 +1970,14 @@ async function dispatchOneRealCall(win: Page, beforeStart?: () => void | Promise
   // card is derived by `taskRoute` from the same outcome and details the panel
   // shows, never retyped.
   await expect(panel).toContainText("Keep the counts 74, 477, 256 exactly.");
-  await panel.getByLabel("I approve this one real Codex Exec call.").check();
+  const approval = panel.getByLabel("I approve this one real Codex Exec call.");
+  const start = panel.getByRole("button", { name: "Start one real Codex Exec call" });
+  await expect(start).toBeDisabled();
+  await inspectConfirmation?.(panel);
+  await approval.check();
+  await expect(start).toBeEnabled();
   await beforeStart?.();
-  await panel.getByRole("button", { name: "Start one real Codex Exec call" }).click({ noWaitAfter: true });
+  await start.click({ noWaitAfter: true });
 }
 
 type TownMotionProbe = {
@@ -2080,11 +2126,81 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(town.locator(".town-thread-target")).toHaveCount(0);
   await town.getByRole("button", { name: "Cairn, ready" }).click({ noWaitAfter: true });
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeFocused();
+  const dispatchPanel = win.locator(".dispatch-panel");
   await dispatchOneRealCall(win, async () => {
+    const approval = dispatchPanel.getByLabel("I approve this one real Codex Exec call.");
+    const start = dispatchPanel.getByRole("button", { name: "Start one real Codex Exec call" });
+    const cancel = dispatchPanel.getByRole("button", { name: "Cancel" });
+    await approval.focus();
+    await win.keyboard.press("Tab");
+    await expect(start).toBeFocused();
+    await win.keyboard.press("Tab");
+    await expect(cancel).toBeFocused();
+    await win.keyboard.press("Shift+Tab");
+    await expect(start).toBeFocused();
+    const actionFocus = await start.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
+    });
+    expect(actionFocus.style).toBe("solid");
+    expect(Number.parseFloat(actionFocus.width)).toBeGreaterThanOrEqual(2);
+    expect(Number.parseFloat(actionFocus.offset)).toBeGreaterThanOrEqual(3);
+    await dispatchPanel.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-real-checked.png") });
+    await win.setViewportSize({ width: 1320, height: 820 });
     await expect(town.locator(".town-node-worker")).toHaveCount(0);
     await expect(town.locator(".town-transfer-layer")).toHaveCount(0);
     await installTownMotionProbe(win);
+  }, async (panel) => {
+    await win.setViewportSize({ width: 760, height: 1000 });
+    await expect(panel).toHaveAttribute("data-dispatch-phase", "confirm");
+    const heading = panel.getByRole("heading", { name: "Start this task" });
+    await expect(heading).toBeFocused();
+    await expect(panel.locator(".route-facts > p")).toHaveCount(4);
+    for (const label of ["Provider", "Model", "Target project", "Task",
+      "What gets sent or can be read:", "Cost or usage limit:"]) {
+      await expect(panel).toContainText(label);
+    }
+    await expect(panel).toContainText("OpenAI");
+    await expect(panel.getByLabel("I approve this one real Codex Exec call.")).not.toBeChecked();
+    const paper = await panel.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const row = getComputedStyle(element.querySelector<HTMLElement>(".route-facts p")!);
+      const exactTask = getComputedStyle(element.querySelector<HTMLElement>(".disclosure-task")!);
+      const controls = [...element.querySelectorAll<HTMLElement>("button, input")];
+      const bounds = element.getBoundingClientRect();
+      const contains = (box: DOMRect) => box.left >= bounds.left - 1 && box.right <= bounds.right + 1;
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        controlsFit: controls.every((control) => contains(control.getBoundingClientRect())),
+        border: style.borderTopWidth,
+        radius: style.borderTopLeftRadius,
+        shadow: style.boxShadow,
+        animation: style.animationName,
+        factDisplay: row.display,
+        factRadius: row.borderTopLeftRadius,
+        factBackground: row.backgroundColor,
+        exactTaskWeight: exactTask.fontWeight,
+        exactTaskRule: exactTask.borderLeftWidth,
+      };
+    });
+    expect(paper).toEqual({
+      overflow: 0, controlsFit: true, border: "0px", radius: "5px", shadow: "none",
+      animation: "none", factDisplay: "grid", factRadius: "0px", factBackground: "rgba(0, 0, 0, 0)",
+      exactTaskWeight: "500", exactTaskRule: "1px",
+    });
+    await panel.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-real-unchecked.png") });
   });
+
+  await expect(dispatchPanel).toHaveAttribute("data-dispatch-phase", "running");
+  await expect(dispatchPanel.locator(".dispatch-running")).toBeVisible();
+  await expect(dispatchPanel.locator(".task-intent, .route-facts, .dispatch-approval, .dispatch-actions")).toHaveCount(0);
+  await win.setViewportSize({ width: 760, height: 1000 });
+  await expect(win.locator(".run-strip")).toBeVisible({ timeout: 30_000 });
+  await dispatchPanel.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-running.png") });
+  await win.setViewportSize({ width: 1320, height: 820 });
 
   // The probe was armed before the click that main accepts. Read its history
   // for the sub-second flight instead of attaching a second live waiter after
@@ -2797,22 +2913,53 @@ test("a route that becomes unavailable refuses before accepting or inventing rec
   // ROUTE_OVERRIDE_UNAVAILABLE when a named adapter is no longer connected —
   // so main refuses before any run session survives, and there is nothing for
   // a strip to reattach to. The refusal lands on the panel that asked for it.
-  await expect(win.locator(".dispatch-panel .dispatch-error")).toBeVisible({ timeout: 30_000 });
+  const panel = win.locator(".dispatch-panel");
+  const refusal = panel.locator(".dispatch-error");
+  await expect(refusal).toBeVisible({ timeout: 30_000 });
+  await expect(panel).toHaveAttribute("data-dispatch-phase", "confirm");
+  await win.setViewportSize({ width: 760, height: 1000 });
+  expect(await refusal.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, radius: style.borderTopLeftRadius, left: style.borderLeftStyle };
+  })).toEqual({ background: "rgba(0, 0, 0, 0)", radius: "0px", left: "double" });
+  await panel.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-refusal.png") });
+  await win.setViewportSize({ width: 1320, height: 820 });
   await expect(win.locator(".run-strip")).toHaveCount(0);
-  // Task 166: a start refused because the routed worker disappeared never
-  // spent its proposal. Main retains the trusted block, and a Chat remount
-  // restores the retry card instead of losing it with the failed panel.
-  const retainedProposal = await win.evaluate(async (dir) => {
+  // A start refused because the routed worker disappeared never spent its
+  // current action. Read the authoritative attributed action seam, not the
+  // retired legacy proposal bridge, then prove a Chat remount restores it.
+  const retainedAction = await win.evaluate(async (dir) => {
     const id = (await window.cairn.conductorConversations(dir)).at(-1)?.id;
-    return id ? window.cairn.conductorProposal(dir, id) : null;
+    return id ? window.cairn.conductorAction(dir, id) : null;
   }, project);
-  expect(retainedProposal).toMatchObject({
-    outcome: "Change the page title",
-    details: "Keep the counts 74, 477, 256 exactly.",
+  expect(retainedAction).toMatchObject({
+    kind: "task",
+    request: {
+      outcome: { text: "Change the page title" },
+      requirements: [{ text: "Keep the counts 74, 477, 256 exactly." }],
+    },
+    risks: [],
   });
   await win.getByRole("button", { name: /Project home/ }).click();
   await win.getByRole("button", { name: "Talk with Cairn" }).click();
-  await expect(win.locator(".task-card")).toBeVisible();
+  const restoredCard = win.locator(".task-card");
+  await expect(restoredCard).toBeVisible();
+
+  // Re-reviewing the retained proposal now shows the honest connection state
+  // in the same paper checkpoint, with no approval or Start action invented.
+  await restoredCard.getByRole("button", { name: "Review" }).click();
+  await expect(panel.locator(".dispatch-connection")).toBeVisible({ timeout: 20_000 });
+  await expect(panel.locator(".route-facts, .dispatch-approval")).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: /Start|Run offline/ })).toHaveCount(0);
+  await expect(panel.getByRole("button", { name: "Cancel" })).toBeVisible();
+  await win.setViewportSize({ width: 760, height: 1000 });
+  await panel.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-connection.png") });
+  await panel.getByRole("button", { name: "Cancel" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(restoredCard.getByRole("heading", { name: "Ready to review" })).toBeFocused();
+  await win.setViewportSize({ width: 1320, height: 820 });
 
   // The manual path uses the same preview boundary. A connection-required
   // review may be shown, but trying to spend it cannot create a run session.

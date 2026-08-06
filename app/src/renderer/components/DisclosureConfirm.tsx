@@ -17,16 +17,16 @@ export function DisclosureConfirm({ disclosure, label, confirmed, onConfirmedCha
 }) {
   return (
     <>
-      <p>You are approving this one task only.</p>
+      <p className="dispatch-disclosure-lead">You are approving this one task only.</p>
       <div className="route-facts">
         <p><span>Provider</span><strong>{disclosure.provider}</strong></p>
         <p><span>Model</span><strong>{disclosure.model}</strong></p>
         <p><span>Target project</span><strong className="mono">{disclosure.project}</strong></p>
         <p><span>Task</span><strong className="disclosure-task">{disclosure.task}</strong></p>
       </div>
-      <p><strong>What gets sent or can be read:</strong> {disclosure.data}</p>
-      <p><strong>Cost or usage limit:</strong> {disclosure.quota}</p>
-      <label className="row" style={{ marginTop: 12 }}>
+      <p className="dispatch-disclosure-scope"><strong>What gets sent or can be read:</strong> {disclosure.data}</p>
+      <p className="dispatch-disclosure-quota"><strong>Cost or usage limit:</strong> {disclosure.quota}</p>
+      <label className="row dispatch-approval">
         <input
           type="checkbox"
           checked={confirmed}

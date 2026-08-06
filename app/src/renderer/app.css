@@ -431,6 +431,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .dispatch-outcome { margin: 0 0 8px; font-weight: 600; }
 .dispatch-error { background: var(--stop-soft); border-radius: var(--r-sm); padding: 10px 14px; color: var(--stop); margin: 8px 0 0; }
 .disclosure-task { white-space: pre-wrap; }
+.dispatch-approval { margin-top: 12px; }
 .task-card-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .task-chip { background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 10px 14px; color: var(--card-ink); }
 .task-chip-risk { border-color: var(--amber-soft); }
@@ -806,15 +807,13 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .chat-column-villager .question-card,
 .chat-column-villager .task-card,
-.chat-column-villager .push-confirm,
-.chat-column-villager .dispatch-panel { border-radius: 22px; }
+.chat-column-villager .push-confirm { border-radius: 22px; }
 .chat-column-villager .task-intent-row,
 .chat-column-villager .task-risk,
 .chat-column-villager .task-card-details,
 .chat-column-villager .task-chip { border-radius: 16px; }
-/* Task 187's current proposal is one annotated folio. The concrete dispatch
-   pause deliberately keeps its established card treatment; Task 188 gives the
-   envelope result its own honest receipt hierarchy below. */
+/* Task 187's current proposal is one annotated folio. Task 191 gives its later
+   concrete dispatch pause a separate paper-checkpoint hierarchy near EOF. */
 .chat-column-villager .task-card {
   position: relative; flex-shrink: 0; overflow: visible; padding: 17px 18px 14px 21px;
   border: 0; border-radius: 5px 9px 7px 4px; box-shadow: none;
@@ -1722,6 +1721,167 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   }
 }
 
+/* Task 191: the owner-facing pause before work starts is one paper checkpoint,
+   not a rounded settings card or a grid of fact tiles. Every accepted-request
+   and real-call byte remains open; only the material and hierarchy change. */
+.chat-column-villager .dispatch-panel {
+  position: relative; flex-shrink: 0; min-width: 0; overflow: visible;
+  padding: 17px 18px 15px 21px; border: 0;
+  border-radius: 5px 8px 6px 4px; box-shadow: none;
+  background-color: rgb(246 236 225 / 3%);
+  background-image: var(--paper-grain); background-size: 160px 160px;
+  background-blend-mode: soft-light; color: var(--lantern-ink);
+}
+.chat-column-villager .dispatch-panel::before {
+  content: ""; position: absolute; left: 1px; top: 17px;
+  width: 2px; height: 27px; border-radius: 0 2px 2px 0;
+  background: var(--garden-cyan); opacity: .58;
+}
+.chat-column-villager .dispatch-heading {
+  width: fit-content; color: var(--garden-cyan); font-size: .76rem;
+  line-height: 1.35; letter-spacing: .065em; text-transform: uppercase;
+}
+.chat-column-villager .dispatch-heading:focus {
+  outline: none; text-decoration-line: underline;
+  text-decoration-color: var(--garden-cyan); text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.chat-column-villager .dispatch-panel .task-intent { margin-top: 9px; }
+.chat-column-villager .dispatch-panel .task-intent-heading {
+  margin: 0 0 6px; color: var(--lantern-soft); font-size: .85rem;
+}
+.chat-column-villager .dispatch-panel .task-intent-list { gap: 5px; }
+.chat-column-villager .dispatch-panel .task-intent-row {
+  padding: 8px 0 8px 12px; border: 0;
+  border-left: 2px solid rgb(246 236 225 / 16%); border-radius: 0;
+  background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .dispatch-panel .task-intent-owner-stated {
+  border-left-color: var(--garden-cyan); background: transparent;
+}
+.chat-column-villager .dispatch-panel .task-intent-owner-stated .muted { color: var(--garden-cyan); }
+.chat-column-villager .dispatch-panel .task-intent-owner-unsure {
+  border-left-color: var(--garden-amber); background: transparent;
+}
+.chat-column-villager .dispatch-panel .task-intent-cairn-chosen {
+  border-left-color: rgb(246 236 225 / 18%); background: transparent;
+}
+.chat-column-villager .dispatch-panel .task-intent-context {
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid rgb(246 236 225 / 8%);
+}
+.chat-column-villager .dispatch-panel .task-intent-context li { border-left-color: rgb(246 236 225 / 16%); }
+.chat-column-villager .dispatch-acceptance {
+  margin: 9px 0 0; padding: 9px 0 1px;
+  border-top: 1px solid rgb(246 236 225 / 10%); line-height: 1.45;
+}
+.chat-column-villager .dispatch-routing,
+.chat-column-villager .dispatch-running {
+  margin: 10px 0 0; padding-left: 11px;
+  border-left: 2px solid var(--garden-cyan); overflow-wrap: anywhere;
+}
+.chat-column-villager .dispatch-connection {
+  margin-top: 10px; padding: 9px 0 2px 12px;
+  border-left: 2px solid var(--garden-amber); min-width: 0;
+}
+.chat-column-villager .dispatch-connection p { margin: 0; overflow-wrap: anywhere; }
+.chat-column-villager .dispatch-connection p + p { margin-top: 5px; }
+.chat-column-villager .dispatch-error {
+  margin: 10px 0 0; padding: 7px 0 7px 12px;
+  border: 0; border-left: 3px double var(--pond-stop); border-radius: 0;
+  background: transparent; color: var(--pond-stop); overflow-wrap: anywhere;
+}
+.chat-column-villager .dispatch-disclosure-lead {
+  margin: 12px 0 5px; color: var(--lantern-ink); font-weight: 650;
+}
+.chat-column-villager .dispatch-panel .route-facts {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  gap: 0; min-width: 0; margin: 5px 0 0;
+  border-top: 1px solid rgb(246 236 225 / 12%);
+}
+.chat-column-villager .dispatch-panel .route-facts p {
+  display: grid; grid-template-columns: minmax(96px, .28fr) minmax(0, 1fr);
+  gap: 8px 12px; min-width: 0; margin: 0; padding: 8px 0;
+  border: 0; border-bottom: 1px solid rgb(246 236 225 / 9%);
+  border-radius: 0; background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .dispatch-panel .route-facts span,
+.chat-column-villager .dispatch-panel .route-facts strong { min-width: 0; overflow-wrap: anywhere; }
+.chat-column-villager .dispatch-panel .route-facts span {
+  color: var(--lantern-soft); font-size: .75rem; letter-spacing: .025em;
+}
+.chat-column-villager .dispatch-panel .disclosure-task {
+  display: block; padding-left: 10px;
+  border-left: 1px solid rgb(246 236 225 / 14%);
+  color: var(--lantern-soft); font-family: var(--mono); font-size: .76rem;
+  font-weight: 500; line-height: 1.55;
+}
+.chat-column-villager .dispatch-disclosure-scope,
+.chat-column-villager .dispatch-disclosure-quota {
+  margin: 0; padding: 9px 0; border-bottom: 1px solid rgb(246 236 225 / 9%);
+  line-height: 1.45; overflow-wrap: anywhere;
+}
+.chat-column-villager .dispatch-disclosure-scope strong,
+.chat-column-villager .dispatch-disclosure-quota strong { color: var(--garden-cyan); }
+.chat-column-villager .dispatch-approval {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  align-items: start; gap: 9px; min-width: 0; margin: 10px 0 0;
+  padding: 10px 2px; border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--garden-amber) 42%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--garden-amber) 42%, transparent);
+  border-radius: 0; background: color-mix(in srgb, var(--garden-amber) 4%, transparent);
+  color: var(--lantern-ink); line-height: 1.4;
+}
+.chat-column-villager .dispatch-approval input {
+  width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--garden-cyan);
+}
+.chat-column-villager .dispatch-approval span { min-width: 0; overflow-wrap: anywhere; }
+.chat-column-villager .dispatch-actions {
+  align-items: center; justify-content: flex-start; flex-wrap: wrap;
+  gap: 8px 12px; margin-top: 11px; padding-top: 9px;
+  border-top: 1px solid rgb(246 236 225 / 10%);
+}
+.chat-column-villager .dispatch-actions .pill {
+  flex: none; min-width: 0; padding: 4px 4px;
+  border: 0; border-bottom: 1px solid transparent; border-radius: 1px;
+  background: transparent; color: var(--lantern-soft); box-shadow: none;
+  line-height: 1.35;
+}
+.chat-column-villager .dispatch-actions .pill-primary {
+  border-bottom-color: color-mix(in srgb, var(--garden-cyan) 58%, transparent);
+  background: transparent; color: var(--garden-cyan); box-shadow: none;
+}
+.chat-column-villager .dispatch-actions .pill:hover:not(:disabled) {
+  transform: none; border-bottom-color: rgb(246 236 225 / 38%);
+  background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .dispatch-actions .pill:active:not(:disabled) {
+  transform: none; background: transparent; box-shadow: none;
+}
+.chat-column-villager .dispatch-actions .pill:focus-visible {
+  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
+}
+.chat-column-villager .dispatch-actions .pill:disabled {
+  border-bottom-color: rgb(246 236 225 / 10%); background: transparent;
+}
+.chat-column-villager .dispatch-panel[data-dispatch-phase="running"] {
+  margin: 2px 3px 0; padding: 9px 5px 8px 17px;
+  border-radius: 0; background: transparent;
+  border-top: 1px solid rgb(246 236 225 / 10%);
+}
+.chat-column-villager .dispatch-panel[data-dispatch-phase="running"]::before {
+  top: 10px; height: 18px; opacity: .48;
+}
+.chat-column-villager .dispatch-panel[data-dispatch-phase="running"] .dispatch-running {
+  margin: 0; padding-left: 0; border-left: 0;
+}
+@media (max-width: 620px) {
+  .chat-column-villager .dispatch-panel { padding: 14px 12px 12px 16px; }
+  .chat-column-villager .dispatch-panel .route-facts p {
+    grid-template-columns: minmax(0, 1fr); gap: 2px;
+  }
+  .chat-column-villager .dispatch-actions { align-items: flex-start; }
+}
+
 /* Reduced motion, part two — placed LAST in the file, deliberately.
    A media query adds no specificity, so the block near the top loses to every
    `.chat-column.chat-column-villager` rule below it, including the one that
@@ -1741,6 +1901,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      so their reduced-motion final state must be equally specific. */
   .chat-column-villager .pill,
   .chat-column-villager .chat-composer-actions .pill { transition: none; }
+  .chat-column-villager .dispatch-actions .pill { transition: none; }
   .chat-column-villager .pill:hover:not(:disabled),
   .chat-column-villager .pill:active:not(:disabled),
   .chat-column-villager .chat-composer-actions .pill:hover:not(:disabled),

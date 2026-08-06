@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
 import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot } from "../../shared/ipc";
@@ -548,6 +548,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const conversationVersionRef = useRef(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
+  const dispatchHeadingId = useId();
   // The run this project has, if any: the same main-process session the run
   // screen reattaches to, read through the same two seams (`taskCurrent` and
   // `onTaskActivity`) — no new IPC, and a reload loses nothing.
@@ -575,6 +576,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const endRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const replacementActionRef = useRef<HTMLHeadingElement | null>(null);
+  const dispatchHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const dispatchFocusReturnPendingRef = useRef(false);
   const settledReplyRef = useRef<HTMLHeadingElement | null>(null);
   const errorRecoveryRef = useRef<HTMLDivElement | null>(null);
   // Mirrors `conversationId` for synchronous reads inside the delta handler
@@ -698,6 +701,19 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     });
     return () => window.cancelAnimationFrame(frame);
   }, [focusEpoch]);
+
+  // Review replaces the focused proposal control, so give its visible heading
+  // the focus that would otherwise fall back to the document. Cancel reverses
+  // that exchange only after React has put the same proposal heading back.
+  useEffect(() => {
+    if (dispatch?.phase === "confirm") {
+      dispatchHeadingRef.current?.focus();
+      return;
+    }
+    if (dispatch !== null || !dispatchFocusReturnPendingRef.current) return;
+    dispatchFocusReturnPendingRef.current = false;
+    replacementActionRef.current?.focus();
+  }, [dispatch?.phase]);
 
   const refreshStatus = useCallback(async () => {
     setStatus(await cairn.conductorStatus());
@@ -1467,6 +1483,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   function cancelDispatch(request: Dispatch): void {
     if (conversationResettingRef.current) return;
     dispatchToken.current += 1;
+    dispatchFocusReturnPendingRef.current = true;
     setDispatch(null);
     setRealCallConfirmed(false);
     void cairn.taskPreviewDiscard(dir, request.previewId ?? undefined);
@@ -1633,28 +1650,31 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   onSend={() => onCardSend(action)} />
               ) : null}
               {dispatch && dispatch.phase !== "settling" ? (
-                <div className="card dispatch-panel">
-                  <p className="card-title">start this task</p>
-                  {dispatch.request !== null ? (
-                    <>
-                      <TaskIntentList request={dispatch.request} context={dispatch.context} heading="Final review" />
-                      <p className="small muted dispatch-acceptance">
-                        Starting accepts every displayed <strong>Cairn chose</strong> value as part of this task.
-                        Separate risk, data-sharing, cost, and provider approvals still use their own controls below.
-                      </p>
-                    </>
-                  ) : null}
+                <section className="card dispatch-panel" data-dispatch-phase={dispatch.phase}
+                  aria-labelledby={dispatch.phase === "confirm" ? dispatchHeadingId : undefined}
+                  aria-label={dispatch.phase === "running" ? "Task handoff" : undefined}>
                   {dispatch.phase === "running" ? (
-                    <p className="small muted">Cairn is working on this. Its notes are saved in your project's docs/ai-work folder.</p>
+                    <p className="small muted dispatch-running" role="status">Cairn is working on this. Its notes are saved in your project's docs/ai-work folder.</p>
                   ) : (
                     <>
-                      {dispatch.error ? <p className="dispatch-error">{dispatch.error}</p> : null}
-                      {dispatchRoute === null && !dispatch.error ? <p className="small muted">Choosing who will do the work…</p> : null}
-                      {dispatchRoute?.status === "connection-required" ? (
+                      <h2 id={dispatchHeadingId} className="card-title dispatch-heading"
+                        ref={dispatchHeadingRef} tabIndex={-1}>Start this task</h2>
+                      {dispatch.request !== null ? (
                         <>
+                          <TaskIntentList request={dispatch.request} context={dispatch.context} heading="Final review" />
+                          <p className="small muted dispatch-acceptance">
+                            Starting accepts every displayed <strong>Cairn chose</strong> value as part of this task.
+                            Separate risk, data-sharing, cost, and provider approvals still use their own controls below.
+                          </p>
+                        </>
+                      ) : null}
+                      {dispatch.error ? <p className="dispatch-error">{dispatch.error}</p> : null}
+                      {dispatchRoute === null && !dispatch.error ? <p className="small muted dispatch-routing">Choosing who will do the work…</p> : null}
+                      {dispatchRoute?.status === "connection-required" ? (
+                        <div className="dispatch-connection">
                           <p>{dispatchRoute.reason}</p>
                           <p className="small muted">Install or sign in to Codex yourself through Codex's own controls. Cairn never opens a login, reads passwords, or picks a different provider.</p>
-                        </>
+                        </div>
                       ) : null}
                       {dispatchReady && dispatch.disclosure ? (
                         <DisclosureConfirm
@@ -1664,7 +1684,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                           onConfirmedChange={setRealCallConfirmed}
                         />
                       ) : null}
-                      <div className="row" style={{ marginTop: 12 }}>
+                      <div className="row dispatch-actions">
                         {dispatchReady ? (
                           <Pill kind="primary" disabled={conversationResetting || (dispatchWorker && !realCallConfirmed)}
                             onClick={() => void startDispatch(dispatch, dispatchWorker)}>
@@ -1676,7 +1696,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                       </div>
                     </>
                   )}
-                </div>
+                </section>
               ) : null}
               {streaming ? (
                 <div className="bubble bubble-cairn">
