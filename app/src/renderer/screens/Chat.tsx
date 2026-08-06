@@ -202,7 +202,12 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
 }) {
   const { preview, result } = flow;
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const pushChipRef = useRef<HTMLDivElement | null>(null);
+  const restorePushChipFocus = useRef(false);
   const announcement = pushAnnouncement(flow);
+  const outcomeTone = flow.phase === "pushing" ? "running"
+    : flow.phase === "settled" && result !== null && result.ok ? "success"
+      : announcement === null ? "quiet" : "refusal";
   const gitsOwnWords = flow.phase === "settled" && result !== null && !result.ok && result.kind === "other";
 
   // Pressing the chip removes the focused button from the DOM. Without this,
@@ -213,10 +218,25 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
     if (flow.phase === "confirm") panelRef.current?.focus();
   }, [flow.phase]);
 
+  // Not now remounts the nudge that opened this pause. Return the keyboard
+  // owner to that exact decision, but never focus a nudge merely because a
+  // DONE card caused it to appear for the first time.
+  useEffect(() => {
+    if (flow.phase === "chip" && restorePushChipFocus.current) {
+      restorePushChipFocus.current = false;
+      pushChipRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    }
+  }, [flow.phase]);
+
+  function declinePush() {
+    restorePushChipFocus.current = true;
+    onDecline();
+  }
+
   return (
-    <div className="push-flow">
+    <div className="push-flow" data-push-phase={flow.phase}>
       {flow.phase === "chip" || flow.phase === "opening" ? (
-        <div className="push-chip">
+        <div className="push-chip" ref={pushChipRef}>
           <Pill kind="soft" disabled={flow.phase === "opening"} onClick={onOpen}>
             This project is {aheadPhrase(preview.ahead)} of {preview.remote}. Push?
           </Pill>
@@ -227,15 +247,15 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
         // `tabIndex={-1}` makes the panel focusable by script without adding it
         // to the tab order; the heading is its accessible name.
         <div className="card push-confirm" ref={panelRef} tabIndex={-1} role="group" aria-labelledby="push-confirm-title">
-          <p className="card-title" id="push-confirm-title">before this push</p>
+          <p className="card-title push-confirm-title" id="push-confirm-title">before this push</p>
           <ul className="push-confirm-facts">
-            <li>Target: {preview.remote} — <span className="mono">{preview.url}</span></li>
-            <li>Branch: <span className="mono">{preview.branch}</span></li>
+            <li className="push-confirm-fact">Target: {preview.remote} — <span className="mono">{preview.url}</span></li>
+            <li className="push-confirm-fact">Branch: <span className="mono">{preview.branch}</span></li>
             {/* The COUNT leads, and the subjects follow as git's own answer.
               * `pushPreview` drops empty lines from `log --format=%s`, so a
               * commit with an empty message leaves the list shorter than the
               * count — the count is what cannot understate the effect. */}
-            <li>
+            <li className="push-confirm-fact push-confirm-effect">
               Effect: this push publishes {commitCount(preview.ahead)}. Their subjects, as git reports them:
               <ul className="push-confirm-subjects">
                 {preview.subjects.map((subject, i) => <li key={i}>{subject}</li>)}
@@ -245,11 +265,11 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
               ) : null}
             </li>
           </ul>
-          <p className="push-confirm-sentence">{PUSH_PUBLICATION}</p>
-          <p className="push-confirm-sentence">{PUSH_RECOVERY}</p>
-          <div className="row" style={{ marginTop: 12 }}>
+          <p className="push-confirm-sentence push-confirm-publication">{PUSH_PUBLICATION}</p>
+          <p className="push-confirm-sentence push-confirm-recovery">{PUSH_RECOVERY}</p>
+          <div className="row push-confirm-actions">
             <Pill kind="primary" disabled={flow.phase === "pushing"} onClick={onApprove}>Push</Pill>
-            <Pill kind="quiet" disabled={flow.phase === "pushing"} onClick={onDecline}>Not now</Pill>
+            <Pill kind="quiet" disabled={flow.phase === "pushing"} onClick={declinePush}>Not now</Pill>
           </div>
         </div>
       ) : null}
@@ -261,10 +281,10 @@ function PushFlowView({ flow, onOpen, onApprove, onDecline }: {
         * case screen readers announce least reliably, so this element outlives
         * the change it carries. It is empty and zero-height until there is
         * something true to say, and only then does it take the card styling. */}
-      <div className={`push-outcome${announcement === null ? "" : " card"}`} role="status">
+      <div className={`push-outcome${announcement === null ? "" : " card"}`} data-push-state={outcomeTone} role="status">
         {announcement === null ? null : (
           <>
-            <p className="card-title">the push</p>
+            <p className="card-title push-outcome-title">the push</p>
             <p className="push-outcome-text">{announcement}</p>
             {/* Task 073 carried this forward: the `other` bucket appends git's
               * own first stderr line, which can carry a local absolute path. It

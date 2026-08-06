@@ -3626,14 +3626,13 @@ test("a card that lands while the owner is disconnected stands alone: no comment
 // scaffold to a bare `file://` upstream and then makes exactly ONE extra local
 // commit that is never pushed. Ahead is then exactly 1, whichever lane runs,
 // and the chip's count must read in the singular.
-function pushFixture(project: string): { url: string; branch: string; subject: string; upstream: string } {
+function pushFixture(project: string, subject = "Add the owner's own local note"): { url: string; branch: string; subject: string; upstream: string } {
   const upstream = mkdtempSync(join(tmpdir(), "cairn-push-upstream-"));
   execFileSync("git", ["init", "-q", "--bare", "."], { cwd: upstream });
   const url = pathToFileURL(upstream).href;
   const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: project, encoding: "utf8" }).trim();
   execFileSync("git", ["remote", "add", "origin", url], { cwd: project });
   execFileSync("git", ["push", "-q", "-u", "origin", "HEAD"], { cwd: project });
-  const subject = "Add the owner's own local note";
   writeFileSync(join(project, "notes.txt"), "a local note\n");
   execFileSync("git", ["add", "notes.txt"], { cwd: project });
   execFileSync("git", ["commit", "-q", "-m", subject], { cwd: project });
@@ -3663,10 +3662,13 @@ function advanceUpstream(upstream: string): void {
 test("a DONE card offers the push chip, and the chip's press opens the contract's pause instead of pushing", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-push-"));
   scaffold(project);
-  const fixture = pushFixture(project);
+  execFileSync("git", ["branch", "-m", "owner/paper-publication-with-a-long-visible-branch-name"], { cwd: project });
+  const fixture = pushFixture(project, "Add the owner's long local note without hiding any publication effect");
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
+  await useStableOwnerActions(win);
+  await win.setViewportSize({ width: 1304, height: 1000 });
 
   await sendChat(win, "Change the page title");
   await waitStreamDone(win);
@@ -3690,6 +3692,23 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   const chipButton = chip.getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true });
   await expect(chipButton).toBeVisible();
   await expect(chip).not.toContainText("1 commits");
+  expect(await chipButton.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      radius: style.borderRadius,
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+      transform: style.transform,
+      practicalTarget: element.getBoundingClientRect().height >= 40,
+      underline: style.borderBottomWidth,
+      motion: style.transitionDuration.split(",").every((duration) => Number.parseFloat(duration) === 0),
+    };
+  })).toEqual({
+    radius: "1px", background: "rgba(0, 0, 0, 0)", shadow: "none", transform: "none",
+    practicalTarget: true, underline: "1px", motion: true,
+  });
+  await chip.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-chip.png") });
 
   // Mark the live region's DOM node now, while the flow is still only a chip.
   // The mark is an attribute React never writes, so if the outcome later
@@ -3720,20 +3739,70 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await expect(pause).toContainText("this push publishes 1 commit");
   await expect(pause).toContainText("Pushing publishes these saved snapshots. If your project is public, anyone can see them.");
   await expect(pause).toContainText("You can undo a pushed snapshot with a new one, but the publishing itself can't be taken back.");
+  expect(await pause.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      border: style.borderTopWidth,
+      radius: style.borderTopLeftRadius,
+      shadow: style.boxShadow,
+      grain: style.backgroundImage === "none" ? "none" : "paper",
+    };
+  })).toEqual({ border: "0px", radius: "5px", shadow: "none", grain: "paper" });
+  await pause.locator(".push-confirm-title").scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-confirm-wide.png") });
+  const pushButton = pause.getByRole("button", { name: "Push", exact: true });
+  const notNowButton = pause.getByRole("button", { name: "Not now", exact: true });
+  await win.keyboard.press("Tab");
+  await expect(pushButton).toBeFocused();
+  await win.keyboard.press("Tab");
+  await expect(notNowButton).toBeFocused();
+  expect(await notNowButton.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { width: style.outlineWidth, style: style.outlineStyle, offset: style.outlineOffset };
+  })).toEqual({ width: "2px", style: "solid", offset: "3px" });
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-confirm-wide-focus.png") });
+
+  await win.setViewportSize({ width: 540, height: 900 });
+  await pause.scrollIntoViewIfNeeded();
+  expect(await pause.evaluate((element) => {
+    const panel = element.getBoundingClientRect();
+    const messages = element.closest<HTMLElement>(".chat-messages")!.getBoundingClientRect();
+    const controls = [...element.querySelectorAll<HTMLElement>("button")];
+    const mono = [...element.querySelectorAll<HTMLElement>(".mono")];
+    const within = (box: DOMRect) => box.left >= panel.left - 1 && box.right <= panel.right + 1;
+    return {
+      overflow: element.scrollWidth - element.clientWidth,
+      withinMessages: panel.left >= messages.left - 1 && panel.right <= messages.right + 1,
+      controlsFit: controls.every((control) => within(control.getBoundingClientRect())),
+      factsFit: mono.every((fact) => within(fact.getBoundingClientRect())),
+    };
+  })).toEqual({ overflow: 0, withinMessages: true, controlsFit: true, factsFit: true });
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-confirm-compact.png") });
+  await notNowButton.scrollIntoViewIfNeeded();
+  await expect(notNowButton).toBeVisible();
+  await expect(notNowButton).toBeFocused();
+  expect(await notNowButton.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  })).toBe(true);
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-confirm-compact-focus.png") });
   // Nothing has left the machine on the first press.
   expect(aheadCount(project)).toBe("1");
 
   // Declining leaves everything untouched, and the nudge is still true.
-  await pause.getByRole("button", { name: "Not now" }).click();
+  await notNowButton.press("Space");
   await expect(pause).toHaveCount(0);
   await expect(chipButton).toBeVisible();
+  await expect(chipButton).toBeFocused();
+  await expect(win.locator(".push-outcome")).toHaveAttribute("data-live-region-probe", "same-node");
   expect(aheadCount(project)).toBe("1");
 
   // The press on the confirmation is the owner's approval of that exact
   // action, and it is the only press that writes.
-  await chipButton.click();
+  await chipButton.press("Enter");
   await expect(pause).toBeVisible({ timeout: 15_000 });
-  await pause.getByRole("button", { name: "Push", exact: true }).click();
+  await expect(pause).toBeFocused();
+  await pushButton.click();
 
   const outcome = win.locator(".push-outcome");
   await expect(outcome).toContainText(`Pushed ${fixture.branch} to`, { timeout: 30_000 });
@@ -3751,6 +3820,19 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   // And it arrived as a change inside the region marked above, not as a new
   // region carrying a message no one hears.
   await expect(outcome).toHaveAttribute("data-live-region-probe", "same-node");
+  await expect(outcome).toHaveAttribute("data-push-state", "success");
+  expect(await outcome.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      border: style.borderTopWidth,
+      radius: style.borderRadius,
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+    };
+  })).toEqual({ border: "1px", radius: "0px", background: "rgba(0, 0, 0, 0)", shadow: "none" });
+  await expect(outcome.getByRole("button")).toHaveCount(0);
+  await outcome.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-success.png") });
   // The honest outcome is honest: the commit really is on the upstream now.
   expect(aheadCount(project)).toBe("0");
   expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
@@ -3849,6 +3931,8 @@ test("a refused push reports the real reason and leaves the project exactly as i
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
+  await useStableOwnerActions(win);
+  await win.setViewportSize({ width: 540, height: 900 });
 
   await sendChat(win, "Change the page title");
   await waitStreamDone(win);
@@ -3865,6 +3949,10 @@ test("a refused push reports the real reason and leaves the project exactly as i
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
 
+  await win.evaluate(() => {
+    const region = document.querySelector(".push-outcome");
+    if (region instanceof HTMLElement) region.dataset.liveRegionProbe = "refusal-same-node";
+  });
   await win.locator(".push-chip").getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true }).click();
   const pause = win.locator(".push-confirm");
   await expect(pause).toBeVisible({ timeout: 15_000 });
@@ -3878,6 +3966,22 @@ test("a refused push reports the real reason and leaves the project exactly as i
   // settled outcome carries no button, because Cairn never retries a push.
   await expect(outcome).not.toContainText("try the push again");
   await expect(outcome.getByRole("button")).toHaveCount(0);
+  await expect(outcome).toHaveAttribute("data-live-region-probe", "refusal-same-node");
+  await expect(outcome).toHaveAttribute("data-push-state", "refusal");
+  expect(await outcome.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const bounds = element.getBoundingClientRect();
+    const messages = element.closest<HTMLElement>(".chat-messages")!.getBoundingClientRect();
+    return {
+      overflow: element.scrollWidth - element.clientWidth,
+      contained: bounds.left >= messages.left - 1 && bounds.right <= messages.right + 1,
+      radius: style.borderRadius,
+      background: style.backgroundColor,
+      shadow: style.boxShadow,
+    };
+  })).toEqual({ overflow: 0, contained: true, radius: "0px", background: "rgba(0, 0, 0, 0)", shadow: "none" });
+  await outcome.scrollIntoViewIfNeeded();
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-refused.png") });
   // Nothing was claimed that did not happen, and nothing was rewritten to make
   // it happen: same commit, same one-ahead count, and the upstream still
   // carries the other clone's work.
