@@ -6,6 +6,7 @@ import { join } from "node:path";
 const renderer = (...parts: string[]) =>
   readFileSync(join(__dirname, "..", "..", "src", "renderer", ...parts), "utf8");
 const css = renderer("app.css");
+const chat = renderer("screens", "Chat.tsx");
 
 function rule(selector: string): string {
   const start = css.indexOf(`\n${selector} {`);
@@ -102,8 +103,27 @@ test("the lantern's own buttons are the mockup's mint and ghost", () => {
     "Send has no solid lower edge to compress");
 });
 
+test("New and Send live inside one compact composer surface", () => {
+  assert.match(chat, /<div className="chat-composer">[\s\S]*?<textarea[\s\S]*?<div className="chat-composer-actions">[\s\S]*?aria-label="New conversation"[\s\S]*?>New<\/button>[\s\S]*?>Send<\/Pill>[\s\S]*?<\/div>[\s\S]*?<\/div>/,
+    "the writing field, New, and Send are not one composer control");
+  assert.ok(rule(".chat-composer").includes("flex-direction: column"),
+    "the composer does not stack its writing area above its actions");
+  assert.ok(rule(".chat-composer").includes("border:"),
+    "the composer has no single enclosing boundary");
+  assert.ok(rule(".chat-composer:focus-within").includes("border-color:")
+    && rule(".chat-composer:focus-within").includes("box-shadow:"),
+    "keyboard focus does not mark the shared composer surface");
+  assert.ok(rule(".chat-composer textarea").includes("border: 0")
+    && rule(".chat-composer textarea").includes("background: transparent"),
+    "the textarea still draws a competing field inside the shared composer");
+  assert.ok(rule(".chat-composer-actions").includes("justify-content: space-between"),
+    "New and Send do not anchor opposite ends of the shared control");
+  assert.ok(rule(".chat-composer-actions .pill").includes("padding:"),
+    "the full-size pills were not compacted to fit inside the composer");
+});
+
 test("nothing outranks the pill's own press", () => {
-  // `.chat-composer` holds exactly one button — the Send pill — and
+  // Both `.chat-composer` buttons are pills, and
   // `motion.css`'s `.chat-composer button:hover:not(:disabled)` is (0,3,1)
   // against `.pill:hover:not(:disabled)`'s (0,3,0), in a file imported AFTER
   // app.css. So a generic button rule there wins twice over, and the app's

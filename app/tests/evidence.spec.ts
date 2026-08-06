@@ -209,8 +209,9 @@ async function observeTerminalPaint(win: Page): Promise<void> {
           dispatchPanels: document.querySelectorAll(".dispatch-panel").length,
           taskCards: document.querySelectorAll(".task-card").length,
           composerDisabled: document.querySelector<HTMLTextAreaElement>(".chat-composer textarea")?.disabled === true,
-          newConversationDisabled: Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-            .find((button) => button.textContent?.trim() === "New conversation")?.disabled === true,
+          newConversationDisabled: document.querySelector<HTMLButtonElement>(
+            '.chat-composer button[aria-label="New conversation"]',
+          )?.disabled === true,
           settlingMessage: document.body.textContent?.includes("Cairn is finishing this result.") === true,
         };
       }));
