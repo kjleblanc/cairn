@@ -793,12 +793,23 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   padding-bottom: 14px; border-bottom: 1px solid rgb(246 236 225 / 9%);
 }
 .chat-column-villager .chat-messages { gap: 13px; padding: 15px 3px 10px; }
-.chat-column-villager .bubble-cairn { line-height: 1.62; }
+/* Task 187: Cairn is a line in the correspondence, not another speech card.
+   One short registration stroke keeps the speaker scannable without enclosing
+   the prose or adding another avatar. */
+.chat-column-villager .bubble-cairn {
+  position: relative; line-height: 1.62; padding: 3px 5px; padding-left: 16px;
+}
+.chat-column-villager .bubble-cairn::before {
+  content: ""; position: absolute; left: 1px; top: .88em; width: 8px; height: 2px;
+  border-radius: 2px; background: var(--garden-cyan); opacity: .44;
+}
 /* The owner's own voice keeps a fill so the two stay scannable — the mockup's
    warm peach, which is the one bright thing on the dark paper. */
 .chat-column-villager .bubble-owner {
+  max-width: 78%; padding: 9px 17px 10px 13px;
   background: linear-gradient(165deg, #fae3c8, #f3d0a8); color: #453120;
-  border-radius: 20px 20px 7px 20px; box-shadow: 0 4px 15px rgb(247 211 168 / 20%);
+  border: 0; border-radius: 10px 2px 3px 10px; box-shadow: none;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
 }
 .chat-column-villager .result-card,
 .chat-column-villager .question-card,
@@ -811,6 +822,74 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .task-risk,
 .chat-column-villager .task-card-details,
 .chat-column-villager .task-chip { border-radius: 16px; }
+/* Task 187's current proposal is one annotated folio. The envelope/result and
+   concrete dispatch pause deliberately keep their established card treatment;
+   those evidence-heavy surfaces need their own hierarchy pass. */
+.chat-column-villager .task-card {
+  position: relative; flex-shrink: 0; overflow: visible; padding: 17px 18px 14px 21px;
+  border: 0; border-radius: 5px 9px 7px 4px; box-shadow: none;
+  background-color: rgb(246 236 225 / 3%);
+  background-image:
+    var(--paper-grain),
+    linear-gradient(105deg, rgb(163 221 208 / 6%), transparent 54%);
+  background-size: 160px 160px, auto;
+  background-blend-mode: soft-light, normal;
+}
+.chat-column-villager .task-card::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 2px; border-radius: 0 2px 2px 0;
+  background: var(--garden-cyan); opacity: .72;
+}
+.chat-column-villager .task-card:has(.task-risk)::before { background: var(--garden-amber); }
+.chat-column-villager .task-card-heading {
+  margin: 0 0 4px; color: var(--lantern-soft); font-size: .82rem;
+  letter-spacing: .035em; line-height: 1.35;
+}
+.chat-column-villager .task-card-heading:focus {
+  outline: none; border-radius: 0;
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--garden-cyan) 72%, transparent);
+}
+.chat-column-villager .task-card-outcome {
+  color: var(--lantern-ink); font-size: 1.04rem; line-height: 1.42;
+}
+.chat-column-villager .task-card-risks { margin-top: 10px; }
+.chat-column-villager .task-risk {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  min-width: 0; padding: 9px 8px 9px 13px;
+  border: 0; border-left: 2px solid color-mix(in srgb, var(--garden-amber) 72%, transparent);
+  border-radius: 0 7px 7px 0;
+  background: linear-gradient(90deg, rgb(242 185 92 / 11%), rgb(242 185 92 / 3%) 72%, transparent);
+}
+.chat-column-villager .task-risk p { margin: 0; }
+.chat-column-villager .task-card-actions {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid rgb(246 236 225 / 8%);
+}
+.chat-column-villager .task-card-actions .pill-primary:disabled {
+  opacity: .68; border-color: rgb(163 221 208 / 28%);
+}
+.chat-column-villager .task-card-details {
+  margin-top: 2px; border-radius: 0; background: transparent;
+}
+.chat-column-villager .task-card-details > summary { padding: 6px 0 0; }
+.chat-column-villager .task-card .task-intent-row {
+  padding: 9px 10px; border: 0; border-left: 2px solid var(--line);
+  border-radius: 0 6px 6px 0; background: rgb(246 236 225 / 4%);
+}
+.chat-column-villager .task-card .task-intent-owner-stated {
+  border-left-color: var(--garden-cyan);
+  background: color-mix(in srgb, var(--garden-cyan) 12%, transparent);
+  color: var(--lantern-ink);
+}
+.chat-column-villager .task-card .task-intent-owner-stated .muted {
+  color: var(--garden-cyan);
+}
+.chat-column-villager .task-card .task-intent-owner-unsure {
+  border-left-color: var(--garden-amber);
+  background: color-mix(in srgb, var(--garden-amber) 9%, transparent);
+}
+.chat-column-villager .task-card .task-intent-cairn-chosen {
+  border-left-color: rgb(246 236 225 / 18%); background: rgb(246 236 225 / 3%);
+}
 /* The disposition chips. DONE's moss and its ink are verbatim from the
    approved mockup, as is STOPPED's amber pair (the mockup's own warm button).
    ERROR has no mockup precedent: its coral is approved, its ink #4a201c is

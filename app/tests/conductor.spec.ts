@@ -307,6 +307,7 @@ test("one compact proposal carries its complete details through a set-aside repl
   try {
     const win = await app.firstWindow();
     await win.setViewportSize({ width: 760, height: 720 });
+    await useStableOwnerActions(win);
     await connectToFixture(win, fixtureUrl, "fixture-model");
 
     holdFixtureInitialProposal();
@@ -322,7 +323,16 @@ test("one compact proposal carries its complete details through a set-aside repl
     await waitStreamDone(win);
     const taskCard = win.locator(".task-card");
     const details = taskCard.locator(".task-card-details");
+    const detailsSummary = details.locator("summary");
     const review = taskCard.getByRole("button", { name: "Review" });
+    const proposalControlsContained = () => taskCard.evaluate((element) => {
+      const card = element.getBoundingClientRect();
+      return [...element.querySelectorAll<HTMLElement>("button, summary")].every((control) => {
+        const box = control.getBoundingClientRect();
+        return box.left >= card.left - 1 && box.right <= card.right + 1
+          && box.top >= card.top - 1 && box.bottom <= card.bottom + 1;
+      });
+    });
     await expect(taskCard).toBeVisible();
     await expect(taskCard.getByRole("heading", { name: "One thing needs your call" })).toBeVisible();
     await expect(taskCard.locator(".task-card-outcome")).toHaveText("Change the page title");
@@ -335,6 +345,41 @@ test("one compact proposal carries its complete details through a set-aside repl
     const proposalReply = win.locator(".bubble-cairn:not(.bubble-commentary)").last();
     await expect(proposalReply.locator("p").first()).toHaveText("Here's the plan.");
     await expect(proposalReply).not.toContainText("Change the page title");
+    expect(await proposalReply.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return style.backgroundColor === "rgba(0, 0, 0, 0)"
+        && style.borderTopWidth === "0px" && style.boxShadow === "none";
+    })).toBe(true);
+    expect(await win.locator(".bubble-owner").last().evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { shadow: style.boxShadow, clip: style.clipPath };
+    })).toEqual({ shadow: "none", clip: "polygon(0px 0px, calc(100% - 10px) 0px, 100% 10px, 100% 100%, 0px 100%)" });
+    expect(await taskCard.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const concern = getComputedStyle(element.querySelector<HTMLElement>(".task-risk")!);
+      return {
+        border: style.borderTopWidth,
+        radius: style.borderTopLeftRadius,
+        shadow: style.boxShadow,
+        concernDisplay: concern.display,
+        concernTop: concern.borderTopWidth,
+        concernLeft: concern.borderLeftWidth,
+      };
+    })).toEqual({
+      border: "0px", radius: "5px", shadow: "none",
+      concernDisplay: "grid", concernTop: "0px", concernLeft: "2px",
+    });
+    await expect(review).toHaveCSS("opacity", "0.68");
+    await expect.poll(proposalControlsContained).toBe(true);
+    const setAside = taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" });
+    for (const control of [setAside, review, detailsSummary]) {
+      expect(await control.evaluate((element) => getComputedStyle(element).transitionDuration
+        .split(",").every((duration) => Number.parseFloat(duration) === 0))).toBe(true);
+    }
+    await setAside.hover();
+    await expect.poll(() => setAside.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
+    await win.mouse.move(20, 500);
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-187-paper-proposal.png") });
     await win.screenshot({ path: join(tmpdir(), "cairn-task-184-compact-proposal.png") });
 
     await details.locator("summary").click();
@@ -371,10 +416,24 @@ test("one compact proposal carries its complete details through a set-aside repl
     await expect(taskCard).toBeVisible();
     await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
     await waitStreamDone(win);
-    await expect(taskCard.getByRole("heading", { name: "Ready to review" })).toBeVisible();
+    const readyHeading = taskCard.getByRole("heading", { name: "Ready to review" });
+    await expect(readyHeading).toBeVisible();
+    await expect(readyHeading).toBeFocused();
+    expect(await readyHeading.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return style.outlineStyle === "none" && style.boxShadow !== "none";
+    })).toBe(true);
     await expect(taskCard.locator(".task-risk")).toHaveCount(0);
     await expect(review).toBeEnabled();
     await expect(details).not.toHaveAttribute("open", "");
+    await expect.poll(proposalControlsContained).toBe(true);
+    for (const control of [review, detailsSummary]) {
+      expect(await control.evaluate((element) => getComputedStyle(element).transitionDuration
+        .split(",").every((duration) => Number.parseFloat(duration) === 0))).toBe(true);
+    }
+    await review.hover();
+    await expect.poll(() => review.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
+    await win.mouse.move(20, 500);
     const replacementReply = win.locator(".bubble-cairn:not(.bubble-commentary)").last();
     await expect(replacementReply.locator("p").first()).toHaveText("I carried that concern forward.");
     const providerRequest = JSON.parse(lastReplyBody() ?? "{}") as {
@@ -387,13 +446,25 @@ test("one compact proposal carries its complete details through a set-aside repl
     expect(providerPrompt).toContain("put the task control fence before any prose");
     expect(providerPrompt).toContain("After the fence, write at most one short sentence");
     expect(providerPrompt).toContain("Do not repeat or summarize the outcome");
+    expect(await taskCard.evaluate((element) => getComputedStyle(element, "::before").backgroundColor))
+      .toBe("rgb(163, 221, 208)");
+    await win.locator(".chat-messages").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(() => taskCard.evaluate((element) => {
+      const card = element.getBoundingClientRect();
+      const messages = element.closest(".chat-messages")!.getBoundingClientRect();
+      return card.top >= messages.top - 1 && card.bottom <= messages.bottom + 1;
+    })).toBe(true);
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-187-paper-ready.png") });
     await win.screenshot({ path: join(tmpdir(), "cairn-task-184-fresh-proposal.png") });
 
-    await details.locator("summary").click();
+    await detailsSummary.click();
     await expect(details).toContainText("Set aside by the owner: Renaming the title may break bookmarked links.");
+    await expect(details.locator(".task-intent-owner-stated .muted").first())
+      .toHaveCSS("color", "rgb(163, 221, 208)");
     await details.scrollIntoViewIfNeeded();
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-187-paper-details.png") });
     await win.screenshot({ path: join(tmpdir(), "cairn-task-184-details.png") });
-    await details.locator("summary").click();
+    await detailsSummary.click();
     await review.click();
     const panel = win.locator(".dispatch-panel");
     await expect(panel).toBeVisible();
