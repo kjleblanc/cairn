@@ -122,6 +122,9 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(projectHome).toBeVisible({ timeout: 30000 });
     const railProjects = win.locator(".rail-project-select");
     await expect(railProjects).toHaveCount(2);
+    await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+    await expect(win.getByRole("button", { name: /^Beta, idle/ })).toBeVisible();
+    await win.getByRole("button", { name: "Expand project rail" }).click();
     await expect(railProjects.nth(0)).toContainText("Beta");
     await expect(railProjects.nth(1)).toContainText("Alpha");
     await win.getByRole("button", { name: "Collapse project rail" }).click();
@@ -183,8 +186,8 @@ test.describe("remembered projects: load, switch, track", () => {
     await app.close();
   });
 
-  test("project chrome shares one pond at wide and compact sizes", async () => {
-    // This proof deliberately does not use Project Home or Dashboard. Task 185
+  test("project chrome opens tucked in the paper field at wide and compact sizes", async () => {
+    // This proof deliberately does not use Project Home or Dashboard. Task 186
     // is visual environment work, so its evidence stays valid if that older
     // navigation path is retired in a later, separately reconciled task.
     const file = registryFile();
@@ -202,10 +205,10 @@ test.describe("remembered projects: load, switch, track", () => {
 
         const railProjects = win.locator(".rail-project-select");
         await expect(railProjects).toHaveCount(2);
-        await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Beta");
-        await win.getByRole("button", { name: "Collapse project rail" }).click();
         await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+        await expect(win.getByRole("button", { name: /^Beta, idle/ })).toHaveAttribute("aria-current", "page");
         await win.getByRole("button", { name: "Expand project rail" }).click();
+        await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Beta");
 
         await win.locator(".rail-project-select", { hasText: "Alpha" }).click();
         await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
@@ -215,12 +218,15 @@ test.describe("remembered projects: load, switch, track", () => {
         // open water so the evidence does not mistake an incidental hover for
         // a second selected project.
         await win.mouse.move(700, 500);
+        await win.getByRole("button", { name: "Collapse project rail" }).click();
+        await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
 
         const betaTown = win.getByRole("region", { name: "Beta town square" });
         const dialog = win.getByRole("dialog", { name: "Conversation with Cairn" });
         const townHeader = betaTown.locator(".town-square-header");
         await expect(betaTown).toBeVisible();
-        await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Beta");
+        await expect(win.locator(".rail-project-select[aria-current='page']"))
+          .toHaveAttribute("aria-label", /^Beta, idle/);
         await expect(win.locator(".pond-line")).toBeHidden();
         await expect(townHeader).toBeVisible();
         await expect(townHeader.locator(".town-project-label strong")).toHaveText("Beta");
@@ -246,14 +252,14 @@ test.describe("remembered projects: load, switch, track", () => {
         expect(chromeBounds.headerLeft).toBeGreaterThanOrEqual(chromeBounds.paneLeft);
         expect(chromeBounds.headerRight).toBeLessThanOrEqual(chromeBounds.paneRight);
         expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-        await win.screenshot({ path: join(tmpdir(), "cairn-task-185-integrated-project-pond-wide.png") });
+        await win.screenshot({ path: join(tmpdir(), "cairn-task-186-quiet-paper-field-wide.png") });
 
         await win.setViewportSize({ width: 900, height: 720 });
         await expect(townHeader).toBeHidden();
         await expect(win.locator(".pond-line")).toBeVisible();
         await expect(win.locator(".pond-line")).toContainText("Beta · Town is quiet.");
         expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-        await win.screenshot({ path: join(tmpdir(), "cairn-task-185-integrated-project-pond-compact.png") });
+        await win.screenshot({ path: join(tmpdir(), "cairn-task-186-quiet-paper-field-compact.png") });
       } finally {
         await app.close();
       }

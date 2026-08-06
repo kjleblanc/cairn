@@ -96,11 +96,14 @@ test("every added motion stops for reduced motion", () => {
     "reduced motion leaves a hover or press transform applied");
 });
 
-test("the lantern's own buttons are the mockup's mint and ghost", () => {
-  assert.ok(rule(".chat-column-villager .pill-primary").includes("#bfe8dd"),
-    "Send is not the approved mint gradient");
-  assert.ok(rule(".chat-column-villager .pill-primary").includes("#7cbdae"),
-    "Send has no solid lower edge to compress");
+test("the lantern's buttons keep their mint and ghost identities without chunky edges", () => {
+  const primary = rule(".chat-column-villager .pill-primary");
+  assert.ok(primary.includes("var(--garden-cyan)"),
+    "Send has lost its muted mint identity");
+  assert.ok(primary.includes("border: 1px solid") && !primary.includes("0 5px 0"),
+    "Send still carries the old thick lower edge");
+  assert.ok(rule(".chat-column-villager .pill-quiet").includes("background: transparent"),
+    "quiet lantern actions no longer disappear into the paper");
 });
 
 test("New and Send live inside one compact composer surface", () => {

@@ -253,6 +253,7 @@ test("New and Send share one narrow Cairn composer without changing their behavi
   try {
     const win = await app.firstWindow();
     await win.setViewportSize({ width: 760, height: 720 });
+    await useStableOwnerActions(win);
     await connectToFixture(win, fixtureUrl, "fixture-model");
 
     const composer = win.locator(".chat-composer");
@@ -264,6 +265,10 @@ test("New and Send share one narrow Cairn composer without changing their behavi
     await expect(win.getByRole("button", { name: "New conversation" })).toHaveCount(1);
     await expect(startNew).toHaveText("New");
     await expect(send).toBeDisabled();
+    expect(await startNew.evaluate((element) => getComputedStyle(element).transitionDuration
+      .split(",").every((duration) => Number.parseFloat(duration) === 0))).toBe(true);
+    await startNew.hover();
+    await expect.poll(() => startNew.evaluate((element) => getComputedStyle(element).transform)).toBe("none");
     expect(await composer.evaluate((element) => {
       const shell = element.getBoundingClientRect();
       return [...element.querySelectorAll("textarea, button")].every((control) => {
@@ -289,7 +294,7 @@ test("New and Send share one narrow Cairn composer without changing their behavi
     await waitStreamDone(win);
     await expect(win.locator(".bubble-owner").filter({ hasText: "Change the page title" })).toBeVisible();
     await expect(composer).toBeVisible();
-    await win.screenshot({ path: join(tmpdir(), "cairn-task-182-cohesive-composer.png") });
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-186-unified-paper-composer.png") });
   } finally {
     await app.close();
   }
@@ -1839,7 +1844,7 @@ async function dispatchOneRealCall(win: Page, beforeStart?: () => void | Promise
   await waitStreamDone(win);
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
-  await taskCard.locator(".task-chip-risk").getByRole("button", { name: "Set aside" }).click();
+  await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
   await waitStreamDone(win);
   await taskCard.getByRole("button", { name: "Review" }).click();
 
@@ -2143,15 +2148,14 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(town.locator(".town-node-cairn")).toBeVisible();
   await expect(town.locator(".town-square-header")).toBeVisible();
 
-  await win.locator(".rail-project-select", { hasText: otherName }).click({ noWaitAfter: true });
+  await win.getByTitle(otherName).click({ noWaitAfter: true });
   const otherTown = win.getByRole("region", { name: `${otherName} town square` });
   await expect(otherTown).toBeVisible();
   await expect(win.locator(".town-square")).toHaveCount(1);
   await expect(otherTown.locator(".town-node-worker")).toHaveCount(0);
   const runningProject = win.locator(".rail-project-select", { has: win.locator(".rail-activity-working") });
   await expect(runningProject).toHaveCount(1);
-  await expect(runningProject).toContainText("Conductor");
-  await expect(runningProject).toContainText("worker task running");
+  await expect(runningProject).toHaveAccessibleName(/^Conductor, worker task running/);
   const awaySession = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
   expect(awaySession?.phase).toBe("running");
   await runningProject.click({ noWaitAfter: true });

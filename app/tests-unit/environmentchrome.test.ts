@@ -46,12 +46,12 @@ test("the shared material reaches the standalone Town preview", () => {
   }
 });
 
-test("the selected project and current-project controls are the same pond islands", () => {
+test("the selected project stays a pond wash while current context becomes an annotation", () => {
   const selected = rule(".rail-project-active");
   assert.ok(selected.includes("var(--environment-island)"),
     "the selected project does not use the environment's island material");
-  assert.ok(selected.includes("var(--environment-edge)"),
-    "the selected project has no shared shoreline edge");
+  assert.ok(!selected.includes("var(--environment-edge)"),
+    "the selected project still draws a shoreline around itself");
   assert.ok(!selected.includes("inset 2px 0"),
     "the selected project still carries the old sidebar stripe");
 
@@ -61,11 +61,11 @@ test("the selected project and current-project controls are the same pond island
   assert.ok(!header.includes("border-bottom"),
     "the current-project header still divides the pond with a hard line");
 
-  const islands = rule(".town-project-label,\n.town-header-actions");
-  assert.ok(islands.includes("var(--environment-island)"),
-    "the current-project controls do not share the selected project's material");
-  assert.ok(islands.includes("var(--environment-edge)"),
-    "the current-project controls do not share the selected project's edge");
+  const annotation = rule(".town-project-label,\n.town-header-actions");
+  assert.ok(annotation.includes("background: transparent"),
+    "the current-project context still paints another island card");
+  assert.ok(annotation.includes("border: 0") && annotation.includes("box-shadow: none"),
+    "the current-project context still carries glass-card chrome");
 });
 
 test("rail and current-project controls have unmistakable keyboard focus", () => {

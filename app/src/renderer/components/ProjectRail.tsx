@@ -68,6 +68,9 @@ export function ProjectRail({
               <div className="rail-project-row">
                 <button type="button" className="rail-project-select" onClick={() => onSelectProject(project.dir)}
                   aria-current={active ? "page" : undefined}
+                  aria-label={collapsed
+                    ? `${project.name || "Unnamed project"}, ${activityText[project.activity]}${urgent ? ", running or unfinished task" : ""}`
+                    : undefined}
                   title={collapsed ? project.name || "Unnamed project" : undefined}>
                   <span className="rail-project-avatar" aria-hidden="true">{initials(project.name)}</span>
                   {!collapsed ? (
@@ -107,14 +110,17 @@ export function ProjectRail({
 
       <div className="rail-bottom">
         <button type="button" className="rail-action" onClick={onOpenProjects}
+          aria-label="Open a project"
           title={collapsed ? "Open a project" : undefined}>
           <span aria-hidden="true">⌂</span>{!collapsed ? <span>Open project</span> : null}
         </button>
         <button type="button" className="rail-action" onClick={onCreateProject}
+          aria-label="Create a project"
           title={collapsed ? "Create a project" : undefined}>
           <span aria-hidden="true">＋</span>{!collapsed ? <span>Create project</span> : null}
         </button>
         <button type="button" className="rail-action" onClick={onSettings}
+          aria-label="Settings"
           title={collapsed ? "Settings" : undefined}>
           <span aria-hidden="true">⚙</span>{!collapsed ? <span>Settings</span> : null}
         </button>

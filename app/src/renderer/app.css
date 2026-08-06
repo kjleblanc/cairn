@@ -450,18 +450,23 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   overflow: hidden;
   /* One sky: the whole workspace is the festival dusk; rail, chat, and town
      are places inside it, not pages beside it. */
-  background:
+  background-image:
+    var(--paper-grain),
     var(--garden-stars),
     radial-gradient(900px 520px at 50% -18%, var(--garden-cyan-glow), transparent 62%),
     radial-gradient(1000px 560px at 55% 115%, var(--garden-amber-glow), transparent 60%),
     linear-gradient(160deg, var(--garden-ink), var(--garden-deep));
+  background-size: 160px 160px, auto, auto, auto, auto;
+  background-blend-mode: soft-light, normal, normal, normal, normal;
 }
 .workspace-shell.workspace-rail-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
 .project-rail {
   position: relative; z-index: 4; min-width: 0; display: flex; flex-direction: column;
-  background: var(--environment-shore); backdrop-filter: blur(10px);
+  background-image: var(--paper-grain), var(--environment-rail-shore), var(--environment-shore);
+  background-size: 160px 160px, auto, auto;
+  background-blend-mode: soft-light, normal, normal;
   color: var(--rail-ink); overflow: hidden;
-  box-shadow: 16px 0 38px var(--environment-shadow);
+  box-shadow: none;
 }
 .rail-identity {
   position: relative; min-height: 74px; display: flex; align-items: center; gap: 10px; padding: 12px;
@@ -473,9 +478,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .rail-identity::after { bottom: 0; }
 .rail-cairn-mark {
   position: relative; flex: 0 0 38px; width: 38px; height: 38px; display: grid; place-items: center;
-  border: 1px solid var(--environment-edge); border-radius: 14px 14px 18px 18px;
-  color: var(--neon); background: var(--environment-island); font-weight: 700;
-  box-shadow: 0 8px 20px var(--environment-shadow), inset 0 0 18px var(--garden-cyan-glow);
+  isolation: isolate; border-radius: 0;
+  color: var(--neon); background: transparent; font-weight: 700;
+  box-shadow: none;
+}
+.rail-cairn-mark::before {
+  content: ""; position: absolute; z-index: -1; inset: 7px 1px 5px 2px;
+  border-radius: 48% 52% 44% 56% / 56% 43% 57% 44%;
+  background: radial-gradient(ellipse at 42% 54%, rgb(163 221 208 / 20%), transparent 72%);
+  transform: rotate(-7deg) scale(1.14, .78);
 }
 .rail-cairn-mark::after {
   content: ""; position: absolute; width: 5px; height: 5px; margin: 26px 0 0 26px;
@@ -503,12 +514,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   letter-spacing: .12em; text-transform: uppercase;
 }
 .rail-project {
-  margin-bottom: 5px; border: 1px solid transparent; border-radius: 15px;
+  margin-bottom: 5px; border: 1px solid transparent; border-radius: 13px 16px 14px 12px;
   transition: background-color .2s var(--ease), border-color .2s var(--ease), box-shadow .2s var(--ease);
 }
 .rail-project-active {
-  background: var(--environment-island); border-color: var(--environment-edge);
-  box-shadow: 0 10px 24px var(--environment-shadow), inset 0 1px rgb(246 236 225 / 7%);
+  background-image: var(--paper-grain), var(--environment-island);
+  background-size: 160px 160px, auto;
+  background-blend-mode: soft-light, normal;
+  border-color: transparent;
+  box-shadow: none;
 }
 .rail-project-row { display: flex; align-items: stretch; }
 .rail-project-select {
@@ -522,7 +536,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .rail-project-avatar {
   flex: 0 0 32px; width: 32px; height: 32px; display: grid; place-items: center;
-  border-radius: 12px; background: var(--rail-avatar); color: var(--neon-warm); font-size: .72rem; font-weight: 700;
+  position: relative; isolation: isolate; border-radius: 0;
+  background: transparent; color: var(--neon-warm); font-size: .72rem; font-weight: 700;
+}
+.rail-project-avatar::before {
+  content: ""; position: absolute; z-index: -1; inset: 8px 0 6px 1px;
+  border-radius: 54% 46% 57% 43% / 45% 58% 42% 55%;
+  background: radial-gradient(ellipse at 45% 52%, rgb(247 211 168 / 17%), transparent 73%);
+  transform: rotate(6deg) scale(1.2, .8);
 }
 .rail-project-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .rail-project-copy > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rail-heading); font-weight: 600; }
@@ -647,18 +668,23 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   left: max(16px, min(calc(50% + 96px), calc(100% - 32px - var(--town-chat-width))));
   width: var(--town-chat-width);
   height: auto; max-height: 76%; margin: 0;
-  /* Lantern on Water (Decision 9). Warm paper lit from inside, resting on the
-     dark pond: the light spills OUT of the panel onto the water instead of the
-     panel covering the water. Three shadows do it — a hairline halo, a wide
-     warm spill, and the drop that lifts it off the surface. */
+  /* Task 186 keeps the lantern's warmth but retires its glass-card silhouette:
+     one controlled edge, a slightly uneven paper cut, faint fibre, and a soft
+     pool of light instead of a stacked halo. */
   padding: 21px;
-  border: 1px solid rgb(246 236 225 / 12%);
-  border-radius: 34px;
-  background: linear-gradient(170deg, var(--lantern-paper-lit), var(--lantern-paper) 62%, #2b2533);
+  border: 1px solid rgb(246 236 225 / 9%);
+  border-radius: 28px 31px 29px 26px;
+  background-image:
+    var(--paper-grain),
+    linear-gradient(170deg,
+      color-mix(in srgb, var(--lantern-paper-lit) 92%, transparent),
+      color-mix(in srgb, var(--lantern-paper) 89%, transparent) 62%,
+      rgb(43 37 51 / 87%));
+  background-size: 160px 160px, auto;
+  background-blend-mode: soft-light, normal;
   box-shadow:
-    0 0 0 7px rgb(247 211 168 / 4%),
-    0 0 70px rgb(247 211 168 / 11%),
-    0 22px 54px rgb(0 0 0 / 42%);
+    0 0 54px rgb(247 211 168 / 7%),
+    0 20px 48px rgb(0 0 0 / 30%);
   /* The paired tokens are re-pointed once, here. Every card, rule, and muted
      line inside the lantern is already written against them, so they re-tone
      through the cascade rather than being rewritten rule by rule. Only what
@@ -794,13 +820,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .result-card-stopped { background: var(--pond-task); color: #4a3520; }
 .chat-column-villager .result-card-error { background: var(--pond-stop); color: #4a201c; }
 .chat-column-villager .chat-composer {
-  background: rgb(246 236 225 / 7%);
-  border-color: color-mix(in srgb, var(--garden-cyan) 68%, transparent);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+  border-radius: 15px 18px 14px 16px;
+  background-color: rgb(246 236 225 / 6%);
+  background-image: var(--paper-grain);
+  background-size: 160px 160px;
+  background-blend-mode: soft-light;
+  border-color: rgb(246 236 225 / 17%);
+  box-shadow: none;
 }
 .chat-column-villager .chat-composer:focus-within {
-  border-color: var(--garden-cyan);
-  box-shadow: 0 0 0 2px rgb(163 221 208 / 18%), 0 8px 24px rgb(0 0 0 / 16%);
+  border-color: color-mix(in srgb, var(--garden-cyan) 68%, transparent);
+  box-shadow: 0 0 0 2px rgb(163 221 208 / 12%);
 }
 .chat-column-villager .chat-composer textarea { padding: 6px 8px 8px; }
 .chat-column-villager .bubble-system { border-radius: 16px; }
@@ -809,30 +839,43 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    that drops over the conversation and would read straight through). */
 .chat-column-villager .body-pill-panel { background: var(--lantern-paper-lit); }
 
-/* The lantern's buttons. The globals above give every pill its chunky edge;
-   these give the lantern's three the mockup's own colours. Specificity note:
-   `.pill:active:not(:disabled)` is 0,3,0 and beats these 0,2,0 rules, which is
-   exactly right — the press must still compress whatever the resting colour. */
-/* Only the edge needs saying: `--card-solid` and `--card-ink` are already
-   re-pointed on the lantern (Task 4), so the base `.pill` rule above resolves
-   to exactly these values inside this scope on its own. */
+/* Task 186 flattens controls only inside the lantern. The rest of the app keeps
+   its established tactile pills; here, one thin edge and a one-pixel lift read
+   as part of the paper field instead of separate glossy buttons. The scoped
+   hover/press rules below deliberately outrank the global pill geometry. */
 .chat-column-villager .pill {
-  --pill-edge: color-mix(in srgb, var(--lantern-deep) 40%, transparent);
+  border: 1px solid rgb(246 236 225 / 12%);
+  border-radius: 11px 13px 10px 12px;
+  --pill-edge: transparent;
+  box-shadow: none;
+  transition: transform .22s var(--ease), background-color .2s, border-color .2s, opacity .15s;
+}
+.chat-column-villager .pill:hover:not(:disabled) { transform: translateY(-1px); }
+.chat-column-villager .pill:active:not(:disabled) {
+  transform: translateY(0) scale(.98); box-shadow: none; transition-duration: .08s;
 }
 .chat-column-villager .pill-primary {
-  background: linear-gradient(165deg, #bfe8dd, var(--garden-cyan)); color: #17302b;
-  --pill-edge: #7cbdae;
-  box-shadow: 0 5px 0 var(--pill-edge), 0 8px 20px rgb(163 221 208 / 22%);
+  border: 1px solid color-mix(in srgb, var(--garden-cyan) 64%, transparent);
+  background: color-mix(in srgb, var(--garden-cyan) 72%, transparent); color: #17302b;
+  --pill-edge: transparent;
+  box-shadow: 0 4px 14px rgb(163 221 208 / 12%);
 }
 .chat-column-villager .pill-quiet {
-  background: rgb(246 236 225 / 7%); color: var(--lantern-soft); --pill-edge: transparent;
+  border-color: transparent; background: transparent; color: var(--lantern-soft); --pill-edge: transparent;
 }
 .chat-column-villager .pill-quiet:hover:not(:disabled) {
   background: rgb(246 236 225 / 14%); color: var(--lantern-ink);
 }
 .chat-column-villager .pill-quiet[aria-disabled="true"]:hover,
 .chat-column-villager .pill-quiet[aria-disabled="true"]:active {
-  background: rgb(246 236 225 / 7%); color: var(--lantern-soft);
+  background: transparent; color: var(--lantern-soft);
+}
+.chat-column-villager .chat-composer-actions .pill {
+  padding: 6px 11px; border-radius: 9px 11px 8px 10px; box-shadow: none;
+}
+.chat-column-villager .chat-composer-actions .pill:hover:not(:disabled) { transform: translateY(-1px); }
+.chat-column-villager .chat-composer-actions .pill:active:not(:disabled) {
+  transform: translateY(0) scale(.98); box-shadow: none;
 }
 .chat-column-villager .chat-tuck { color: var(--lantern-soft); }
 .chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
@@ -843,11 +886,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* One continuous blend, from the approved lantern-v3 frame: three soft
      ellipses over a single diagonal. Nothing here has an edge that could read
      as a drawn ring. */
-  background:
+  background-image:
+    var(--paper-grain),
     radial-gradient(ellipse 90% 70% at 30% 68%, #2b3350, transparent 70%),
     radial-gradient(ellipse 70% 55% at 74% 14%, #352c4e, transparent 72%),
     radial-gradient(ellipse 60% 45% at 50% 100%, #1d2438, transparent 70%),
     linear-gradient(165deg, var(--lantern-plum), var(--lantern-mid) 45%, var(--lantern-deep));
+  background-size: 160px 160px, auto, auto, auto, auto;
+  background-blend-mode: soft-light, normal, normal, normal, normal;
 }
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;
@@ -858,13 +904,19 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .town-project-label,
 .town-header-actions {
-  min-height: 42px; border: 1px solid var(--environment-edge); border-radius: 16px;
-  background: var(--environment-island); backdrop-filter: blur(14px);
-  box-shadow: 0 10px 26px var(--environment-shadow), inset 0 1px rgb(246 236 225 / 7%);
+  min-height: 42px; border: 0; border-radius: 0;
+  background: transparent; backdrop-filter: none;
+  box-shadow: none;
 }
 .town-project-label {
-  display: flex; min-width: 0; max-width: min(34vw, 330px); flex-direction: column;
-  justify-content: center; padding: 6px 13px;
+  position: relative; display: flex; min-width: 0; max-width: min(34vw, 330px); flex-direction: column;
+  justify-content: center; padding: 6px 13px 6px 16px;
+}
+.town-project-label::before {
+  content: ""; position: absolute; left: 5px; top: 9px; bottom: 9px; width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent, var(--garden-cyan) 28%, var(--garden-cyan) 72%, transparent);
+  opacity: .62;
 }
 .town-square-header span {
   color: var(--lantern-soft); font-size: .68rem; font-weight: 700; letter-spacing: .02em;
@@ -878,12 +930,11 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   min-width: 0; max-width: min(42vw, 390px); margin: 0; overflow: hidden; color: var(--lantern-ink);
   font-size: .74rem; text-align: right; text-overflow: ellipsis; white-space: nowrap;
 }
-/* 7% is the mockup's own ghost-button FILL (`.l3-ghost`, lantern-v3.html:80).
-   The 8% this carried came from a hairline BORDER declaration, which is not a
-   fill alpha; the rule it replaced used 7% too, so 7% is doubly sourced. */
+/* Header actions are annotations on the water now, with a quiet wash only on
+   hover; they no longer sit in pill-shaped glass. */
 .town-square-header button {
-  flex: none; padding: 6px 12px; border: 0; border-radius: 999px;
-  background: rgb(246 236 225 / 7%); color: var(--lantern-soft);
+  flex: none; padding: 6px 10px; border: 0; border-radius: 9px 11px 8px 10px;
+  background: transparent; color: var(--lantern-soft);
   font: inherit; font-size: .68rem; font-weight: 700; cursor: pointer;
 }
 /* 14% is the mockup's own hover fill (`.l3-ghost:hover`, lantern-v3.html:81). */
@@ -990,19 +1041,26 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: relative; z-index: 1; width: 78px; height: 78px; display: block; margin-bottom: 4px;
   transition: transform .45s var(--pop);
 }
+.town-face::before {
+  content: ""; position: absolute; z-index: 0; inset: 16px 5px 11px 9px;
+  border-radius: 54% 46% 58% 42% / 43% 57% 45% 55%;
+  background: radial-gradient(ellipse at 45% 54%, color-mix(in srgb, var(--face-color) 18%, transparent), transparent 72%);
+  filter: blur(6px); transform: translate(4px, 3px) rotate(-5deg) scale(1.12, .72);
+  pointer-events: none;
+}
 .town-node:hover .town-face { transform: scale(1.06); }
 .town-node:active .town-face { transform: scale(.94); }
 .town-face-kimi, .town-face-codex, .town-face-claude, .town-face-gemini, .town-face-worker-fallback {
   width: 68px; height: 68px;
 }
 .town-face-holo {
-  position: absolute; inset: 0; display: block;
+  position: absolute; z-index: 1; inset: 0; display: block;
   filter: drop-shadow(0 0 9px var(--face-glow)) drop-shadow(0 0 3px var(--face-glow));
   animation: town-face-float 6s ease-in-out infinite;
 }
-/* Cairn keeps its exact original glow. */
+/* Cairn's line stays crisp; the offset wash now carries the extra presence. */
 .town-face-cairn .town-face-holo {
-  filter: drop-shadow(0 0 9px var(--garden-cyan-glow)) drop-shadow(0 0 3px var(--garden-cyan-dim));
+  filter: drop-shadow(0 1px 7px var(--garden-cyan-glow));
 }
 .town-face:not(.town-face-cairn) .town-face-holo { animation-delay: -2s; }
 .town-face-tilt { position: relative; display: block; width: 100%; height: 100%; }
@@ -1357,6 +1415,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .workspace-town-pane-pond-open .chat-column.chat-column-villager { animation: none; transition: none; }
   .pond-line, .pond-line-chevron, .pond-back { transition: none; }
   .pond-back:hover { transform: translateX(-50%); }
+  /* Task 186's lantern controls are more specific than the global pill rules,
+     so their reduced-motion final state must be equally specific. */
+  .chat-column-villager .pill,
+  .chat-column-villager .chat-composer-actions .pill { transition: none; }
+  .chat-column-villager .pill:hover:not(:disabled),
+  .chat-column-villager .pill:active:not(:disabled),
+  .chat-column-villager .chat-composer-actions .pill:hover:not(:disabled),
+  .chat-column-villager .chat-composer-actions .pill:active:not(:disabled) { transform: none; }
   /* Found while fixing the lantern's entrance: these pre-date this work and lose
      to the block at the top of the file the same way it did. Every one is a
      specificity loss, not a miss — the eye groups carry both `town-face-eye`

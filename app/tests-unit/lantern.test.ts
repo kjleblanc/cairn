@@ -44,13 +44,14 @@ test("the panel is warm lit paper, not a bright rectangle", () => {
   assert.ok(!rule.includes("var(--card-solid);"), "the lantern is still the app's flat card fill");
 });
 
-test("light spills out of the lantern onto the water", () => {
-  // Three shadows from the approved mockup: a hairline halo, a wide warm
-  // spill, and the drop that lifts it off the pond. Two would be a border.
+test("one soft light spill lifts the paper without a stacked halo", () => {
+  // Task 186 supersedes the mockup's three stacked shadows: the hairline halo
+  // was the part that read as glass. A warm spill and a quiet drop remain.
   const rule = lanternRule();
   const shadow = rule.slice(rule.indexOf("box-shadow:"), rule.indexOf(";", rule.indexOf("box-shadow:")));
-  assert.equal(shadow.match(/rgb\(/g)?.length, 3, "the lantern does not spill light onto the water");
+  assert.equal(shadow.match(/rgb\(/g)?.length, 2, "the lantern does not use one spill and one quiet drop");
   assert.ok(shadow.includes("247 211 168"), "the spill is not the mockup's lantern gold");
+  assert.ok(!shadow.includes("0 0 0 7px"), "the glassy hairline halo returned");
 });
 
 test("the lantern re-points the paired tokens instead of rewriting its children", () => {

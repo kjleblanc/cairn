@@ -63,7 +63,10 @@ export function Workspace({
   const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 1260px)").matches ?? false);
   const [pondOpen, setPondOpen] = useState(false);
   const [chatNeedsYou, setChatNeedsYou] = useState(false);
-  const [railCollapsed, setRailCollapsed] = useState(false);
+  // Task 186: projects are a shelf at the edge of the world, not the first
+  // thing that claims the room. It opens on demand and remains fully named in
+  // ProjectRail even while only the monograms are visible.
+  const [railCollapsed, setRailCollapsed] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([initialDir]));
   const [manualExpansion, setManualExpansion] = useState<Set<string>>(() => new Set());
   const [townPresentation, setTownPresentation] = useState<TownPresentationState>(defaultTownPresentation);
