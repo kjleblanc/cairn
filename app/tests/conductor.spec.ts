@@ -2121,8 +2121,12 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // elapsed clock, and the two controls.
   const strip = win.locator(".run-strip");
   await expect(strip).toBeVisible({ timeout: 30_000 });
+  await expect(strip).toHaveAttribute("data-run-state", "running");
+  await expect(strip.locator(".run-strip-state")).toHaveAttribute("role", "status");
   await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/, { timeout: 30_000 });
   await expect(strip.locator(".run-strip-elapsed")).toHaveText(/^\d+:\d\d$/);
+  await expect(strip.locator(".run-strip-outcome")).toHaveText("Change the page title");
+  await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible();
   await expect(strip.getByRole("button", { name: "Open the run screen" })).toBeVisible();
 
   // The town is a projection of this exact live worker session. Native buttons
@@ -2152,9 +2156,21 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     const dialog = document.querySelector<HTMLElement>(".chat-column-villager")?.getBoundingClientRect();
     const pane = document.querySelector<HTMLElement>(".workspace-town-pane")?.getBoundingClientRect();
     const line = document.querySelector<HTMLElement>(".pond-line")?.getBoundingClientRect();
-    if (!dialog || !pane || !line) throw new Error("Expected the narrow line and the conversation");
+    const run = document.querySelector<HTMLElement>(".run-strip");
+    const runState = document.querySelector<HTMLElement>(".run-strip-state");
+    const outcome = document.querySelector<HTMLElement>(".run-strip-outcome");
+    const runControls = document.querySelector<HTMLElement>(".run-strip-controls");
+    if (!dialog || !pane || !line || !run || !runState || !outcome || !runControls) {
+      throw new Error("Expected the narrow line, run, and conversation");
+    }
     const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
       && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
+    const runRect = run.getBoundingClientRect();
+    const runStyle = getComputedStyle(run);
+    const outcomeStyle = getComputedStyle(outcome);
+    const stateRect = runState.getBoundingClientRect();
+    const outcomeRect = outcome.getBoundingClientRect();
+    const runControlsRect = runControls.getBoundingClientRect();
     return {
       // Takes the window, and sits clear of the line rather than under it.
       dialogTakesTheWindow: dialog.width > pane.width - 40,
@@ -2163,6 +2179,21 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
       controlsFit: Array.from(document.querySelectorAll<HTMLElement>(
         ".chat-topbar button, .run-strip-controls button",
       )).every((control) => contains(dialog, control.getBoundingClientRect())),
+      runPaper: {
+        overflow: run.scrollWidth - run.clientWidth,
+        controlsFit: Array.from(run.querySelectorAll<HTMLElement>("button"))
+          .every((control) => contains(runRect, control.getBoundingClientRect())),
+        display: runStyle.display,
+        background: runStyle.backgroundColor,
+        radius: runStyle.borderRadius,
+        outcomeWhiteSpace: outcomeStyle.whiteSpace,
+        outcomeOverflow: outcomeStyle.overflow,
+        outcomeTextOverflow: outcomeStyle.textOverflow,
+        outcomeWrap: outcomeStyle.overflowWrap,
+        actionsShareStatusLine: runControlsRect.top < stateRect.bottom
+          && runControlsRect.bottom > stateRect.top,
+        outcomeFollowsStatus: outcomeRect.top >= Math.max(stateRect.bottom, runControlsRect.bottom) - 1,
+      },
       pageFits: document.documentElement.scrollWidth <= window.innerWidth
         && document.documentElement.scrollHeight <= window.innerHeight,
     };
@@ -2172,8 +2203,22 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     dialogClearsTheLine: true,
     dialogFits: true,
     controlsFit: true,
+    runPaper: {
+      overflow: 0,
+      controlsFit: true,
+      display: "grid",
+      background: "rgba(0, 0, 0, 0)",
+      radius: "0px",
+      outcomeWhiteSpace: "normal",
+      outcomeOverflow: "visible",
+      outcomeTextOverflow: "clip",
+      outcomeWrap: "anywhere",
+      actionsShareStatusLine: true,
+      outcomeFollowsStatus: true,
+    },
     pageFits: true,
   });
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-189-run-running.png") });
 
   // Pressing the line opens the pond WHOLE, over the window. Both villagers
   // are fully inside it and clear of each other — not crowded into the half
@@ -2226,6 +2271,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await win.getByTitle(otherName).click({ noWaitAfter: true });
   const otherTown = win.getByRole("region", { name: `${otherName} town square` });
   await expect(otherTown).toBeVisible();
+  await expect(win.locator(".run-strip")).toHaveCount(0);
   await expect(win.locator(".town-square")).toHaveCount(1);
   await expect(otherTown.locator(".town-node-worker")).toHaveCount(0);
   const runningProject = win.locator(".rail-project-select", { has: win.locator(".rail-activity-working") });
@@ -2236,6 +2282,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await runningProject.click({ noWaitAfter: true });
   await expect(win.locator(".town-square")).toHaveCount(1);
   await expect(worker).toHaveCount(1);
+  await expect(strip).toHaveAttribute("data-run-state", "running");
 
   const groundBox = await town.locator(".town-square-ground").boundingBox();
   const workerBox = await worker.boundingBox();
@@ -2307,6 +2354,9 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await win.setViewportSize({ width: 1320, height: 820 });
 
   await win.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => strip.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+  await expect.poll(() => strip.getByRole("button", { name: "Open the run screen" })
+    .evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s");
   await expect.poll(() => worker.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s");
   await expect.poll(() => worker.locator(".town-face-holo").evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
   await expect.poll(() => worker.locator(".town-worker-pad span").first().evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
@@ -2366,6 +2416,20 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     if (state instanceof HTMLElement) state.dataset.liveRegionProbe = "same-node";
   });
   await expect(strip.locator(".run-strip-state")).toHaveAttribute("role", "status");
+  const stopTask = strip.getByRole("button", { name: "Stop this task" });
+  const openRun = strip.getByRole("button", { name: "Open the run screen" });
+  await stopTask.focus();
+  await win.keyboard.press("Tab");
+  await expect(openRun).toBeFocused();
+  await win.keyboard.press("Shift+Tab");
+  await expect(stopTask).toBeFocused();
+  const stopFocus = await stopTask.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
+  });
+  expect(stopFocus.style).toBe("solid");
+  expect(Number.parseFloat(stopFocus.width)).toBeGreaterThanOrEqual(2);
+  expect(Number.parseFloat(stopFocus.offset)).toBeGreaterThanOrEqual(3);
 
   // The composer says what is true instead of accepting a send the serial
   // gate would refuse.
@@ -2375,7 +2439,7 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // Only a started process incurs cost, so stop it once the real exec has
   // actually begun — same reason routing.spec waits on this marker.
   await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
-  await strip.getByRole("button", { name: "Stop this task" }).click({ noWaitAfter: true });
+  await stopTask.click({ noWaitAfter: true });
 
   // The interim result relay (until Task 8): the conversation is not left
   // silent — the strip carries the terminal state and the way to the records.
@@ -2383,8 +2447,10 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   // The terminal line arrived as a change INSIDE the live region marked above,
   // not as a new region carrying a message no one hears.
   await expect(strip.locator(".run-strip-state")).toHaveAttribute("data-live-region-probe", "same-node");
+  await expect(strip).toHaveAttribute("data-run-state", "stopped");
   await expect(strip.locator(".run-strip-terminal")).toHaveText("STOPPED — you stopped it yourself");
   await expect(strip.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
+  await expect(openRun).toBeVisible();
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByText("A task is running. You can type again when it finishes.")).toHaveCount(0);
   await expect(town.locator(".town-node-worker")).toHaveCount(0, { timeout: 15_000 });
@@ -2404,6 +2470,11 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   const report = readFileSync(join(project, "docs", "ai-work", "tasks", "001-report.md"), "utf8");
   expect(report).toContain("CANCELLED_BY_OWNER");
   expect(existsSync(join(project, "visible.txt"))).toBe(false);
+
+  await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
+  await win.setViewportSize({ width: 760, height: 1000 });
+  await expect(strip).toHaveAttribute("data-run-state", "stopped");
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-189-run-stopped.png") });
 
   // The link is real: it opens the run screen on this same session.
   await strip.getByRole("button", { name: "Open the run screen" }).click({ noWaitAfter: true });
@@ -2686,6 +2757,7 @@ test("a reload mid-run reattaches the conversation's strip and shows the finishe
   // strip that waited for one instead of reading the session on mount would
   // miss this window. Reattachment is a read, not a wait.
   await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible({ timeout: 5_000 });
+  await expect(strip).toHaveAttribute("data-run-state", "running");
   await expect(strip.locator(".run-strip-stage")).toHaveText(/^(Route|Run|Check|Result)$/);
   // Task 166 keeps an unspent proposal in trusted main-process state for Chat
   // reattachment. The proposal that started this run was consumed when main
@@ -2697,8 +2769,14 @@ test("a reload mid-run reattaches the conversation's strip and shows the finishe
   // The reattached strip carries the finish too, without the renderer that
   // dispatched it ever seeing the run's own answer.
   await expect(strip).toContainText("DONE —", { timeout: 30_000 });
+  await expect(strip).toHaveAttribute("data-run-state", "done");
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   expect(readFileSync(join(project, "visible.txt"), "utf8")).toBe("model-authored result\n");
+  // Session phase closes just before the bounded terminal evidence capture.
+  // The result card is posted only after that capture's finally has released
+  // the run gate, so wait for it before asking Electron to quit; otherwise the
+  // real quit-protection dialog correctly keeps the still-settling run open.
+  await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
   await app.close();
 });
 

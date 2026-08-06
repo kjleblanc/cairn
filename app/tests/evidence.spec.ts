@@ -265,6 +265,12 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
     const card = win.locator(".result-card");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAccessibleName("DONE result receipt for Task 001");
+    const runThread = win.locator(".run-strip");
+    await expect(runThread).toHaveAttribute("data-run-state", "done");
+    await expect(runThread.locator(".run-strip-terminal")).toContainText("DONE");
+    await expect(runThread.locator(".run-strip-outcome")).toHaveText(OUTCOME);
+    await expect(runThread.getByRole("button", { name: "Stop this task" })).toHaveCount(0);
+    await expect(runThread.getByRole("button", { name: "Open the run screen" })).toBeVisible();
     await expect(card.locator(":scope > .card-title")).toHaveText("Cairn's receipt");
     await expect(card.locator(".result-card-provenance")).toHaveText("Checked by Cairn after the builder finished");
     const runDetails = card.locator(".result-card-run-details");
@@ -366,12 +372,47 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
     expect(receiptLayout.overflow).toBeLessThanOrEqual(1);
     expect(receiptLayout.controlsInside).toBe(true);
     expect(receiptLayout.animationName).toBe("none");
+    const runThreadLayout = await runThread.evaluate((element) => {
+      const thread = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const outcome = element.querySelector<HTMLElement>(".run-strip-outcome");
+      const action = element.querySelector<HTMLElement>(".run-strip-controls button");
+      if (!outcome || !action) throw new Error("Expected the settled run thread");
+      const outcomeStyle = getComputedStyle(outcome);
+      const actionStyle = getComputedStyle(action);
+      const actionRect = action.getBoundingClientRect();
+      return {
+        overflow: element.scrollWidth - element.clientWidth,
+        actionInside: actionRect.left >= thread.left - 1 && actionRect.right <= thread.right + 1,
+        display: style.display,
+        background: style.backgroundColor,
+        radius: style.borderRadius,
+        animationName: style.animationName,
+        actionTransition: actionStyle.transitionDuration,
+        outcomeWhiteSpace: outcomeStyle.whiteSpace,
+        outcomeOverflow: outcomeStyle.overflow,
+        outcomeTextOverflow: outcomeStyle.textOverflow,
+      };
+    });
+    expect(runThreadLayout).toEqual({
+      overflow: 0,
+      actionInside: true,
+      display: "grid",
+      background: "rgba(0, 0, 0, 0)",
+      radius: "0px",
+      animationName: "none",
+      actionTransition: "0s",
+      outcomeWhiteSpace: "normal",
+      outcomeOverflow: "visible",
+      outcomeTextOverflow: "clip",
+    });
     await setWindowSize(app, 760, 1000);
     await evidence.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-173-evidence-narrow.png") });
     await card.locator(":scope > .card-title").evaluate((title) =>
       title.scrollIntoView({ block: "start", behavior: "auto" }));
     await win.screenshot({ path: join(tmpdir(), "cairn-task-188-receipt-compact.png") });
+    await win.screenshot({ path: join(tmpdir(), "cairn-task-189-run-done.png") });
 
     await claims.locator(":scope > summary").click();
     await request.locator(":scope > summary").click();
@@ -405,6 +446,8 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
 
     await win.reload();
     await expect(win.locator(".result-card .result-evidence-figure")).toHaveCount(2, { timeout: 20_000 });
+    await expect(win.locator('.run-strip[data-run-state="done"]')).toBeVisible({ timeout: 20_000 });
+    await expect(win.locator(".run-strip-outcome")).toHaveText(OUTCOME);
   } finally {
     if (app) await app.close();
     await closeServer(provider.server);

@@ -1512,6 +1512,18 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     ?? (session?.result?.status === "connection-required"
       ? "No task was started, nothing was saved, and no AI was called."
       : "This task closed.");
+  // Presentation state comes only from the main-owned session. It adds no
+  // words and owns no behavior; CSS uses it for a supplemental non-color mark
+  // beside the real live-region text below.
+  const runThreadState = session?.phase === "running"
+    ? "running"
+    : session?.error
+      ? "error"
+      : session?.result?.status === "done"
+        ? "done"
+        : session?.result?.status === "stopped"
+          ? "stopped"
+          : "closed";
   const dispatchRoute = dispatch?.route ?? null;
   const dispatchReady = dispatchRoute !== null && dispatchRoute.status === "ready" ? dispatchRoute : null;
   // A real worker lane is anything that is not the offline demo — a
@@ -1718,7 +1730,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               <div ref={endRef} />
             </div>
             {session ? (
-              <div className="run-strip">
+              <div className="run-strip" data-run-state={runThreadState}>
                 {/* ONE live region, mounted with the strip and never replaced:
                   * only its TEXT swaps, from the stage word to the terminal
                   * line. The announcement that matters most is how the run

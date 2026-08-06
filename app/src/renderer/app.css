@@ -741,14 +741,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .chat-topbar { row-gap: 4px; }
 .chat-column-villager .body-pill-wrap { flex: 1 1 0; min-width: 0; }
 .chat-column-villager .body-pill-wrap > .pill { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The run strip wraps instead of clipping its controls at the dialog's edge;
- * the outcome line takes its own row so the stage, clock, and both pills are
- * always fully visible. */
-.chat-column-villager .run-strip { flex-wrap: wrap; row-gap: 6px; }
-.chat-column-villager .run-strip-state { flex-shrink: 1; min-width: 0; }
-.chat-column-villager .run-strip-terminal { overflow-wrap: anywhere; }
-.chat-column-villager .run-strip-outcome { flex-basis: 100%; order: 5; }
-.chat-column-villager .run-strip-controls { margin-left: auto; }
 /* Cards' fact grids and long mono paths fit the narrower measure. */
 .chat-column-villager .route-facts { grid-template-columns: 1fr 1fr; }
 .chat-column-villager .route-facts strong,
@@ -1522,10 +1514,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .chat-topbar > .pill:first-child { grid-column: 1; grid-row: 1; justify-self: start; padding-inline: 4px; }
   .chat-column-villager .chat-topbar > .body-pill-wrap { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   .chat-column-villager .chat-topbar > .chat-tuck { grid-column: 2; grid-row: 1; }
-  .chat-column-villager .run-strip-controls { flex: 1 1 100%; width: 100%; margin-left: 0; }
-  .chat-column-villager .run-strip-controls .pill {
-    flex: 1 1 0; min-width: 0; padding: 8px 6px; font-size: .82rem; line-height: 1.25;
-  }
   /* Reserve the conversation's right shore all the way through the compact
      rail regime. Saved workers are presentation-clamped to this shore in the
      Town component while their stored coordinates remain unchanged. */
@@ -1596,8 +1584,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   /* With the full width back, the top bar and run controls need none of the
      621–1260 block's cramping. */
   .chat-column-villager .chat-topbar { display: flex; }
-  .chat-column-villager .run-strip-controls { flex: none; width: auto; margin-left: auto; }
-  .chat-column-villager .run-strip-controls .pill { flex: none; padding: 11px 22px; font-size: .95rem; }
   .chat-column-villager .route-facts { grid-template-columns: repeat(3, 1fr); }
 
   /* Opening the pond puts the conversation away rather than shrinking it. */
@@ -1634,6 +1620,107 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .checkup-finding p { margin: 0; }
 .checkup-finding .pill { margin-top: 6px; }
 .checkup-basis { margin-top: 14px; }
+
+/* Task 189: the project-scoped run is a ruled thread in the conversation,
+   not another rounded dashboard card between the receipt and composer. Its
+   status node, actions, outcome, and ownership are unchanged in Chat.tsx;
+   this slice is presentation only. */
+.chat-column-villager .run-strip {
+  position: relative; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
+  column-gap: 10px; row-gap: 5px; min-width: 0; margin: 2px 3px 0;
+  padding: 10px 7px 9px 17px; border: 0;
+  border-top: 1px solid rgb(246 236 225 / 10%); border-radius: 0;
+  background: transparent; box-shadow: none;
+}
+.chat-column-villager .run-strip::before {
+  content: ""; position: absolute; left: 1px; top: 11px;
+  width: 2px; height: 20px; border-radius: 0 2px 2px 0;
+  background: var(--garden-cyan); opacity: .52;
+}
+.chat-column-villager .run-strip-state {
+  grid-column: 1; grid-row: 1;
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0;
+  flex-shrink: 1; color: var(--garden-cyan); line-height: 1.35;
+}
+.chat-column-villager .run-strip-state::before {
+  content: ""; flex: 0 0 auto; width: 8px; height: 2px;
+  border: 0; border-radius: 0; background: currentColor;
+}
+.chat-column-villager .run-strip[data-run-state="running"] .run-strip-state::before {
+  width: 7px; height: 7px; border: 1.5px solid currentColor;
+  border-radius: 50%; background: transparent;
+}
+.chat-column-villager .run-strip[data-run-state="done"] .run-strip-state {
+  color: var(--pond-done);
+}
+.chat-column-villager .run-strip[data-run-state="done"] .run-strip-state::before {
+  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+}
+.chat-column-villager .run-strip[data-run-state="stopped"] .run-strip-state,
+.chat-column-villager .run-strip[data-run-state="closed"] .run-strip-state {
+  color: var(--pond-task);
+}
+.chat-column-villager .run-strip[data-run-state="stopped"] .run-strip-state::before {
+  width: 9px; height: 2px; border-radius: 0; background: currentColor;
+}
+.chat-column-villager .run-strip[data-run-state="error"] .run-strip-state {
+  color: var(--pond-stop);
+}
+.chat-column-villager .run-strip[data-run-state="error"] .run-strip-state::before {
+  width: 7px; height: 7px; border: 2px double currentColor;
+  border-radius: 0; background: transparent;
+}
+.chat-column-villager .run-strip[data-run-state="closed"] .run-strip-state::before {
+  width: 7px; height: 7px; border: 1px solid currentColor;
+  border-radius: 0; background: transparent;
+}
+.chat-column-villager .run-strip-stage {
+  color: var(--garden-cyan); font-size: .76rem; letter-spacing: .055em;
+}
+.chat-column-villager .run-strip-terminal { overflow-wrap: anywhere; }
+.chat-column-villager .run-strip-elapsed {
+  grid-column: 2; grid-row: 1; flex-shrink: 0; padding-left: 9px;
+  border-left: 1px solid rgb(246 236 225 / 12%);
+  color: var(--lantern-soft); font-size: .78rem; line-height: 1.35;
+}
+.chat-column-villager .run-strip-outcome {
+  grid-column: 1 / -1; grid-row: 2; order: initial; min-width: 0;
+  margin: 1px 0 0; padding: 6px 0 0;
+  border-top: 1px solid rgb(246 236 225 / 8%);
+  color: var(--lantern-soft); font-size: .88rem; line-height: 1.45;
+  overflow: visible; text-overflow: clip; white-space: normal;
+  overflow-wrap: anywhere;
+}
+.chat-column-villager .run-strip-controls {
+  grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 10px;
+  width: auto; margin-left: 0; justify-self: end;
+}
+.chat-column-villager .run-strip-controls .pill {
+  flex: none; min-width: 0; padding: 2px 4px;
+  border: 0; border-bottom: 1px solid transparent; border-radius: 1px;
+  background: transparent; color: var(--lantern-soft); box-shadow: none;
+  font-size: .82rem; line-height: 1.35;
+}
+.chat-column-villager .run-strip-controls .pill:hover:not(:disabled) {
+  transform: none; border-bottom-color: rgb(246 236 225 / 32%);
+  background: transparent; color: var(--lantern-ink);
+}
+.chat-column-villager .run-strip-controls .pill:active:not(:disabled) {
+  transform: none; background: transparent; box-shadow: none;
+}
+.chat-column-villager .run-strip-controls .pill:focus-visible {
+  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
+}
+@media (max-width: 620px) {
+  .chat-column-villager .run-strip {
+    grid-template-columns: minmax(0, 1fr) auto; padding: 9px 4px 8px 14px;
+  }
+  .chat-column-villager .run-strip-controls {
+    grid-column: 1 / -1; grid-row: 3; width: 100%; margin-left: 0;
+    justify-self: start; justify-content: flex-start; flex-wrap: wrap;
+  }
+}
 
 /* Reduced motion, part two — placed LAST in the file, deliberately.
    A media query adds no specificity, so the block near the top loses to every
