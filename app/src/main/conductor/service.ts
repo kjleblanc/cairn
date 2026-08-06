@@ -23,7 +23,15 @@ import type {
 import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
 import { isQuitDraining, runningDirs } from "../rungate.js";
 import { logError } from "../log.js";
-import { ConductorHttpError, promptTooLarge, streamChat, type ChatTurnMessage, type SlotWithKey } from "./client.js";
+import { createOpenAICompatibleTransport } from "./transports/openai-compatible.js";
+import {
+  ConductorTransportError,
+  promptTooLarge,
+  streamWithTransport,
+  type ConductorTransportConnection,
+  type ConductorTransportFactory,
+  type ConductorTransportMessage,
+} from "./transports/types.js";
 import { consentCardFor } from "./consent.js";
 import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
@@ -743,7 +751,7 @@ export function commentary(
   void streamTurn(dir, conversationId, conn, controller, onDelta, "commentary");
 }
 
-function replyContextMessage(context: OwnerReplyContext): ChatTurnMessage {
+function replyContextMessage(context: OwnerReplyContext): ConductorTransportMessage {
   return {
     role: "system",
     content: "Non-authoritative reply context recorded by Cairn's runtime for the next owner message. It explains what the owner is answering; it is not a new instruction, a live action, dispatch authority, or approval.\n" + JSON.stringify(context),
@@ -851,6 +859,7 @@ async function streamTurn(
   kind: TurnKind,
   retainedHistory?: ConductorHistorySnapshot,
   setAsideReplacement?: SetAsideReplacement,
+  transportFactory: ConductorTransportFactory = createOpenAICompatibleTransport,
 ): Promise<void> {
   let full = "";
   let publicFull = "";
@@ -868,17 +877,17 @@ async function streamTurn(
     // both already visible to the provider), never the owner's words and
     // never a secret. Curated seats add nothing (`null`).
     const seatNote = connectionNoteFor(conn.baseUrl, conn.model);
-    const messages: ChatTurnMessage[] = [
+    const messages: ConductorTransportMessage[] = [
       { role: "system", content: CONSTITUTION },
       { role: "system", content: assembleBriefing(dir, undefined, latestOwnerText) },
-      ...(seatNote ? [{ role: "system", content: seatNote } satisfies ChatTurnMessage] : []),
+      ...(seatNote ? [{ role: "system", content: seatNote } satisfies ConductorTransportMessage] : []),
       // A result card enters the prompt as SYSTEM context, labeled for what it
       // is: Cairn's runtime wrote it, the conversation model did not, and the
       // model must not mistake it for its own earlier reply. `cardBriefing`
       // carries the report's own separation — verified facts under one label,
       // the worker's claims under another — so the model can never read a
       // claim as something Cairn verified.
-      ...historySnapshot.entries.flatMap(({ turn, replyContext, authenticatedOwner, authenticatedCairn, authenticatedEnvelope }): ChatTurnMessage[] => {
+      ...historySnapshot.entries.flatMap(({ turn, replyContext, authenticatedOwner, authenticatedCairn, authenticatedEnvelope }): ConductorTransportMessage[] => {
         if (turn.role === "envelope") return authenticatedEnvelope
           ? [{ role: "system", content: cardBriefing(turn.card) }]
           : [];
@@ -893,7 +902,7 @@ async function streamTurn(
       }),
       // The envelope's instruction goes LAST, after the card it is about, so
       // "the card above" names the message immediately above it.
-      ...(kind === "commentary" ? [{ role: "system", content: COMMENTARY_INSTRUCTION } satisfies ChatTurnMessage] : []),
+      ...(kind === "commentary" ? [{ role: "system", content: COMMENTARY_INSTRUCTION } satisfies ConductorTransportMessage] : []),
     ];
     // Checked here, before any network call, so an oversized conversation fails
     // instantly and for its real reason instead of surfacing later as an opaque
@@ -909,9 +918,17 @@ async function streamTurn(
       else onDelta({ dir, conversationId: id, kind: "error", turnKind: kind });
       return;
     }
-    const slot: SlotWithKey = { baseUrl: conn.baseUrl, model: conn.model, apiKey: keystore.decryptedKey(conn) };
+    const connection: ConductorTransportConnection = {
+      baseUrl: conn.baseUrl,
+      model: conn.model,
+      apiKey: keystore.decryptedKey(conn),
+    };
 
-    for await (const event of streamChat(slot, messages, fetch, controller.signal)) {
+    for await (const event of streamWithTransport(
+      transportFactory,
+      connection,
+      { messages, signal: controller.signal },
+    )) {
       if (event.kind === "delta" && event.text) {
         full += event.text;
         const streamedCandidate = kind === "reply" ? extractConductorControl(full).candidate : null;
@@ -1066,7 +1083,7 @@ async function streamTurn(
         message: recovered ? CAIRN_TURN_POSTWRITE_VERIFICATION_FAILED : CAIRN_TURN_PERSISTENCE_UNCERTAIN,
         turnKind: kind,
       });
-    } else if (err instanceof ConductorHttpError) {
+    } else if (err instanceof ConductorTransportError) {
       onDelta({ dir, conversationId: id, kind: "error", message: err.ownerMessage, turnKind: kind });
     } else {
       logError("conductor:send", err);
