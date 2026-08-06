@@ -361,7 +361,8 @@ export function Workspace({
              inside it as the villager bubble anchored to Cairn. */
           <section className={`workspace-town-pane${pondOpen ? " workspace-town-pane-pond-open" : ""}`}
             aria-label="Town square">
-            <PondLine presentation={runtimePresentation} needsYou={chatNeedsYou}
+            <PondLine projectName={projectStatus.facts.name || "Project"}
+              presentation={runtimePresentation} needsYou={chatNeedsYou}
               open={pondOpen} onToggle={setPondOpen} />
             <TownSquare key={`town:${activeDir}`} projectName={projectStatus.facts.name || "Project"}
               task={townTask} stream={townStream}

@@ -24,18 +24,22 @@
   --stone-a: light-dark(#d6d1c5, #545064);
   --stone-b: light-dark(#c4beb0, #45405a);
   --trail: light-dark(#a49c8c, #7a7494);
-  --rail-bg: light-dark(#17232a, #28223f);
-  --rail-panel: light-dark(#20343d, #322b4d);
-  --rail-hover: light-dark(#29414a, #3b3459);
-  --rail-avatar: light-dark(#2a3c43, #403860);
-  --rail-line: light-dark(#31464e, rgb(242 185 92 / 18%));
-  --rail-heading: #f7efe6;
-  --rail-ink: #e2d8ce;
-  --rail-muted: #a89d9e;
-  --neon: #7fd8c8;
-  --neon-soft: #5f9e92;
-  --neon-warm: #f2b95c;
-  --neon-green: #9ec98a;
+  /* The rail is furniture in the night garden, so it borrows the pond's
+     approved material and semantic colours instead of keeping a second UI
+     palette. Custom properties may safely refer forward to the garden tokens
+     below; they resolve where they are used, after the whole cascade exists. */
+  --rail-bg: rgb(22 27 44 / 52%);
+  --rail-panel: rgb(246 236 225 / 8%);
+  --rail-hover: rgb(163 221 208 / 9%);
+  --rail-avatar: rgb(246 236 225 / 8%);
+  --rail-line: rgb(163 221 208 / 14%);
+  --rail-heading: var(--lantern-ink);
+  --rail-ink: var(--lantern-ink);
+  --rail-muted: var(--lantern-soft);
+  --neon: var(--garden-cyan);
+  --neon-soft: var(--garden-cyan-dim);
+  --neon-warm: var(--pond-task);
+  --neon-green: var(--pond-done);
   --town-sky: light-dark(#dce9ec, #2e2a4e);
   --town-ground: light-dark(#c7d6cf, #2c2842);
   --town-entity: light-dark(rgb(238 249 248 / 88%), rgb(244 234 217 / 94%));
@@ -60,8 +64,7 @@
   --garden-ink: #35304f;
   /* Decision 9, rule 3 (owner, 2026-08-02): the muted pastels supersede the
      saturated set. Cairn's is #a3ddd0; its dim and glow are that colour, not
-     a second choice. --neon below keeps the old teal — it is the project
-     rail's colour and is outside Decision 9. */
+     a second choice. The project rail now points back to these same colours. */
   --garden-cyan: #a3ddd0;
   --garden-cyan-dim: rgb(163 221 208 / 35%);
   --garden-cyan-glow: rgb(163 221 208 / 9%);
@@ -126,6 +129,13 @@
   --lantern-paper-lit: #3d3444;
   --lantern-ink: #f6ece1;
   --lantern-soft: #c3b3a6;
+  /* Project navigation and current-project context are furniture in this same
+     world. Keep their materials global to the night garden because TownSquare
+     also renders standalone in the visual lab, outside `.workspace-shell`. */
+  --environment-shore: linear-gradient(160deg, var(--rail-bg), rgb(22 27 44 / 24%));
+  --environment-island: linear-gradient(145deg, rgb(246 236 225 / 10%), rgb(22 27 44 / 48%));
+  --environment-edge: rgb(163 221 208 / 18%);
+  --environment-shadow: rgb(13 9 31 / 24%);
   --pop: cubic-bezier(.34, 1.56, .64, 1);
   --ease: cubic-bezier(.22, .9, .3, 1);
   --mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;

@@ -183,6 +183,85 @@ test.describe("remembered projects: load, switch, track", () => {
     await app.close();
   });
 
+  test("project chrome shares one pond at wide and compact sizes", async () => {
+    // This proof deliberately does not use Project Home or Dashboard. Task 185
+    // is visual environment work, so its evidence stays valid if that older
+    // navigation path is retired in a later, separately reconciled task.
+    const file = registryFile();
+    const registryBefore = readFileSync(file);
+    writeFileSync(file, JSON.stringify({ recent: [
+      { dir: projB, lastOpened: "2026-08-05T12:01:00.000Z" },
+      { dir: projA, lastOpened: "2026-08-05T12:00:00.000Z" },
+    ] }, null, 2));
+
+    try {
+      const app = await electron.launch({ args: ["."], env: baseEnv() });
+      try {
+        const win = await app.firstWindow();
+        await win.setViewportSize({ width: 1320, height: 820 });
+
+        const railProjects = win.locator(".rail-project-select");
+        await expect(railProjects).toHaveCount(2);
+        await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Beta");
+        await win.getByRole("button", { name: "Collapse project rail" }).click();
+        await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+        await win.getByRole("button", { name: "Expand project rail" }).click();
+
+        await win.locator(".rail-project-select", { hasText: "Alpha" }).click();
+        await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
+        await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Alpha");
+        await win.locator(".rail-project-select", { hasText: "Beta" }).click();
+        // Project switching reorders the rail under the pointer. Move onto the
+        // open water so the evidence does not mistake an incidental hover for
+        // a second selected project.
+        await win.mouse.move(700, 500);
+
+        const betaTown = win.getByRole("region", { name: "Beta town square" });
+        const dialog = win.getByRole("dialog", { name: "Conversation with Cairn" });
+        const townHeader = betaTown.locator(".town-square-header");
+        await expect(betaTown).toBeVisible();
+        await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Beta");
+        await expect(win.locator(".pond-line")).toBeHidden();
+        await expect(townHeader).toBeVisible();
+        await expect(townHeader.locator(".town-project-label strong")).toHaveText("Beta");
+        await expect(townHeader.locator("[role='status']")).toBeVisible();
+        await expect.poll(() => dialog.evaluate((element) =>
+          element.getAnimations().every((animation) => animation.playState !== "running"))).toBe(true);
+
+        const chromeBounds = await win.evaluate(() => {
+          const rail = document.querySelector<HTMLElement>(".project-rail")!.getBoundingClientRect();
+          const stage = document.querySelector<HTMLElement>(".workspace-stage")!.getBoundingClientRect();
+          const pane = document.querySelector<HTMLElement>(".workspace-town-pane")!.getBoundingClientRect();
+          const header = document.querySelector<HTMLElement>(".town-square-header")!.getBoundingClientRect();
+          return {
+            railRight: rail.right,
+            stageLeft: stage.left,
+            paneLeft: pane.left,
+            paneRight: pane.right,
+            headerLeft: header.left,
+            headerRight: header.right,
+          };
+        });
+        expect(Math.abs(chromeBounds.railRight - chromeBounds.stageLeft)).toBeLessThanOrEqual(1);
+        expect(chromeBounds.headerLeft).toBeGreaterThanOrEqual(chromeBounds.paneLeft);
+        expect(chromeBounds.headerRight).toBeLessThanOrEqual(chromeBounds.paneRight);
+        expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+        await win.screenshot({ path: join(tmpdir(), "cairn-task-185-integrated-project-pond-wide.png") });
+
+        await win.setViewportSize({ width: 900, height: 720 });
+        await expect(townHeader).toBeHidden();
+        await expect(win.locator(".pond-line")).toBeVisible();
+        await expect(win.locator(".pond-line")).toContainText("Beta · Town is quiet.");
+        expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+        await win.screenshot({ path: join(tmpdir(), "cairn-task-185-integrated-project-pond-compact.png") });
+      } finally {
+        await app.close();
+      }
+    } finally {
+      writeFileSync(file, registryBefore);
+    }
+  });
+
   test("a broken entry is shown honestly; removing it edits only the app's list", async () => {
     // Break the most recent project (Alpha) the way an owner would: move the folder.
     const contentsBefore = readdirSync(projA).sort();

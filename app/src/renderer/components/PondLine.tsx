@@ -10,7 +10,8 @@ import { pondLineLabel, pondLineTone, type TownRuntimePresentation } from "../to
  * the window; the control below brings the conversation back. Above 1260px the
  * whole thing is `display: none` — the approved wide layout is untouched.
  */
-export function PondLine({ presentation, needsYou, open, onToggle }: {
+export function PondLine({ projectName, presentation, needsYou, open, onToggle }: {
+  projectName: string;
   presentation: TownRuntimePresentation;
   needsYou: boolean;
   open: boolean;
@@ -28,7 +29,7 @@ export function PondLine({ presentation, needsYou, open, onToggle }: {
         aria-expanded={open}
         onClick={() => onToggle(!open)}>
         <span className="pond-line-dot" aria-hidden="true" />
-        <span className="pond-line-text">{pondLineLabel(presentation, needsYou)}</span>
+        <span className="pond-line-text">{projectName} · {pondLineLabel(presentation, needsYou)}</span>
         <span className="pond-line-peek">
           look at the pond
           <span className="pond-line-chevron" aria-hidden="true">⌃</span>
