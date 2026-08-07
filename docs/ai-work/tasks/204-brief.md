@@ -52,8 +52,8 @@ returns null for any path under `docs/ai-work/tasks/` not in the run's
 `ownedRecords` — which is exactly `[brief, report, LOG]` (`:1027-1031`) — and
 `commitExactPaths` (`:794-816`) requires the whole changed set to equal the
 product paths plus those records, so **any** new non-ignored file anywhere
-breaks a run in flight, not only one under a task path. `serial.ts:1315` stops
-on HEAD moving. A verdict saved during a live run therefore seals that run
+breaks a run in flight, not only one under a task path. `core/src/serial.ts:1315`
+stops on HEAD moving. A verdict saved during a live run therefore seals that run
 `MODEL_RESULT_NOT_VERIFIED`, permanently accusing a worker of an unverifiable
 result. `core/test/serial.test.ts:763` already proves the mechanism, and
 `AGENTS.md:105-107` says an automation "never touches task paths".

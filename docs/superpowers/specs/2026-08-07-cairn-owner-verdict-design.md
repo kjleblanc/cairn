@@ -1,9 +1,24 @@
 # The Owner's Verdict — Design
 
-**Status:** proposed 2026-08-07. Sits on top of the shipped evidence work
+**Status:** proposed 2026-08-07 by Task 203; **revised the same day by Task 204
+after an adversarial review raised 68 findings, of which 39 survived refutation
+— 6 CRITICAL, 20 MAJOR, 13 MINOR.** Sits on top of the shipped evidence work
 (Tasks 173 and 188) and the followups channel (Task 157). Nothing here loosens
 an approval, a verification, or a risk boundary. Nothing here lets the owner's
 judgment move a stone, a disposition, or a milestone.
+
+**What the review changed, so a reader knows which parts were wrong once.** The
+committed copy moved out of `docs/ai-work/tasks/` and gained a no-active-run
+gate, because as first written it would have sealed a live run
+`MODEL_RESULT_NOT_VERIFIED` and permanently accused a worker. Three factual
+claims were false and are corrected in place with the correction named: the
+brief-count statistic, the reason `promise` and `answer` are trustworthy, and a
+`moved` "contradiction" the owner had already settled in Task 081. Two
+decisions contradicted each other (the mandatory note against first-class
+partial reviews) and one would have destroyed the publication-approval signal.
+Every correction is marked where it appears rather than quietly rewritten. The
+core — record the owner's verdict, resist forgery, keep `review` and
+`disposition` on separate axes — is unchanged; the review did not touch it.
 
 **Who decided what.** This spec marks its own sources using the three markings
 the showing-not-asking spec defines, because it would be absurd for a document
@@ -62,26 +77,38 @@ posted card (`app/src/main/tasks.ts:452`) and its followups are granted to
 commentary turns only (`app/src/main/conductor/service.ts:966`), rendering as
 "Where we could go next" on the latest turn (`app/src/renderer/screens/Chat.tsx:1679`).
 
-**The responding half does not exist at all.** No spec, plan, type, store, or
-IPC call records what the owner thought. This is the only hole.
+**The responding half has no machinery at all.** No spec, plan, type, store, or
+IPC call carries the owner's judgment; `app/src/preload.ts` exposes no channel
+for one, and every post-result call is either an acknowledgement or a read. The
+judgment itself is not missing — see below — but nothing in Cairn holds it.
 
 It is not missing because nobody noticed. It is missing because it is currently
-done in prose. Seventeen of 197 task reports mention the owner reviewing,
-confirming, approving, or accepting the work. **Two of them quote what the owner
-actually said** — *"The owner reviewed the refreshed safe-stream, wide,
-keyboard-focus, and compact evidence and said 'Looks right. Approved.'"*
-(`docs/ai-work/tasks/194-report.md:36`). The verdict already exists. In fifteen
-cases out of seventeen it survives only as Cairn's summary of the owner's
-judgment, bound to no evidence and answerable to no query; in the remaining
-two, as a sentence Cairn still wrote.
+done in prose. **Measured 2026-08-07 at commit `83dfd0d`** — these counts move
+as work lands, and did move once during Task 203 — of 199 task reports, **14
+quote the owner's own words** and a further **29 record that the owner reviewed
+or approved without quoting them**:
+
+> "The owner reviewed the refreshed safe-stream, wide, keyboard-focus, and
+> compact evidence and said 'Looks right. Approved.'"
+> (`docs/ai-work/tasks/194-report.md:36`)
+
+The verdict already exists, and in the better cases it is even bound to named
+evidence. What it is not is **structured, queryable, or hashed to what was on
+screen** — and in every case it is a sentence Cairn wrote about the owner
+rather than a record the owner authored. That is the gap, and it is narrower
+and more honest than "the verdict is not recorded".
 
 Two further facts set the stakes.
 
-- **The owner's judgment is already load-bearing and already unrecorded.**
-  `moved` is the worker's claim (`core/src/serial.ts:617`), and stones count
-  DONE-plus-YES rows (`core/src/steps.ts:60`). Yet the contract says "Whether a
-  milestone truly moved is the owner's call; the log column stays a claim"
-  (`AGENTS.md:169`). Those two statements contradict each other today.
+- **The owner's judgment already has one place it is deliberately kept out of.**
+  `moved` is the worker's claim (`core/src/serial.ts:617`) and stones count
+  DONE-plus-YES rows (`core/src/steps.ts:60`). **This is settled, not broken.**
+  Task 081 (`17318e5`, "the stone keeps its mechanism and loses its false claim
+  to verification") recorded the owner's decision to keep the mechanism and
+  label the claim as a claim, in the contract and in the app's own words; the
+  contract now says so at `AGENTS.md:169`. An earlier draft of this spec
+  presented that as a live contradiction. It is not one, and nothing here
+  reopens it — see Decision 7.
 - **Cairn's own development ritual is already the thing being asked for,
   manually.** `app/shots/manifest.json` holds thirteen entries shaped
   `{task, title, caption, shots:[{file, label}]}` — a per-task page of prose
@@ -136,10 +163,13 @@ is not consuming, and nothing branches on what it finds.
 
 This is consistent with `AGENTS.md:174` as written, and it has a second
 property worth naming: **the record shape is designed once and any power can be
-built on it later without redesign.** Percy and Applitools both grew their
-gates on top of a review field that began as pure record. Because Decision 4
-keeps the owner's axis separate from Cairn's, that door stays open without
-being walked through.
+built on it later without redesign.** Because Decision 4 keeps the owner's axis
+separate from Cairn's and forbids the verdict path from writing `disposition`,
+a gate could later be added without touching the record — a claim checkable
+against this document rather than against anyone's product history. (An earlier
+draft asserted that Percy and Applitools grew their gates on top of a
+record-only field. Nothing in this repository supports that and it is
+contestable on its face, so it is gone.)
 
 The cost is stated plainly rather than discovered: a queue the owner must visit,
 with nothing making them visit it. Decision 6 carries the two nudges that exist.
@@ -150,7 +180,14 @@ with nothing making them visit it. Decision 6 carries the two nudges that exist.
 
 The rubric already exists and is already declared before work starts, which is
 the one thing annotation-queue tools get right and everyone else gets wrong.
-120 of 197 briefs carry `## Checks that will show the outcome holds`.
+
+**But it is not one rubric.** Measured 2026-08-07 at `83dfd0d`: of 199 briefs,
+**122 carry some `## Checks` heading, in eleven different wordings** — 57 use
+`## Checks that will show the outcome holds`, 38 use a bare `## Checks`, and
+the rest spread across nine more spellings. An earlier draft of this spec said
+"120 of 197 carry" the canonical heading, conflating the two measurements.
+**The spread is the argument, not an embarrassment:** a rubric written eleven
+ways cannot be parsed, and that is what Decision 3's generator exists to fix.
 
 **But it is prose, and it drifts.** Brief 197 promised five checks; report 197
 delivered seven, adding an A/B control run and `git diff --check`. Both
@@ -158,11 +195,26 @@ numbered lists, neither aligned. Nothing in the repository can say whether all
 five promises were answered.
 
 **Cairn chose** the remedy, and the owner approved it as part of the spine:
-**Cairn assigns a stable id to each check when it writes the brief**
-(`197.c1` … `197.c5`), and the report answers each id explicitly. This is a
-brief-format change and a contract amendment, not app code alone. Task 203's
-own brief uses the format provisionally, as the cheapest available proof that
-it works before the contract adopts it.
+**Cairn assigns a stable id to each check when it writes the brief**, and the
+report answers each id explicitly. This is a brief-format change and a contract
+amendment, not app code alone.
+
+**The id is position-only — `c1` … `cM`, never `197.c1`.** Task 203's brief
+used the task-numbered form and it is wrong: the contract mandates renumbering
+when two lanes claim the same number (`AGENTS.md:93`), and `renumberTask`
+rewrites exactly one thing inside the files — the `# Task NNN` heading
+(`cli/src/flows/claim.ts:271`). Task-numbered ids would silently survive a
+renumber pointing at the old number, which is the opposite of stable. The task
+number is already the filename; repeating it inside buys nothing and breaks.
+Task 204's brief uses the corrected form.
+
+**The amendment governs briefs a lane writes, not the adapter contract Cairn
+generates.** `briefText()` at `core/src/serial.ts:250` emits a worker-facing
+`## Checks` block from `contract.checks` on every dispatch, and it carries no
+ids. Wording the rule to cover it would make Cairn's own shipped runtime
+violate the contract on every run. Bringing the runtime into line is real work
+and belongs to Plan 2, where the queue needs it; the rule is scoped explicitly
+until then.
 
 Three things follow at no extra cost.
 
@@ -178,13 +230,15 @@ Three things follow at no extra cost.
    (`CONTRACT-TEMPLATE.md:143`). The verdict scores against that rather than
    inventing a second evidence channel.
 
-**Seventy-seven briefs predate the convention.** They record `rubric: "none"`
-and take a whole-job verdict. The record says so rather than presenting an
-empty list as a completed scoring.
+**Every brief written before the amendment records `rubric: "none"`** and takes
+a whole-job verdict. The criterion is *carries ids*, not *carries a heading* —
+77 of the 199 briefs measured at `83dfd0d` have no `## Checks` heading at all,
+and the other 122 have one in eleven wordings and no ids. The record says
+`"none"` rather than presenting an empty list as a completed scoring.
 
 **This belongs under Evidence levels.** The contract already defines Verified
 as "Core plus executable 'done when' checks the report cites"
-(`CONTRACT-TEMPLATE.md:176`). An owner verdict scoring those checks is what
+(`CONTRACT-TEMPLATE.md:183`). An owner verdict scoring those checks is what
 makes a project genuinely Verified rather than merely declaring itself so. The
 amendment lands there, not as a new concept.
 
@@ -235,31 +289,83 @@ Six properties carry the design.
   `unjudged`, because the review is unfinished. Any `not-met` requires the owner
   to choose `revise` or `fail`, because that distinction is intent — nearly
   there against wrong thing — and only the owner holds it.
-- **`promise` and `answer` are copied verbatim.** The record must read standing
-  alone, or the committed file is a page of identifiers. The report cannot move
-  in any case, being written `wx` (`core/src/serial.ts:600`), but the copy is
-  what makes the artifact worth committing.
+- **`promise`, `answer`, and `disposition` are snapshotted at seal time, not
+  read at judge time.** The record must read standing alone, or the committed
+  file is a page of identifiers. **The earlier justification for this was
+  wrong:** it claimed the report "cannot move" because it is written `wx`
+  (`core/src/serial.ts:600`). `wx` only stops *Cairn* clobbering its own file,
+  it says nothing about anyone else, and it is not even unconditional — the
+  code reads `flag: recovery?.overwriteReport ? "w" : "wx"`. The brief and
+  report live in the project a worker can write to. So Cairn copies their text
+  into the app-owned store at the moment the run's record seals, alongside
+  `finalizeEvidenceRun`, and the verdict form renders from that snapshot.
+  **What the owner judged is what the owner saw**, and a later edit to the file
+  cannot rewrite history.
 - **`evidenceSeen` pins the captures by hash.** Every PNG is already hashed.
   Recording which hashes were on screen means a later capture can never quietly
   become the thing the owner approved.
-- **A note is required on anything but a clean pass.** The value of this record
-  a year from now sits almost entirely in the notes.
+- **A note is required to leave `unjudged` for anything but a clean pass — not
+  to save.** The value of this record a year from now sits almost entirely in
+  the notes, but requiring one on every write would forbid the partial reviews
+  Decision 6 promises are first-class. An autosaved partial sitting at
+  `unjudged` requires nothing; the note is the price of a terminal verdict.
 - **Verdicts append; they never overwrite.** A changed mind supersedes and both
   persist, matching the log's append-only contract and the report's `wx`. The
   record can answer whether the owner approved something before they knew what
   they know now.
 
-**The committed copy is generated Markdown at
-`docs/ai-work/tasks/NNN-verdict.md`, carrying `recordSha256` in its
-frontmatter.** Cairn recomputes on read. A hand-edited or worker-forged file
-matches no signed record and renders as **unauthenticated** — the same
-fail-closed shape as an unmarked card line. **The copy a worker can reach is
-the copy that is not authoritative, which is exactly why committing it is
-safe.**
+**The committed copy is generated Markdown at `docs/ai-work/verdicts/NNN.md`,
+carrying `recordSha256` in its frontmatter.** Cairn recomputes on read. A
+hand-edited or worker-forged file matches no signed record and renders as
+**not verifiable here** — the same fail-closed shape as an unmarked card line.
+**The copy a worker can reach is the copy that is not authoritative, which is
+exactly why committing it is safe.**
+
+**It is not under `docs/ai-work/tasks/`, and that is load-bearing.** An earlier
+draft put it there and it was the worst error in this design.
+`changedTaskPaths` (`core/src/serial.ts:758`) returns null for any path under
+`docs/ai-work/tasks/` that is not in the run's `ownedRecords`, and that set is
+exactly `[brief, report, LOG]` (`:1027-1031`). `AGENTS.md:105-107` says it in
+words: "An automation is not a lane… it never touches task paths."
+
+**A gate matters more than the path.** `commitExactPaths` (`:794-816`) requires
+the *whole* changed set to equal the product paths plus the owned records, and
+`:1315` stops the run if HEAD moved. So **any** new non-ignored file anywhere
+in the tree — under `verdicts/` just as much as under `tasks/` — breaks a run
+in flight. Moving the path alone would not have fixed this.
+`core/test/serial.test.ts:763` already proves the mechanism as a passing test.
+
+Therefore:
+
+- **The signed record in `userData` is written immediately.** It is outside the
+  project and can never disturb a run.
+- **The committed copy is written and committed together, and only while no run
+  is active for that project** (the app already holds the run lock; the
+  conversation surface gates the same way at
+  `app/src/main/conductor/service.ts:203,794`). While a run is active the copy is
+  **pending**, and the record says so. Cairn writes it at the next safe moment.
+- **The contract's isolation condition applies unchanged.** `AGENTS.md:45` and
+  `:301` say to commit only when Git isolation is clear and to skip otherwise;
+  a skipped copy stays pending rather than being forced.
+- **A verdict can never seal a run.** Asserted by a test that saves a verdict
+  during a live run and proves the run still reaches its own honest outcome.
+
+**Portability, and what "not verifiable here" must never say.** The marker
+store is per-machine, so a genuine verdict committed on one machine cannot be
+authenticated on another. For a result card `cardauth`'s fail-closed drop is
+right — a card is ephemeral and re-derivable. **A verdict is neither.** Dropping
+it, or labelling it forged, would tell the owner their own recorded judgment was
+fabricated, which is a worse failure than the one it guards. So the wording is
+fixed here: an unverifiable copy is shown, marked **"recorded on another
+machine — not verifiable here"**, and never called forged, never silently
+dropped, and never counted as authenticated. The trade is deliberate: this
+design chooses *the owner never loses their own words* over *every displayed
+verdict is machine-proven*.
 
 Cairn writes and commits the copy automatically, once, when the verdict is
-saved — including when a later verdict supersedes an earlier one, which appends
-rather than rewrites. The commit is local and reversible, so it takes no pause.
+saved and no run is active — including when a later verdict supersedes an
+earlier one, which appends rather than rewrites. The commit is local and
+reversible, so it takes no pause.
 **Publishing is untouched:** pushing remains behind the existing publication
 approval, and a verdict commit never pushes itself.
 
@@ -275,18 +381,23 @@ and must survive scrutiny on its own.
 - **The conductor may never write or amend one.** It writes commentary after
   every card today. It must not emit "the owner approved this"; that is a
   forged verdict wearing prose.
-- **The verdict takes its own exact-path commit.** `serial.ts` verification is
-  built around worker runs. A verdict is Cairn committing on its own behalf
-  with no worker present, and it must never ride inside the commit of the run
-  it judges.
+- **The verdict takes its own exact-path commit, and only when no run is
+  active.** `serial.ts` verification is built around worker runs. A verdict is
+  Cairn committing on its own behalf with no worker present, and it must never
+  ride inside the commit of the run it judges — **nor land beside one that is
+  still being verified.** An earlier draft named only the first direction;
+  Decision 4 now carries the gate that covers both.
 - **The conductor may cite a verdict only as a verbatim quotation carrying its
   task number.** No paraphrase, no summary across verdicts.
 
 The last rule needs its reason recorded, because it will look like excessive
 caution to whoever implements it. A conductor that has read forty verdicts
 writes better briefs; that is the highest-value thing in this design. But
-citation honesty has failed in the eval at v1 and v2 **on the very scenario
-written to fix it**, and v4 did not address it. Handing that conductor a corpus
+citation honesty has failed in the eval at `conductor-v1` and `conductor-v2`
+**on the very scenario written to fix it** (S3, `docs/superpowers/evals/conductor-v0.md:118-119`).
+The live constitution is `conductor-v8` (`app/src/main/conductor/constitution.ts:48`)
+and **the eval has not been run since v2**, so v3 through v8 are entirely
+unscored — the rule may well be fixed and nobody can say. Handing that conductor a corpus
 of the owner's recorded judgments hands it forty new opportunities to
 misattribute. Decision 6 of the showing-not-asking spec drew the boundary at
 attribution rather than choice; misquoting the owner's verdict is attribution
@@ -311,11 +422,17 @@ instead of merely implausible.
   `cant-tell`, close, reload: the record persists as `unjudged`, still queued,
   scores intact. A form that punishes stopping halfway is a form the owner
   avoids.
-- **Surfacing rides shipped machinery.** The unjudged count joins the needs-you
-  signal (`app/src/renderer/screens/Chat.tsx:1545`, Task 155), as its fourth item and its only
-  non-blocking one. The commentary turn that already fires after every card may
-  raise outstanding reviews as a followup note, in the channel built for where
-  to go next.
+- **Surfacing gets its own quiet surface, and must not join `needsYou`.**
+  `needsYou` is a boolean OR of three *blocking* decisions — a proposal to
+  decide, a dispatch to confirm, and the publication approval — published as
+  one dot (`app/src/renderer/screens/Chat.tsx:1545`, Task 155). Feeding a
+  standing, non-blocking count into it would pin it permanently true and
+  **destroy the push-approval attention signal**, which is the one signal in
+  the app guarding a real risk boundary. An earlier draft proposed exactly
+  that. The unjudged count therefore gets a separate, quieter indicator. The
+  commentary turn that already fires after every card may also raise
+  outstanding reviews as a followup note, in the channel built for where to go
+  next.
 
 **One limit, stated here so it is not discovered on the first review.** The
 captures are of Cairn's own window at two run boundaries. They are not
@@ -331,18 +448,24 @@ implementation, not during design.
 
 The verdict does not set `moved`. It does not add or remove a stone. It does not
 edit the report, the log row, or the brief. It does not reopen a sealed record.
-The contradiction named in "Where this comes from" — that `moved` is the
-worker's claim while the contract calls it the owner's call — is **recorded by
-this design and resolved by none of it.** A verdict that scores checks makes
-the contradiction visible and dated for the first time; closing it means
-letting the owner's judgment drive a stone, which is a gate, which Decision 2
-declined. That is a later decision made on evidence this design will produce.
+It does not seal, stop, or disturb a run — Decision 4's gate is what makes that
+true in fact rather than in intention.
+
+**`moved` in particular stays exactly where Task 081 put it.** An earlier draft
+of this spec claimed a live contradiction between `moved` being the worker's
+claim and the contract calling it the owner's call, and offered this design as
+what would make it "visible and dated for the first time". That was wrong: the
+owner settled it in Task 081 (`17318e5`), choosing to keep the mechanism and
+label the claim honestly, and the contract and app already say so. Nothing here
+reopens a closed owner decision. If the owner ever wants a stone to count their
+judgment instead, that is a gate, which Decision 2 declined, and it would be a
+fresh decision on its own evidence — not a defect this design is fixing.
 
 ## Order of work
 
 **Cairn chose.** Four plans, not one. Bundling them would put the trust
 properties, a contract change, and a new screen under a single review, and the
-one person who has to do that reviewing said plainly that he does not know this
+one person who has to do that reviewing said plainly that they do not know this
 material well. Each step below is independently shippable and independently
 rejectable.
 
@@ -373,12 +496,17 @@ format goes first and gets used before anything is built on it.
 
 ## How we would know it holds
 
-Each of these is a test rather than a claim. The first three are trust defects
+Each of these is a test rather than a claim. The first four are trust defects
 if they fail, not bugs.
 
-- **A worker cannot author a counted verdict.** A plausible `197-verdict.md`
-  written into the project renders as unauthenticated, leaves the queue count
-  unchanged, and is read by nothing.
+- **Saving a verdict during a live run cannot seal that run.** Start a run,
+  save a verdict mid-flight, and assert the run still reaches its own honest
+  outcome with HEAD unmoved by the verdict. This is the test the review's
+  CRITICAL demanded, and it is first because `core/test/serial.test.ts:763`
+  already proves the failure it guards against.
+- **A worker cannot author a counted verdict.** A plausible
+  `docs/ai-work/verdicts/197.md` written into the project renders as not
+  verifiable, leaves the queue count unchanged, and is read by nothing.
 - **The conductor cannot emit a verdict.** A conductor turn carrying a
   verdict-shaped fence produces no record, failing closed on read exactly as
   followups do.
@@ -387,8 +515,20 @@ if they fail, not bugs.
   separate axes are only half of keeping it.
 - **`evidenceSeen` pins what was on screen.** Judge a run, add a capture, and
   the verdict still names only the hashes that existed at `judgedAt`.
-- **A note is required on anything but a clean pass.** The record cannot be
-  written without it.
+- **A note is required to reach a terminal verdict, and never to save.** A
+  partial at `unjudged` saves with no note; moving to `revise` or `fail`
+  without one is refused. Both halves asserted, because an earlier draft stated
+  only the first and contradicted Decision 6.
+- **A verdict recorded on another machine is shown, not accused.** Present a
+  committed copy with no local marker and assert the wording says "recorded on
+  another machine — not verifiable here", that it is not counted as
+  authenticated, and that it is not dropped.
+- **The snapshot is what the owner saw.** Seal a run, rewrite the brief and
+  report on disk as a worker could, and assert the verdict form still renders
+  the sealed text.
+- **The unjudged count never pins `needsYou`.** With verdicts outstanding,
+  assert `needsYou` is still false when no blocking decision is waiting, so the
+  publication approval keeps its signal.
 - **A partial review survives a reload** as `unjudged`, still queued, scores
   intact.
 - **Promised-versus-answered surfaces itself.** Brief 197 and report 197 run

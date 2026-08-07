@@ -3,146 +3,168 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give every check in a task brief a stable id that its report must
-answer, so promised-versus-answered becomes checkable — and close a shipping
-defect found while planning it.
+answer, so promised-versus-answered becomes checkable — and close the one
+contract copy that genuinely has no drift test.
 
-**Architecture:** Documentation and one generator function. The contract gains
-two amended rules; `briefSkeleton()` emits the new format; the existing
-mirror test is extended to cover the fourth contract copy it was silently
-missing. No product runtime changes.
+**Architecture:** Documentation, two tests, and one generator function. No
+product runtime changes.
 
 **Tech Stack:** Node's built-in `node:test`, TypeScript 5.6, plain Markdown.
 
 **Plan 1 of 4** for
-`docs/superpowers/specs/2026-08-07-cairn-owner-verdict-design.md`. Plans 2–4
-(the verdict record, the review queue, the conductor's read access) are named
-in that spec's "Order of work" and are not written yet, by design: this format
-must survive contact with real briefs before anything is built on it.
+`docs/superpowers/specs/2026-08-07-cairn-owner-verdict-design.md`.
+
+**Revised by Task 204** after an adversarial review. The first version's Task A
+was built on a false premise — it claimed `app/resources/contract.md` ships
+unguarded, when that file and `core/assets/contract.md` are **gitignored build
+artifacts** regenerated from the canonical template and cannot drift. That task
+is deleted. Its replacement covers `AGENTS.md`, which is tracked,
+hand-maintained, and genuinely untested. Four other defects that would have
+stopped an engineer are fixed and marked below.
 
 ## Global Constraints
 
-- **The contract has FIVE copies.** Any amendment edits all five or the build
-  fails: `CONTRACT-TEMPLATE.md` (canonical), `core/assets/contract.md`,
-  the `<script type="text/plain" id="src-contract">` block in `cairn.html`,
-  `app/resources/contract.md`, and `AGENTS.md` (this project's live instance).
-- **`app/resources/contract.md` ships to users.** `app/forge.config.ts:14`
-  bundles it as an `extraResource`; `app/src/main/main.ts:33-34` reads it at
-  runtime. Task A exists because no test covers it today.
-- **All five are byte-identical for the shared sections.** Verified
-  2026-08-07: `CONTRACT-TEMPLATE.md`, `core/assets/contract.md`, and
-  `app/resources/contract.md` share sha256 prefix `11dc963a9c0404db`.
-  `AGENTS.md` differs only by carrying this project's own facts.
-- **Line endings matter.** `core/test/contract-mirrors.test.mjs` normalises
-  `\r\n?` to `\n` before comparing. Task 197 lost time to a scripted edit that
-  rewrote a file as CRLF. Write LF.
-- **No task number is claimed by this plan.** Each task below is claimed at
-  execution time under the contract's own rule.
-- **Nothing is pushed.** Every commit is local; publication keeps its pause.
-- **No paid model call.** This plan makes none.
+- **Three contract copies are SOURCES, edited by hand.** `CONTRACT-TEMPLATE.md`
+  (canonical), the `<script type="text/plain" id="src-contract">` block in
+  `cairn.html`, and `AGENTS.md` (this project's live instance). Every amendment
+  edits all three.
+- **Two are BUILD OUTPUTS and are never edited or staged.**
+  `core/assets/contract.md` (from `core/scripts/sync-contract.mjs`) and
+  `app/resources/contract.md` (from `app/scripts/copy-assets.mjs`). Both are
+  gitignored — `.gitignore:8`, `app/.gitignore:4`, `core/.gitignore:3` — and
+  `git add` **exits 1** on them. Regenerate; never hand-edit.
+- **What the mirror test actually enforces:** `core/test/contract-mirrors.test.mjs`
+  compares `core/assets/contract.md` and `cairn.html`'s embedded block against
+  `CONTRACT-TEMPLATE.md`. It runs after `npm run build`, which is why the
+  generated copy is meaningful there. `AGENTS.md` is compared to nothing —
+  Task A fixes that.
+- **`AGENTS.md` differs from the template only inside the first fenced
+  ```text``` block** (the project facts, lines 13-17). Verified 2026-08-07 at
+  `83dfd0d`: everything outside that block is byte-identical.
+- **`cairn.html`'s line numbers are offset from the `.md` copies** by the HTML
+  wrapper. Never reuse the others' numbers for it.
+- **Line endings:** the mirror test normalises `\r\n?` to `\n` before
+  comparing. Write LF.
+- **No task number is claimed by this plan.** Each task is claimed at execution
+  time under the contract's own rule.
+- **Nothing is pushed. No paid model call.**
 
 ---
 
-### Task A: Cover the fourth contract mirror
+### Task A: Cover the one contract copy that has no drift test
 
-The mirror test checks three copies and misses the one that ships. Amending the
-contract before closing this would risk shipping a stale contract to every
-installed app with no test to catch it.
+`AGENTS.md` is the contract this repository actually runs under, it is
+hand-edited by every amendment, and nothing compares it to anything. Tasks B
+and C both edit it, so this lands first.
 
 **Files:**
-- Modify: `core/test/contract-mirrors.test.mjs:11-38`
+- Modify: `core/test/contract-mirrors.test.mjs:11-33`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: a mirror test covering all four file copies. Tasks B and C rely on
-  it failing when a copy is missed.
+- Produces: a mirror test that fails when `AGENTS.md` drifts from the template
+  outside the project-facts block. Tasks B and C rely on it.
 
 - [ ] **Step 1: Write the failing assertion**
 
-Add to `core/test/contract-mirrors.test.mjs`, inside the existing test, after
-the `asset` constant:
+In `core/test/contract-mirrors.test.mjs`, add this helper above the existing
+`test(...)` call:
 
 ```javascript
-  const shipped = normalizeLineEndings(
-    readFileSync(join(repository, "app", "resources", "contract.md"), "utf8"),
-  );
+/** The contract text with the first fenced project-facts block removed.
+ * AGENTS.md is the template plus this project's facts; everything else must
+ * match byte for byte. */
+function withoutProjectFacts(value) {
+  return value.replace(/```text\n[\s\S]*?\n```/, "```text\n<facts>\n```");
+}
 ```
 
-and after the existing `assert.equal(asset, canonical, ...)` line:
+Then add a second `test(...)` after the existing one:
 
 ```javascript
-  assert.equal(
-    shipped,
-    canonical,
-    "app/resources/contract.md drifted from CONTRACT-TEMPLATE.md — this copy ships to users via forge.config.ts extraResource",
+test("AGENTS.md matches the canonical template outside its project facts", () => {
+  const repository = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const canonical = normalizeLineEndings(
+    readFileSync(join(repository, "CONTRACT-TEMPLATE.md"), "utf8"),
   );
+  const live = normalizeLineEndings(
+    readFileSync(join(repository, "AGENTS.md"), "utf8"),
+  );
+  assert.equal(
+    withoutProjectFacts(live),
+    withoutProjectFacts(canonical),
+    "AGENTS.md drifted from CONTRACT-TEMPLATE.md outside the project-facts block",
+  );
+});
 ```
 
 - [ ] **Step 2: Prove it red by deliberate divergence**
 
-The files are identical today, so a new assertion passes immediately and proves
-nothing. Diverge one on purpose — the A/B control method Task 197 used to prove
-its pre-existing failures.
+The files agree today, so a new assertion passes immediately and proves
+nothing. Diverge one on purpose — the A/B control method Task 197 used.
+**`AGENTS.md` is tracked, so `git checkout` genuinely restores it.** (The
+deleted first version of this task tried the same trick on a gitignored file,
+where `git checkout` cannot restore and `git status` cannot detect the failure.)
 
 Run:
 
 ```bash
-printf '\nDIVERGENCE PROBE - REMOVE ME\n' >> app/resources/contract.md && node --test core/test/contract-mirrors.test.mjs; git checkout -- app/resources/contract.md
+printf '\nDIVERGENCE PROBE\n' >> AGENTS.md && node --test core/test/contract-mirrors.test.mjs; git checkout -- AGENTS.md
 ```
 
-Expected: FAIL, naming `app/resources/contract.md drifted`. The trailing
-`git checkout` restores the file whether the test passed or failed.
+Expected: FAIL naming `AGENTS.md drifted from CONTRACT-TEMPLATE.md`.
 
-- [ ] **Step 3: Confirm the restore and that the test now passes**
+- [ ] **Step 3: Confirm the restore and that both tests pass**
 
 Run:
 
 ```bash
-git status --porcelain app/resources/contract.md && node --test core/test/contract-mirrors.test.mjs
+git status --porcelain AGENTS.md && node --test core/test/contract-mirrors.test.mjs
 ```
 
-Expected: no output from `git status` (file restored), then PASS.
+Expected: `git status` prints nothing (tracked file restored), then PASS with
+2 passing.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add core/test/contract-mirrors.test.mjs
-git commit -m "Cover app/resources/contract.md in the mirror test"
+git commit -m "Guard AGENTS.md against drifting from the canonical contract"
 ```
 
 ---
 
 ### Task B: Make the taken-number rule match its implementation
 
-The written rule says a number is taken if its **brief** exists. Task 148 has no
-brief — `3e0be00` renumbered it away — but holds `148-report.md` and a STOPPED
-log row. A reader following the prose would reuse it. The code already refuses
-it: `taskNumbersInDir` matches `/^(\d{3,})-/` against every file
-(`cli/src/flows/claim.ts:37`), and the branch scan applies the same match
-(`:92`). This task makes the sentence match the code.
+The written rule says a number is taken if its **brief** exists. Task 148 has
+no brief — `3e0be00` renumbered it away — but holds `148-report.md` and a
+STOPPED log row. A reader following the prose would reuse it. The code already
+refuses it, and it does not enumerate file kinds: `taskNumbersInDir` matches
+`/^(\d{3,})-/` against every entry (`cli/src/flows/claim.ts:37`) and the branch
+scan applies the same match (`cli/src/flows/claim.ts:93`).
 
 **Files:**
 - Modify: `CONTRACT-TEMPLATE.md:79-80`
-- Modify: `core/assets/contract.md:79-80`
-- Modify: `app/resources/contract.md:79-80`
 - Modify: `AGENTS.md:79-80`
-- Modify: `cairn.html:171-172` — inside the `id="src-contract"` block. **Its
-  line numbers are offset by the HTML wrapper**, so do not reuse the others'.
+- Modify: `cairn.html:171-172` — **offset by the HTML wrapper; do not reuse the
+  numbers above.**
 
 **Interfaces:**
-- Consumes: Task A's four-way mirror test.
-- Produces: the amended rule. Task C edits the same five files.
+- Consumes: Task A's `AGENTS.md` coverage.
+- Produces: the amended rule. Task C edits the same three files, **two lines
+  lower**, because this task adds two lines above them.
 
-- [ ] **Step 1: Verify the current text is identical in all five**
+- [ ] **Step 1: Verify the current text is identical in all three sources**
 
 Run:
 
 ```bash
-grep -n "a number is taken if its brief file exists" CONTRACT-TEMPLATE.md core/assets/contract.md app/resources/contract.md cairn.html AGENTS.md
+grep -n "a number is taken if its brief file exists" CONTRACT-TEMPLATE.md cairn.html AGENTS.md
 ```
 
-Expected: five matches, one per file.
+Expected: three matches, one per file.
 
-- [ ] **Step 2: Replace the sentence in all five**
+- [ ] **Step 2: Replace the sentence in all three**
 
 Replace this exact text:
 
@@ -151,31 +173,40 @@ Replace this exact text:
   committed or not.
 ```
 
-with:
+with the rule the code actually implements — **not** a narrower one naming two
+file kinds, which would drift again the moment a third record type is added:
 
 ```text
-  `docs/ai-work/tasks/`: a number is taken if a brief **or a report** exists
-  for it, committed or not. A renumbered task can leave a report behind with
-  no brief — Task 148 does — and reusing that number would collide a new task
-  with a finished run's records.
+  `docs/ai-work/tasks/`: a number is taken if **any file there begins with
+  it** — a brief, a report, or any later record — committed or not. A
+  renumbered task can leave a report behind with no brief, and reusing that
+  number would collide a new task with a finished run's records.
 ```
 
-- [ ] **Step 3: Run the mirror test**
+Note there is no repository-specific example here: `CONTRACT-TEMPLATE.md` is
+copied into every project, so "Task 148" would be meaningless there. The Task
+148 evidence belongs in this task's report.
 
-Run: `node --test core/test/contract-mirrors.test.mjs`
-Expected: PASS. A FAIL here names whichever copy was missed — that is the test
-doing its job, so fix that copy and rerun.
+- [ ] **Step 3: Regenerate the build outputs and run the mirror tests**
 
-- [ ] **Step 4: Run the full core and cli suites**
+```bash
+node core/scripts/sync-contract.mjs && node --test core/test/contract-mirrors.test.mjs
+```
+
+Expected: PASS, 2 passing. A FAIL names whichever source was missed.
+
+- [ ] **Step 4: Run the full suites**
 
 Run: `npm test --workspaces`
 Expected: PASS, core and cli both green.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Commit — three source files only**
+
+The two generated copies are gitignored and `git add` would exit 1 on them.
 
 ```bash
-git add CONTRACT-TEMPLATE.md core/assets/contract.md app/resources/contract.md cairn.html AGENTS.md
-git commit -m "A task number is taken by a brief or a report, matching the code"
+git add CONTRACT-TEMPLATE.md cairn.html AGENTS.md
+git commit -m "A task number is taken by any record file, matching the code"
 ```
 
 ---
@@ -183,22 +214,26 @@ git commit -m "A task number is taken by a brief or a report, matching the code"
 ### Task C: Amend the contract for stable check ids
 
 **Files:**
-- Modify: the brief rule at line 40 and the report rule at lines 143-145 in
-  each of `CONTRACT-TEMPLATE.md`, `core/assets/contract.md`,
-  `app/resources/contract.md`, and `AGENTS.md` — all four share these numbers,
-  verified 2026-08-07.
-- Modify: `cairn.html:132` (brief rule) and `cairn.html:235-237` (report rule).
-  **Offset by the HTML wrapper; do not reuse the others' numbers.**
+- Modify: the brief rule at line 40 and the report rule at lines 145-147 in
+  `CONTRACT-TEMPLATE.md` and `AGENTS.md` — **145-147, not 143-145: Task B adds
+  two lines above them.** Re-grep rather than trusting these numbers.
+- Modify: the same two rules in `cairn.html` — **offset; re-grep.**
+- Modify: `CONTRACT-TEMPLATE.md:3`, `cairn.html`, `AGENTS.md:3` — the version
+  string.
+- Modify: `core/package.json` (register the new test)
 - Create: `core/test/contract-check-ids.test.mjs`
 
 **Interfaces:**
-- Consumes: Task A's four-way mirror test; Task B's amended file set.
-- Produces: the amended contract text that Task D's generator must satisfy, and
-  the id format `NNN.cM` that Plans 2–4 parse.
+- Consumes: Task A's coverage; Task B's amended files.
+- Produces: the id format `c1`…`cM` that Plans 2–4 parse, and a contract at
+  v0.8.0.
 
-- [ ] **Step 1: Write the failing test that pins the amendment verbatim**
+- [ ] **Step 1: Write the failing test that pins the amendment**
 
-Create `core/test/contract-check-ids.test.mjs`:
+Create `core/test/contract-check-ids.test.mjs`. **The assertions collapse
+whitespace before matching**, because the contract's prose is hard-wrapped and
+a literal-space regex cannot cross a line break — the defect that made the
+first version of this plan permanently red where it claimed green:
 
 ```javascript
 import test from "node:test";
@@ -209,34 +244,46 @@ import { fileURLToPath } from "node:url";
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function contract() {
-  return readFileSync(join(REPOSITORY, "CONTRACT-TEMPLATE.md"), "utf8").replace(/\r\n?/g, "\n");
+/** Line endings normalised and every whitespace run collapsed, so a hard-wrapped
+ * sentence matches the same regex as a single-line one. */
+function contractText(file) {
+  return readFileSync(join(REPOSITORY, file), "utf8").replace(/\s+/g, " ");
 }
 
-test("the contract requires each brief check to carry a stable id", () => {
-  assert.match(
-    contract(),
-    /each check carries a stable id of the form `NNN\.cM`/,
-    "the brief rule naming the check-id format is missing",
-  );
-});
+for (const file of ["CONTRACT-TEMPLATE.md", "AGENTS.md"]) {
+  test(`${file} requires each brief check to carry a stable id`, () => {
+    assert.match(
+      contractText(file),
+      /each check carries a stable id of the form `cN`/,
+      "the brief rule naming the check-id format is missing",
+    );
+  });
 
-test("the contract requires the report to answer every brief check by id", () => {
-  assert.match(
-    contract(),
-    /answering every id the brief declared, and naming any check added during the work/,
-    "the report rule requiring per-id answers is missing",
-  );
-});
+  test(`${file} requires the report to answer every brief check by id`, () => {
+    assert.match(
+      contractText(file),
+      /answering every id the brief declared, and naming any check added during the work/,
+      "the report rule requiring per-id answers is missing",
+    );
+  });
+
+  test(`${file} declares contract version 0.8.0`, () => {
+    assert.match(contractText(file), /Cairn Contract v0\.8\.0/);
+  });
+}
 ```
 
-- [ ] **Step 2: Run it to verify both fail**
+- [ ] **Step 2: Register the test, then run it to verify it fails**
+
+`core/package.json`'s `test` script is an explicit file list, not a glob — an
+unregistered test file is silently never run. Add
+`test/contract-check-ids.test.mjs` immediately after
+`test/contract-mirrors.test.mjs` in that list.
 
 Run: `node --test core/test/contract-check-ids.test.mjs`
-Expected: FAIL, 2 failing — "the brief rule naming the check-id format is
-missing" and "the report rule requiring per-id answers is missing".
+Expected: FAIL, 6 failing (two files × three assertions).
 
-- [ ] **Step 3: Amend the brief rule in all five copies**
+- [ ] **Step 3: Amend the brief rule in all three sources**
 
 Replace this exact line:
 
@@ -248,12 +295,14 @@ with:
 
 ```text
 3. Restate the visible outcome and write a short task brief. Its checks are a
-   numbered list, and each check carries a stable id of the form `NNN.cM` —
-   the task number, then `c`, then the check's position — so a report can
-   answer it and a later reader can find it.
+   numbered list, and each check carries a stable id of the form `cN` — `c`
+   then the check's position — so a report can answer it and a later reader can
+   find it. The id carries no task number: renumbering a task rewrites its
+   heading, not its body, so a task-numbered id would survive pointing at the
+   old number.
 ```
 
-- [ ] **Step 4: Amend the report rule in all five copies**
+- [ ] **Step 4: Amend the report rule in all three sources**
 
 Replace this exact text:
 
@@ -273,60 +322,54 @@ with:
   brief's;
 ```
 
-- [ ] **Step 5: Run the new test and the mirror test**
+This governs briefs a lane writes. It does not govern the adapter contract
+`briefText()` generates at `core/src/serial.ts:250`, which emits a worker-facing
+`## Checks` block with no ids; wording the rule to cover that would put Cairn's
+own runtime in violation on every dispatch. Bringing the runtime into line
+belongs to Plan 2.
 
-Run: `node --test core/test/contract-check-ids.test.mjs core/test/contract-mirrors.test.mjs`
-Expected: PASS, 3 passing.
+- [ ] **Step 5: Bump the contract version in all three sources**
 
-- [ ] **Step 6: Run the full suites**
+The declared version is the only drift signal the contract defines, and it is
+machine-read. Replace `Cairn Contract v0.7.0` with `Cairn Contract v0.8.0`.
 
-Run: `npm test --workspaces`
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Regenerate, then run both test files**
 
 ```bash
-git add CONTRACT-TEMPLATE.md core/assets/contract.md app/resources/contract.md cairn.html AGENTS.md core/test/contract-check-ids.test.mjs
-git commit -m "Brief checks carry stable ids; reports answer every one"
+node core/scripts/sync-contract.mjs && node --test core/test/contract-check-ids.test.mjs core/test/contract-mirrors.test.mjs
+```
+
+Expected: PASS, 8 passing.
+
+- [ ] **Step 7: Run the full suites**
+
+Run: `npm test --workspaces`
+Expected: PASS. Core's count rises by 6.
+
+- [ ] **Step 8: Commit — sources, the test, and the registration**
+
+```bash
+git add CONTRACT-TEMPLATE.md cairn.html AGENTS.md core/test/contract-check-ids.test.mjs core/package.json
+git commit -m "Brief checks carry stable ids; reports answer every one (contract v0.8.0)"
 ```
 
 ---
 
 ### Task D: Emit the id format from the brief generator
 
-Every brief `cairn claim` writes must carry the format, or the amendment is a
-rule nobody follows.
-
 **Files:**
 - Modify: `cli/src/flows/claim.ts:128-158` (`briefSkeleton`)
 - Modify: `cli/test/claim.test.ts`
 
 **Interfaces:**
-- Consumes: Task C's amended contract text and the `NNN.cM` format.
+- Consumes: Task C's amended contract and the `cN` format.
 - Produces: `briefSkeleton(n, title, laneLabel, baseCommit)` — unchanged
-  signature, amended output. Plans 2–4 parse briefs produced by it.
+  signature, amended output.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `cli/test/claim.test.ts`:
-
-```typescript
-test("the brief skeleton declares check ids for the claimed number", () => {
-  const skeleton = briefSkeleton(7, "a visible outcome", "A (main checkout)", "abc1234");
-  assert.match(skeleton, /## Checks that will show the outcome holds/);
-  assert.match(
-    skeleton,
-    /1\. \*\*`007\.c1`\*\*/,
-    "the first check must be pre-labelled with the zero-padded task number",
-  );
-  assert.ok(
-    !skeleton.includes("NNN.c"),
-    "the skeleton must interpolate the real number, not leave the placeholder",
-  );
-});
-```
-
-Add `briefSkeleton` to the existing import block at the top of the file:
+Add `briefSkeleton` to the existing import block at the top of
+`cli/test/claim.test.ts`:
 
 ```typescript
 import {
@@ -341,11 +384,26 @@ import {
 } from "../src/flows/claim.js";
 ```
 
+Then add:
+
+```typescript
+test("the brief skeleton pre-labels its checks with stable ids", () => {
+  const skeleton = briefSkeleton(7, "a visible outcome", "A (main checkout)", "abc1234");
+  assert.match(skeleton, /## Checks that will show the outcome holds/);
+  assert.match(skeleton, /1\. \*\*`c1`\*\*/, "the first check must be pre-labelled `c1`");
+  assert.match(skeleton, /2\. \*\*`c2`\*\*/, "the second check must be pre-labelled `c2`");
+  assert.ok(
+    !/`\d{3}\.c\d`/.test(skeleton),
+    "ids must not carry the task number — renumbering would strand them",
+  );
+});
+```
+
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `cd cli && npm test`
-Expected: FAIL on "the first check must be pre-labelled with the zero-padded
-task number" — the current skeleton emits `1. TODO: exact commands...`.
+Expected: FAIL on "the first check must be pre-labelled `c1`" — the current
+skeleton emits `1. TODO: exact commands...`.
 
 - [ ] **Step 3: Amend the skeleton's Checks section**
 
@@ -365,13 +423,14 @@ with:
 Each check carries a stable id so the report can answer it by name. Add or
 remove numbered items as the task needs; keep the ids in order.
 
-1. **\`${nnn}.c1\`** — TODO: exact command, named so a later conversation can
-   re-run it, and what its output must show.
-2. **\`${nnn}.c2\`** — TODO.
+1. **\`c1\`** — TODO: exact command, named so a later conversation can re-run
+   it, and what its output must show.
+2. **\`c2\`** — TODO.
 ```
 
-Note the escaped backticks: `briefSkeleton` returns a template literal, so
-every literal backtick inside it needs a leading backslash.
+`briefSkeleton` returns a template literal, so every literal backtick inside it
+needs a leading backslash. No `${nnn}` interpolation is needed here — that is
+the point of dropping the task number.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -383,43 +442,46 @@ Expected: PASS, all cli tests green.
 Run: `npm test --workspaces`
 Expected: PASS.
 
-- [ ] **Step 6: Prove it end to end on a real claim**
-
-Run, in a scratch clone rather than this repository:
-
-```bash
-cd cli && npm run build && node dist/src/index.js claim "a throwaway probe"
-```
-
-Expected: a brief whose Checks section reads ``**`NNN.c1`**`` with the real
-claimed number interpolated. Delete the scratch clone afterwards; do not commit
-the probe brief.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add cli/src/flows/claim.ts cli/test/claim.test.ts
 git commit -m "Brief skeleton pre-labels checks with stable ids"
 ```
 
+**No scratch-clone probe.** The first version of this plan ended with
+`cd cli && npm run build && node dist/src/index.js claim "a throwaway probe"` in
+a fresh clone. That step was wrong three ways: `cli/src/index.ts:11` reads
+`process.cwd()`, which would be `<clone>/cli` and contains no
+`docs/ai-work/tasks`; `cli` imports `@cairn/core` and cannot build alone; and
+cloning plus installing is work outside the named repository and a dependency
+install, both of which `AGENTS.md:224-233` puts behind an owner pause that the
+step never named. Step 1 already calls `briefSkeleton` directly, which is the
+same proof without leaving the repository.
+
 ---
 
 ## How we would know this plan held
 
-- `npm test --workspaces` passes, core and cli both green.
-- The mirror test fails when any one of the four file copies diverges, proven
-  by deliberate divergence rather than asserted.
-- A brief written by `cairn claim` after Task D carries `NNN.c1` with the real
-  number interpolated.
-- No product runtime changed: `git diff --stat` across the four tasks touches
-  only contract copies, `claim.ts`, and tests.
+- `npm test --workspaces` passes, core and cli both green, with core's count up
+  by 6 from Task C.
+- The mirror test fails when `AGENTS.md` diverges from the template outside its
+  facts block, proven by deliberate divergence rather than asserted.
+- The check-id test fails when any of the three sources is missed, proven the
+  same way.
+- A brief written by `cairn claim` after Task D carries `` **`c1`** `` and no
+  task-numbered id.
+- No `git add` in this plan names a gitignored path.
+- `git diff --stat` across the four tasks touches only the three contract
+  sources, `claim.ts`, `core/package.json`, and tests.
 
 ## Deliberately not in this plan
 
 - **The verdict record, the queue, and the conductor's read access.** Plans
-  2–4. They parse the format this plan establishes and are not written until it
-  has been used on real briefs.
-- **Retrofitting ids onto the 120 existing briefs.** They record `rubric:
-  "none"` under the spec's Decision 3 and are left exactly as they are.
-- **Any change to what a check may assert.** This plan changes how a check is
-  labelled, never what counts as one.
+  2–4, unwritten until this format has been used on real briefs.
+- **Bringing `briefText()` and `composeWorkerReport` into line with the id
+  rule.** Plan 2 needs it; the amendment is scoped so the runtime is not in
+  violation meanwhile.
+- **Teaching `renumberTask` about ids.** Dropping the task number from the id
+  removes the need entirely.
+- **Retrofitting ids onto existing briefs.** They record `rubric: "none"`.
