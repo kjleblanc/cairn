@@ -44,14 +44,24 @@ test("the panel is warm lit paper, not a bright rectangle", () => {
   assert.ok(!rule.includes("var(--card-solid);"), "the lantern is still the app's flat card fill");
 });
 
-test("one soft light spill lifts the paper without a stacked halo", () => {
-  // Task 186 supersedes the mockup's three stacked shadows: the hairline halo
-  // was the part that read as glass. A warm spill and a quiet drop remain.
+test("one soft light spill lifts the paper, and nothing drops it onto the water", () => {
+  // Task 186 superseded the mockup's three stacked shadows: the hairline halo
+  // was the part that read as glass. It kept a warm spill AND a quiet drop.
+  //
+  // Task 197 retires the drop, deliberately. This assertion used to require
+  // exactly two rgb() values for exactly that reason, so the change is
+  // recorded here rather than quietly relaxed. A drop shadow is the single
+  // strongest signal that a surface floats ABOVE what is behind it; with the
+  // outline gone and the fill translucent, the drop was the last thing still
+  // reading this as a slab laid on the pond. What remains is the spill, now
+  // widened — light spilling ONTO the water is what puts the surface in the
+  // pond instead of over it.
   const rule = lanternRule();
   const shadow = rule.slice(rule.indexOf("box-shadow:"), rule.indexOf(";", rule.indexOf("box-shadow:")));
-  assert.equal(shadow.match(/rgb\(/g)?.length, 2, "the lantern does not use one spill and one quiet drop");
+  assert.equal(shadow.match(/rgb\(/g)?.length, 1, "the lantern does not use exactly one warm spill");
   assert.ok(shadow.includes("247 211 168"), "the spill is not the mockup's lantern gold");
   assert.ok(!shadow.includes("0 0 0 7px"), "the glassy hairline halo returned");
+  assert.doesNotMatch(shadow, /rgb\(0 0 0/, "the drop shadow returned, so the surface floats above the pond again");
 });
 
 test("the lantern re-points the paired tokens instead of rewriting its children", () => {
