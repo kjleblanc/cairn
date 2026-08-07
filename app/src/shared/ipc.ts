@@ -1,5 +1,21 @@
 import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 
+export type {
+  AccountLabelProvenance,
+  AuthKind,
+  AvailabilityEvidence,
+  BillingKind,
+  CairnRole,
+  CatalogSnapshot,
+  CatalogSource,
+  ConnectionStatus,
+  ConnectionSummary,
+  ModelLifecycle,
+  ModelModality,
+  ModelOption,
+  NormalizedModelPrice,
+} from "./model-connections.js";
+
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required" };
 export type ProjectActivity = "idle" | "thinking" | "working" | "complete";
