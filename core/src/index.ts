@@ -1,5 +1,6 @@
 export * from "./codex.js";
 export * from "./convert.js";
+export * from "./critic.js";
 export * from "./files.js";
 export * from "./intent.js";
 export * from "./kimi.js";

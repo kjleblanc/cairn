@@ -1,0 +1,11 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "not-met", "severity": "major", "confidence": "high", "failureConditionId": "failure-c1", "observed": "The first frozen condition is absent.", "evidenceRefs": ["artifact-c1"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": "shared-root", "smallestRepair": "Repair the shared implementation cause." },
+    { "id": "f2", "criterionId": "c2", "status": "not-met", "severity": "major", "confidence": "high", "failureConditionId": "failure-c2", "observed": "The second frozen condition is absent.", "evidenceRefs": ["artifact-c2"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": "shared-root", "smallestRepair": "Repair the shared implementation cause." },
+    { "id": "f3", "criterionId": "c3", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact.", "evidenceRefs": ["artifact-c3"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null }
+  ],
+  "unscopedFindings": [],
+  "comparisons": [],
+  "largestGapId": "f1"
+}

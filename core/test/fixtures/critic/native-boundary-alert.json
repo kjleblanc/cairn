@@ -1,0 +1,12 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The declared local outcome is present.", "evidenceRefs": ["artifact-c1"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null },
+    { "id": "f2", "criterionId": "c2", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact.", "evidenceRefs": ["artifact-c2"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null }
+  ],
+  "unscopedFindings": [
+    { "id": "u1", "category": "protected-work-or-recovery-breach", "observed": "A protected-work boundary may have changed.", "evidenceRefs": ["boundary-evidence"], "counterEvidenceRefs": ["boundary-counterevidence"], "confidence": "medium", "selfCheck": "challenged", "rootCauseKey": "boundary-root" }
+  ],
+  "comparisons": [],
+  "largestGapId": null
+}

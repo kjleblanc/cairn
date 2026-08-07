@@ -1,0 +1,11 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The repaired required condition now holds.", "evidenceRefs": ["artifact-c1"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null },
+    { "id": "f2", "criterionId": "c2", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact after repair.", "evidenceRefs": ["artifact-c2"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null },
+    { "id": "f3", "criterionId": "p1", "status": "not-met", "severity": "minor", "confidence": "medium", "failureConditionId": null, "observed": "The repair introduced a visible but unpromised spacing difference.", "evidenceRefs": ["artifact-p1"], "counterEvidenceRefs": [], "selfCheck": "challenged", "rootCauseKey": "repair-polish", "smallestRepair": "Leave the unpromised difference advisory." }
+  ],
+  "unscopedFindings": [],
+  "comparisons": [],
+  "largestGapId": "f3"
+}

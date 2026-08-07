@@ -1,0 +1,12 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact.", "evidenceRefs": ["artifact-c1"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null },
+    { "id": "f2", "criterionId": "p1", "status": "met", "severity": null, "confidence": "medium", "failureConditionId": null, "observed": "The semantic candidate better matches the declared dimension.", "evidenceRefs": ["candidate-image", "reference-image"], "counterEvidenceRefs": [], "selfCheck": "challenged", "rootCauseKey": null, "smallestRepair": null }
+  ],
+  "unscopedFindings": [],
+  "comparisons": [
+    { "comparisonId": "comparison-one", "criterionId": "p1", "referenceId": "reference-one", "dimensionId": "layout", "candidateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "referenceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "presentationOrder": "A-B", "result": "candidate", "evidenceRefs": ["candidate-image", "reference-image"] }
+  ],
+  "largestGapId": null
+}

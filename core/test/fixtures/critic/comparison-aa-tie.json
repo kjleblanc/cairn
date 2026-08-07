@@ -1,0 +1,12 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact.", "evidenceRefs": ["artifact-c1"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null },
+    { "id": "f2", "criterionId": "p1", "status": "tie", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The two blinded artifacts are byte-identical.", "evidenceRefs": ["candidate-image", "reference-image"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null }
+  ],
+  "unscopedFindings": [],
+  "comparisons": [
+    { "comparisonId": "comparison-one", "criterionId": "p1", "referenceId": "reference-one", "dimensionId": "layout", "candidateSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "referenceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "presentationOrder": "A-B", "result": "tie", "evidenceRefs": ["candidate-image", "reference-image"] }
+  ],
+  "largestGapId": null
+}

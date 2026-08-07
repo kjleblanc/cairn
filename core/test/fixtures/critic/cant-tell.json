@@ -1,0 +1,10 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "cant-tell", "severity": null, "confidence": "low", "failureConditionId": null, "observed": "The declared evidence is unavailable.", "evidenceRefs": [], "counterEvidenceRefs": [], "selfCheck": "unresolved", "rootCauseKey": null, "smallestRepair": null },
+    { "id": "f2", "criterionId": "c2", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact.", "evidenceRefs": ["artifact-c2"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null }
+  ],
+  "unscopedFindings": [],
+  "comparisons": [],
+  "largestGapId": "f1"
+}

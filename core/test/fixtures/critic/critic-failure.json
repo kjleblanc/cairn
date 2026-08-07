@@ -1,0 +1,10 @@
+{
+  "version": "cairn-critic-output/v1",
+  "findings": [
+    { "id": "f1", "criterionId": "c1", "status": "not-met", "severity": "major", "confidence": "high", "failureConditionId": "failure-c1", "observed": "The frozen artifact condition is absent.", "evidenceRefs": ["artifact-c1"], "counterEvidenceRefs": ["counter-c1"], "selfCheck": "challenged", "rootCauseKey": "missing-required-result", "smallestRepair": "Restore only the frozen required result." },
+    { "id": "f2", "criterionId": "c2", "status": "met", "severity": null, "confidence": "high", "failureConditionId": null, "observed": "The supported path remains intact.", "evidenceRefs": ["artifact-c2"], "counterEvidenceRefs": [], "selfCheck": "supported", "rootCauseKey": null, "smallestRepair": null }
+  ],
+  "unscopedFindings": [],
+  "comparisons": [],
+  "largestGapId": "f1"
+}
