@@ -148,7 +148,12 @@ language, with the owner's own words where possible.
 
 ## Checks that will show the outcome holds
 
-1. TODO: exact commands, named so a later conversation can re-run them.
+Each check carries a stable id so the report can answer it by name. Add or
+remove numbered items as the task needs; keep the ids in order.
+
+1. **\`c1\`** — TODO: exact command, named so a later conversation can re-run
+   it, and what its output must show.
+2. **\`c2\`** — TODO.
 
 ## DONE and STOPPED
 

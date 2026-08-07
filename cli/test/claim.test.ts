@@ -12,6 +12,7 @@ import {
   renumberTask,
   verifyByteExact,
   padNumber,
+  briefSkeleton,
 } from "../src/flows/claim.js";
 
 const TASKS = path.join("docs", "ai-work", "tasks");
@@ -159,4 +160,15 @@ test("verifyByteExact proves a restored brief matches its commit, byte for byte"
   assert.equal(verifyByteExact(root, commit, path.join(TASKS, "004-brief.md")), true);
   writeTaskFile(root, "004-brief.md", "# Task 004 brief — clobbered\n");
   assert.equal(verifyByteExact(root, commit, path.join(TASKS, "004-brief.md")), false);
+});
+
+test("the brief skeleton pre-labels its checks with stable ids", () => {
+  const skeleton = briefSkeleton(7, "a visible outcome", "A (main checkout)", "abc1234");
+  assert.match(skeleton, /## Checks that will show the outcome holds/);
+  assert.match(skeleton, /1\. \*\*`c1`\*\*/, "the first check must be pre-labelled `c1`");
+  assert.match(skeleton, /2\. \*\*`c2`\*\*/, "the second check must be pre-labelled `c2`");
+  assert.ok(
+    !/`\d{3}\.c\d`/.test(skeleton),
+    "ids must not carry the task number — renumbering rewrites the heading, not the body",
+  );
 });
