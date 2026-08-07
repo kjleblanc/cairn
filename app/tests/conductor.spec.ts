@@ -3,9 +3,16 @@ import { test } from "./fixtures/isolated-profile";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { conductorFile, detachStoredConnection, restoreStoredConnection } from "./fixtures/conductor-connection";
+import {
+  clearStoredConnectionFiles,
+  conductorFile,
+  detachStoredConnection,
+  modelCatalogsFile,
+  modelConnectionsFile,
+  restoreStoredConnection,
+} from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
 
 // Task 026: the fake body proves the whole conductor loop offline — connect,
@@ -249,7 +256,7 @@ test.beforeEach(() => {
   releaseFixtureAnswer();
   setFixtureCommentaryDelay(400);
   setFixtureProseOnlySetAside(false);
-  rmSync(conductorFile(), { force: true });
+  clearStoredConnectionFiles();
 });
 
 test("New and Send share one narrow Cairn composer without changing their behavior", async () => {
@@ -706,8 +713,18 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await expect(pill).toContainText(host);
   await expect(pill).toContainText("fixture-model");
 
+  expect(existsSync(conductorFile())).toBe(false);
+  const authorityText = readFileSync(modelConnectionsFile(), "utf8");
+  const authority = JSON.parse(authorityText) as {
+    connections?: Array<{ credential?: { kind?: unknown; ciphertextB64?: unknown } }>;
+  };
+  expect(authority.connections?.[0]?.credential?.kind).toBe("inline-encrypted");
+  expect(authority.connections?.[0]?.credential?.ciphertextB64).toEqual(expect.any(String));
+  expect(authorityText).not.toContain("sk-test-key");
+
   await pill.click();
   await win.getByRole("button", { name: "Disconnect" }).click();
+  expect(existsSync(modelConnectionsFile())).toBe(false);
 
   // The card remembers the last seat — never the key: it re-opens straight on
   // the paste screen with the custom fields pre-filled, the memory line
@@ -728,6 +745,120 @@ test("the connect card blocks until consent, then disconnecting wipes the connec
   await expect(win2.getByPlaceholder("e.g. moonshotai/kimi-k3")).toHaveValue("fixture-model");
   await expect(reCard2).toContainText("Cairn remembers your last choice — never your key.");
   await relaunched.close();
+});
+
+test("malformed connection state blocks ordinary use and offers only the exact local erase recovery", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-recovery-"));
+  scaffold(project);
+  writeFileSync(conductorFile(), "{malformed-local-credential", "utf8");
+  writeFileSync(modelCatalogsFile(), "{malformed-cache", "utf8");
+  writeFileSync(modelConnectionsFile(), "{truncated-authority", "utf8");
+  const providerBodyBefore = lastReplyBody();
+
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
+    const win = await app.firstWindow();
+    await useStableOwnerActions(win);
+    const recovery = win.locator(".card", { hasText: "Erase Cairn model connections" });
+    await expect(recovery).toBeVisible({ timeout: 30_000 });
+    await expect(recovery).toContainText("No provider call, logout, or remote revocation occurs");
+    const firstRecoveryCard = await win.evaluate(async () => {
+      const status = await window.cairn.conductorStatus();
+      if (!status.recovery) throw new Error("expected recovery card");
+      return status.recovery;
+    });
+    const overwriteAttempt = await win.evaluate(async ({ baseUrl, model }) => {
+      const consent = await window.cairn.conductorConsentCard(baseUrl, model);
+      if (!consent.ok) throw new Error("consent card failed");
+      return window.cairn.conductorConnect({
+        card: consent.value,
+        apiKey: "sk-must-not-overwrite-recovery",
+        consentConfirmed: true,
+        fileContentsConfirmed: true,
+      });
+    }, { baseUrl: fixtureUrl, model: "fixture-model" });
+    expect(overwriteAttempt.ok).toBe(false);
+    expect(readFileSync(conductorFile(), "utf8")).toBe("{malformed-local-credential");
+
+    const ordinary = await win.evaluate(() => window.cairn.conductorDisconnect());
+    expect(ordinary.ok).toBe(false);
+    expect(existsSync(conductorFile())).toBe(true);
+    expect(existsSync(modelCatalogsFile())).toBe(true);
+    expect(existsSync(modelConnectionsFile())).toBe(true);
+
+    const tampered = await win.evaluate(async () => {
+      const status = await window.cairn.conductorStatus();
+      if (!status.recovery) throw new Error("expected recovery card");
+      return window.cairn.conductorDisconnect({
+        kind: "erase-model-connections",
+        card: { ...status.recovery, targets: [...status.recovery.targets, "renderer-added-path"] },
+        confirmed: true,
+      });
+    });
+    expect(tampered.ok).toBe(false);
+    expect(existsSync(conductorFile())).toBe(true);
+
+    await recovery.getByRole("button", { name: "Review exact files" }).click();
+    await expect(recovery).toContainText(basename(conductorFile()));
+    await expect(recovery).toContainText(basename(modelCatalogsFile()));
+    await expect(recovery).toContainText(basename(modelConnectionsFile()));
+    await expect(recovery).not.toContainText(dirname(conductorFile()));
+    await recovery.getByRole("button", { name: "Cancel" }).click();
+    expect(existsSync(conductorFile())).toBe(true);
+
+    await recovery.getByRole("button", { name: "Review exact files" }).click();
+    await recovery.locator('input[type="checkbox"]').check();
+    await recovery.getByRole("button", { name: "Erase Cairn model connections" }).click();
+    await expect(win.locator(".card", { hasText: "connect cairn's brain" })).toBeVisible({ timeout: 10_000 });
+    expect(existsSync(conductorFile())).toBe(false);
+    expect(existsSync(modelCatalogsFile())).toBe(false);
+    expect(existsSync(modelConnectionsFile())).toBe(false);
+    expect(lastReplyBody()).toBe(providerBodyBefore);
+
+    await connectToFixture(win, fixtureUrl, "fixture-model", "sk-reconnected-after-recovery");
+    expect((await win.evaluate(() => window.cairn.conductorStatus())).connected).toBe(true);
+    writeFileSync(modelConnectionsFile(), "{second-recovery-episode", "utf8");
+    const secondRecoveryCard = await win.evaluate(async () => {
+      const status = await window.cairn.conductorStatus();
+      if (!status.recovery) throw new Error("expected second recovery card");
+      return status.recovery;
+    });
+    expect(secondRecoveryCard.recoveryId).not.toBe(firstRecoveryCard.recoveryId);
+    const replayed = await win.evaluate((oldCard) => window.cairn.conductorDisconnect({
+      kind: "erase-model-connections",
+      card: oldCard,
+      confirmed: true,
+    }), firstRecoveryCard);
+    expect(replayed.ok).toBe(false);
+    expect(existsSync(modelConnectionsFile())).toBe(true);
+    const erasedSecond = await win.evaluate((currentCard) => window.cairn.conductorDisconnect({
+      kind: "erase-model-connections",
+      card: currentCard,
+      confirmed: true,
+    }), secondRecoveryCard);
+    expect(erasedSecond).toEqual({ ok: true, value: null });
+    expect(existsSync(modelConnectionsFile())).toBe(false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("newly discovered connection corruption shows recovery without reloading or calling the provider", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-live-recovery-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model", "sk-live-recovery-test");
+  const providerCallsBefore = replyRequestCount();
+  writeFileSync(modelConnectionsFile(), "{corrupted-while-chat-remains-mounted", "utf8");
+
+  await sendChat(win, "This must be refused before a provider call.");
+
+  const recovery = win.locator(".card", { hasText: "Erase Cairn model connections" });
+  await expect(recovery).toBeVisible({ timeout: 10_000 });
+  expect(replyRequestCount()).toBe(providerCallsBefore);
+  expect(await win.evaluate((dir) => window.cairn.conductorConversations(dir), project)).toEqual([]);
+  await app.close();
 });
 
 // Task 131: "Sign in with OpenRouter" — the one-click door. The dance runs
@@ -806,6 +937,14 @@ test("sign in with OpenRouter lands connected, no key anywhere", async () => {
   expect(status.baseUrl).toBe("https://openrouter.ai/api/v1");
   expect(status.model).toBe("moonshotai/kimi-k3");
   expect(status.provider).toBe("openrouter.ai");
+  expect(existsSync(conductorFile())).toBe(false);
+  const oauthAuthorityText = readFileSync(modelConnectionsFile(), "utf8");
+  const oauthAuthority = JSON.parse(oauthAuthorityText) as {
+    connections?: Array<{ credential?: { kind?: unknown; ciphertextB64?: unknown } }>;
+  };
+  expect(oauthAuthority.connections?.[0]?.credential?.kind).toBe("inline-encrypted");
+  expect(oauthAuthority.connections?.[0]?.credential?.ciphertextB64).toEqual(expect.any(String));
+  expect(oauthAuthorityText).not.toContain("sk-or-fixture-key");
 
   // The fixture's own verdict: the verifier in the exchange hashes to the
   // challenge the auth URL carried — the PKCE binding held end-to-end.
@@ -850,6 +989,85 @@ test("cancelling the sign-in returns to the paste screen, still disconnected, an
   await expect(fetch(location)).rejects.toThrow(/fetch failed/);
 
   await app.close();
+});
+
+test("Disconnect cancels an in-flight absent-store OAuth completion before it can recreate custody", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-oauth-disconnect-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: oauthEnv(project) });
+  const win = await app.firstWindow();
+  const card = win.locator(".card", { hasText: "connect cairn's brain" });
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await win.evaluate(() => localStorage.removeItem("cairn-last-seat"));
+  await win.reload();
+  await card.getByRole("button", { name: /Kimi K3/ }).click();
+  await confirmConductorConsent(card);
+  await card.getByRole("button", { name: "Sign in with OpenRouter" }).click();
+  await expect(card).toContainText("Finish in your browser.");
+  const authUrl = (await card.getByRole("link", { name: "Open the sign-in page yourself" }).getAttribute("href")) as string;
+
+  expect(await win.evaluate(() => window.cairn.conductorDisconnect())).toEqual({ ok: true, value: null });
+  expect(existsSync(conductorFile())).toBe(false);
+  expect(existsSync(modelConnectionsFile())).toBe(false);
+  const authResponse = await fetch(authUrl, { redirect: "manual" });
+  const location = authResponse.headers.get("location") as string;
+  await expect(fetch(location)).rejects.toThrow(/fetch failed/);
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+  expect(existsSync(conductorFile())).toBe(false);
+  expect(existsSync(modelConnectionsFile())).toBe(false);
+  expect((await win.evaluate(() => window.cairn.conductorStatus())).connected).toBe(false);
+  await app.close();
+});
+
+test("Disconnect and a newer Begin invalidate OAuth while listener initialization is still awaiting", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-oauth-start-race-"));
+  scaffold(project);
+  const env = oauthEnv(project);
+  env.CAIRN_TEST_OAUTH_INITIALIZATION_DELAY_MS = "250";
+  const app = await electron.launch({ args: ["."], env });
+  try {
+    const win = await app.firstWindow();
+    await expect(win.locator(".card", { hasText: "connect cairn's brain" })).toBeVisible({ timeout: 30_000 });
+    const disconnectedRace = await win.evaluate(async () => {
+      const card = await window.cairn.conductorConsentCard(
+        "https://openrouter.ai/api/v1",
+        "moonshotai/kimi-k3",
+      );
+      if (!card.ok) throw new Error(card.message);
+      const starting = window.cairn.conductorOAuthBegin({
+        card: card.value,
+        consentConfirmed: true,
+        fileContentsConfirmed: true,
+      });
+      const disconnected = await window.cairn.conductorDisconnect();
+      return { disconnected, starting: await starting };
+    });
+    expect(disconnectedRace.disconnected).toEqual({ ok: true, value: null });
+    expect(disconnectedRace.starting).toEqual({ ok: false, message: "Sign-in was cancelled. Nothing was stored." });
+    expect(existsSync(conductorFile())).toBe(false);
+    expect(existsSync(modelConnectionsFile())).toBe(false);
+
+    const overlapping = await win.evaluate(async () => {
+      const card = await window.cairn.conductorConsentCard(
+        "https://openrouter.ai/api/v1",
+        "moonshotai/kimi-k3",
+      );
+      if (!card.ok) throw new Error(card.message);
+      const request = { card: card.value, consentConfirmed: true, fileContentsConfirmed: true } as const;
+      const first = window.cairn.conductorOAuthBegin(request);
+      const second = window.cairn.conductorOAuthBegin(request);
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+      const disconnected = await window.cairn.conductorDisconnect();
+      return { firstResult, secondResult, disconnected };
+    });
+    expect(overlapping.firstResult).toEqual({ ok: false, message: "Sign-in was cancelled. Nothing was stored." });
+    expect(overlapping.secondResult.ok).toBe(true);
+    expect(overlapping.disconnected).toEqual({ ok: true, value: null });
+    expect(existsSync(conductorFile())).toBe(false);
+    expect(existsSync(modelConnectionsFile())).toBe(false);
+  } finally {
+    await app.close();
+  }
 });
 
 test("the OAuth channel enforces the same consent gate, and OpenRouter seats only", async () => {
@@ -908,6 +1126,132 @@ test("a custom seat is named in the prompt with one offer to add it to the picke
   await app.close();
 });
 
+test("an equivalent project-path alias keeps renderer delta tags while main uses pinned authority", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-project-alias-"));
+  scaffold(project);
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model");
+  const alias = `${project}${sep}.`;
+  await win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task201AliasDeltas?: Array<{ dir: string; kind: string }> };
+    state.task201AliasDeltas = [];
+    window.cairn.onConductorDelta((event) => state.task201AliasDeltas?.push({ dir: event.dir, kind: event.kind }));
+  });
+
+  const sent = await win.evaluate((dir) => window.cairn.conductorSend({
+    dir,
+    conversationId: null,
+    text: "Confirm the equivalent project alias remains visible to this renderer.",
+  }), alias);
+  expect(sent.ok).toBe(true);
+  await expect.poll(() => win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task201AliasDeltas?: Array<{ dir: string; kind: string }> };
+    return state.task201AliasDeltas?.some((event) => event.kind === "done" || event.kind === "error") ?? false;
+  })).toBe(true);
+  expect(await win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task201AliasDeltas?: Array<{ dir: string; kind: string }> };
+    return state.task201AliasDeltas?.every((event) => event.dir === state.task201AliasDeltas?.[0]?.dir) ?? false;
+  })).toBe(true);
+  expect(await win.evaluate(() => {
+    const state = globalThis as typeof globalThis & { task201AliasDeltas?: Array<{ dir: string; kind: string }> };
+    return state.task201AliasDeltas?.[0]?.dir ?? null;
+  })).toBe(alias);
+  await app.close();
+});
+
+test("a current legacy credential migrates and talks on the same pinned route without key re-entry", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-legacy-current-"));
+  scaffold(project);
+  const seedingApp = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const seedingWindow = await seedingApp.firstWindow();
+  await connectToFixture(seedingWindow, fixtureUrl, "fixture-model", "sk-legacy-current");
+  await seedingApp.close();
+
+  const seededAuthority = JSON.parse(readFileSync(modelConnectionsFile(), "utf8")) as {
+    connections?: Array<{
+      baseUrl?: unknown;
+      authorizedDataScope?: unknown;
+      credential?: { kind?: unknown; ciphertextB64?: unknown };
+    }>;
+    conductorAssignment?: { modelId?: unknown };
+  };
+  const seeded = seededAuthority.connections?.[0];
+  expect(seeded?.credential?.kind).toBe("inline-encrypted");
+  const legacyRecord = {
+    baseUrl: seeded?.baseUrl,
+    model: seededAuthority.conductorAssignment?.modelId,
+    keyB64: seeded?.credential?.ciphertextB64,
+    authorizedDataScope: seeded?.authorizedDataScope,
+  };
+  const legacyBytes = JSON.stringify(legacyRecord);
+  writeFileSync(conductorFile(), legacyBytes, "utf8");
+  rmSync(modelConnectionsFile(), { force: true });
+
+  const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  const win = await app.firstWindow();
+  await useStableOwnerActions(win);
+  await expect(win.locator(".body-pill-wrap button").first()).toContainText("fixture-model", { timeout: 30_000 });
+  const status = await win.evaluate(() => window.cairn.conductorStatus());
+  expect(status).toMatchObject({ connected: true, consentRequired: false, model: "fixture-model" });
+  expect(readFileSync(conductorFile(), "utf8")).toBe(legacyBytes);
+  const migratedText = readFileSync(modelConnectionsFile(), "utf8");
+  expect(migratedText).not.toContain("keyB64");
+  expect(migratedText).not.toContain("sk-legacy-current");
+
+  await sendChat(win, "Confirm this migrated pinned route still works.");
+  await waitStreamDone(win);
+  expect(lastReplyBody()).toContain("Confirm this migrated pinned route still works.");
+  expect(readFileSync(conductorFile(), "utf8")).toBe(legacyBytes);
+  await app.close();
+});
+
+test("a renderer cannot redirect first legacy migration to another project", async () => {
+  const selectedProject = mkdtempSync(join(tmpdir(), "cairn-conductor-selected-project-"));
+  const injectedProject = mkdtempSync(join(tmpdir(), "cairn-conductor-injected-project-"));
+  scaffold(selectedProject, "Selected project");
+  scaffold(injectedProject, "Injected project");
+  const app = await electron.launch({ args: ["."], env: baseEnv(selectedProject) });
+  const win = await app.firstWindow();
+  await connectToFixture(win, fixtureUrl, "fixture-model", "sk-project-binding-test");
+
+  const seededAuthority = JSON.parse(readFileSync(modelConnectionsFile(), "utf8")) as {
+    connections?: Array<{
+      baseUrl?: unknown;
+      authorizedDataScope?: unknown;
+      credential?: { kind?: unknown; ciphertextB64?: unknown };
+    }>;
+    conductorAssignment?: { modelId?: unknown };
+  };
+  const seeded = seededAuthority.connections?.[0];
+  expect(seeded?.credential?.kind).toBe("inline-encrypted");
+  const legacyBytes = JSON.stringify({
+    baseUrl: seeded?.baseUrl,
+    model: seededAuthority.conductorAssignment?.modelId,
+    keyB64: seeded?.credential?.ciphertextB64,
+    authorizedDataScope: seeded?.authorizedDataScope,
+  });
+  clearStoredConnectionFiles();
+  writeFileSync(conductorFile(), legacyBytes, "utf8");
+  const providerCallsBefore = replyRequestCount();
+
+  const refused = await win.evaluate((dir) => window.cairn.conductorSend({
+    dir,
+    conversationId: null,
+    text: "Renderer-selected project paths must not become model authority.",
+  }), injectedProject);
+
+  expect(refused).toEqual({
+    ok: false,
+    message: "CONDUCTOR_PROJECT_REAUTHORIZATION_REQUIRED: Review this project's connection permission before messaging Cairn.",
+  });
+  expect(existsSync(modelConnectionsFile())).toBe(false);
+  expect(readFileSync(conductorFile(), "utf8")).toBe(legacyBytes);
+  expect(await win.evaluate((dir) => window.cairn.conductorConversations(dir), injectedProject)).toEqual([]);
+  expect(replyRequestCount()).toBe(providerCallsBefore);
+  await app.close();
+});
+
 // Task 172: widening the standing connection from file names to bounded file
 // contents is a new authorization, not a silent upgrade. This one offline
 // fixture walk proves all four boundaries together: a legacy encrypted key is
@@ -931,6 +1275,7 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   // fixture key. Rewriting only the non-secret metadata afterward faithfully
   // reproduces a connection saved before Task 172.
   const firstApp = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const firstWindow = await firstApp.firstWindow();
   await useStableOwnerActions(firstWindow);
   const refusedFreshConnect = await firstWindow.evaluate(async ({ baseUrl, model }) => {
@@ -946,20 +1291,38 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   expect(refusedFreshConnect).toEqual({ ok: false, message: "CONDUCTOR_CONNECT_NOT_AUTHORIZED" });
   expect(existsSync(conductorFile())).toBe(false);
   await connectToFixture(firstWindow, fixtureUrl, "fixture-model", "sk-test-key", true);
-  await firstApp.close();
+  } finally {
+    await firstApp.close();
+  }
 
-  const storedPath = conductorFile();
-  const currentStored = JSON.parse(readFileSync(storedPath, "utf8")) as Record<string, unknown>;
-  expect(currentStored.authorizedDataScope).toEqual(expect.any(String));
-  const legacyStored = {
-    baseUrl: currentStored.baseUrl,
-    model: currentStored.model,
-    keyB64: currentStored.keyB64,
+  expect(existsSync(conductorFile())).toBe(false);
+  const currentAuthority = JSON.parse(readFileSync(modelConnectionsFile(), "utf8")) as {
+    connections?: Array<{
+      baseUrl?: unknown;
+      authorizedDataScope?: unknown;
+      credential?: { kind?: unknown; ciphertextB64?: unknown };
+    }>;
+    conductorAssignment?: { modelId?: unknown };
   };
+  const currentStored = currentAuthority.connections?.[0];
+  expect(currentStored?.authorizedDataScope).toEqual(expect.any(String));
+  expect(currentStored?.credential?.kind).toBe("inline-encrypted");
+  expect(currentStored?.credential?.ciphertextB64).toEqual(expect.any(String));
+  const legacyStored = {
+    baseUrl: currentStored?.baseUrl,
+    model: currentAuthority.conductorAssignment?.modelId,
+    keyB64: currentStored?.credential?.ciphertextB64,
+  };
+  const storedPath = conductorFile();
   writeFileSync(storedPath, JSON.stringify(legacyStored), "utf8");
+  // Recreate a true legacy-only launch. The successful fixture connection also
+  // wrote Task 201's authority file; leaving it beside this hand-rewritten
+  // credential would correctly be a digest/facts mismatch recovery case.
+  rmSync(modelConnectionsFile(), { force: true });
   const providerBodyBeforeRenewal = lastReplyBody();
 
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await useStableOwnerActions(win);
   const statusBeforeRenewal = await win.evaluate(() => window.cairn.conductorStatus());
@@ -969,16 +1332,12 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
     baseUrl: fixtureUrl,
     model: "fixture-model",
   });
+  await win.getByRole("button", { name: "Expand project rail" }).click();
   await expect(win.getByText("brain paused · review permission")).toBeVisible();
 
-  // An unknown future scope fails closed just like a missing legacy marker,
-  // and model changes cannot silently bless it under a different disclosure.
-  writeFileSync(storedPath, JSON.stringify({
-    ...legacyStored,
-    authorizedDataScope: "unknown-future-sharing-scope",
-  }), "utf8");
-  const unknownScopeStatus = await win.evaluate(() => window.cairn.conductorStatus());
-  expect(unknownScopeStatus).toMatchObject({ connected: false, consentRequired: true });
+  // Model changes cannot silently bless a missing legacy scope under a
+  // different disclosure. (Unknown-scope migration is covered with the same
+  // strict fake-file path in the unit suite.)
   const staleModelChange = await win.evaluate(() => window.cairn.conductorSetModel("must-not-replace-the-saved-model"));
   expect(staleModelChange).toEqual({ ok: false, message: "CONDUCTOR_CONSENT_REQUIRED" });
   expect((JSON.parse(readFileSync(storedPath, "utf8")) as Record<string, unknown>).model).toBe("fixture-model");
@@ -1042,8 +1401,13 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   const statusAfterRenewal = await win.evaluate(() => window.cairn.conductorStatus());
   expect(statusAfterRenewal).toMatchObject({ connected: true, consentRequired: false });
   const renewedStored = JSON.parse(readFileSync(storedPath, "utf8")) as Record<string, unknown>;
-  expect(renewedStored.authorizedDataScope).toBe(currentCard?.data);
+  expect(renewedStored.authorizedDataScope).toBeUndefined();
   expect(renewedStored.keyB64).toBe(legacyStored.keyB64);
+  const renewedAuthority = JSON.parse(readFileSync(modelConnectionsFile(), "utf8")) as {
+    connections?: Array<{ authorizedDataScope?: unknown; legacyAuthorizedDataScope?: unknown }>;
+  };
+  expect(renewedAuthority.connections?.[0]?.authorizedDataScope).toBe(currentCard?.data);
+  expect(renewedAuthority.connections?.[0]?.legacyAuthorizedDataScope).toBeNull();
 
   await sendChat(win, `Inspect ${safePath} and propose changing the page title.`);
   await waitStreamDone(win);
@@ -1076,7 +1440,9 @@ test("bounded project-file contents wait for renewed consent and keep dispatch o
   expect(await win.evaluate((dir) => window.cairn.taskCurrent(dir), project)).toBeNull();
   expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
 
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 test("dispatch preview accepts only the current risk-free proposal and a correction retires it", async () => {
@@ -1688,6 +2054,7 @@ test("attributed task actions keep raw owner bytes, main ids, one-time replies, 
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-task-action-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
@@ -1848,7 +2215,9 @@ test("attributed task actions keep raw owner bytes, main ids, one-time replies, 
   expect(correctionContext).toContain('"source":"owner-stated"');
   expect(correctionContext).toContain('"ownerText":"Use 300 milliseconds"');
   expect(correctionContext).not.toContain(correctionAction.actionId);
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 test("owner marker custody failure makes no provider call and retains the action", async () => {
@@ -2020,6 +2389,7 @@ test("a task block with details shows a details section on the card", async () =
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-details-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
@@ -2029,9 +2399,11 @@ test("a task block with details shows a details section on the card", async () =
   const taskCard = win.locator(".task-card");
   await expect(taskCard).toBeVisible();
   await expect(taskCard).toContainText("Change the page title");
-  await expect(taskCard).toContainText("Your details (sent word-for-word)");
+  await expect(taskCard).toContainText("Your exact words");
   await expect(taskCard).toContainText("74, 477, 256");
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 test("a malformed task block renders as plain chat text, never a card", async () => {
@@ -2101,50 +2473,53 @@ test("a targeted risk reply retires the whole old action before a fresh proposal
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-busychip-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
-  const win = await app.firstWindow();
-  await connectToFixture(win, fixtureUrl, "fixture-model");
-
-  await sendChat(win, "Please plan the twoconcerns page title change.");
-  await waitStreamDone(win);
-
-  const taskCard = win.locator(".task-card");
-  const riskChips = taskCard.locator(".task-risk");
-  await expect(taskCard.locator(".task-chip-question")).toHaveCount(0);
-  await expect(riskChips).toHaveCount(2);
-  await expect(taskCard.getByRole("button", { name: "Review" })).toBeDisabled();
-  const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
-  const oldAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
-  expect(oldAction?.kind).toBe("task");
-
-  holdFixtureAnswer();
-  await riskChips.nth(0).getByRole("button", { name: "Set aside" }).click();
-
-  // The locked state is transient — it ends the moment the answer's stream
-  // finishes. Two sequential expects can straddle that end under load (the
-  // first-run flake seen in tasks 131/137), so the pin is ONE locator, one
-  // atomic observation per poll: a risk chip that both says the lock and
-  // has its button disabled.
   try {
-    await expect(taskCard).toHaveCount(0);
-    expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+    const win = await app.firstWindow();
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+
+    await sendChat(win, "Please plan the twoconcerns page title change.");
+    await waitStreamDone(win);
+
+    const taskCard = win.locator(".task-card");
+    const riskChips = taskCard.locator(".task-risk");
+    await expect(taskCard.locator(".task-chip-question")).toHaveCount(0);
+    await expect(riskChips).toHaveCount(2);
+    await expect(taskCard.getByRole("button", { name: "Review" })).toBeDisabled();
+    const conversationId = await win.evaluate(async (dir) => (await window.cairn.conductorConversations(dir)).at(-1)?.id ?? "", project);
+    const oldAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+    expect(oldAction?.kind).toBe("task");
+
+    holdFixtureAnswer();
+    await riskChips.nth(0).getByRole("button", { name: "Set aside" }).click();
+
+    try {
+      await expect(taskCard).toHaveCount(0);
+      expect(await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId })).toBeNull();
+      // Pin the started state while the fake is held. Without this observation
+      // a busy full-suite run can ask whether Stop is gone before it ever
+      // renders, mistaking "not started yet" for "finished".
+      await expect(win.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    } finally {
+      releaseFixtureAnswer();
+    }
+
+    await waitStreamDone(win);
+    const freshAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
+    expect(freshAction?.kind).toBe("task");
+    expect(freshAction?.actionId).not.toBe(oldAction?.actionId);
+    expect(freshAction?.kind === "task" ? freshAction.risks.map((risk) => risk.text) : null)
+      .toEqual(["Renaming the title may break bookmarked links."]);
+    expect(freshAction?.kind === "task" ? freshAction.risks[0]?.riskId : null)
+      .not.toBe(oldAction?.kind === "task" ? oldAction.risks[1]?.riskId : null);
+    expect(freshAction?.kind === "task" ? freshAction.context : null)
+      .toEqual(["Set aside by the owner: Should the old title still redirect?"]);
+    await expect(taskCard).toBeVisible();
+    await expect(taskCard.locator(".task-risk")).toHaveCount(1);
+    await expect(taskCard.getByRole("button", { name: "Review" })).toBeDisabled();
   } finally {
     releaseFixtureAnswer();
+    await app.close();
   }
-
-  await waitStreamDone(win);
-  const freshAction = await win.evaluate(({ dir, id }) => window.cairn.conductorAction(dir, id), { dir: project, id: conversationId });
-  expect(freshAction?.kind).toBe("task");
-  expect(freshAction?.actionId).not.toBe(oldAction?.actionId);
-  expect(freshAction?.kind === "task" ? freshAction.risks.map((risk) => risk.text) : null)
-    .toEqual(["Renaming the title may break bookmarked links."]);
-  expect(freshAction?.kind === "task" ? freshAction.risks[0]?.riskId : null)
-    .not.toBe(oldAction?.kind === "task" ? oldAction.risks[1]?.riskId : null);
-  expect(freshAction?.kind === "task" ? freshAction.context : null)
-    .toEqual(["Set aside by the owner: Should the old title still redirect?"]);
-  await expect(taskCard).toBeVisible();
-  await expect(taskCard.locator(".task-risk")).toHaveCount(1);
-  await expect(taskCard.getByRole("button", { name: "Review" })).toBeDisabled();
-  await app.close();
 });
 
 // Task 6 (Phase 3). Walks the whole inline path in the real-call lane: chat
@@ -2803,6 +3178,7 @@ test("a fresh confirmed dispatch reaches the same stable Town with reduced motio
   scaffold(project);
   const fakeCodex = fakeCodexEnvironment(project, true, "slow");
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  try {
   const win = await app.firstWindow();
   await win.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(() => win.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
@@ -2828,12 +3204,19 @@ test("a fresh confirmed dispatch reaches the same stable Town with reduced motio
   const strip = win.locator(".run-strip");
   await strip.getByRole("button", { name: "Stop this task" }).click();
   await expect(strip).toContainText("STOPPED — you stopped it yourself", { timeout: 30_000 });
+  // A result comment may legitimately own Cairn's live `thinking` truth after
+  // the stopped outcome lands. Wait for that fake stream before asserting the
+  // stable Town state this test is named for.
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project),
+    { timeout: 30_000 }).toBeNull();
   await expect(town).toHaveAttribute("data-town-truth", "stopped");
   await expect(town).toHaveAttribute("data-town-outcome", "stopped");
   await expect(town).toHaveAttribute("data-town-motion", "none");
   await expect(town.locator(".town-transfer-layer")).toHaveCount(0);
   await expect(town.locator(".town-node-done")).toHaveCount(0);
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 // Task 8 (Phase 3), fake-codex lane. A stopped run is the case a dishonest
@@ -3276,6 +3659,7 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-comment-busy-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
@@ -3329,14 +3713,18 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   // unmounts as the settled turn lands; waiting for the caption to go is
   // what keeps the flush after the lock has really been released. The
   // waiting message then becomes a real owner turn with a real answer.
+  const replyCallsBeforeFlush = replyRequestCount();
   releaseFixtureCommentary();
   await expect(win.getByText(/Commenting on the result above/)).toHaveCount(0, { timeout: 30_000 });
   await expect(win.locator(".bubble-pending")).toHaveCount(0, { timeout: 30_000 });
   await expect(win.locator(".bubble-owner", { hasText: "Is that everything?" })).toHaveCount(1, { timeout: 30_000 });
   await waitStreamDone(win);
-  // One "Sure, got it." answers the set-aside above; the second is the
-  // flushed message's own reply — proof the queue really sent it.
-  await expect(win.getByText("Sure, got it.")).toHaveCount(2);
+  await expect.poll(replyRequestCount, { timeout: 30_000 }).toBe(replyCallsBeforeFlush + 1);
+  // Task 184 made the set-aside acknowledgement main-owned. Its fixed line
+  // remains once; the one fixture acknowledgement belongs to the flushed
+  // message and, with the provider-call count above, proves the queue sent it.
+  await expect(win.getByText("I carried that concern forward.")).toHaveCount(1);
+  await expect(win.getByText("Sure, got it.")).toHaveCount(1, { timeout: 30_000 });
   await expect(win.locator(".bubble-system")).toHaveCount(0);
 
   // On disk, exactly once — the queue sent it a single time, and the
@@ -3347,7 +3735,9 @@ test("a message sent while the comment streams waits visibly and sends itself wh
   }, project);
   expect(turns.filter((turn) => turn.role === "owner" && turn.text === "Is that everything?").length).toBe(1);
   expect(turns.filter((turn) => turn.role === "owner" && turn.text === "And keep it short.").length).toBe(0);
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 // Task 153: the owner's own report — "if Cairn wants to send to dispatch
@@ -3356,9 +3746,13 @@ test("a message sent while the comment streams waits visibly and sends itself wh
 // lingering with its spent button; this pins the whole second cycle, mock
 // lane both times.
 test("later proposals after a dispatched run survive Chat reattachment", async () => {
+  // Two complete fake dispatches plus a mid-stream Chat remount can exceed the
+  // file's generic 60-second ceiling late in the full serial Electron suite.
+  test.setTimeout(120_000);
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-second-dispatch-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
@@ -3383,25 +3777,13 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(win.locator(".result-card")).toHaveCount(1, { timeout: 30_000 });
   await expect(win.locator(".chat-messages .result-card ~ .bubble-cairn:not(.bubble-commentary)")).toHaveCount(1, { timeout: 30_000 });
 
-  // Task 166: collect main's parsed blocks, not the fixture model's own words.
-  // This listener lives at the preload seam rather than inside Chat, so it
-  // survives the navigation below and proves exactly what main emitted on its
-  // done delta.
-  await win.evaluate(() => {
-    const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
-    state.task166Blocks = [];
-    window.cairn.onConductorDelta((event) => {
-      if (event.kind === "done" && event.taskBlock) state.task166Blocks?.push(event.taskBlock);
-    });
-  });
-
   // The second proposal in the SAME conversation gets its own card. Its two
   // concerns deliberately distinguish it from both neighboring proposals.
   await sendChat(win, "twoconcerns now");
   await waitStreamDone(win);
   const secondCard = win.locator(".task-card");
   await expect(secondCard).toBeVisible();
-  await expect(secondCard.locator(".task-chip")).toHaveCount(2);
+  await expect(secondCard.locator(".task-risk")).toHaveCount(2);
   await expect(secondCard.getByRole("button", { name: "Review" })).toBeDisabled();
 
   // The reported conversation reached a third proposal after its first
@@ -3423,28 +3805,27 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   // the first already dispatched or the superseded second one.
   const restoredCard = win.locator(".task-card");
   await expect(restoredCard).toBeVisible();
-  await expect(restoredCard.locator(".task-chip")).toHaveCount(0);
+  await expect(restoredCard.locator(".task-risk")).toHaveCount(0);
   await expect(restoredCard).toContainText("74, 477, 256");
   await expect(restoredCard.getByRole("button", { name: "Review" })).toBeEnabled();
-  await expect.poll(() => win.evaluate(() => {
-    const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
-    return state.task166Blocks?.length ?? 0;
-  })).toBe(2);
-  const mainBlocks = await win.evaluate(() => {
-    const state = globalThis as typeof globalThis & { task166Blocks?: unknown[] };
-    return state.task166Blocks ?? [];
-  });
-  expect(mainBlocks.at(-1)).toEqual({
-    outcome: "Change the page title",
-    concerns: [],
-    notes: "",
-    details: "74, 477, 256",
-  });
-  const mainProposal = await win.evaluate(async (dir) => {
+  // Tasks 177/179 replaced the legacy taskBlock with an authenticated action.
+  // Read that main-owned projection after Chat remounts: the card must reflect
+  // main's parsed intent, not transient renderer state or fixture prose.
+  const restoredAuthority = await win.evaluate(async (dir) => {
     const id = (await window.cairn.conductorConversations(dir)).at(-1)?.id;
-    return id ? window.cairn.conductorProposal(dir, id) : null;
+    return { id: id ?? null, action: id ? await window.cairn.conductorAction(dir, id) : null };
   }, project);
-  expect(mainProposal).toEqual(mainBlocks.at(-1));
+  expect(restoredAuthority.action).toMatchObject({
+    kind: "task",
+    conversationId: restoredAuthority.id,
+    request: {
+      outcome: { source: "owner-stated", text: "Change the page title", ownerText: "detailtask" },
+      requirements: [{ source: "cairn-chosen", text: "74, 477, 256", ownerText: null }],
+    },
+    context: [],
+    risks: [],
+  });
+  expect(restoredAuthority.action?.actionId).toMatch(/^[0-9a-f-]{36}$/);
 
   // Dispatch the restored third proposal. This remains the second run, so the
   // folding assertions below still prove the two-card history.
@@ -3455,7 +3836,7 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(win.locator(".task-card")).toHaveCount(0);
   await expect.poll(() => win.evaluate(async (dir) => {
     const id = (await window.cairn.conductorConversations(dir)).at(-1)?.id;
-    return id ? window.cairn.conductorProposal(dir, id) : null;
+    return id ? window.cairn.conductorAction(dir, id) : null;
   }, project)).toBeNull();
 
   // Task 155 (fold away the past): when the second run's card lands, the
@@ -3474,7 +3855,9 @@ test("later proposals after a dispatched run survive Chat reattachment", async (
   await expect(folded).toHaveAttribute("aria-expanded", "true");
   await folded.click();
   await expect(win.locator(".result-card")).toHaveCount(1);
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 // Task 155 (queue instead of bounce), mock lane — the same queue in the
@@ -3485,10 +3868,14 @@ test("a message sent while a reply streams queues and flushes when the reply lan
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-reply-queue-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
-  await sendChat(win, "slowstream");
+  holdFixtureAnswer();
+  // The second phrase is an existing fake-only completion-gate trigger;
+  // `scriptFor` selects slowstream first, so the visible reply is unchanged.
+  await sendChat(win, "slowstream plain redirect is enough");
   await expect(win.getByText(/One moment/)).toBeVisible({ timeout: 10_000 });
   // Open mid-reply: the queue is what makes a send right now honest.
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
@@ -3498,6 +3885,7 @@ test("a message sent while a reply streams queues and flushes when the reply lan
   await expect(waiting).toHaveCount(1);
   await expect(waiting.first()).toContainText("And then summarize.");
   await expect(waiting.first()).toContainText("Will send when Cairn finishes.");
+  releaseFixtureAnswer();
 
   // The first reply lands, the queue flushes itself, and the waiting message
   // becomes a real owner turn with its own answer — nothing refused.
@@ -3507,7 +3895,10 @@ test("a message sent while a reply streams queues and flushes when the reply lan
   await waitStreamDone(win);
   await expect(win.getByText("Sure, got it.")).toBeVisible();
   await expect(win.locator(".bubble-system")).toHaveCount(0);
-  await app.close();
+  } finally {
+    releaseFixtureAnswer();
+    await app.close();
+  }
 });
 
 // Task 155 (needs-you dot), mock lane. Tucked away while a proposed task
@@ -3935,6 +4326,7 @@ test("a refused push reports the real reason and leaves the project exactly as i
   advanceUpstream(fixture.upstream);
   const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: project, encoding: "utf8" }).trim();
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
   await useStableOwnerActions(win);
@@ -3949,7 +4341,7 @@ test("a refused push reports the real reason and leaves the project exactly as i
   await taskCard.getByRole("button", { name: "Review" }).click();
   const panel = win.locator(".dispatch-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+  await panel.getByRole("button", { name: "Run offline demonstration" }).click({ noWaitAfter: true });
 
   const card = win.locator(".result-card");
   await expect(card).toBeVisible({ timeout: 30_000 });
@@ -3959,10 +4351,10 @@ test("a refused push reports the real reason and leaves the project exactly as i
     const region = document.querySelector(".push-outcome");
     if (region instanceof HTMLElement) region.dataset.liveRegionProbe = "refusal-same-node";
   });
-  await win.locator(".push-chip").getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true }).click();
+  await win.locator(".push-chip").getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true }).click({ noWaitAfter: true });
   const pause = win.locator(".push-confirm");
   await expect(pause).toBeVisible({ timeout: 15_000 });
-  await pause.getByRole("button", { name: "Push", exact: true }).click();
+  await pause.getByRole("button", { name: "Push", exact: true }).click({ noWaitAfter: true });
 
   const outcome = win.locator(".push-outcome");
   await expect(outcome).toContainText(
@@ -3996,7 +4388,9 @@ test("a refused push reports the real reason and leaves the project exactly as i
   expect(aheadCount(project)).toBe("1");
   expect(execFileSync("git", ["log", "-1", "--format=%s", fixture.branch], { cwd: fixture.upstream, encoding: "utf8" }).trim())
     .toBe("Someone else's commit");
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 // The case a one-press chip would get wrong in the worst way: a run the owner
@@ -4008,6 +4402,7 @@ test("a stopped run never evaluates the push chip, with a real local commit wait
   pushFixture(project);
   const fakeCodex = fakeCodexEnvironment(project, true, "slow");
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  try {
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
   await dispatchOneRealCall(win);
@@ -4015,7 +4410,7 @@ test("a stopped run never evaluates the push chip, with a real local commit wait
   const strip = win.locator(".run-strip");
   await expect(strip).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
-  await strip.getByRole("button", { name: "Stop this task" }).click();
+  await strip.getByRole("button", { name: "Stop this task" }).click({ noWaitAfter: true });
 
   const card = win.locator(".result-card");
   await expect(card).toBeVisible({ timeout: 30_000 });
@@ -4037,7 +4432,9 @@ test("a stopped run never evaluates the push chip, with a real local commit wait
   await expect(win.locator(".push-confirm")).toHaveCount(0);
   await expect(win.getByText("Push?", { exact: false })).toHaveCount(0);
   expect(aheadCount(project)).toBe("1");
-  await app.close();
+  } finally {
+    await app.close();
+  }
 });
 
 // Task 194: the model's private follow-up fence never belongs in the public
@@ -4065,7 +4462,7 @@ test("private commentary settles into contained paper next steps and one sends a
     await taskCard.getByRole("button", { name: "Review" }).click();
     const panel = win.locator(".dispatch-panel");
     await expect(panel).toBeVisible({ timeout: 15_000 });
-    await panel.getByRole("button", { name: "Run offline demonstration" }).click();
+    await panel.getByRole("button", { name: "Run offline demonstration" }).click({ noWaitAfter: true });
 
     await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
     await expect.poll(fixtureCommentaryReachedGate, { timeout: 30_000 }).toBe(true);

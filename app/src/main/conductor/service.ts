@@ -1,5 +1,6 @@
 import { shell } from "electron";
 import { randomUUID } from "node:crypto";
+import { types as nodeTypes } from "node:util";
 import { bindTaskIntent, taskRequestView, type TaskIntent } from "@cairn/core";
 import type {
   ConductorAction,
@@ -11,6 +12,8 @@ import type {
   ConductorDelta,
   ConductorOAuthEvent,
   ConductorOAuthRequest,
+  ConductorRecoveryCard,
+  ConductorRecoveryEraseRequest,
   ConductorRenewConsentRequest,
   ConductorSendRequest,
   ConductorStatus,
@@ -23,6 +26,7 @@ import type {
 import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
 import { isQuitDraining, runningDirs } from "../rungate.js";
 import { logError } from "../log.js";
+import { parseConnectionBaseUrl, parseConductorAssignment } from "../connections/schema.js";
 import { createOpenAICompatibleTransport } from "./transports/openai-compatible.js";
 import {
   ConductorTransportError,
@@ -36,7 +40,7 @@ import { consentCardFor } from "./consent.js";
 import { CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
-import { beginOpenRouterOAuth, createLoopbackListener, type OAuthAttempt } from "./oauth.js";
+import { beginOpenRouterOAuth, createLoopbackListener, OAUTH_CANCELLED, type OAuthAttempt } from "./oauth.js";
 import { cardBriefing } from "./relay.js";
 import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
@@ -50,6 +54,9 @@ import { buildSetAsideReplacement, preservesSetAsideReplacement, type SetAsideRe
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
 const CONSENT_REQUIRED = "CONDUCTOR_CONSENT_REQUIRED";
+const PROJECT_REAUTHORIZATION_REQUIRED = "CONDUCTOR_PROJECT_REAUTHORIZATION_REQUIRED: Review this project's connection permission before messaging Cairn.";
+const CONNECTION_RECOVERY_REQUIRED = "CONDUCTOR_CONNECTION_RECOVERY_REQUIRED: Erase Cairn's damaged local model-connection state, then reconnect.";
+const CONNECTION_DETAILS_INVALID = "CONDUCTOR_CONNECTION_DETAILS_INVALID: Use an HTTP(S) provider URL and a valid provider model ID.";
 const ENCRYPTION_UNAVAILABLE = "This computer cannot store the key securely, so Cairn did not save it.";
 const PROMPT_TOO_LARGE_MESSAGE =
   "Cairn did not send this because the project briefing and conversation together are too large. Start a new conversation. If that also stops, the project's saved records need a smaller briefing.";
@@ -146,6 +153,26 @@ type InternalAction =
 
 const currentActions = new Map<string, InternalAction>();
 
+/** The project picker is renderer-facing navigation; main keeps only the most
+ * recently validated root in memory and independently re-resolves it before
+ * any connection grant is created or used. */
+let currentProjectRoot: string | null = null;
+let currentProjectRendererRoot: string | null = null;
+let currentProjectExpectation: ReturnType<typeof keystore.captureProjectExpectation> = null;
+
+export function noteCurrentProject(dir: string): void {
+  const selection = keystore.captureProjectSelection(dir);
+  currentProjectRendererRoot = dir;
+  currentProjectRoot = selection?.canonicalRoot ?? dir;
+  currentProjectExpectation = selection?.expectation ?? null;
+}
+
+function selectedProjectExpectation(dir: string): NonNullable<typeof currentProjectExpectation> | null {
+  if (currentProjectRoot === null || currentProjectExpectation === null
+    || actionKey(dir) !== actionKey(currentProjectRoot)) return null;
+  return currentProjectExpectation;
+}
+
 /**
  * Task routing keeps only an in-memory preview. Any conversation-side change
  * to proposal authority retires that preview through this main-private seam;
@@ -179,7 +206,7 @@ function taskRunningForProject(dir: string): boolean {
 }
 
 function exactRecord(value: unknown, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value === null || typeof value !== "object" || Array.isArray(value) || nodeTypes.isProxy(value)) return null;
   const actual = Object.keys(value);
   if (keys.some((key) => !actual.includes(key)) || actual.some((key) => !keys.includes(key) && !optional.includes(key))) return null;
   return value as Record<string, unknown>;
@@ -264,6 +291,14 @@ function actionReplyContext(
  * the renderer's copy is never trusted on its own. The sentences live in
  * `consent.ts`, pure, so the unit suite pins them without booting the app. */
 export function conductorConsentCard(baseUrl: string, model: string): ConductorConsentCard {
+  if (parseConnectionBaseUrl(baseUrl).kind !== "valid"
+    || parseConductorAssignment({
+      role: "conductor",
+      mode: "pinned",
+      connectionId: "00000000-0000-4000-8000-000000000000",
+      modelId: model,
+      assignmentRevision: "00000000-0000-4000-8000-000000000001",
+    }).kind !== "valid") throw new Error(CONNECTION_DETAILS_INVALID);
   return consentCardFor(baseUrl, model);
 }
 
@@ -278,16 +313,109 @@ function hasCurrentConsent(conn: StoredConnection): boolean {
   return conn.authorizedDataScope === conductorConsentCard(conn.baseUrl, conn.model).data;
 }
 
-export function status(): ConductorStatus {
-  const conn = keystore.readConnection();
-  const consentCurrent = conn !== null && hasCurrentConsent(conn);
+let recoveryEpisodeId: string | null = null;
+
+function recoveryCard(): ConductorRecoveryCard {
+  recoveryEpisodeId ??= randomUUID();
+  return Object.freeze({
+    kind: "erase-model-connections",
+    recoveryId: recoveryEpisodeId,
+    title: "Erase Cairn model connections",
+    targets: keystore.recoveryTargets(),
+    effect: "Deletes Cairn's local encrypted model credential, model cache, and connection authority, and cancels any provider sign-in currently in progress. This cannot be undone.",
+    exposure: "No provider call, logout, or remote revocation occurs. Provider accounts remain signed in.",
+    recovery: "Reconnect the provider and explicitly authorize this project again.",
+    confirmation: "I approve deleting exactly these local Cairn model-connection files.",
+  });
+}
+
+function sameRecoveryCard(left: ConductorRecoveryCard, right: ConductorRecoveryCard): boolean {
+  return left.kind === right.kind
+    && left.recoveryId === right.recoveryId
+    && left.title === right.title
+    && left.effect === right.effect
+    && left.exposure === right.exposure
+    && left.recovery === right.recovery
+    && left.confirmation === right.confirmation
+    && left.targets.length === right.targets.length
+    && left.targets.every((target, index) => target === right.targets[index]);
+}
+
+function checkedRecoveryTargets(value: unknown): readonly string[] | null {
+  const expected = keystore.recoveryTargets();
+  if (!Array.isArray(value) || nodeTypes.isProxy(value)
+    || Object.getPrototypeOf(value) !== Array.prototype
+    || value.length !== expected.length) return null;
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== expected.length + 1 || !ownKeys.includes("length")) return null;
+  for (let index = 0; index < expected.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable
+      || descriptor.value !== expected[index]) return null;
+  }
+  return expected;
+}
+
+function checkedRecoveryEraseRequest(value: unknown): ConductorRecoveryEraseRequest | null {
+  const request = exactRecord(value, ["kind", "card", "confirmed"]);
+  const card = request ? exactRecord(request.card, [
+    "kind", "recoveryId", "title", "targets", "effect", "exposure", "recovery", "confirmation",
+  ]) : null;
+  const targets = card ? checkedRecoveryTargets(card.targets) : null;
+  if (!request || !card || request.kind !== "erase-model-connections" || request.confirmed !== true
+    || card.kind !== "erase-model-connections" || typeof card.recoveryId !== "string"
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(card.recoveryId)
+    || card.title !== "Erase Cairn model connections" || targets === null
+    || typeof card.effect !== "string" || typeof card.exposure !== "string"
+    || typeof card.recovery !== "string" || typeof card.confirmation !== "string") return null;
   return {
-    connected: consentCurrent,
+    kind: "erase-model-connections",
+    confirmed: true,
+    card: {
+      kind: "erase-model-connections",
+      recoveryId: card.recoveryId,
+      title: "Erase Cairn model connections",
+      targets: [...targets],
+      effect: card.effect,
+      exposure: card.exposure,
+      recovery: card.recovery,
+      confirmation: card.confirmation,
+    },
+  };
+}
+
+export function status(): ConductorStatus {
+  const scoped = keystore.readConnection(currentProjectRoot, currentProjectExpectation);
+  if (scoped.kind === "recovery-required") {
+    return {
+      connected: false,
+      consentRequired: false,
+      baseUrl: "",
+      model: "",
+      provider: "",
+      encryptionAvailable: keystore.encryptionAvailable(),
+      projectAuthorizationRequired: false,
+      modelChangeAllowed: false,
+      recovery: recoveryCard(),
+    };
+  }
+  recoveryEpisodeId = null;
+  const needsProjectAuthorization = scoped.kind === "project-reauthorization-required";
+  const fallback = needsProjectAuthorization ? keystore.readConnection(null) : scoped;
+  const conn = fallback.kind === "ready" ? fallback.value : null;
+  const consentCurrent = conn !== null && hasCurrentConsent(conn);
+  const projectCurrent = conn !== null && currentProjectRoot !== null
+    && !needsProjectAuthorization && conn.projectAuthorized;
+  return {
+    connected: consentCurrent && projectCurrent,
     consentRequired: conn !== null && !consentCurrent,
     baseUrl: conn?.baseUrl ?? "",
     model: conn?.model ?? "",
     provider: conn ? new URL(conn.baseUrl).host : "",
     encryptionAvailable: keystore.encryptionAvailable(),
+    projectAuthorizationRequired: conn !== null && !projectCurrent,
+    modelChangeAllowed: false,
+    recovery: null,
   };
 }
 
@@ -303,36 +431,89 @@ export function connect(request: ConductorConnectRequest): Result<null> {
   if (!keystore.encryptionAvailable()) {
     return { ok: false, message: ENCRYPTION_UNAVAILABLE };
   }
-  keystore.saveKey(request.card.baseUrl, request.card.model, request.apiKey, expected.data);
-  return { ok: true, value: null };
+  if (currentProjectRoot === null || currentProjectExpectation === null) {
+    return { ok: false, message: PROJECT_REAUTHORIZATION_REQUIRED };
+  }
+  const saved = keystore.saveKey(
+    request.card.baseUrl,
+    request.card.model,
+    request.apiKey,
+    expected.data,
+    "pasted-api-key",
+    currentProjectRoot,
+    undefined,
+    currentProjectExpectation,
+  );
+  if (saved.ok) recoveryEpisodeId = null;
+  return saved.ok ? { ok: true, value: null } : { ok: false, message: saved.message };
 }
 
 /** Renew a stale saved connection without decrypting or replacing its key and
  * without contacting the provider. The current connection fixes the card's
  * provider/model; renderer-supplied alternatives cannot retarget renewal. */
 export function renewConsent(request: ConductorRenewConsentRequest): Result<null> {
-  const conn = keystore.readConnection();
-  if (!conn) return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+  const scoped = keystore.readConnection(currentProjectRoot, currentProjectExpectation);
+  if (scoped.kind === "recovery-required") return { ok: false, message: CONNECTION_RECOVERY_REQUIRED };
+  const loaded = scoped.kind === "project-reauthorization-required"
+    ? keystore.readConnection(null)
+    : scoped;
+  if (loaded.kind !== "ready") return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+  const conn = loaded.value;
   const expected = conductorConsentCard(conn.baseUrl, conn.model);
   if (!sameCard(expected, request.card) || request.consentConfirmed !== true || request.fileContentsConfirmed !== true) {
     return { ok: false, message: CONNECT_NOT_AUTHORIZED };
   }
-  if (!keystore.updateAuthorizedDataScope(expected.data)) {
-    return { ok: false, message: CONNECT_NOT_AUTHORIZED };
-  }
-  return { ok: true, value: null };
+  const renewed = keystore.updateAuthorizedDataScope(
+    expected.data,
+    currentProjectRoot,
+    conn.storeRevision,
+    currentProjectExpectation,
+  );
+  if (renewed.ok) recoveryEpisodeId = null;
+  return renewed.ok ? { ok: true, value: null } : { ok: false, message: renewed.message };
 }
 
-export function disconnect(): void {
-  keystore.clearConnection();
+export function disconnect(requestValue?: unknown): Result<null> {
+  let result: keystore.ConnectionMutationResult;
+  if (requestValue === undefined) {
+    cancelOAuth();
+    result = keystore.clearConnection(currentProjectRoot);
+  } else {
+    const request = checkedRecoveryEraseRequest(requestValue);
+    const expected = recoveryCard();
+    if (request === null || !sameRecoveryCard(request.card, expected)
+      || keystore.readConnection(currentProjectRoot, currentProjectExpectation).kind !== "recovery-required") {
+      return { ok: false, message: CONNECT_NOT_AUTHORIZED };
+    }
+    cancelOAuth();
+    result = keystore.eraseConnectionsForRecovery();
+  }
+  if (!result.ok) return { ok: false, message: result.message };
+  recoveryEpisodeId = null;
   proposals.clear();
   currentActions.clear();
   notifyTaskProposalChanged(null);
+  return { ok: true, value: null };
 }
 
 /** One sign-in attempt at a time, app-wide — the loopback listener and the
  * waiting card are both single-tenant by nature. */
 let liveOAuth: OAuthAttempt | null = null;
+// A generation reserves authority before listener initialization awaits. This
+// closes the otherwise-empty slot in which Disconnect (or a second Begin)
+// could miss a still-starting attempt and let it recreate custody afterward.
+let oauthGeneration = 0;
+
+async function waitForOAuthInitializationTestDelay(): Promise<void> {
+  const value = process.env.CAIRN_E2E === "1"
+    ? process.env.CAIRN_TEST_OAUTH_INITIALIZATION_DELAY_MS
+    : undefined;
+  if (value === undefined) return;
+  if (!/^\d{1,4}$/.test(value)) throw new Error("CAIRN_TEST_OAUTH_INITIALIZATION_DELAY_INVALID");
+  const delay = Number(value);
+  if (delay < 1 || delay > 5_000) throw new Error("CAIRN_TEST_OAUTH_INITIALIZATION_DELAY_INVALID");
+  await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, delay));
+}
 
 const DEFAULT_OPENROUTER_AUTH_BASE = new URL(OPENROUTER_BASE_URL).origin;
 
@@ -363,19 +544,41 @@ export async function beginOAuth(
   if (!keystore.encryptionAvailable()) {
     return { ok: false, message: ENCRYPTION_UNAVAILABLE };
   }
-  // A second begin supersedes whatever attempt was still waiting.
+  const oauthProjectRoot = currentProjectRoot;
+  const oauthProjectExpectation = currentProjectExpectation;
+  if (!oauthProjectExpectation) {
+    return { ok: false, message: PROJECT_REAUTHORIZATION_REQUIRED };
+  }
+  const expectedStoreRevision = keystore.expectedStoreRevision(oauthProjectRoot, oauthProjectExpectation);
+  if (expectedStoreRevision === "recovery-required") {
+    return { ok: false, message: CONNECTION_RECOVERY_REQUIRED };
+  }
+  if (expectedStoreRevision === "project-reauthorization-required") {
+    return { ok: false, message: PROJECT_REAUTHORIZATION_REQUIRED };
+  }
+  // Reserve this attempt before the listener await. A second begin or any
+  // Disconnect increments the generation, so a delayed initializer can never
+  // become live after the superseding action has already returned.
+  const generation = ++oauthGeneration;
   const previous = liveOAuth;
   liveOAuth = null;
   previous?.cancel();
   let attempt: OAuthAttempt;
   try {
+    await waitForOAuthInitializationTestDelay();
+    if (oauthGeneration !== generation) return { ok: false, message: OAUTH_CANCELLED };
     attempt = await beginOpenRouterOAuth({
       authBase: process.env.CAIRN_OPENROUTER_AUTH_BASE ?? DEFAULT_OPENROUTER_AUTH_BASE,
       listen: createLoopbackListener,
       fetchImpl: (url, init) => fetch(url, init),
     });
   } catch (err) {
+    if (oauthGeneration !== generation) return { ok: false, message: OAUTH_CANCELLED };
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+  if (oauthGeneration !== generation) {
+    attempt.cancel();
+    return { ok: false, message: OAUTH_CANCELLED };
   }
   liveOAuth = attempt;
   if (process.env.CAIRN_OAUTH_NO_BROWSER !== "1") {
@@ -384,17 +587,36 @@ export async function beginOAuth(
   }
   attempt.waitForKey()
     .then((key) => {
-      if (liveOAuth !== attempt) return;
+      if (oauthGeneration !== generation || liveOAuth !== attempt) return;
       liveOAuth = null;
+      const selectedAtCompletion = oauthProjectRoot === null
+        ? null
+        : selectedProjectExpectation(oauthProjectRoot);
+      if (!selectedAtCompletion
+        || selectedAtCompletion.canonicalRootDigest !== oauthProjectExpectation.canonicalRootDigest
+        || selectedAtCompletion.filesystemIdentityDigest !== oauthProjectExpectation.filesystemIdentityDigest) {
+        emit({ kind: "failed", message: PROJECT_REAUTHORIZATION_REQUIRED });
+        return;
+      }
       try {
-        keystore.saveKey(request.card.baseUrl, request.card.model, key, expected.data);
-        emit({ kind: "done" });
+        const saved = keystore.saveKey(
+          request.card.baseUrl,
+          request.card.model,
+          key,
+          expected.data,
+          "openrouter-oauth",
+          oauthProjectRoot,
+          expectedStoreRevision,
+          oauthProjectExpectation,
+        );
+        if (saved.ok) recoveryEpisodeId = null;
+        emit(saved.ok ? { kind: "done" } : { kind: "failed", message: saved.message });
       } catch {
         emit({ kind: "failed", message: ENCRYPTION_UNAVAILABLE });
       }
     })
     .catch((err: unknown) => {
-      if (liveOAuth !== attempt) return;
+      if (oauthGeneration !== generation || liveOAuth !== attempt) return;
       liveOAuth = null;
       emit({ kind: "failed", message: err instanceof Error ? err.message : String(err) });
     });
@@ -405,22 +627,23 @@ export async function beginOAuth(
  * already knows, so no event goes back out. Clearing the slot FIRST is what
  * keeps the attempt's own rejection from emitting a stale "failed". */
 export function cancelOAuth(): void {
+  oauthGeneration += 1;
   const attempt = liveOAuth;
   liveOAuth = null;
   attempt?.cancel();
 }
 
 export function setModel(model: string): void {
-  const conn = keystore.readConnection();
-  if (!conn) {
+  const loaded = keystore.readConnection(currentProjectRoot, currentProjectExpectation);
+  if (loaded.kind !== "ready") {
     throw new Error("Connect to a provider before changing the model.");
   }
+  const conn = loaded.value;
   if (!hasCurrentConsent(conn)) {
     throw new Error(CONSENT_REQUIRED);
   }
-  if (!keystore.updateModel(model)) {
-    throw new Error("Connect to a provider before changing the model.");
-  }
+  void model;
+  throw new Error("CONDUCTOR_MODEL_PINNED: This compatibility connection stays on its reviewed model until Connections is available.");
 }
 
 export function conversations(dir: string): ConductorConversationSummary[] {
@@ -546,8 +769,17 @@ export function send(
 ): Result<{ conversationId: string }> {
   const request = checkedSendRequest(requestValue);
   if (request === null) return { ok: false, message: INVALID_SEND };
-  const { dir, conversationId, text } = request;
+  const { dir: requestedDir, conversationId, text } = request;
   if (!text.trim()) return { ok: false, message: EMPTY_SEND };
+  // The renderer may name its visible project for navigation, but it cannot
+  // select model authority. Use only main's last validated project root after
+  // proving the request resolves to that same root.
+  const projectExpectation = selectedProjectExpectation(requestedDir);
+  if (currentProjectRoot === null || projectExpectation === null) {
+    return { ok: false, message: PROJECT_REAUTHORIZATION_REQUIRED };
+  }
+  const dir = currentProjectRoot;
+  const eventDir = requestedDir;
   // Quitting is checked FIRST, and for the same reason `commentary` checks it:
   // inside the 8-second grace window the process is about to end, so a stream
   // started here is paid for, killed part-way, and never persisted or seen. The
@@ -572,13 +804,20 @@ export function send(
       ? "Cairn is finishing a short comment on the result card. Try again in a moment."
       : "Cairn is already answering for this project. Wait for that reply, or stop it first." };
   }
-  const conn = keystore.readConnection();
-  if (!conn) {
+  const loadedConnection = keystore.readConnection(dir, projectExpectation);
+  if (loadedConnection.kind === "recovery-required") {
+    return { ok: false, message: CONNECTION_RECOVERY_REQUIRED };
+  }
+  if (loadedConnection.kind === "project-reauthorization-required") {
+    return { ok: false, message: PROJECT_REAUTHORIZATION_REQUIRED };
+  }
+  if (loadedConnection.kind !== "ready") {
     return { ok: false, message: "Connect to a provider before messaging Cairn." };
   }
+  const conn = loadedConnection.value;
   // Refuse BEFORE creating a conversation or persisting the owner's turn. A
   // stale saved key is preserved for renewal, but authorizes no model call.
-  if (!hasCurrentConsent(conn)) {
+  if (!hasCurrentConsent(conn) || !conn.projectAuthorized) {
     return { ok: false, message: CONSENT_REQUIRED };
   }
 
@@ -676,7 +915,7 @@ export function send(
     && entry.turn.role === "owner"
     && entry.turn.text === text);
   if (!accepted || historySnapshot === null) {
-    onDelta({ dir, conversationId: id, kind: "error", message: OWNER_TURN_READBACK_FAILED, turnKind: "reply" });
+    onDelta({ dir: eventDir, conversationId: id, kind: "error", message: OWNER_TURN_READBACK_FAILED, turnKind: "reply" });
     return { ok: true, value: { conversationId: id } };
   }
   // Marker or pre-write append refusal leaves the action current. Every
@@ -691,7 +930,7 @@ export function send(
     text: "",
     ...(request.actionReply === undefined ? {} : { settlementKind: request.actionReply.kind }),
   });
-  void streamTurn(dir, id, conn, controller, onDelta, "reply", historySnapshot, setAsideReplacement);
+  void streamTurn(dir, id, conn, controller, onDelta, "reply", eventDir, historySnapshot, setAsideReplacement);
 
   return { ok: true, value: { conversationId: id } };
 }
@@ -727,17 +966,22 @@ export function commentary(
   onDelta: (delta: ConductorDelta) => void,
 ): void {
   if (!isConversationId(conversationId)) return;
-  const key = actionKey(dir);
-  const conn = keystore.readConnection();
-  if (!conn || !hasCurrentConsent(conn)) return;
+  const projectExpectation = selectedProjectExpectation(dir);
+  if (currentProjectRoot === null || projectExpectation === null) return;
+  const projectDir = currentProjectRoot;
+  const key = actionKey(projectDir);
+  const loadedConnection = keystore.readConnection(projectDir, projectExpectation);
+  if (loadedConnection.kind !== "ready") return;
+  const conn = loadedConnection.value;
+  if (!hasCurrentConsent(conn) || !conn.projectAuthorized) return;
   if (controllers.has(key)) return;
-  if (taskRunningForProject(dir)) return;
+  if (taskRunningForProject(projectDir)) return;
   if (isQuitDraining()) return;
   // The instruction says "the card above", so the card has to really be there.
   // `readTurns` DROPS an envelope line whose card fails its guard, and a card
   // the conversation cannot read back is a card the model cannot see: better
   // silence than a comment on a run that is not in front of it.
-  const posted = readTurns(dir, conversationId).at(-1);
+  const posted = readTurns(projectDir, conversationId).at(-1);
   if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) return;
 
   const controller = new AbortController();
@@ -748,7 +992,15 @@ export function commentary(
     startedAt: new Date().toISOString(),
     text: "",
   });
-  void streamTurn(dir, conversationId, conn, controller, onDelta, "commentary");
+  void streamTurn(
+    projectDir,
+    conversationId,
+    conn,
+    controller,
+    onDelta,
+    "commentary",
+    currentProjectRendererRoot ?? projectDir,
+  );
 }
 
 function replyContextMessage(context: OwnerReplyContext): ConductorTransportMessage {
@@ -857,6 +1109,7 @@ async function streamTurn(
   controller: AbortController,
   onDelta: (delta: ConductorDelta) => void,
   kind: TurnKind,
+  eventDir: string,
   retainedHistory?: ConductorHistorySnapshot,
   setAsideReplacement?: SetAsideReplacement,
   transportFactory: ConductorTransportFactory = createOpenAICompatibleTransport,
@@ -911,12 +1164,16 @@ async function streamTurn(
     // A commentary turn nobody asked for tells nobody: it simply does not
     // happen, and the card is unaffected.
     if (promptTooLarge(messages)) {
-      if (kind === "reply") onDelta({ dir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE, turnKind: kind });
+      if (kind === "reply") onDelta({ dir: eventDir, conversationId: id, kind: "error", message: PROMPT_TOO_LARGE_MESSAGE, turnKind: kind });
       // A commentary that never starts still releases the renderer's
       // indicator (Task 153): a quiet error event, matching the silent drop
       // in the catch below. No message, no bubble, no partial turn.
-      else onDelta({ dir, conversationId: id, kind: "error", turnKind: kind });
+      else onDelta({ dir: eventDir, conversationId: id, kind: "error", turnKind: kind });
       return;
+    }
+    const projectExpectation = selectedProjectExpectation(dir);
+    if (projectExpectation === null || !keystore.revalidateConnection(conn, dir, projectExpectation)) {
+      throw new Error("CONDUCTOR_PROJECT_AUTHORITY_CHANGED");
     }
     const connection: ConductorTransportConnection = {
       baseUrl: conn.baseUrl,
@@ -945,7 +1202,7 @@ async function streamTurn(
             publicFull = acknowledgement;
             const live = controllers.get(actionKey(dir));
             if (live?.controller === controller) live.text = publicFull;
-            onDelta({ dir, conversationId: id, kind: "replace", text: publicFull, turnKind: kind });
+            onDelta({ dir: eventDir, conversationId: id, kind: "replace", text: publicFull, turnKind: kind });
           }
           continue;
         }
@@ -955,7 +1212,7 @@ async function streamTurn(
         if (nextPublic.startsWith(publicFull)) publicFull = nextPublic;
         const live = controllers.get(actionKey(dir));
         if (live?.controller === controller) live.text = publicFull;
-        if (publicDelta) onDelta({ dir, conversationId: id, kind: "delta", text: publicDelta, turnKind: kind });
+        if (publicDelta) onDelta({ dir: eventDir, conversationId: id, kind: "delta", text: publicDelta, turnKind: kind });
       } else if (event.kind === "usage") {
         tokens = (event.promptTokens ?? 0) + (event.completionTokens ?? 0);
         costUsd = event.costUsd;
@@ -1027,7 +1284,7 @@ async function streamTurn(
     // any other, and the proposal is dropped rather than put on screen as a
     // card the owner never asked a question to get.
     onDelta({
-      dir,
+      dir: eventDir,
       conversationId: id,
       kind: "done",
       turn: cairnTurn,
@@ -1045,7 +1302,7 @@ async function streamTurn(
       // the comment mid-stream releases its indicator instead of holding it
       // forever. Nothing is persisted and nothing is surfaced as an error.
       logError("conductor:commentary", err);
-      onDelta({ dir, conversationId: id, kind: "error", turnKind: kind });
+      onDelta({ dir: eventDir, conversationId: id, kind: "error", turnKind: kind });
     } else if (controller.signal.aborted) {
       const cairnTurn: CairnChatTurn = { role: "cairn", text: `${publicFull}\n\n(stopped early)`, ts: new Date().toISOString() };
       try {
@@ -1053,7 +1310,7 @@ async function streamTurn(
         // Carry the exact persisted turn so a renderer reattaching concurrently
         // can deduplicate it by identity instead of fabricating a second turn
         // with a different timestamp.
-        onDelta({ dir, conversationId: id, kind: "error", turn: cairnTurn, message: "Stopped.", turnKind: kind });
+        onDelta({ dir: eventDir, conversationId: id, kind: "error", turn: cairnTurn, message: "Stopped.", turnKind: kind });
       } catch (persistError) {
         logError("conductor:stopped-partial", persistError);
         const recovered = persistError instanceof ConversationAppendUncertainError
@@ -1061,7 +1318,7 @@ async function streamTurn(
         // Persistence is fallible, but the renderer must always receive one
         // terminal event and release its streaming state.
         onDelta({
-          dir,
+          dir: eventDir,
           conversationId: id,
           kind: "error",
           ...(recovered ? { turn: cairnTurn } : {}),
@@ -1076,7 +1333,7 @@ async function streamTurn(
     } else if (err instanceof ConversationAppendUncertainError && completedTurn !== null) {
       const recovered = recoveredCairnTurn(dir, id, completedTurn);
       onDelta({
-        dir,
+        dir: eventDir,
         conversationId: id,
         kind: "error",
         ...(recovered ? { turn: completedTurn } : {}),
@@ -1084,10 +1341,10 @@ async function streamTurn(
         turnKind: kind,
       });
     } else if (err instanceof ConductorTransportError) {
-      onDelta({ dir, conversationId: id, kind: "error", message: err.ownerMessage, turnKind: kind });
+      onDelta({ dir: eventDir, conversationId: id, kind: "error", message: err.ownerMessage, turnKind: kind });
     } else {
       logError("conductor:send", err);
-      onDelta({ dir, conversationId: id, kind: "error", message: "Cairn had a problem answering. Trying again in a moment usually works.", turnKind: kind });
+      onDelta({ dir: eventDir, conversationId: id, kind: "error", message: "Cairn had a problem answering. Trying again in a moment usually works.", turnKind: kind });
     }
   } finally {
     controllers.delete(actionKey(dir));

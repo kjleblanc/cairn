@@ -137,6 +137,7 @@ export function registerProjectIpc(): void {
       }
       const s = projectStatus(dir);
       touchProject(dir);
+      conductorService.noteCurrentProject(dir);
       return s;
     }));
 
@@ -149,6 +150,7 @@ export function registerProjectIpc(): void {
       initProject(input.dir, input);
       const s = projectStatus(input.dir);
       touchProject(input.dir);
+      conductorService.noteCurrentProject(input.dir);
       return s;
     }));
 
@@ -163,6 +165,7 @@ export function registerProjectIpc(): void {
       const outcome = convertProject(input.dir, input);
       const s = projectStatus(input.dir);
       touchProject(input.dir);
+      conductorService.noteCurrentProject(input.dir);
       return { status: s, outcome };
     }));
 
@@ -253,7 +256,7 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:connect", (_e, request: ConductorConnectRequest): Result<null> => {
     try {
       const result = conductorService.connect(request);
-      if (result.ok) emitBridgeSync(); // the phone's status line changes with the connection
+      emitBridgeSync(); // failed verified writes can also change recovery status
       return result;
     } catch (err) {
       logError("conductor:connect", err);
@@ -264,7 +267,7 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:renewConsent", (_e, request: ConductorRenewConsentRequest): Result<null> => {
     try {
       const result = conductorService.renewConsent(request);
-      if (result.ok) emitBridgeSync();
+      emitBridgeSync();
       return result;
     } catch (err) {
       logError("conductor:renewConsent", err);
@@ -275,7 +278,7 @@ export function registerConductorIpc(): void {
   ipcMain.handle("conductor:oauthBegin", (event, request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>> => {
     try {
       return conductorService.beginOAuth(request, (oauthEvent: ConductorOAuthEvent) => {
-        if (oauthEvent.kind === "done") emitBridgeSync(); // a completed sign-in changes the phone's status line
+        emitBridgeSync(); // terminal failures can be indeterminate and require recovery
         if (!event.sender.isDestroyed()) event.sender.send("conductor:oauth", oauthEvent);
       });
     } catch (err) {
@@ -290,12 +293,19 @@ export function registerConductorIpc(): void {
       return null;
     }));
 
-  ipcMain.handle("conductor:disconnect", () =>
-    toResult("conductor:disconnect", () => {
-      conductorService.disconnect();
-      emitBridgeSync();
-      return null;
-    }));
+  ipcMain.handle("conductor:disconnect", (_e, request?: unknown): Result<null> => {
+    let result: Result<null>;
+    try {
+      result = conductorService.disconnect(request);
+    } catch (err) {
+      logError("conductor:disconnect", err);
+      result = { ok: false, message: plainMessage(err) };
+    }
+    // A failed Forget may already have crossed the credential-deletion
+    // boundary. Phones must refresh into recovery just as the desktop does.
+    emitBridgeSync();
+    return result;
+  });
 
   ipcMain.handle("conductor:setModel", (_e, model: string) =>
     toResult("conductor:setModel", () => {

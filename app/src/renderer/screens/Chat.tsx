@@ -978,6 +978,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // service.ts). Release the indicator just as quietly: no error bubble,
     // and no stopped-early echo of a partial turn that was never saved
     // (Task 153).
+    // A terminal stream failure can be the first observation of corrupted or
+    // replaced connection authority. Refresh main-owned status immediately so
+    // its recovery/reauthorization card never waits for a reload.
+    void refreshStatus();
     if (event.turnKind === "commentary") {
       streamingRef.current = "";
       setStreamingText("");
@@ -1008,7 +1012,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setError(event.message ?? "Cairn had a problem answering.");
     const settlementKind = failedFlight?.actionReply?.kind ?? failedFlight?.settlementKind;
     if (settlementKind) settleTargetedReply(settlementKind, null, true);
-  }), [dir, setConvId, setRetryRequest, applyAction, reconcileAction, settleTargetedReply]);
+  }), [dir, setConvId, setRetryRequest, applyAction, reconcileAction, settleTargetedReply, refreshStatus]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
 
@@ -1134,6 +1138,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     const response = await cairn.conductorSend({ dir, conversationId: startingId, text, ...(actionReply ? { actionReply } : {}) });
     if (inFlightRef.current !== inFlight) return true; // superseded by "New conversation" or another send meanwhile — this call still dispatched
     if (!response.ok) {
+      // A refusal may be the first observation of corrupt connection state or
+      // a changed project identity. Refresh even for a quiet queued refusal.
+      void refreshStatus();
       const actionReplyCannotRetry = actionReply !== undefined
         && (response.message.startsWith("CONDUCTOR_ACTION_STALE:")
           || response.message.startsWith("CONDUCTOR_ACTION_REPLY_INVALID:")

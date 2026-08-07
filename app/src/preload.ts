@@ -40,7 +40,7 @@ const api: CairnApi = {
     ipcRenderer.on("conductor:oauth", listener);
     return () => ipcRenderer.removeListener("conductor:oauth", listener);
   },
-  conductorDisconnect: () => ipcRenderer.invoke("conductor:disconnect"),
+  conductorDisconnect: (request) => ipcRenderer.invoke("conductor:disconnect", request),
   conductorSetModel: (model) => ipcRenderer.invoke("conductor:setModel", model),
   conductorSend: (request) => ipcRenderer.invoke("conductor:send", request),
   conductorStop: (dir) => ipcRenderer.invoke("conductor:stop", dir),

@@ -2344,3 +2344,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .town-face-mark-gemini path:nth-child(1),
   .town-face-mark-gemini path:nth-child(2) { animation: none; }
 }
+.connection-recovery-targets {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}

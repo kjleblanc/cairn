@@ -493,7 +493,7 @@ test("streamTurn uses the injected transport seam, not compatible HTTP selection
   assert.match(streamTurn, /err instanceof ConductorTransportError/);
   assert.match(
     streamTurn,
-    /logError\("conductor:send", err\);\s*onDelta\(\{ dir, conversationId: id, kind: "error", message: "Cairn had a problem answering\. Trying again in a moment usually works\.", turnKind: kind \}\);/,
+    /logError\("conductor:send", err\);\s*onDelta\(\{ dir: eventDir, conversationId: id, kind: "error", message: "Cairn had a problem answering\. Trying again in a moment usually works\.", turnKind: kind \}\);/,
   );
   assert.ok(
     streamTurn.indexOf("controller.signal.aborted") < streamTurn.indexOf("err instanceof ConductorTransportError"),

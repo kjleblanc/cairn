@@ -192,6 +192,34 @@ export interface ConductorStatus {
   model: string;
   provider: string;
   encryptionAvailable: boolean;
+  /** True when the saved credential is healthy but this canonical project
+   * has no current grant (or its filesystem binding changed). */
+  projectAuthorizationRequired?: boolean;
+  /** Task 3 keeps the compatibility route pinned until Connections ships. */
+  modelChangeAllowed?: boolean;
+  /** Present only when main has blocked ordinary connection activity because
+   * local model-connection custody is malformed or deletion is incomplete. */
+  recovery?: ConductorRecoveryCard | null;
+}
+
+/** Main-authored destructive-recovery disclosure. The fixed filenames inside
+ * Cairn's private profile are output-only facts; raw profile paths never enter
+ * the renderer, and it must return this whole card unchanged. */
+export interface ConductorRecoveryCard {
+  kind: "erase-model-connections";
+  recoveryId: string;
+  title: "Erase Cairn model connections";
+  targets: readonly string[];
+  effect: string;
+  exposure: string;
+  recovery: string;
+  confirmation: string;
+}
+
+export interface ConductorRecoveryEraseRequest {
+  kind: "erase-model-connections";
+  card: ConductorRecoveryCard;
+  confirmed: true;
 }
 
 export interface ConductorConsentCard {
@@ -371,7 +399,7 @@ export interface CairnApi {
   conductorOAuthBegin(request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>>;
   conductorOAuthCancel(): Promise<Result<null>>;
   onConductorOAuth(cb: (event: ConductorOAuthEvent) => void): () => void;
-  conductorDisconnect(): Promise<Result<null>>;
+  conductorDisconnect(request?: ConductorRecoveryEraseRequest): Promise<Result<null>>;
   conductorSetModel(model: string): Promise<Result<null>>;
   conductorSend(request: ConductorSendRequest): Promise<Result<{ conversationId: string }>>;
   conductorStop(dir: string): Promise<Result<null>>;

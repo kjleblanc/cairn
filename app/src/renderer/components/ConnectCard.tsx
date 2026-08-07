@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ConductorConsentCard, ConductorStatus } from "../../shared/ipc";
+import type { ConductorConsentCard, ConductorRecoveryCard, ConductorStatus } from "../../shared/ipc";
 import { cairn } from "../api";
 import { BODIES, OPENROUTER_BASE_URL, RECOMMENDATION_NOTE, RECOMMENDED_BODY, bodyBaseUrl, type Body } from "../../shared/bodies";
 import { Card, ErrorCard, Pill } from "./Ui";
@@ -134,9 +134,9 @@ const MORE_BODIES = BODIES.filter((b) => b.primary !== true);
  * lines are removed; the consent strings and the key field's placeholder
  * stay byte-identical, and a remembered seat still opens with the key path
  * expanded (task 127's pre-filled reconnect). */
-export function ConnectCard({ status, onConnected }: { status: ConductorStatus; onConnected: () => void }) {
+function ConnectionSetupCard({ status, onConnected }: { status: ConductorStatus; onConnected: () => void }) {
   const [rememberedSeat] = useState<RememberedSeat | null>(() => readRememberedSeat());
-  const initialSeat = status.consentRequired
+  const initialSeat = status.consentRequired || status.projectAuthorizationRequired
     ? { baseUrl: status.baseUrl, model: status.model }
     : rememberedSeat;
   const [panel, setPanel] = useState<Panel>(initialSeat ? "default" : "start");
@@ -154,6 +154,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
   const [fileContentsCheckedCard, setFileContentsCheckedCard] = useState<string | null>(null);
   const [loadedCard, setLoadedCard] = useState<ConductorConsentCard | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [copied, setCopied] = useState(false);
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
@@ -176,15 +177,19 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
   useEffect(() => {
     let cancelled = false;
     setLoadedCard(null);
+    setValidationError(null);
     setCheckedCard(null);
     setFileContentsCheckedCard(null);
     try {
       new URL(baseUrl.trim());
     } catch {
+      setValidationError("Use a valid HTTP(S) provider URL.");
       return;
     }
     void cairn.conductorConsentCard(baseUrl.trim(), model.trim()).then((response) => {
-      if (!cancelled) setLoadedCard(response.ok ? response.value : null);
+      if (cancelled) return;
+      setLoadedCard(response.ok ? response.value : null);
+      setValidationError(response.ok ? null : response.message);
     });
     return () => { cancelled = true; };
   }, [baseUrl, model]);
@@ -200,7 +205,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
         consentConfirmed: true,
         fileContentsConfirmed: true,
       });
-      if (!response.ok) { setError(response.message); return; }
+      if (!response.ok) { setError(response.message); onConnected(); return; }
       // Remember the seat — never the key — so the next visit opens pre-filled.
       localStorage.setItem(SEAT_STORAGE_KEY, JSON.stringify({ baseUrl: baseUrl.trim(), model: model.trim() }));
       onConnected();
@@ -226,6 +231,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
         setOauthUrl(null);
         setError(event.message);
         setPanel("default");
+        onConnected();
       }
     });
   }, [onConnected]);
@@ -243,7 +249,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
         consentConfirmed: true,
         fileContentsConfirmed: true,
       });
-      if (!response.ok) { setError(response.message); return; }
+      if (!response.ok) { setError(response.message); onConnected(); return; }
       setOauthUrl(response.value.authUrl);
       setPanel("oauth");
     } catch (err) {
@@ -266,7 +272,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
         consentConfirmed: true,
         fileContentsConfirmed: true,
       });
-      if (!response.ok) { setError(response.message); return; }
+      if (!response.ok) { setError(response.message); onConnected(); return; }
       onConnected();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -281,7 +287,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
     setError(null);
     try {
       const response = await cairn.conductorDisconnect();
-      if (!response.ok) { setError(response.message); return; }
+      if (!response.ok) { setError(response.message); onConnected(); return; }
       onConnected();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -322,11 +328,14 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
   // one — editing a field or choosing another brain takes it away.
   const showingMemory = rememberedSeat !== null && baseUrl === rememberedSeat.baseUrl && model === rememberedSeat.model;
 
-  if (status.consentRequired) {
+  if (status.consentRequired || status.projectAuthorizationRequired) {
+    const sharingPermissionChanged = status.consentRequired;
     return (
-      <Card title="review the new sharing permission">
+      <Card title={sharingPermissionChanged ? "review the new sharing permission" : "authorize this project"}>
         <p>
-          Your saved <strong>{status.provider}</strong> connection using <strong>{status.model}</strong> is paused. Cairn can now share a bounded snapshot of selected project-file contents, so review the wider permission before another conversation.
+          {sharingPermissionChanged
+            ? <>Your saved <strong>{status.provider}</strong> connection using <strong>{status.model}</strong> is paused. Cairn can now share a bounded snapshot of selected project-file contents, so review the wider permission before another conversation.</>
+            : <>Your saved <strong>{status.provider}</strong> connection using <strong>{status.model}</strong> is paused for this project. Review and explicitly authorize this project before another conversation.</>}
         </p>
         <p className="small muted">Your saved key is still encrypted. Reviewing this permission does not contact the provider or replace the key.</p>
         {error ? <ErrorCard message={error} /> : null}
@@ -381,7 +390,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
   if (panel === "picker") {
     return (
       <Card title="choose a different brain">
-        <p className="small muted">Every way to power Cairn. This list is a starting point, not a fence: any model works.</p>
+        <p className="small muted">Every way to power Cairn. This list is a starting point, not a fence: any compatible provider model ID works.</p>
         <div className="brain-list">
           {PRIMARY_BODIES.map((body) => (
             <BodyButton key={body.id} body={body} onChoose={chooseBody} />
@@ -500,7 +509,7 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
         <p style={{ marginTop: 10, marginBottom: 0 }}><strong>{currentBody?.name ?? model}</strong></p>
       )}
       {showingMemory ? <p className="small muted">Cairn remembers your last choice — never your key.</p> : null}
-      {error ? <ErrorCard message={error} /> : null}
+      {validationError ? <ErrorCard message={validationError} /> : error ? <ErrorCard message={error} /> : null}
 
       {kimiSeat ? (
         <>
@@ -564,4 +573,72 @@ export function ConnectCard({ status, onConnected }: { status: ConductorStatus; 
       </div>
     </Card>
   );
+}
+
+function RecoveryCard({ card, onRecovered }: { card: ConductorRecoveryCard; onRecovered: () => void }) {
+  const [reviewing, setReviewing] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [erasing, setErasing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function erase() {
+    if (!confirmed || erasing) return;
+    setErasing(true);
+    setError(null);
+    try {
+      const response = await cairn.conductorDisconnect({ kind: card.kind, card, confirmed: true });
+      if (!response.ok) {
+        setError(response.message);
+        onRecovered();
+        return;
+      }
+      onRecovered();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setErasing(false);
+    }
+  }
+
+  return (
+    <Card title={card.title}>
+      <p>Cairn found local model-connection state it cannot safely use or repair.</p>
+      <p className="small"><strong>Effect:</strong> {card.effect}</p>
+      <p className="small"><strong>Provider access:</strong> {card.exposure}</p>
+      <p className="small"><strong>Recovery:</strong> {card.recovery}</p>
+      {error ? <ErrorCard message={error} /> : null}
+      {reviewing ? (
+        <>
+          <p className="small"><strong>Exact filenames in Cairn's private profile:</strong></p>
+          <ul className="connection-recovery-targets">
+            {card.targets.map((target) => <li key={target}>{target}</li>)}
+          </ul>
+          <label className="row" style={{ marginTop: 14, alignItems: "flex-start" }}>
+            <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+            <span>{card.confirmation}</span>
+          </label>
+          <div className="row" style={{ marginTop: 14 }}>
+            <Pill kind="danger" disabled={!confirmed || erasing} onClick={() => void erase()}>
+              {erasing ? "Erasing..." : card.title}
+            </Pill>
+            <Pill kind="quiet" disabled={erasing} onClick={() => { setReviewing(false); setConfirmed(false); setError(null); }}>
+              Cancel
+            </Pill>
+          </div>
+        </>
+      ) : (
+        <div className="row" style={{ marginTop: 14 }}>
+          <Pill kind="danger" onClick={() => setReviewing(true)}>Review exact files</Pill>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** Recovery is a separate component so the ordinary setup card's hook order
+ * never changes when main switches into or out of a fail-closed state. */
+export function ConnectCard(props: { status: ConductorStatus; onConnected: () => void }) {
+  return props.status.recovery
+    ? <RecoveryCard card={props.status.recovery} onRecovered={props.onConnected} />
+    : <ConnectionSetupCard {...props} />;
 }
