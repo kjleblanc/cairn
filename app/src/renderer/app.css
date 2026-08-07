@@ -448,15 +448,28 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: fixed; inset: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr);
   overflow: hidden;
   /* One sky: the whole workspace is the festival dusk; rail, chat, and town
-     are places inside it, not pages beside it. */
+     are places inside it, not pages beside it.
+
+     Task 197 gives that sky a direction light comes from. The two flat glows
+     that used to sit here (a cyan wash off the top edge and an amber wash off
+     the bottom) are replaced — not joined — by the key/counter pair, so the
+     field is lit once rather than twice. Depth is falloff only: still water
+     (Decision 9, rule 4) forbids putting a drawn mark back on the pond.
+
+     The fibre is the SAME --paper-grain Task 186 shares across five surfaces;
+     only its blend changes, to `overlay`. soft-light leaves a mid-grey
+     unchanged, so the fibre was being drawn and then cancelled against this
+     dark ground. */
   background-image:
     var(--paper-grain),
     var(--garden-stars),
-    radial-gradient(900px 520px at 50% -18%, var(--garden-cyan-glow), transparent 62%),
-    radial-gradient(1000px 560px at 55% 115%, var(--garden-amber-glow), transparent 60%),
+    var(--field-key),
+    var(--field-counter),
+    var(--field-haze),
+    var(--field-vignette),
     linear-gradient(160deg, var(--garden-ink), var(--garden-deep));
-  background-size: 160px 160px, auto, auto, auto, auto;
-  background-blend-mode: soft-light, normal, normal, normal, normal;
+  background-size: 160px 160px, auto, auto, auto, auto, auto, auto;
+  background-blend-mode: overlay, normal, normal, normal, normal, normal, normal;
 }
 .workspace-shell.workspace-rail-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
 .project-rail {
@@ -667,23 +680,30 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   left: max(16px, min(calc(50% + 96px), calc(100% - 32px - var(--town-chat-width))));
   width: var(--town-chat-width);
   height: auto; max-height: 76%; margin: 0;
-  /* Task 186 keeps the lantern's warmth but retires its glass-card silhouette:
+  /* Task 186 kept the lantern's warmth but retired its glass-card silhouette:
      one controlled edge, a slightly uneven paper cut, faint fibre, and a soft
-     pool of light instead of a stacked halo. */
+     pool of light instead of a stacked halo.
+
+     Task 197 finishes that: the outline and the drop shadow are gone. A drop
+     shadow is the single strongest signal that a surface floats ABOVE what is
+     behind it, and it was the last thing making this read as a slab on the
+     pond. The warm spill stays and widens — light spilling ONTO the water is
+     what puts the surface in the pond rather than over it. This deliberately
+     retires the "one spill and one quiet drop" contract; see the Task 197
+     report.
+
+     The paper is still the lantern's own, declared here from the lantern's own
+     palette. Only the painting moves, to ::after, so the feather mask can
+     never touch text. ::before is not available: that selector is the retired
+     villager tail and lantern.test.ts guards its absence. */
   padding: 21px;
-  border: 1px solid rgb(246 236 225 / 9%);
+  border: 0;
   border-radius: 28px 31px 29px 26px;
-  background-image:
-    var(--paper-grain),
-    linear-gradient(170deg,
-      color-mix(in srgb, var(--lantern-paper-lit) 92%, transparent),
-      color-mix(in srgb, var(--lantern-paper) 89%, transparent) 62%,
-      rgb(43 37 51 / 87%));
-  background-size: 160px 160px, auto;
-  background-blend-mode: soft-light, normal;
-  box-shadow:
-    0 0 54px rgb(247 211 168 / 7%),
-    0 20px 48px rgb(0 0 0 / 30%);
+  --surface-lit: color-mix(in srgb, var(--lantern-paper-lit) var(--surface-alpha-lit), transparent);
+  --surface-body: color-mix(in srgb, var(--lantern-paper) var(--surface-alpha-body), transparent);
+  --surface-foot: color-mix(in srgb, var(--lantern-plum) var(--surface-alpha-foot), transparent);
+  background: none;
+  box-shadow: 0 0 96px rgb(247 211 168 / 6%);
   /* The paired tokens are re-pointed once, here. Every card, rule, and muted
      line inside the lantern is already written against them, so they re-tone
      through the cascade rather than being rewritten rule by rule. Only what
@@ -725,6 +745,50 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      file, not the one above: a media query adds no specificity, so
      `.chat-column-villager` up there is (0,1,0) and loses to this (0,2,0). */
   animation: villager-rise .42s var(--spring) both;
+}
+/* Task 197: the surface itself, painted behind its own text.
+ *
+ * This exists as a separate layer for one reason: the feather is a mask, and a
+ * mask applied to the column would fade the TEXT at the edges as well as the
+ * paper. Painting the surface on ::after and holding it at z-index -1 inside
+ * the column's own stacking context means the paper thins out while every
+ * glyph stays at full strength.
+ *
+ * The two-axis mask, composited with `intersect`, thins all four edges over
+ * --surface-feather. The surface therefore never stops anywhere: there is no
+ * edge to find, which is what "part of the pond" rather than "on the pond"
+ * actually means.
+ *
+ * backdrop-filter is what makes the fill readable at these alphas — it
+ * diffuses the field behind the paper instead of letting detail read straight
+ * through the words. The @supports block below is the fallback for machines
+ * that cannot do it. */
+.chat-column.chat-column-villager::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  border-radius: inherit;
+  background-image:
+    var(--paper-grain),
+    linear-gradient(170deg, var(--surface-lit), var(--surface-body) 62%, var(--surface-foot));
+  background-size: 160px 160px, auto;
+  background-blend-mode: overlay, normal;
+  backdrop-filter: blur(13px) saturate(112%);
+  mask-image:
+    linear-gradient(to bottom, transparent 0, #000 var(--surface-feather), #000 calc(100% - var(--surface-feather)), transparent 100%),
+    linear-gradient(to right, transparent 0, #000 var(--surface-feather), #000 calc(100% - var(--surface-feather)), transparent 100%);
+  mask-composite: intersect;
+}
+/* Fail CLOSED to legible. Without backdrop-filter the field reads straight
+ * through the paper, and the feather thins the fill exactly where the key
+ * light is brightest — the two failures compound. A machine that cannot blur
+ * gets the opaque surface and its hairline back instead. */
+@supports not (backdrop-filter: blur(1px)) {
+  .chat-column.chat-column-villager {
+    --surface-alpha-lit: 92%;
+    --surface-alpha-body: 89%;
+    --surface-alpha-foot: 87%;
+    border: 1px solid rgb(246 236 225 / 9%);
+  }
+  .chat-column.chat-column-villager::after { mask-image: none; }
 }
 /* Inside the dialog, only the message list gives. Before this, every child
  * shrank proportionally once the column hit max-height, collapsing the list

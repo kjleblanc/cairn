@@ -41,9 +41,21 @@ test("one static paper grain belongs to the field, shelf, lantern, and composer"
     ".chat-column-villager .chat-composer",
     ".town-square",
   ]) {
-    assert.ok(rule(selector).includes("var(--paper-grain)"),
+    // A surface may paint the shared texture on its own skin layer rather than
+    // on itself. Task 197 moved the conversation surface's paint to ::after so
+    // its feather mask could not touch text; the surface still shares this one
+    // texture, which is what this contract is actually about. Widened to the
+    // surface AND its skin, deliberately — not relaxed to "somewhere in the
+    // file", which would pass on any unrelated rule's grain.
+    const skin = `${selector}::after`;
+    const painted = rule(selector) + (css.includes(`${skin} {`) ? rule(skin) : "");
+    assert.ok(painted.includes("var(--paper-grain)"),
       `${selector} does not share the paper texture`);
   }
+  // Exactly one texture token exists. Five bespoke noises would not read as
+  // paper, they would read as five textures.
+  assert.equal(tokens.match(/--paper-[a-z]*:\s*url\(/g)?.length, 1,
+    "a second paper texture token appeared; the shared material is the point");
   assert.ok(!css.includes("paper-grain-shift"),
     "the grain animates instead of staying quiet");
 });
