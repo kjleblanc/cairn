@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRequestBody, ownerMessageFor, promptTooLarge, streamChat, ConductorHttpError, PROMPT_CHAR_LIMIT } from "../src/main/conductor/client.js";
+import { buildRequestBody, ownerMessageFor, promptTooLarge, streamChat, ConductorHttpError, INFERENCE_REDIRECT_POLICY, PROMPT_CHAR_LIMIT } from "../src/main/conductor/client.js";
 
 const SLOT = { baseUrl: "https://openrouter.ai/api/v1", model: "moonshotai/kimi-k2", apiKey: "test-key" };
+const REDIRECT_OWNER_MESSAGE = "The provider redirected Cairn's request. Cairn stopped before sending it anywhere else.";
 
 function sseResponse(chunks: string[]): Response {
   const encoder = new TextEncoder();
@@ -26,6 +27,7 @@ test("streaming yields deltas, usage, and done — and the url and key are used"
   const fake: typeof fetch = async (url, init) => {
     seenUrl = String(url);
     seenAuth = String((init?.headers as Record<string, string>).authorization);
+    assert.equal(init?.redirect, "manual");
     return sseResponse([
       'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
       'data: {"choices":[{"delta":{"content":"lo"}}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4,"cost":0.0001}}\n\n',
@@ -55,6 +57,31 @@ test("an http error surfaces a plain-words owner message and no key", async () =
       return true;
     },
   );
+});
+
+test("the legacy wrapper rejects redirects once with no Location detail", async () => {
+  assert.equal(INFERENCE_REDIRECT_POLICY, "reject-all");
+  let calls = 0;
+  const fake: typeof fetch = async (_url, init) => {
+    calls += 1;
+    assert.equal(init?.redirect, "manual");
+    return new Response("raw redirect body with test-key", {
+      status: 302,
+      headers: { location: "https://target.invalid/next?secret=location-canary" },
+    });
+  };
+
+  await assert.rejects(
+    async () => { for await (const _ of streamChat(SLOT, [{ role: "user", content: "project-body-canary" }], fake)) void _; },
+    (error: unknown) => {
+      assert.ok(error instanceof ConductorHttpError);
+      assert.equal(error.status, 302);
+      assert.equal(error.ownerMessage, REDIRECT_OWNER_MESSAGE);
+      assert.doesNotMatch(error.ownerMessage, /test-key|project-body-canary|target\.invalid|location-canary|raw redirect body/);
+      return true;
+    },
+  );
+  assert.equal(calls, 1);
 });
 
 test("promptTooLarge is false exactly at the limit and true just over it", () => {

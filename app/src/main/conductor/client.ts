@@ -23,6 +23,7 @@ export interface StreamEvent {
 
 export {
   ConductorHttpError,
+  INFERENCE_REDIRECT_POLICY,
   PROMPT_CHAR_LIMIT,
   promptTooLarge,
 } from "./transports/types.js";

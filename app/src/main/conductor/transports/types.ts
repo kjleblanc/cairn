@@ -4,6 +4,9 @@ export interface ConductorTransportConnection {
   readonly apiKey: string;
 }
 
+/** Every inference transport must stop at the first HTTP redirect. */
+export const INFERENCE_REDIRECT_POLICY = "reject-all" as const;
+
 export interface ConductorTransportMessage {
   readonly role: "system" | "user" | "assistant";
   readonly content: string;
@@ -79,6 +82,7 @@ export class ConductorHttpError extends ConductorTransportError {
 }
 
 export interface ConductorTransport {
+  readonly inferenceRedirectPolicy: typeof INFERENCE_REDIRECT_POLICY;
   stream(request: ConductorTransportRequest): AsyncGenerator<ConductorTransportStreamEvent>;
 }
 
