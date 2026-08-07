@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   ConductorHttpError as ClientHttpError,
   streamChat,
@@ -12,6 +14,7 @@ import { createOpenAICompatibleTransport } from "../src/main/conductor/transport
 import {
   ConductorHttpError,
   ConductorTransportError,
+  INFERENCE_REDIRECT_POLICY,
   streamWithTransport,
   type ConductorTransport,
   type ConductorTransportFactory,
@@ -28,6 +31,57 @@ const CONNECTION = {
   model: "moonshotai/kimi-k2",
   apiKey: "inert-test-key",
 };
+
+const REDIRECT_OWNER_MESSAGE = "The provider redirected Cairn's request. Cairn stopped before sending it anywhere else.";
+
+type RedirectTarget = "same-origin" | "cross-origin";
+
+interface ObservedRequest {
+  readonly method: string;
+  readonly pathname: string;
+  readonly contentType: string;
+  readonly authorizationSha256: string;
+  readonly bodySha256: string;
+  readonly bodyBytes: number;
+}
+
+interface RedirectObservation {
+  readonly requestCount: number;
+  readonly headerBytes: number;
+  readonly authorizationBytes: number;
+  readonly bodyBytes: number;
+  readonly requests: readonly ObservedRequest[];
+}
+
+interface RedirectScenario {
+  readonly baseUrl: string;
+  snapshot(): { readonly source: RedirectObservation; readonly target: RedirectObservation };
+}
+
+interface FakeModelProvider {
+  readonly sourceOrigin: string;
+  readonly targetOrigin: string;
+  readonly locationCanary: string;
+  readonly responseCanary: string;
+  scenario(input: { readonly status: number; readonly target: RedirectTarget }): RedirectScenario;
+  close(): Promise<void>;
+}
+
+async function startFakeModelProvider(): Promise<FakeModelProvider> {
+  const moduleUrl = pathToFileURL(join(
+    __dirname,
+    "..",
+    "tests",
+    "fixtures",
+    "fake-model-provider.mjs",
+  )).href;
+  const fixture = await import(moduleUrl) as { start(): Promise<FakeModelProvider> };
+  return fixture.start();
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
 
 function sseResponse(chunks: string[]): Response {
   const encoder = new TextEncoder();
@@ -66,7 +120,8 @@ test("the compatible transport preserves the exact request URL, init, and JSON b
     { role: "user" as const, content: "hello" },
   ];
 
-  const events = await collectTransport(createOpenAICompatibleTransport(CONNECTION, fake), {
+  const transport = createOpenAICompatibleTransport(CONNECTION, fake);
+  const events = await collectTransport(transport, {
     messages,
     signal: controller.signal,
   });
@@ -79,10 +134,128 @@ test("the compatible transport preserves the exact request URL, init, and JSON b
       authorization: "Bearer inert-test-key",
     },
     body: '{"model":"moonshotai/kimi-k2","messages":[{"role":"system","content":"rules"},{"role":"user","content":"hello"}],"stream":true,"stream_options":{"include_usage":true}}',
+    redirect: "manual",
     signal: controller.signal,
   });
-  assert.equal(Object.hasOwn(seenInit ?? {}, "redirect"), false);
+  assert.equal(transport.inferenceRedirectPolicy, INFERENCE_REDIRECT_POLICY);
   assert.deepEqual(events, [{ kind: "done" }]);
+});
+
+test("all inference redirects stop before same-origin or cross-origin replay", async (t) => {
+  const fixture = await startFakeModelProvider();
+  t.after(async () => { await fixture.close(); });
+  assert.match(fixture.sourceOrigin, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.match(fixture.targetOrigin, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.notEqual(fixture.sourceOrigin, fixture.targetOrigin);
+
+  const statuses = [301, 302, 303, 307, 308] as const;
+  const targets = ["same-origin", "cross-origin"] as const;
+  for (const status of statuses) {
+    for (const target of targets) {
+      await t.test(`${status} ${target}`, async () => {
+        const scenario = fixture.scenario({ status, target });
+        const apiKey = `inert-redirect-key-${status}-${target}`;
+        const messages = [{
+          role: "user" as const,
+          content: `inert-project-body-${status}-${target}`,
+        }];
+        const expectedBody = JSON.stringify({
+          model: CONNECTION.model,
+          messages,
+          stream: true,
+          stream_options: { include_usage: true },
+        });
+        const authorization = `Bearer ${apiKey}`;
+        const seenEvents: ConductorTransportStreamEvent[] = [];
+        let caught: unknown;
+
+        try {
+          for await (const event of createOpenAICompatibleTransport({
+            baseUrl: scenario.baseUrl,
+            model: CONNECTION.model,
+            apiKey,
+          }).stream({ messages })) seenEvents.push(event);
+        } catch (error) {
+          caught = error;
+        }
+
+        const snapshot = scenario.snapshot();
+        assert.equal(snapshot.source.requestCount, 1, "the intended provider receives one request with no retry");
+        assert.equal(snapshot.source.requests.length, 1);
+        assert.equal(snapshot.source.requests[0]?.method, "POST");
+        assert.match(snapshot.source.requests[0]?.pathname ?? "", /^\/redirect\/\d+\/v1\/chat\/completions$/);
+        assert.equal(snapshot.source.requests[0]?.contentType, "application/json");
+        assert.equal(snapshot.source.requests[0]?.authorizationSha256, sha256(authorization));
+        assert.equal(snapshot.source.requests[0]?.bodySha256, sha256(expectedBody));
+        assert.equal(snapshot.source.requests[0]?.bodyBytes, Buffer.byteLength(expectedBody));
+        assert.ok(snapshot.source.headerBytes > 0);
+        assert.equal(snapshot.source.authorizationBytes, Buffer.byteLength(authorization));
+        assert.equal(snapshot.source.bodyBytes, Buffer.byteLength(expectedBody));
+        assert.deepEqual(snapshot.target, {
+          requestCount: 0,
+          headerBytes: 0,
+          authorizationBytes: 0,
+          bodyBytes: 0,
+          requests: [],
+        });
+        assert.deepEqual(seenEvents, []);
+        assert.ok(caught instanceof ConductorHttpError);
+        assert.ok(caught instanceof ConductorTransportError);
+        assert.equal(caught.status, status);
+        assert.equal(caught.ownerMessage, REDIRECT_OWNER_MESSAGE);
+        for (const secret of [
+          apiKey,
+          messages[0].content,
+          fixture.locationCanary,
+          fixture.responseCanary,
+          fixture.sourceOrigin,
+          fixture.targetOrigin,
+        ]) assert.equal(caught.ownerMessage.includes(secret), false);
+      });
+    }
+  }
+});
+
+test("redirect boundaries, missing body, and cancel failure keep one redacted error", async () => {
+  for (const status of [300, 304, 399]) {
+    let canceled = false;
+    const fake: typeof fetch = async (_url, init) => {
+      assert.equal(init?.redirect, "manual");
+      if (status === 304) return new Response(null, { status });
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"must-not-stream"}}]}\n\n'));
+        },
+        cancel() {
+          canceled = true;
+          if (status === 399) throw new Error("inert redirect cancel failure");
+        },
+      }), {
+        status,
+        headers: status === 399
+          ? { location: "https://user:password@target.invalid/next?secret=location-canary" }
+          : undefined,
+      });
+    };
+    const events: ConductorTransportStreamEvent[] = [];
+
+    await assert.rejects(
+      async () => {
+        for await (const event of createOpenAICompatibleTransport(CONNECTION, fake).stream({ messages: [] })) {
+          events.push(event);
+        }
+      },
+      (error: unknown) => {
+        assert.ok(error instanceof ConductorHttpError);
+        assert.equal(error.status, status);
+        assert.equal(error.ownerMessage, REDIRECT_OWNER_MESSAGE);
+        assert.doesNotMatch(error.ownerMessage, /user|password|target\.invalid|location-canary|must-not-stream|cancel failure/);
+        return true;
+      },
+    );
+    assert.deepEqual(events, []);
+    if (status !== 304) assert.equal(canceled, true);
+  }
 });
 
 test("the legacy client wrapper keeps its constructor and custom compatible route", async () => {
@@ -265,6 +438,7 @@ test("a fake factory receives any compatible connection once and preserves event
     factoryCalls += 1;
     seenConnection = connection;
     return {
+      inferenceRedirectPolicy: INFERENCE_REDIRECT_POLICY,
       async *stream(request) {
         seenRequest = request;
         yield { kind: "delta", text: "first" };

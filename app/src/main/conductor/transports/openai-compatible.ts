@@ -1,11 +1,14 @@
 import {
   ConductorHttpError,
+  INFERENCE_REDIRECT_POLICY,
   type ConductorTransport,
   type ConductorTransportConnection,
   type ConductorTransportMessage,
   type ConductorTransportRequest,
   type ConductorTransportStreamEvent,
 } from "./types.js";
+
+const REDIRECT_OWNER_MESSAGE = "The provider redirected Cairn's request. Cairn stopped before sending it anywhere else.";
 
 export function ownerMessageFor(status: number): string {
   if (status === 401 || status === 403) return "The provider did not accept the key. Reconnect with a fresh key.";
@@ -52,8 +55,17 @@ async function* streamOpenAICompatible(
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${connection.apiKey}` },
     body: JSON.stringify(buildRequestBody(connection.model, request.messages)),
+    redirect: "manual",
     signal: request.signal,
   });
+  if (response.status >= 300 && response.status < 400) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      /* releasing the body must not mask the redacted redirect error */
+    }
+    throw new ConductorHttpError(response.status, REDIRECT_OWNER_MESSAGE);
+  }
   if (!response.ok || !response.body) {
     try {
       await response.body?.cancel();
@@ -90,6 +102,7 @@ export function createOpenAICompatibleTransport(
   fetchImpl: typeof fetch = fetch,
 ): ConductorTransport {
   return {
+    inferenceRedirectPolicy: INFERENCE_REDIRECT_POLICY,
     stream(request) {
       return streamOpenAICompatible(connection, request, fetchImpl);
     },
