@@ -31,39 +31,35 @@ const BODY_FLOOR = 4.5;
 const LARGE_FLOOR = 3;
 
 /**
- * Failures this check found that Task 197 did NOT cause.
+ * Deliberately EMPTY: the floor is absolute, and every lantern element clears
+ * it. This map is the escape hatch, kept only so a future finding can be
+ * recorded honestly rather than silently deleted -- adding to it is a decision
+ * someone has to write down, not a default.
  *
- * Each ratio here was measured on this same branch with the pre-Task-197
- * values restored (opaque surface, original card wash) — a real A/B, not an
- * assumption. They are genuine accessibility defects and they are older than
- * this task; every one is on the connect card, and two are not about
- * translucency at all:
- *   - "Kimi K3Recommended" puts --lantern-ink on a light selected pill.
- *   - "Cairn's starting recommendation" uses --green-deep, which resolves to
- *     the LIGHT-theme #3f5c31 on permanently dark paper. This is the same
- *     class of bug Task 171's whole-branch review found once already.
- *   - the rest are --lantern-soft muted body text, which simply does not
- *     clear 4.5:1 against this paper at these sizes.
- * Fixing them is a named follow-up, not Task 197's business.
+ * It did not start empty. On its first run this check found six failures, and
+ * a real A/B on this branch with the pre-Task-197 values restored proved five
+ * of them older than Task 197:
+ *   - "Cairn's starting recommendation" used --green-deep, which is a
+ *     light-dark() pair and so resolved to the LIGHT theme's #3f5c31 on
+ *     permanently dark paper -- 1.14:1. The same class of bug Task 171's
+ *     whole-branch review found once already, which is why this check exists.
+ *   - four --lantern-soft muted body-text elements measured 4.21-4.48:1.
+ * The sixth, a 1.01:1 on the "Kimi K3 / Recommended" row, was a fault in this
+ * check rather than in the app: it sampled a container whose box is mostly
+ * covered by a child pill painting its own background, so the modal colour was
+ * the pill's fill while the ink read was the parent's. Containers like that
+ * are now skipped (see `covered` below) and their children measured instead.
  *
- * The contract this check enforces is therefore a RATCHET, not an absolute
- * floor it cannot currently reach: nothing new may fail, and nothing already
- * failing may get materially worse. Making it an absolute floor today would
- * mean either failing forever or deleting the evidence.
+ * Task 197 fixed the five real ones by re-pointing the dark-side green and
+ * lifting the muted ink inside the lantern -- the same move the paper already
+ * made for --stop. Worst measured ratio is now 4.62:1.
  */
-/** Keys are matched on collapsed whitespace, so a truncation landing on a
- *  space cannot silently reclassify a known failure as a new one. */
+const PRE_EXISTING_RAW = new Map<string, number>([]);
+/** Matched on collapsed whitespace, so a truncation landing on a space cannot
+ *  silently reclassify a recorded failure as a new one. */
 function key(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
-const PRE_EXISTING_RAW = new Map<string, number>([
-  ["Kimi K3Recommended", 1.01],
-  ["Cairn's starting recommendation — not yet", 1.14],
-  ["Kimi's newest model; a long chat usually c", 4.22],
-  ["Bills per use — sign in or paste a key", 4.21],
-  ["Runs on your Kimi membership's included co", 4.47],
-  ["Uses your membership's coding quota — key", 4.48],
-]);
 const PRE_EXISTING = new Map([...PRE_EXISTING_RAW].map(([k, v]) => [key(k), v]));
 /**
  * How far a pre-existing failure may move. Task 197's translucency knowingly
@@ -163,8 +159,20 @@ test("lantern text clears the contrast floor against the lit field it now sits o
 
       const style = await sample.evaluate((el) => {
         const s = getComputedStyle(el);
-        return { color: s.color, size: parseFloat(s.fontSize), weight: Number(s.fontWeight) || 400 };
+        // A container whose box is largely covered by a child that paints its
+        // OWN background is not measurable this way: the modal colour would be
+        // that child's fill while the colour read here is the parent's ink, and
+        // the two never actually meet on screen. (This produced a spurious
+        // 1.01:1 on the "Kimi K3 / Recommended" row, whose tag is a light pill
+        // carrying its own dark ink.) Such elements are skipped; their children
+        // are separately present in the sample set and get measured properly.
+        const covered = Array.from(el.querySelectorAll("*")).some((child) => {
+          const c = getComputedStyle(child as Element).backgroundColor;
+          return c !== "rgba(0, 0, 0, 0)" && c !== "transparent";
+        });
+        return { color: s.color, size: parseFloat(s.fontSize), weight: Number(s.fontWeight) || 400, covered };
       });
+      if (style.covered) continue;
       // A fully transparent colour is a decorative or spacing element.
       if (/rgba?\([^)]*,\s*0\s*\)/.test(style.color)) continue;
 

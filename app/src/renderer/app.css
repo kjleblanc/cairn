@@ -736,6 +736,26 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      tokens have to come with it — in light theme --stop-soft is a bright pale
      block on dark paper, and --stop text measures ~3:1 against the card. */
   --stop: var(--pond-stop);
+  /* Task 197, same reason as --stop directly above, found by the new measured
+     contrast check rather than by eye. --green-deep is a light-dark() pair, so
+     on this permanently dark paper it resolves to the LIGHT theme's #3f5c31 —
+     dark green on dark paper, measured at 1.14:1 against a 4.5 floor. That is
+     the identical class of bug Task 171's whole-branch review found once
+     before, which is why the check now exists. The dark-side green comes with
+     the paper, exactly as the coral did. */
+  --green-deep: var(--pond-done);
+  /* 5%, not 12%: this wash sits UNDER --green-deep ink, so a lighter wash
+     costs contrast. Measured on the Recommended tag — 12% gives 4.05:1,
+     under the floor for its 11.8px bold; 5% clears it. Same trade the
+     --stop-soft comment above records, found the same way. */
+  --green-soft: color-mix(in srgb, var(--pond-done) 5%, transparent);
+  --green: var(--pond-done);
+  /* The muted ink measured 4.21-4.48:1 for body text on this paper — under the
+     floor even before Task 197, and Task 197's translucency costs it a further
+     ~0.2. Lifted here, inside the lantern, rather than in the global token: the
+     shelf and town square use --lantern-soft over different, darker material
+     and are not this task's to re-tone. */
+  --lantern-soft: #d8cabd;
   /* 12%, not 18%: the coral text sits ON this wash, so a lighter wash costs
      contrast. Measured against the card's own 5% wash over the paper —
      18% gives 4.27:1 (under the 4.5 floor for this 14.7px bold), 15% is 4.54
