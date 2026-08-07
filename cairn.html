@@ -40,7 +40,7 @@
 </head>
 <body>
 <main>
-  <p class="eyebrow">Cairn Contract v0.7.0</p>
+  <p class="eyebrow">Cairn Contract v0.8.0</p>
   <h1>One task.<br>One honest result.</h1>
   <p class="lead">Cairn helps beginners use AI without turning planning, building,
   reviewing, and deciding into an endless owner-facing workflow.</p>
@@ -92,7 +92,7 @@
 
 <script type="text/plain" id="src-contract"># Project Contract
 
-> **What this is.** Cairn Contract v0.7.0 is the small rulebook for AI work in this
+> **What this is.** Cairn Contract v0.8.0 is the small rulebook for AI work in this
 > project. It is saved as `AGENTS.md` in the project root. The owner may be a
 > complete beginner, so explain decisions and results in plain language.
 
@@ -129,7 +129,12 @@ For each requested outcome:
    and the complete Git status.
 2. Identify the project root and protect every existing tracked, staged,
    modified, and untracked path.
-3. Restate the visible outcome and write a short task brief.
+3. Restate the visible outcome and write a short task brief. Its checks are a
+   numbered list, and each check carries a stable id of the form `cN` — `c`
+   then the check's position — so a report can answer it and a later reader can
+   find it. The id carries no task number: renumbering a task rewrites its
+   heading, not its body, so a task-numbered id would survive pointing at the
+   old number.
 4. Work directly and serially: inspect, implement, check, repair, and rerun.
 5. Verify that the requested visible outcome actually holds, and inspect the
    real diff and final Git status.
@@ -236,7 +241,9 @@ The report states:
 - what actually changed, naming every file touched;
 - checks run and their real results, naming each check's exact command and
   where its output can be seen, so a later conversation — or the owner — can
-  re-run the decisive one;
+  re-run the decisive one, answering every id the brief declared, and naming
+  any check added during the work as an addition rather than renumbering the
+  brief's;
 - how to try it;
 - limitations or remaining human judgment; and
 - `Disposition: DONE` or `Disposition: STOPPED — [reason]`.
