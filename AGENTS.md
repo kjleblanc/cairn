@@ -76,8 +76,10 @@ inside each lane; these rules keep the lanes out of each other's way:
   worktree is not ready until its own dependency install and build have run
   in it.)
 - **A task number is claimed by committing the brief.** Before writing, list
-  `docs/ai-work/tasks/`: a number is taken if its brief file exists,
-  committed or not. Then check the working tree, `main`'s history, and every
+  `docs/ai-work/tasks/`: a number is taken if **any file there begins with
+  it** — a brief, a report, or any later record — committed or not. A
+  renumbered task can leave a report behind with no brief, and reusing that
+  number would collide a new task with a finished run's records. Then check the working tree, `main`'s history, and every
   lane branch for the lowest free number; write `NNN-brief.md` and commit it
   alone at once.
 - **The log merges itself.** `docs/ai-work/LOG.md` carries Git's union merge
