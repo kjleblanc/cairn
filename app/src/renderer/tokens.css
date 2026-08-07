@@ -180,9 +180,9 @@
      pond. The alphas are NOT chosen for looks — they are the values the
      measured-contrast check permits; see the Task 197 report. */
   --surface-feather: 36px;
-  --surface-alpha-lit: 52%;
-  --surface-alpha-body: 42%;
-  --surface-alpha-foot: 34%;
+  --surface-alpha-lit: 68%;
+  --surface-alpha-body: 60%;
+  --surface-alpha-foot: 52%;
   /* Project navigation and current-project context are furniture in this same
      world. Keep their materials global to the night garden because TownSquare
      also renders standalone in the visual lab, outside `.workspace-shell`. */

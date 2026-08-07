@@ -714,6 +714,21 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      hairline rule (narrow-v2.html:66,69). */
   --card: rgb(246 236 225 / 5%);
   --card-solid: rgb(246 236 225 / 7%);
+  /* Task 197 (widened scope, owner-approved after seeing the first render).
+     Tasks 188/191 gave the receipt and the checkpoint a 3% cream wash. That
+     was invisible against the old ~90% opaque paper, but the surface is now
+     translucent over dark water — so the SAME wash suddenly reads as a lighter
+     block with a hard fill boundary, and the inner cards became the slab the
+     outer surface had just stopped being.
+
+     The wash is not what identifies these cards: the 2px rule down their left
+     edge and their spacing are, which is what "flat ruled paper" already
+     meant. So the fill goes and the tint drops. The @supports fallback below
+     restores both, because with an opaque surface the original values are
+     right again — this is a relationship between the two, not a new opinion
+     about the cards. */
+  --inner-card-fill: transparent;
+  --inner-card-tint: rgb(163 221 208 / 5%);
   --card-ink: var(--lantern-ink);
   --card-muted: var(--lantern-soft);
   --line: rgb(246 236 225 / 13%);
@@ -787,6 +802,9 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
     --surface-alpha-body: 89%;
     --surface-alpha-foot: 87%;
     border: 1px solid rgb(246 236 225 / 9%);
+    /* Opaque paper again, so the original card wash is right again. */
+    --inner-card-fill: rgb(246 236 225 / 3%);
+    --inner-card-tint: rgb(163 221 208 / 7%);
   }
   .chat-column.chat-column-villager::after { mask-image: none; }
 }
@@ -876,10 +894,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .task-card {
   position: relative; flex-shrink: 0; overflow: visible; padding: 17px 18px 14px 21px;
   border: 0; border-radius: 5px 9px 7px 4px; box-shadow: none;
-  background-color: rgb(246 236 225 / 3%);
+  background-color: var(--inner-card-fill);
   background-image:
     var(--paper-grain),
-    linear-gradient(105deg, rgb(163 221 208 / 6%), transparent 54%);
+    linear-gradient(105deg, var(--inner-card-tint), transparent 54%);
   background-size: 160px 160px, auto;
   background-blend-mode: soft-light, normal;
 }
@@ -950,10 +968,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   position: relative; flex-shrink: 0; overflow: visible; min-width: 0;
   padding: 18px 18px 15px 21px; border: 0; border-radius: 5px 9px 7px 4px;
   box-shadow: none;
-  background-color: rgb(246 236 225 / 3%);
+  background-color: var(--inner-card-fill);
   background-image:
     var(--paper-grain),
-    linear-gradient(108deg, rgb(163 221 208 / 7%), transparent 58%);
+    linear-gradient(108deg, var(--inner-card-tint), transparent 58%);
   background-size: 160px 160px, auto;
   background-blend-mode: soft-light, normal;
 }
