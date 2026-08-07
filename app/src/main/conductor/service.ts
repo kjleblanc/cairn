@@ -27,6 +27,7 @@ import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
 import { isQuitDraining, runningDirs } from "../rungate.js";
 import { logError } from "../log.js";
 import { parseConnectionBaseUrl, parseConductorAssignment } from "../connections/schema.js";
+import { resolvePinnedSelection } from "../connections/resolve.js";
 import { createOpenAICompatibleTransport } from "./transports/openai-compatible.js";
 import {
   ConductorTransportError,
@@ -1121,6 +1122,20 @@ async function streamTurn(
   let completedTurn: CairnChatTurn | null = null;
   let proposalPreview = false;
   try {
+    // Task 206 keeps today's legacy bridge exact and dormant: no catalog I/O,
+    // assignment change, or fallback. The full resolver remains headless until
+    // later route-receipt/connection-flow tasks can supply complete authority.
+    const pinnedSelection = resolvePinnedSelection({
+      role: "conductor",
+      connectionId: conn.connectionId,
+      modelId: conn.model,
+      conductorTransportAvailable: true,
+      runtimeId: null,
+      catalog: null,
+      catalogSource: "legacy-pinned-bridge",
+    });
+    if (pinnedSelection.kind !== "resolved") throw new Error("CONDUCTOR_PINNED_SELECTION_INVALID");
+    const selectedModel = pinnedSelection.modelId;
     const historySnapshot = retainedHistory ?? readHistorySnapshot(dir, id);
     const latestOwnerEntry = [...historySnapshot.entries].reverse()
       .find((entry) => entry.turn.role === "owner" && entry.authenticatedOwner);
@@ -1129,7 +1144,7 @@ async function streamTurn(
     // history: it is a code-assembled connection fact (model id + host only,
     // both already visible to the provider), never the owner's words and
     // never a secret. Curated seats add nothing (`null`).
-    const seatNote = connectionNoteFor(conn.baseUrl, conn.model);
+    const seatNote = connectionNoteFor(conn.baseUrl, selectedModel);
     const messages: ConductorTransportMessage[] = [
       { role: "system", content: CONSTITUTION },
       { role: "system", content: assembleBriefing(dir, undefined, latestOwnerText) },
@@ -1177,7 +1192,7 @@ async function streamTurn(
     }
     const connection: ConductorTransportConnection = {
       baseUrl: conn.baseUrl,
-      model: conn.model,
+      model: selectedModel,
       apiKey: keystore.decryptedKey(conn),
     };
 
