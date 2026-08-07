@@ -20,6 +20,16 @@ Every correction is marked where it appears rather than quietly rewritten. The
 core — record the owner's verdict, resist forgery, keep `review` and
 `disposition` on separate axes — is unchanged; the review did not touch it.
 
+**Prerequisite added by Task 207.** The owner subsequently decided that Cairn
+must regain a critic, calibrated so minor issues cannot reject an otherwise
+successful task, and that the quality-intent/critic work must land before this
+design's Plan 2 begins. The decision-complete source is
+`docs/superpowers/specs/2026-08-07-cairn-quality-intent-and-critic-design.md`;
+its implementation plan is
+`docs/superpowers/plans/2026-08-07-cairn-quality-intent-and-critic-prerequisite.md`.
+The four plans in this document keep their numbers. An unnumbered
+**Prerequisite Q** now sits between completed Plan 1 and Plan 2.
+
 **Who decided what.** This spec marks its own sources using the three markings
 the showing-not-asking spec defines, because it would be absurd for a document
 about recording the owner's judgment to be vague about whose judgment it
@@ -74,7 +84,7 @@ through `webContents.capturePage`, and land outside the project at
 worker cannot author its own evidence (`app/src/main/evidence.ts:131,183`).
 "What's next" is built too: one conductor commentary turn chains after every
 posted card (`app/src/main/tasks.ts:452`) and its followups are granted to
-commentary turns only (`app/src/main/conductor/service.ts:966`), rendering as
+commentary turns only (`app/src/main/conductor/service.ts:1227-1229`), rendering as
 "Where we could go next" on the latest turn (`app/src/renderer/screens/Chat.tsx:1679`).
 
 **The responding half has no machinery at all.** No spec, plan, type, store, or
@@ -106,7 +116,7 @@ Two further facts set the stakes.
   Task 081 (`17318e5`, "the stone keeps its mechanism and loses its false claim
   to verification") recorded the owner's decision to keep the mechanism and
   label the claim as a claim, in the contract and in the app's own words; the
-  contract now says so at `AGENTS.md:169`. An earlier draft of this spec
+  contract's "Task records are memory" section now says so. An earlier draft of this spec
   presented that as a live contradiction. It is not one, and nothing here
   reopens it — see Decision 7.
 - **Cairn's own development ritual is already the thing being asked for,
@@ -132,9 +142,13 @@ Two further facts set the stakes.
   be authorable by the worker it judges or by the conductor that briefed it.
 - **Every risk boundary keeps its pause.** This spec moves none. It adds no
   capability to install, spend, send, delete, or publish.
-- **A review is advice.** `AGENTS.md:174` says a review "may suggest a new task,
-  and the completed record stands." Decision 2 holds this line rather than
-  softening it.
+- **A post-completion review is advice.** The "Task records are memory" section
+  of `AGENTS.md` says a review "may suggest a new task, and the completed record
+  stands." Decision 2 holds this line rather than softening it. Prerequisite Q's
+  critic is a different, task-scoped pre-seal inspection against a frozen Task
+  Spec. Required/optional/off is visible before dispatch; a model allegation
+  needs owner/native confirmation to block. It cannot reopen a completed record
+  or speak as the owner.
 
 ## Decision 1 — Cairn's own record first; the product second
 
@@ -161,9 +175,10 @@ placed beside a sealed one, and **no automated decision consumes it.** The
 conductor may read it as context under Decision 5's quote-only terms; reading
 is not consuming, and nothing branches on what it finds.
 
-This is consistent with `AGENTS.md:174` as written, and it has a second
-property worth naming: **the record shape is designed once and any power can be
-built on it later without redesign.** Because Decision 4 keeps the owner's axis
+This is consistent with the "Task records are memory" section of `AGENTS.md`,
+and it has a second property worth naming: **the record shape is designed once
+and any power can be built on it later without redesign.** Because Decision 4
+keeps the owner's axis
 separate from Cairn's and forbids the verdict path from writing `disposition`,
 a gate could later be added without touching the record — a claim checkable
 against this document rather than against anyone's product history. (An earlier
@@ -173,6 +188,13 @@ contestable on its face, so it is gone.)
 
 The cost is stated plainly rather than discovered: a queue the owner must visit,
 with nothing making them visit it. Decision 6 carries the two nudges that exist.
+
+**Task 207 clarification:** Decision 2 governs the authenticated owner's verdict
+designed here. A separately attributed critic assessment is not an owner
+verdict and cannot write or derive one. Prerequisite Q may use a strictly parsed,
+evidence-bound assessment while a task is still active, but only under the
+bounded policy in its own design. It may not alter or reopen a sealed task. No
+owner-verdict field is consumed by that policy.
 
 ## Decision 3 — The rubric is the brief's Checks, and the checks get stable ids
 
@@ -201,7 +223,7 @@ amendment, not app code alone.
 
 **The id is position-only — `c1` … `cM`, never `197.c1`.** Task 203's brief
 used the task-numbered form and it is wrong: the contract mandates renumbering
-when two lanes claim the same number (`AGENTS.md:93`), and `renumberTask`
+when two lanes claim the same number (`AGENTS.md`, "Working in lanes"), and `renumberTask`
 rewrites exactly one thing inside the files — the `# Task NNN` heading
 (`cli/src/flows/claim.ts:271`). Task-numbered ids would silently survive a
 renumber pointing at the old number, which is the opposite of stable. The task
@@ -212,9 +234,23 @@ Task 204's brief uses the corrected form.
 generates.** `briefText()` at `core/src/serial.ts:250` emits a worker-facing
 `## Checks` block from `contract.checks` on every dispatch, and it carries no
 ids. Wording the rule to cover it would make Cairn's own shipped runtime
-violate the contract on every run. Bringing the runtime into line is real work
-and belongs to Plan 2, where the queue needs it; the rule is scoped explicitly
-until then.
+violate the contract on every run. Bringing the runtime into line is real work.
+Task 207 moves that obligation from Plan 2 into Prerequisite Q because the
+critic needs the exact same `cN` promises before the verdict store can parse
+them. The rule remains scoped until Q lands; Plan 2 then consumes the proven
+shape rather than inventing it.
+
+**The Quality Plan is the source of the runtime rubric.** It is frozen before
+dispatch and preserves the existing `owner-stated`, `owner-unsure`, and
+`cairn-chosen` provenance. Every required criterion compiles to one existing
+`cN` backed by an owner-stated row or contract rule; owner-unsure/Cairn-chosen
+quality remains a separately visible `pN` until the owner adopts it in a new
+turn. Advisory polish cannot become a hidden gate. A named reference is
+untrusted, narrow evidence for declared
+dimensions, never wholesale intent. Candidate and reference states are
+snapshotted and hashed. An empty reference list is an honest and supported
+value; Cairn does not invent one merely to run a critic. The complete schema
+and blocking rules live in the Task 207 quality-intent design.
 
 Three things follow at no extra cost.
 
@@ -227,7 +263,7 @@ Three things follow at no extra cost.
 3. **The evidence pointer is already mandated.** The contract requires the
    report to name "each check's exact command and where its output can be seen,
    so a later conversation — or the owner — can re-run the decisive one"
-   (`CONTRACT-TEMPLATE.md:143`). The verdict scores against that rather than
+   (`CONTRACT-TEMPLATE.md:150-153`). The verdict scores against that rather than
    inventing a second evidence channel.
 
 **Every brief written before the amendment records `rubric: "none"`** and takes
@@ -236,11 +272,11 @@ a whole-job verdict. The criterion is *carries ids*, not *carries a heading* —
 and the other 122 have one in eleven wordings and no ids. The record says
 `"none"` rather than presenting an empty list as a completed scoring.
 
-**This belongs under Evidence levels.** The contract already defines Verified
-as "Core plus executable 'done when' checks the report cites"
-(`CONTRACT-TEMPLATE.md:183`). An owner verdict scoring those checks is what
-makes a project genuinely Verified rather than merely declaring itself so. The
-amendment lands there, not as a new concept.
+**This belongs under Evidence levels.** The contract's "Evidence levels"
+section defines Verified as "Core plus executable 'done when' checks the report
+cites." An owner verdict scoring those checks is what makes a project genuinely
+Verified rather than merely declaring itself so. The amendment lands there,
+not as a new concept.
 
 ## Decision 4 — The record: two artifacts, one authoritative
 
@@ -254,31 +290,41 @@ a marker, following `cardauth.ts` exactly: content may sit where a worker can
 reach it, but a digest recorded outside every project decides what counts, and
 every failure drops rather than trusts (`app/src/main/conductor/cardauth.ts:38`).
 
-```jsonc
+```json
 {
   "version": 1,
   "projectHash": "<sha256 of the canonical project root>",
   "task": 197,
   "runId": "<uuid>",
-  "disposition": "DONE",          // copied from the sealed record; never written here
-  "rubric": "checks",             // or "none"
+  "disposition": "DONE",
+  "rubric": "checks",
   "checks": [{
-    "id": "197.c4",
+    "id": "c4",
     "promise": "<brief text, verbatim>",
-    "answer": "<report text, verbatim>",   // null means promised and never answered
-    "score": "met" | "not-met" | "cant-tell",
-    "note": "..."                          // required unless met
+    "answer": "<report text, verbatim>",
+    "score": "met",
+    "note": null
   }],
-  "added": [{ "answer": "...", "score": "...", "note": "..." }],
-  "review": "unjudged" | "pass" | "revise" | "fail",
-  "note": "...",                  // whole-job note; required unless pass
-  "evidenceSeen": ["<sha256>"],   // the exact captures on screen at judgedAt
+  "added": [],
+  "review": "pass",
+  "note": null,
+  "evidenceSeen": ["<sha256>"],
+  "adviceSeen": ["<critic-assessment-sha256>"],
   "judgedAt": "<ISO8601>",
   "cairnVersion": "0.x.y"
 }
 ```
 
-Six properties carry the design.
+Allowed check scores are `met`, `not-met`, and `cant-tell`; allowed review
+states are `unjudged`, `pass`, `revise`, and `fail`. `answer: null` means a
+promised check was never answered. With `rubric: "none"`, `checks` must be empty
+and the owner makes only the whole-job judgment. Per-check and whole-job notes
+may remain null while an autosaved record is `unjudged`; a terminal `revise` or
+`fail` requires the whole-job note, and every terminal non-met/cant-tell check
+requires its own note. These are parser invariants, not comments left for the UI
+to interpret.
+
+Seven properties carry the design.
 
 - **`disposition` is copied and unwritable.** Cairn's verified outcome and the
   owner's judgment are separate axes, and the schema enforces the separation
@@ -293,7 +339,7 @@ Six properties carry the design.
   read at judge time.** The record must read standing alone, or the committed
   file is a page of identifiers. **The earlier justification for this was
   wrong:** it claimed the report "cannot move" because it is written `wx`
-  (`core/src/serial.ts:600`). `wx` only stops *Cairn* clobbering its own file,
+  (`core/src/serial.ts:600-607`). `wx` only stops *Cairn* clobbering its own file,
   it says nothing about anyone else, and it is not even unconditional — the
   code reads `flag: recovery?.overwriteReport ? "w" : "wx"`. The brief and
   report live in the project a worker can write to. So Cairn copies their text
@@ -304,6 +350,14 @@ Six properties carry the design.
 - **`evidenceSeen` pins the captures by hash.** Every PNG is already hashed.
   Recording which hashes were on screen means a later capture can never quietly
   become the thing the owner approved.
+- **`adviceSeen` pins advice without laundering it into evidence.** A critic
+  assessment hash records which attributed model advice was displayed. Main,
+  not renderer input, derives a deduplicated list of at most three from the authenticated
+  verdict session. Every digest must resolve through Cairn's marker and match the
+  same project, run, Task Spec, sealed candidate, and pre-seal phase; stale,
+  prior-round, cross-project, forged, duplicate, or not-rendered advice fails.
+  It does not copy a critic result into the owner's scores, prove the advice
+  true, or imply the owner agreed.
 - **A note is required to leave `unjudged` for anything but a clean pass — not
   to save.** The value of this record a year from now sits almost entirely in
   the notes, but requiring one on every write would forbid the partial reviews
@@ -325,8 +379,9 @@ exactly why committing it is safe.**
 draft put it there and it was the worst error in this design.
 `changedTaskPaths` (`core/src/serial.ts:758`) returns null for any path under
 `docs/ai-work/tasks/` that is not in the run's `ownedRecords`, and that set is
-exactly `[brief, report, LOG]` (`:1027-1031`). `AGENTS.md:105-107` says it in
-words: "An automation is not a lane… it never touches task paths."
+exactly `[brief, report, LOG]` (`:1027-1031`). The "Working in lanes" section of
+`AGENTS.md` says it in words: "An automation is not a lane… it never touches
+task paths."
 
 **A gate matters more than the path.** `commitExactPaths` (`:794-816`) requires
 the *whole* changed set to equal the product paths plus the owned records, and
@@ -344,8 +399,9 @@ Therefore:
   conversation surface gates the same way at
   `app/src/main/conductor/service.ts:203,794`). While a run is active the copy is
   **pending**, and the record says so. Cairn writes it at the next safe moment.
-- **The contract's isolation condition applies unchanged.** `AGENTS.md:45` and
-  `:301` say to commit only when Git isolation is clear and to skip otherwise;
+- **The contract's isolation condition applies unchanged.** The "whole
+  workflow" and "Git protection" sections of `AGENTS.md` say to commit only
+  when Git isolation is clear and to skip otherwise;
   a skipped copy stays pending rather than being forced.
 - **A verdict can never seal a run.** Asserted by a test that saves a verdict
   during a live run and proves the run still reaches its own honest outcome.
@@ -425,7 +481,7 @@ instead of merely implausible.
 - **Surfacing gets its own quiet surface, and must not join `needsYou`.**
   `needsYou` is a boolean OR of three *blocking* decisions — a proposal to
   decide, a dispatch to confirm, and the publication approval — published as
-  one dot (`app/src/renderer/screens/Chat.tsx:1545`, Task 155). Feeding a
+  one dot (`app/src/renderer/screens/Chat.tsx:1552-1562`, Task 155). Feeding a
   standing, non-blocking count into it would pin it permanently true and
   **destroy the push-approval attention signal**, which is the one signal in
   the app guarding a real risk boundary. An earlier draft proposed exactly
@@ -463,17 +519,27 @@ fresh decision on its own evidence — not a defect this design is fixing.
 
 ## Order of work
 
-**Cairn chose.** Four plans, not one. Bundling them would put the trust
-properties, a contract change, and a new screen under a single review, and the
-one person who has to do that reviewing said plainly that they do not know this
-material well. Each step below is independently shippable and independently
-rejectable.
+**Cairn chose.** Four numbered plans plus one unnumbered prerequisite, not one
+bundle. Bundling them would put the trust properties, a contract change, a
+critic, and a new screen under a single review, and the one person who has to do
+that reviewing said plainly that they do not know this material well. Each step
+below is independently shippable and independently rejectable.
 
 1. **The contract amendment (Decision 3's check ids).** First, because every
    brief written after it carries ids and the later plans parse them —
    retrofitting would mean rewriting briefs that had already shipped. It is
    also the only step with no app code, so it is the cheapest to review and the
-   cheapest to reverse.
+   cheapest to reverse. **Completed by Task 205.**
+
+**Prerequisite Q — Quality intent and the bounded critic.** After Plan 1 and
+before Plan 2, execute
+`docs/superpowers/plans/2026-08-07-cairn-quality-intent-and-critic-prerequisite.md`.
+It freezes the Quality Plan/critic schemas, brings runtime briefs and reports
+  onto `cN`, proves the critic's tool-free packet custody and finite policy, and
+  runs the separately approved calibration. Plan 2 may not be written or started
+  until Q10 is DONE. This prerequisite never renumbers Plans 2–4 and never
+changes an already sealed task.
+
 2. **The verdict record and its custody (Decisions 4, 5's write half, and 7).**
    Second: types, the marker store, the IPC surface, and the committed copy.
    No user interface. This is where every trust property lives — a worker
@@ -548,6 +614,20 @@ if they fail, not bugs.
   paraphrase of a verdict as a failure, alongside the existing scenarios and
   under the same `constitution` column. Given S3's history this is the only
   reason to believe the rule holds.
+- **Critic advice cannot author the owner's judgment.** Feed a valid
+  `CriticAssessmentV1` through every renderer/conductor/project-file path and
+  assert that no verdict, owner score, note, queue state, disposition, `moved`,
+  stone, dispatch, or next task is created or prefilled.
+- **`adviceSeen` means actually seen for this candidate.** Cross-project,
+  prior-round, stale-candidate, forged, duplicate, and not-rendered assessment
+  hashes are rejected; main derives the exact bounded list shown in the
+  authenticated verdict session.
+- **A negative assessment after seal changes nothing.** A sealed DONE followed
+  by critic-shaped advice retains the same disposition, commit, report/log,
+  `moved` claim, stone, owner verdict, and queue state.
+- **Quality and critic custody were proven before this plan starts.** Plan 2's
+  tests consume the preregistered calibration result and frozen schema versions;
+  they do not rerun, reinterpret, or weaken Prerequisite Q.
 - Existing suites stay green: `npm.cmd run typecheck`, `test:unit`,
   `build:vite`, `build:lab`, and the Playwright cases.
 - **The owner's judgment is required for DONE on the implementing task**, as
@@ -561,10 +641,14 @@ if they fail, not bugs.
   is also what per-check images and motion clips depend on.
 - **Video.** Nothing in the stack records, encodes, stores, or plays it. It
   arrives with phase two or not at all.
-- **A revise loop.** Turning a `fail` or `revise` into a pre-filled next brief
-  is the obvious next capability and was declined under Decision 2. The record
-  carries what such a loop would need; nothing consumes it yet.
-- **Gating.** Declined under Decision 2, and the schema keeps it possible.
+- **A post-verdict revise loop.** Turning an owner's `fail` or `revise` into a
+  pre-filled next brief remains declined under Decision 2. Prerequisite Q's one
+  separately approved repair occurs before seal against an unchanged Task Spec;
+  it does not consume an owner verdict.
+- **Owner-verdict gating.** Still declined under Decision 2. The pre-seal critic
+  is task-scoped: only a Task Spec with owner-stated/contract basis may require
+  it, optional/off tasks can seal without it, and it cannot operate on a
+  completed record. A required task criterion is not inferred from a verdict.
 - **Resolving the `moved` contradiction.** Decision 7.
 - **Backfilling the seventeen verdicts that exist as prose in old reports.**
   Extracting them means an agent interpreting the owner's words and writing
@@ -574,10 +658,11 @@ if they fail, not bugs.
 
 ## Open for the owner
 
-1. **The contract amendment is real work outside the app.** Stable check ids
-   touch `CONTRACT-TEMPLATE.md`, `AGENTS.md`, `cairn claim`, and every future
-   brief. It should be its own task, landing before the app work that depends
-   on it.
+1. **The contract amendment is complete; its runtime half is not.** Task 205
+   landed stable ids in `CONTRACT-TEMPLATE.md`, `AGENTS.md`, `cairn claim`, and
+   every future lane-authored brief. Prerequisite Q now owns carrying those ids
+   through Cairn's generated runtime brief, worker evidence, and report before
+   Plan 2 consumes them.
 2. **A new eval scenario costs a paid run.** Scoring quote-only means running
    the eval, which needs the owner's connected provider and their explicit go.
    The last full run cost $0.0283 across ten scenarios.
@@ -588,3 +673,9 @@ if they fail, not bugs.
    one most likely to be rounded up to a pass by a form that omits it. If it
    proves to be where every review goes to die, that is a finding about the
    checks being written, not about this design.
+5. **Critic calibration is a separate paid/data-bearing boundary.** Before its
+   first live call, Cairn must name the exact provider/resolved model, synthetic
+   fixture payloads and hashes, at-most-16 one-fixture calls, time/output caps,
+   and honest billing/quota basis. If the owner declines or the held-out bar
+   fails, Q10 stops and Plan 2 remains unstarted; no existing task or verdict
+   changes.
