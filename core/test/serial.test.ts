@@ -37,8 +37,27 @@ import {
   taskRequestSha256,
   type TaskIntent,
 } from "../src/intent.js";
-import { createOfflineDemoAdapter, type AdapterTaskContract, type TaskAdapter } from "../src/routing.js";
-import { runSerialTask as runSerialTaskWithIntent, type SerialRunOptions } from "../src/serial.js";
+import {
+  CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  createOfflineDemoAdapter,
+  type AdapterTaskContract,
+  type TaskAdapter,
+} from "../src/routing.js";
+import {
+  bindInitialEvidencePlan,
+  bindTaskSpec,
+  EVIDENCE_PLAN_CANDIDATE_VERSION,
+  parseQualityPlanCandidate,
+  QUALITY_PLAN_VERSION,
+} from "../src/quality.js";
+import {
+  composeSerialTaskSpecAuthority,
+  previewSerialRoute,
+  previewTaskSpecSerialRoute,
+  runSerialTask as runSerialTaskWithIntent,
+  type SerialRunOptions,
+} from "../src/serial.js";
+import { classifyTaskSpecRunRecord } from "../src/records.js";
 import { projectStatus } from "../src/steps.js";
 
 const LOG_HEADER =
@@ -186,6 +205,571 @@ function validResult(contract: Parameters<TaskAdapter["run"]>[0]) {
 function claimsFence(claims: Record<string, unknown>): string {
   return ["Done.", "", "```cairn-claims", JSON.stringify(claims), "```"].join("\n");
 }
+
+function qualityInputs(criticMode: "off" | "optional" | "required" = "off") {
+  const intent = bindTaskIntent({
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Build the local result.", ownerQuote: "Build the local result." },
+    requirements: [{
+      source: "owner-unsure",
+      text: "Maybe prefer a polished result.",
+      ownerQuote: "Maybe prefer a polished result.",
+    }],
+    context: [],
+  }, [{
+    kind: "conversation",
+    inputId: "30000000-0000-4000-8000-000000000055",
+    text: "Build the local result. Maybe prefer a polished result.",
+  }]);
+  assert.ok(intent);
+  const candidate = parseQualityPlanCandidate({
+    version: QUALITY_PLAN_VERSION,
+    target: { kind: "local-task", basis: [{ kind: "intent-outcome" }] },
+    supportedPath: { statement: "Build the local result.", basis: [{ kind: "intent-outcome" }] },
+    critic: criticMode === "required" ? {
+      mode: "required",
+      reason: "The frozen quality plan requires critic review.",
+      basis: [{ kind: "intent-outcome" }],
+    } : {
+      mode: criticMode,
+      reason: criticMode === "optional" ? "Critic review could help but is not required." : "No critic was requested.",
+      basis: [{
+        kind: "cairn-default",
+        reason: criticMode === "optional" ? "no-useful-inspection" : "not-requested",
+      }],
+    },
+    candidateStates: [{
+      id: "candidate-main",
+      route: "/main",
+      viewport: { width: 1280, height: 720 },
+      inputFixtureId: "fixture-input",
+      dataFixtureId: "fixture-data",
+      versionOrTime: "v1",
+      locale: "en-US",
+      accessibilityMode: "default",
+    }],
+    acceptanceChecks: [{
+      id: "c1",
+      promise: "Build the local result.",
+      kind: "non-regression",
+      judge: "cairn",
+      basis: [{ kind: "intent-outcome" }],
+      failureCondition: {
+        id: "failure-c1",
+        statement: "The local result is absent.",
+        allowedArtifactIds: ["artifact-output"],
+      },
+      evidenceStandard: {
+        mode: "adapter-attestation",
+        proves: "The approved local check completed.",
+        precondition: null,
+      },
+      comparison: null,
+    }],
+    qualityPreferences: [{
+      id: "p1",
+      dimension: "polish",
+      desiredDirection: "Prefer a polished result when it changes no required behavior.",
+      basis: [{ kind: "intent-requirement", index: 0 }],
+      comparison: null,
+    }],
+    references: [],
+    unknowns: [],
+    coverage: {
+      outcomeCriterionIds: ["c1"],
+      requirementCriteria: [],
+      supportedPathCriterionId: "c1",
+    },
+  });
+  assert.ok(candidate);
+  const taskSpec = bindTaskSpec(intent, candidate);
+  assert.ok(taskSpec);
+  const evidencePlan = bindInitialEvidencePlan(taskSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [{
+      criterionId: "c1",
+      kind: "adapter-command-attestation",
+      command: {
+        executablePath: "node",
+        executableSha256: "e".repeat(64),
+        arguments: [{ kind: "literal", value: "--test" }],
+        fixtureBindings: [],
+        cwdRelative: "core",
+        expectedExitCodes: [0],
+        timeoutMs: 60_000,
+        resultParserMode: "node-test-tap",
+        assertion: { id: "local-check-passes", expectedResult: "zero failing tests" },
+      },
+      artifactIds: ["artifact-output"],
+    }],
+  });
+  assert.ok(evidencePlan);
+  return { intent, taskSpec, evidencePlan };
+}
+
+function qualityFixture() {
+  const inputs = qualityInputs();
+  const authority = composeSerialTaskSpecAuthority(inputs.taskSpec, inputs.evidencePlan);
+  assert.ok(authority);
+  return { ...inputs, authority };
+}
+
+function unsupportedQualityFixture(mode: "zero-command" | "mixed") {
+  const requestedOutcome = mode === "zero-command"
+    ? "Build a result that needs packet evidence."
+    : "Build a result that needs command and packet evidence.";
+  const intent = directRequest(requestedOutcome);
+  const commandCriterion = {
+    id: "c1",
+    promise: requestedOutcome,
+    kind: "non-regression",
+    judge: "cairn",
+    basis: [{ kind: "intent-outcome" }],
+    failureCondition: {
+      id: "failure-c1",
+      statement: "The required result is absent.",
+      allowedArtifactIds: ["artifact-command"],
+    },
+    evidenceStandard: {
+      mode: mode === "zero-command" ? "artifact-inspection" : "adapter-attestation",
+      proves: mode === "zero-command" ? "The packet contains the result." : "The approved command completed.",
+      precondition: null,
+    },
+    comparison: null,
+  };
+  const packetCriterion = {
+    id: mode === "zero-command" ? "c1" : "c2",
+    promise: mode === "zero-command" ? requestedOutcome : "The packet contains the required artifact.",
+    kind: mode === "zero-command" ? "non-regression" : "acceptance",
+    judge: "cairn",
+    basis: [{ kind: "intent-outcome" }],
+    failureCondition: {
+      id: mode === "zero-command" ? "failure-c1" : "failure-c2",
+      statement: "The required packet artifact is absent.",
+      allowedArtifactIds: ["artifact-packet"],
+    },
+    evidenceStandard: {
+      mode: "artifact-inspection",
+      proves: "The packet contains the required artifact.",
+      precondition: null,
+    },
+    comparison: null,
+  };
+  const acceptanceChecks = mode === "zero-command" ? [packetCriterion] : [commandCriterion, packetCriterion];
+  const candidate = parseQualityPlanCandidate({
+    version: QUALITY_PLAN_VERSION,
+    target: { kind: "local-task", basis: [{ kind: "intent-outcome" }] },
+    supportedPath: { statement: requestedOutcome, basis: [{ kind: "intent-outcome" }] },
+    critic: {
+      mode: "off",
+      reason: "No critic was requested.",
+      basis: [{ kind: "cairn-default", reason: "not-requested" }],
+    },
+    candidateStates: [{
+      id: "candidate-main",
+      route: "/main",
+      viewport: { width: 1280, height: 720 },
+      inputFixtureId: "fixture-input",
+      dataFixtureId: "fixture-data",
+      versionOrTime: "v1",
+      locale: "en-US",
+      accessibilityMode: "default",
+    }],
+    acceptanceChecks,
+    qualityPreferences: [],
+    references: [],
+    unknowns: [],
+    coverage: {
+      outcomeCriterionIds: mode === "zero-command" ? ["c1"] : ["c1", "c2"],
+      requirementCriteria: [],
+      supportedPathCriterionId: "c1",
+    },
+  });
+  assert.ok(candidate);
+  const taskSpec = bindTaskSpec(intent, candidate);
+  assert.ok(taskSpec);
+  const commandProcedure = {
+    criterionId: "c1",
+    kind: "adapter-command-attestation",
+    command: {
+      executablePath: "node",
+      executableSha256: "e".repeat(64),
+      arguments: [{ kind: "literal", value: "--test" }],
+      fixtureBindings: [],
+      cwdRelative: "core",
+      expectedExitCodes: [0],
+      timeoutMs: 60_000,
+      resultParserMode: "node-test-tap",
+      assertion: { id: "local-check-passes", expectedResult: "zero failing tests" },
+    },
+    artifactIds: ["artifact-command"],
+  };
+  const packetProcedure = {
+    criterionId: mode === "zero-command" ? "c1" : "c2",
+    kind: "packet-artifact",
+    command: null,
+    artifactIds: ["artifact-packet"],
+  };
+  const evidencePlan = bindInitialEvidencePlan(taskSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: mode === "zero-command" ? [packetProcedure] : [commandProcedure, packetProcedure],
+  });
+  assert.ok(evidencePlan);
+  return { intent, taskSpec, evidencePlan };
+}
+
+function assertLegacyComposedOmitsTaskSpecRunRecord(composed: object): void {
+  assert.equal(Object.hasOwn(composed, "taskSpecRunRecord"), false);
+  assert.equal(
+    JSON.stringify(composed).includes('"taskSpecRunRecord":'),
+    false,
+    "legacy composed JSON bytes must not acquire a staged v4 field",
+  );
+}
+
+function taskSpecClaimsFence(
+  taskSpecSha256: string,
+  disposition: "DONE" | "STOPPED" = "DONE",
+  overrides: Record<string, unknown> = {},
+): string {
+  return claimsFence({
+    version: "cairn-task-spec-worker-claims/v1",
+    taskSpecSha256,
+    disposition,
+    summary: "The worker reports the local result complete.",
+    changes: [],
+    criteria: [{ id: "c1", result: "The worker says the required promise holds." }],
+    preferences: [{ id: "p1", result: "The worker says polish was considered." }],
+    howToTry: "Inspect the local result.",
+    limitations: "The adapter event proves execution and exit only.",
+    milestone: "NO",
+    ...overrides,
+  });
+}
+
+function qualityResult(
+  contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+  assert.ok(commandSha256);
+  return {
+    kind: "worker-result/v3",
+    taskNumber: contract.taskNumber,
+    requestSha256: contract.requestSha256,
+    taskSpecSha256: contract.taskSpecSha256,
+    evidencePlanSha256: contract.evidencePlanSha256,
+    status: "completed",
+    claimsText: taskSpecClaimsFence(contract.taskSpecSha256),
+    evidence: { outputTokens: 12 },
+    processEvents: {
+      representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+      complete: true,
+      events: [{ sequence: 0, commandSha256, exitCode: 0 }],
+    },
+    ...overrides,
+  };
+}
+
+function qualityAdapter(
+  resultOverride?: (contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>) => unknown,
+): TaskAdapter {
+  return {
+    descriptor: {
+      id: "quality-fake",
+      label: "Quality fake",
+      provider: "local-test",
+      model: "deterministic",
+      connected: true,
+      capabilities: ["serial-task"],
+      priority: 100,
+    },
+    qualitySupport: { commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION },
+    async run(contract) {
+      assert.equal(contract.version, "cairn-serial-task/v4");
+      if (contract.version !== "cairn-serial-task/v4") throw new Error("expected v4");
+      if (resultOverride) return resultOverride(contract) as never;
+      return qualityResult(contract) as never;
+    },
+  };
+}
+
+test("Task-Spec serial authority is branded and canonical event capability is opt-in", () => {
+  const { intent, taskSpec, evidencePlan, authority } = qualityFixture();
+  assert.equal(composeSerialTaskSpecAuthority(structuredClone(taskSpec), evidencePlan), null);
+  assert.equal(composeSerialTaskSpecAuthority(taskSpec, structuredClone(evidencePlan)), null);
+  assert.throws(
+    () => previewTaskSpecSerialRoute(intent, structuredClone(authority), [qualityAdapter()]),
+    /INVALID_TASK_SPEC_AUTHORITY/,
+  );
+
+  const legacy = qualityAdapter();
+  delete legacy.qualitySupport;
+  legacy.descriptor = { ...legacy.descriptor, id: "legacy-fake", priority: 10 };
+  assert.equal(previewSerialRoute(intent, [legacy]).status, "ready", "legacy routing stays unchanged");
+  assert.equal(previewTaskSpecSerialRoute(intent, authority, [legacy]).status, "connection-required");
+  assert.equal(previewTaskSpecSerialRoute(intent, authority, [legacy, qualityAdapter()]).status, "ready");
+});
+
+test("Q4 authority rejects a required critic before worker spawn while optional remains eligible", async () => {
+  const optional = qualityInputs("optional");
+  const optionalAuthority = composeSerialTaskSpecAuthority(optional.taskSpec, optional.evidencePlan);
+  assert.ok(optionalAuthority);
+  assert.equal(previewTaskSpecSerialRoute(optional.intent, optionalAuthority, [qualityAdapter()]).status, "ready");
+
+  const required = qualityInputs("required");
+  const rejectedAuthority = composeSerialTaskSpecAuthority(required.taskSpec, required.evidencePlan);
+  assert.equal(rejectedAuthority, null);
+  let workerCalls = 0;
+  const shouldNotRun: TaskAdapter = {
+    descriptor: {
+      id: "required-critic-fake",
+      label: "Required critic fake",
+      provider: "local-test",
+      model: "deterministic",
+      connected: true,
+      capabilities: ["serial-task"],
+      priority: 100,
+    },
+    qualitySupport: { commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION },
+    async run(contract) {
+      workerCalls += 1;
+      return validResult(contract);
+    },
+  };
+  const root = project();
+  await assert.rejects(
+    () => runSerialTaskWithIntent(root, required.intent, {
+      adapters: [shouldNotRun],
+      taskSpecAuthority: rejectedAuthority as never,
+    }),
+    /INVALID_TASK_SPEC_AUTHORITY/,
+  );
+  assert.equal(workerCalls, 0);
+  assert.deepEqual(requireTaskNames(root), []);
+});
+
+test("Q4 authority rejects zero-command and mixed non-command plans before a worker can claim DONE", async (t) => {
+  for (const mode of ["zero-command", "mixed"] as const) {
+    await t.test(mode, async () => {
+      const { intent, taskSpec, evidencePlan } = unsupportedQualityFixture(mode);
+      const rejectedAuthority = composeSerialTaskSpecAuthority(taskSpec, evidencePlan);
+      assert.equal(rejectedAuthority, null);
+
+      let workerCalls = 0;
+      const shouldNotRun: TaskAdapter = {
+        descriptor: {
+          id: `unsupported-${mode}`,
+          label: "Unsupported quality fake",
+          provider: "local-test",
+          model: "deterministic",
+          connected: true,
+          capabilities: ["serial-task"],
+          priority: 100,
+        },
+        qualitySupport: { commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION },
+        async run(contract) {
+          workerCalls += 1;
+          return validResult(contract);
+        },
+      };
+      const root = project();
+      await assert.rejects(
+        () => runSerialTaskWithIntent(root, intent, {
+          adapters: [shouldNotRun],
+          taskSpecAuthority: rejectedAuthority as never,
+        }),
+        /INVALID_TASK_SPEC_AUTHORITY/,
+      );
+      assert.equal(workerCalls, 0, "unsupported evidence never reaches process spawn");
+      assert.deepEqual(requireTaskNames(root), [], "no DONE or STOPPED task record was authored");
+    });
+  }
+});
+
+test("the staged v4 run keeps Task Spec, claims, adapter events, and envelope result separate", async () => {
+  const root = project();
+  const { intent, authority } = qualityFixture();
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [qualityAdapter()],
+    taskSpecAuthority: authority,
+  });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(Object.hasOwn(result.composed, "taskSpecRunRecord"), true);
+  assert.match(JSON.stringify(result.composed), /"taskSpecRunRecord":\{/);
+  const record = result.composed.taskSpecRunRecord;
+  assert.ok(record);
+  assert.equal(record.taskSpecSha256, authority.taskSpecSha256);
+  assert.equal(record.evidencePlanSha256, authority.evidencePlanSha256);
+  assert.deepEqual(record.workerClaims?.criteria.map((claim) => claim.id), ["c1"]);
+  assert.deepEqual(record.workerClaims?.preferences.map((claim) => claim.id), ["p1"]);
+  assert.deepEqual(record.adapterAttestations.map((attestation) => attestation.criterionId), ["c1"]);
+  assert.equal(record.adapterAttestations[0].exitCode, 0);
+  assert.equal(record.envelopeResult.disposition, "DONE");
+  assert.equal(classifyTaskSpecRunRecord(record).kind, "task-spec-bound");
+  assert.equal(classifyTaskSpecRunRecord(structuredClone(record)).kind, "invalid");
+  assert.equal(classifyTaskSpecRunRecord(record).criticReady, false);
+
+  const brief = readFileSync(result.briefPath, "utf8");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(brief, /### Required promises[\s\S]*- c1: Build the local result\./);
+  assert.match(brief, /### Advisory preferences — not DONE gates[\s\S]*- p1: polish/);
+  assert.doesNotMatch(brief, /## Checks\n\n- c1/);
+  assert.match(report, /Task Spec evidence — separate from claims and envelope facts/);
+  assert.match(report, /proves command identity and exit only/);
+  assert.match(report, /worker's Task-Spec-bound account \(claims, not verified by Cairn\)/);
+  assert.match(report, /Envelope result — Cairn's separate terminal fact/);
+});
+
+test("v4 refuses substituted identities and unavailable or forged process-event custody", async (t) => {
+  const cases: readonly Readonly<{
+    name: string;
+    expectedReason: string;
+    result: (contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>) => unknown;
+  }>[] = [
+    {
+      name: "legacy v2 result",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => ({
+        kind: "worker-result/v2",
+        taskNumber: contract.taskNumber,
+        requestSha256: contract.requestSha256,
+        status: "completed",
+        claimsText: null,
+        evidence: {},
+      }),
+    },
+    {
+      name: "substituted Task Spec hash",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => qualityResult(contract, { taskSpecSha256: "f".repeat(64) }),
+    },
+    {
+      name: "substituted Evidence Plan hash",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => qualityResult(contract, { evidencePlanSha256: "f".repeat(64) }),
+    },
+    {
+      name: "only an unrelated successful command",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => qualityResult(contract, {
+        processEvents: {
+          representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+          complete: true,
+          events: [{ sequence: 0, commandSha256: "a".repeat(64), exitCode: 0 }],
+        },
+      }),
+    },
+    {
+      name: "planned command plus an unrelated successful command",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [
+              { sequence: 0, commandSha256, exitCode: 0 },
+              { sequence: 1, commandSha256: "a".repeat(64), exitCode: 0 },
+            ],
+          },
+        });
+      },
+    },
+    {
+      name: "duplicate command events",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [
+              { sequence: 0, commandSha256, exitCode: 0 },
+              { sequence: 1, commandSha256, exitCode: 0 },
+            ],
+          },
+        });
+      },
+    },
+    {
+      name: "incomplete event stream",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const base = qualityResult(contract);
+        const processEvents = base.processEvents as Record<string, unknown>;
+        return { ...base, processEvents: { ...processEvents, complete: false } };
+      },
+    },
+    {
+      name: "record-unsafe Task-Spec claims",
+      expectedReason: "WORKER_CLAIMS_MISSING",
+      result: (contract) => qualityResult(contract, {
+        claimsText: taskSpecClaimsFence(contract.taskSpecSha256, "DONE", { summary: " \t " }),
+      }),
+    },
+    {
+      name: "event tries to choose criterion authority",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [{ sequence: 0, commandSha256, exitCode: 0, criterionId: "c1" }],
+          },
+        });
+      },
+    },
+    {
+      name: "unexpected planned exit",
+      expectedReason: "MODEL_RESULT_NOT_VERIFIED",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [{ sequence: 0, commandSha256, exitCode: 1 }],
+          },
+        });
+      },
+    },
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const root = project();
+      const { intent, authority } = qualityFixture();
+      const result = await runSerialTaskWithIntent(root, intent, {
+        adapters: [qualityAdapter(item.result)],
+        taskSpecAuthority: authority,
+      });
+      assert.equal(result.status, "stopped");
+      if (result.status !== "stopped") return;
+      assert.equal(result.reason, item.expectedReason);
+      assert.equal(result.composed.taskSpecRunRecord?.taskSpecSha256, authority.taskSpecSha256);
+      assert.equal(result.composed.taskSpecRunRecord?.envelopeResult.disposition, "STOPPED");
+      if (item.name === "unexpected planned exit" || item.name === "record-unsafe Task-Spec claims") {
+        assert.equal(
+          result.composed.taskSpecRunRecord?.adapterAttestations[0]?.exitCode,
+          item.name === "unexpected planned exit" ? 1 : 0,
+          "valid process custody remains separate from rejected worker claims",
+        );
+      } else {
+        assert.deepEqual(result.composed.taskSpecRunRecord?.adapterAttestations, []);
+      }
+    });
+  }
+});
 
 test("normal mode stops at connection-required without writing records", async () => {
   const root = project();
@@ -1552,6 +2136,7 @@ test("one frozen attributed intent reaches the v3 contract, brief, and composed 
   assert.match(brief, /> Word counts: 74, 477, 256/);
   assert.match(brief, /Context kept with the task — not a requirement/);
   if (result.status === "done") {
+    assertLegacyComposedOmitsTaskSpecRunRecord(result.composed);
     assert.deepEqual(result.composed.acceptedRequest.requirements, [{
       source: "owner-stated", text: "Use these exact word counts", ownerText: "Word counts: 74, 477, 256",
     }]);
@@ -1659,6 +2244,7 @@ test("a verified DONE carries the Git-derived composed record for the result car
   assert.equal(result.composed.route.model, CODEX_EXEC_MODEL);
   assert.match(result.composed.evidenceSummary ?? "", /^Bounded worker evidence: /);
   assert.equal(result.composed.processFailure, null);
+  assertLegacyComposedOmitsTaskSpecRunRecord(result.composed);
   // The composed value is the very input the report was rendered from, so the
   // card and the record cannot tell two different stories about one run.
   assert.equal(result.reportText, readFileSync(result.reportPath, "utf8"));

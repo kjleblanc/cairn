@@ -442,6 +442,65 @@ export interface TaskBlock {
   details: string;
 }
 
+export const TASK_SPEC_RESULT_PROJECTION_VERSION = "cairn-task-spec-result-projection/v1" as const;
+
+/**
+ * Durable, data-only projection of Core's branded Task-Spec run record.
+ *
+ * The projection deliberately keeps four speakers/fact classes apart:
+ * required promises and advisory preferences come from the frozen Task Spec;
+ * adapter attestations carry command-hash/exit custody only; `workerClaims`
+ * remains the worker's unverified account; and `envelopeResult` is Main's
+ * separately verified terminal fact. Q4 has no critic/candidate custody, so
+ * `criticReady` is fixed false and no critic/verdict field exists.
+ */
+export interface TaskSpecResultProjectionV1 {
+  version: typeof TASK_SPEC_RESULT_PROJECTION_VERSION;
+  requestSha256: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  requiredPromises: Array<{ id: `c${number}`; promise: string }>;
+  /** Advisory guidance only; these rows never gate DONE. */
+  advisoryPreferences: Array<{
+    id: `p${number}`;
+    dimension: string;
+    desiredDirection: string;
+  }>;
+  /** Main-derived command identity/exit facts; never CriterionResultV1. */
+  adapterAttestations: Array<{
+    version: "cairn-adapter-command-attestation/v1";
+    taskSpecSha256: string;
+    evidencePlanSha256: string;
+    criterionId: `c${number}`;
+    sequence: number;
+    commandSha256: string;
+    exitCode: number;
+  }>;
+  /** Worker assertions only, even when the hash and every id match. */
+  workerClaims: {
+    version: "cairn-task-spec-worker-claims/v1";
+    taskSpecSha256: string;
+    disposition: "DONE" | "STOPPED";
+    summary: string;
+    changes: string[];
+    criteria: Array<{ id: `c${number}`; result: string }>;
+    preferences: Array<{ id: `p${number}`; result: string }>;
+    howToTry: string;
+    limitations: string;
+    milestone: "YES" | "NO" | "UNCLEAR";
+  } | null;
+  /** Main's terminal envelope fact, separate from worker claims and events. */
+  envelopeResult: {
+    version: "cairn-envelope-result/v1";
+    taskNumber: number;
+    requestSha256: string;
+    taskSpecSha256: string;
+    disposition: "DONE" | "STOPPED";
+    stopReason: string | null;
+  };
+  criticReady: false;
+}
+
 /**
  * The envelope's own account of one terminal run, built deterministically from
  * the structured record input Cairn composed its report from — never from the
@@ -504,6 +563,11 @@ export interface ResultCard {
    * path, never image data, and never included in conductor context.
    */
   evidenceRunId?: string | null;
+  /**
+   * Present only for the staged Task-Spec-bound v4 path. Absence keeps every
+   * legacy/live empty-registry card byte and meaning unchanged.
+   */
+  taskSpecResult?: TaskSpecResultProjectionV1;
 }
 
 /** The two turns owner and Cairn take in the conversation itself. */

@@ -10,6 +10,38 @@ export interface WorkerClaims {
   milestone: "YES" | "NO" | "UNCLEAR";
 }
 
+export const TASK_SPEC_WORKER_CLAIMS_VERSION = "cairn-task-spec-worker-claims/v1" as const;
+
+export interface TaskSpecWorkerCriterionClaim {
+  id: `c${number}`;
+  result: string;
+}
+
+export interface TaskSpecWorkerPreferenceClaim {
+  id: `p${number}`;
+  result: string;
+}
+
+/** Worker-authored assertions only. None of these fields carries judge/source authority. */
+export interface TaskSpecWorkerClaims {
+  version: typeof TASK_SPEC_WORKER_CLAIMS_VERSION;
+  taskSpecSha256: string;
+  disposition: "DONE" | "STOPPED";
+  summary: string;
+  changes: readonly string[];
+  criteria: readonly TaskSpecWorkerCriterionClaim[];
+  preferences: readonly TaskSpecWorkerPreferenceClaim[];
+  howToTry: string;
+  limitations: string;
+  milestone: "YES" | "NO" | "UNCLEAR";
+}
+
+export interface TaskSpecWorkerClaimsExpectation {
+  taskSpecSha256: string;
+  criterionIds: readonly `c${number}`[];
+  preferenceIds: readonly `p${number}`[];
+}
+
 const TOTAL_CAP = 262_144;
 const SUMMARY_CAP = 300;
 const CHANGE_CAP = 500;
@@ -21,6 +53,16 @@ const PROSE_CAP = 2_000;
 
 function cappedString(value: unknown, cap: number): value is string {
   return typeof value === "string" && value.length <= cap;
+}
+
+const TASK_SPEC_FORBIDDEN_RECORD_TEXT = /[\u0000\u202a-\u202e\u2066-\u2069]/u;
+
+/** Keep the v4 parser and record mint on one text boundary. The legacy parser
+ * deliberately retains its historical empty/control-character behavior. */
+function taskSpecRecordString(value: unknown, cap: number, meaningful = false): value is string {
+  return cappedString(value, cap)
+    && (!meaningful || value.trim().length > 0)
+    && !TASK_SPEC_FORBIDDEN_RECORD_TEXT.test(value);
 }
 
 const FENCE_OPENER = /^```cairn-claims[ \t]*$/;
@@ -114,4 +156,107 @@ export function parseWorkerClaims(finalMessage: string | null): WorkerClaims | n
     limitations: record.limitations,
     milestone: record.milestone,
   };
+}
+
+function exactKeys(record: Readonly<Record<string, unknown>>, expected: readonly string[]): boolean {
+  const keys = Reflect.ownKeys(record);
+  if (keys.some((key) => typeof key !== "string")) return false;
+  const sorted = [...(keys as string[])].sort();
+  const wanted = [...expected].sort();
+  if (sorted.length !== wanted.length || sorted.some((key, index) => key !== wanted[index])) return false;
+  const descriptors = Object.getOwnPropertyDescriptors(record);
+  return expected.every((key) => {
+    const descriptor = descriptors[key];
+    return Boolean(descriptor && !descriptor.get && !descriptor.set && "value" in descriptor && descriptor.enumerable);
+  });
+}
+
+function safeExpectedIds(
+  values: readonly string[],
+  pattern: RegExp,
+  cap: number,
+): boolean {
+  if (!Array.isArray(values) || values.length > cap) return false;
+  const seen = new Set<string>();
+  return values.every((value) => typeof value === "string" && pattern.test(value)
+    && !seen.has(value) && Boolean(seen.add(value)));
+}
+
+function parseTaskSpecClaimRows<T extends `c${number}` | `p${number}`>(
+  value: unknown,
+  expectedIds: readonly T[],
+): ReadonlyArray<Readonly<{ id: T; result: string }>> | null {
+  if (!Array.isArray(value) || value.length !== expectedIds.length) return null;
+  const rows: Readonly<{ id: T; result: string }>[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const entry = value[index];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    const prototype = Object.getPrototypeOf(entry);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const row = entry as Readonly<Record<string, unknown>>;
+    if (!exactKeys(row, ["id", "result"]) || row.id !== expectedIds[index]
+      || !taskSpecRecordString(row.result, CHECK_RESULT_CAP)) return null;
+    rows.push(Object.freeze({ id: row.id as T, result: row.result }));
+  }
+  return Object.freeze(rows);
+}
+
+/**
+ * Parse the one versioned Task-Spec claims fence against Main's exact expected
+ * digest and ordered cN/pN ids. Unknown, missing, duplicate, reordered, or
+ * authority-looking fields fail closed; returned rows remain worker claims.
+ */
+export function parseTaskSpecWorkerClaims(
+  finalMessage: string | null,
+  expectation: TaskSpecWorkerClaimsExpectation,
+): TaskSpecWorkerClaims | null {
+  try {
+    if (!finalMessage || finalMessage.length > TOTAL_CAP || /\r(?!\n)|\u2028|\u2029/.test(finalMessage)) return null;
+    if (!expectation || typeof expectation !== "object" || Array.isArray(expectation)
+      || !/^[a-f0-9]{64}$/.test(expectation.taskSpecSha256)
+      || !safeExpectedIds(expectation.criterionIds, /^c(?:[1-9]|1[0-2])$/, 12)
+      || !safeExpectedIds(expectation.preferenceIds, /^p(?:[1-9]|1[0-2])$/, 12)) return null;
+    const fences = extractClaimsFences(finalMessage);
+    if (fences.length !== 1) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fences[0]);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const prototype = Object.getPrototypeOf(parsed);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const record = parsed as Readonly<Record<string, unknown>>;
+    const expected = [
+      "changes", "criteria", "disposition", "howToTry", "limitations", "milestone",
+      "preferences", "summary", "taskSpecSha256", "version",
+    ];
+    if (!exactKeys(record, expected) || record.version !== TASK_SPEC_WORKER_CLAIMS_VERSION
+      || record.taskSpecSha256 !== expectation.taskSpecSha256
+      || (record.disposition !== "DONE" && record.disposition !== "STOPPED")
+      || (record.milestone !== "YES" && record.milestone !== "NO" && record.milestone !== "UNCLEAR")
+      || !taskSpecRecordString(record.summary, SUMMARY_CAP, true)
+      || !taskSpecRecordString(record.howToTry, PROSE_CAP, true)
+      || !taskSpecRecordString(record.limitations, PROSE_CAP)
+      || !Array.isArray(record.changes) || record.changes.length > CHANGES_COUNT_CAP
+      || !record.changes.every((entry) => taskSpecRecordString(entry, CHANGE_CAP))) return null;
+    const criteria = parseTaskSpecClaimRows(record.criteria, expectation.criterionIds);
+    const preferences = parseTaskSpecClaimRows(record.preferences, expectation.preferenceIds);
+    if (!criteria || !preferences) return null;
+    return Object.freeze({
+      version: TASK_SPEC_WORKER_CLAIMS_VERSION,
+      taskSpecSha256: record.taskSpecSha256,
+      disposition: record.disposition,
+      summary: record.summary,
+      changes: Object.freeze([...(record.changes as string[])]),
+      criteria,
+      preferences,
+      howToTry: record.howToTry,
+      limitations: record.limitations,
+      milestone: record.milestone,
+    }) as TaskSpecWorkerClaims;
+  } catch {
+    return null;
+  }
 }

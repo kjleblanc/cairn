@@ -2,28 +2,51 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { parseWorkerClaims, type WorkerClaims } from "./claims.js";
+import {
+  parseTaskSpecWorkerClaims,
+  parseWorkerClaims,
+  type TaskSpecWorkerClaims,
+  type WorkerClaims,
+} from "./claims.js";
 import { CODEX_EXEC_ADAPTER_ID } from "./codex.js";
 import { KIMI_EXEC_ADAPTER_ID } from "./kimi.js";
 import { taskRequestSha256, taskRequestView, type TaskIntent } from "./intent.js";
 import {
+  ADAPTER_COMMAND_ATTESTATION_VERSION,
+  ENVELOPE_RESULT_VERSION,
+  TASK_SPEC_RUN_RECORD_VERSION,
+  composeTaskSpecRunRecord,
   composeWorkerReport,
   composeWorkerRowSummary,
   renderAcceptedTaskRequest,
   stopReasonInPlainWords,
   type ComposedRecordInput,
+  type AdapterCommandAttestationV1,
+  type TaskSpecRunRecordV1,
 } from "./records.js";
 import { appendLogRow, canonicalPath, isCairnProject, nextTaskNumber, pad, parseFacts, parseLog, paths, type LogRow } from "./files.js";
 import { acquireRunLock, type RunLock } from "./lock.js";
 import {
+  CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  parseWorkerProcessEventBundle,
   routeTask,
   WorkerBoundaryError,
   WorkerProcessError,
   type AdapterTaskContract,
+  type AdapterTaskQualityBinding,
+  type QualityBoundAdapterTaskContractV4,
+  type QualityBoundWorkerRunResultV3,
   type RouteResult,
   type TaskAdapter,
   type WorkerRunResult,
 } from "./routing.js";
+import {
+  evidencePlanSha256,
+  taskSpecReviewView,
+  taskSpecSha256,
+  type EvidencePlanV1,
+  type TaskSpecV1,
+} from "./quality.js";
 
 const OFFLINE_SUPPORTED_OUTCOME = "Demonstrate serial routing and verify honest task records without implementing the requested product change.";
 const WORKER_SUPPORTED_OUTCOME = "Run one explicitly confirmed worker task through the connected adapter and verify its result and Git state.";
@@ -38,6 +61,103 @@ export interface SerialRunOptions {
   commitRecords?: boolean;
   events?: SerialRunEvents;
   signal?: AbortSignal;
+  /** Staged Q4 authority. Omitted keeps the live v3 route byte-for-byte. */
+  taskSpecAuthority?: SerialTaskSpecAuthorityV1;
+}
+
+export const SERIAL_TASK_SPEC_AUTHORITY_VERSION = "cairn-serial-task-spec-authority/v1" as const;
+
+export type SerialTaskSpecAuthorityV1 = Readonly<{
+  version: typeof SERIAL_TASK_SPEC_AUTHORITY_VERSION;
+  taskSpec: TaskSpecV1;
+  taskSpecSha256: string;
+  taskSpecReview: NonNullable<ReturnType<typeof taskSpecReviewView>>;
+  evidencePlan: EvidencePlanV1;
+  evidencePlanSha256: string;
+}>;
+
+const serialTaskSpecAuthorityBrand = new WeakSet<object>();
+
+/**
+ * Main's sole Q4 serial authority mint. Both inputs must already carry Core's
+ * brands; a structural clone cannot be upgraded merely by repeating hashes.
+ */
+export function composeSerialTaskSpecAuthority(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+): SerialTaskSpecAuthorityV1 | null {
+  try {
+    const specSha = taskSpecSha256(taskSpec);
+    const planSha = evidencePlanSha256(evidencePlan);
+    const review = taskSpecReviewView(taskSpec);
+    if (!specSha || !planSha || !review || review.taskSpecSha256 !== specSha) return null;
+    const spec = taskSpec as TaskSpecV1;
+    const plan = evidencePlan as EvidencePlanV1;
+    // Q4 has no critic execution/custody. A Task Spec that makes critic review
+    // mandatory cannot be honestly completed through this route.
+    if (spec.quality.critic.mode === "required"
+      || plan.taskSpecSha256 !== specSha
+      || plan.procedures.length !== spec.quality.acceptanceChecks.length
+      || plan.procedures.some((procedure, index) => procedure.criterionId !== spec.quality.acceptanceChecks[index]?.id)) {
+      return null;
+    }
+    const commandHashes: string[] = [];
+    for (const procedure of plan.procedures) {
+      // Q4's worker route can authenticate only exact adapter-command events.
+      // Packet, owner, or comparison procedures remain valid Core plans, but
+      // must not be upgraded into an authority whose missing evidence could be
+      // skipped on the way to DONE.
+      if (procedure.kind !== "adapter-command-attestation" || !procedure.command
+        || !/^[a-f0-9]{64}$/.test(procedure.command.sha256)) return null;
+      commandHashes.push(procedure.command.sha256);
+    }
+    // One event hash must map to exactly one required cN. Reusing a command
+    // hash across criteria would make process-event custody ambiguous.
+    if (new Set(commandHashes).size !== commandHashes.length) return null;
+    const authority = Object.freeze({
+      version: SERIAL_TASK_SPEC_AUTHORITY_VERSION,
+      taskSpec: spec,
+      taskSpecSha256: specSha,
+      taskSpecReview: review,
+      evidencePlan: plan,
+      evidencePlanSha256: planSha,
+    }) as SerialTaskSpecAuthorityV1;
+    serialTaskSpecAuthorityBrand.add(authority);
+    return authority;
+  } catch {
+    return null;
+  }
+}
+
+function serialTaskSpecAuthorityFor(
+  intent: TaskIntent,
+  value: SerialTaskSpecAuthorityV1 | undefined,
+): SerialTaskSpecAuthorityV1 | null {
+  if (value === undefined) return null;
+  try {
+    if (!serialTaskSpecAuthorityBrand.has(value) || value.taskSpec.intent !== intent
+      || value.taskSpecSha256 !== taskSpecSha256(value.taskSpec)
+      || value.taskSpecReview.taskSpecSha256 !== value.taskSpecSha256
+      || value.evidencePlan.taskSpecSha256 !== value.taskSpecSha256
+      || value.evidencePlanSha256 !== evidencePlanSha256(value.evidencePlan)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+export function serialTaskSpecQualityBinding(
+  intent: TaskIntent,
+  authority: SerialTaskSpecAuthorityV1,
+): AdapterTaskQualityBinding | null {
+  if (serialTaskSpecAuthorityFor(intent, authority) !== authority) return null;
+  return Object.freeze({
+    taskSpec: authority.taskSpec,
+    taskSpecSha256: authority.taskSpecSha256,
+    taskSpecReview: authority.taskSpecReview,
+    evidencePlan: authority.evidencePlan,
+    evidencePlanSha256: authority.evidencePlanSha256,
+  });
 }
 export interface RecordCommit {
   status: "created" | "skipped";
@@ -208,10 +328,74 @@ function emit(activities: SerialActivity[], events: SerialRunEvents | undefined,
   events?.onActivity?.(activity);
 }
 
+function indentTaskSpecBriefData(value: string): string {
+  return value.replace(/\r\n|\r|\n/g, (lineBreak) => `${lineBreak}  `);
+}
+
 function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
   const label = contract.route.adapterLabel;
   const provider = contract.route.provider;
+  if (contract.version === "cairn-serial-task/v4") {
+    const required = contract.taskSpecReview.criteria
+      .map((criterion) => `- ${criterion.id}: ${indentTaskSpecBriefData(criterion.promise)}`)
+      .join("\n");
+    const preferences = contract.taskSpecReview.preferences.length > 0
+      ? contract.taskSpecReview.preferences
+        .map((preference) => `- ${preference.id}: ${indentTaskSpecBriefData(preference.dimension)} — ${indentTaskSpecBriefData(preference.desiredDirection)}`)
+        .join("\n")
+      : "- None.";
+    return `# Task ${pad(contract.taskNumber)} — one confirmed real ${label} task
+
+Supported outcome: ${contract.supportedOutcome}
+
+Lane: **Standard** — one explicitly confirmed ${provider} ${label} call; the model may make in-scope local workspace changes.
+
+${renderAcceptedTaskRequest(contract.intent)}
+
+## Frozen Task Spec
+
+- Task Spec SHA-256: \`${contract.taskSpecSha256}\`
+- Evidence Plan SHA-256: \`${contract.evidencePlanSha256}\`
+
+### Required promises
+
+${required}
+
+### Advisory preferences — not DONE gates
+
+${preferences}
+
+## Route
+
+- Adapter: ${contract.route.adapterLabel}
+- Provider: ${contract.route.provider}
+- Model: ${contract.route.model}
+- Reason: ${contract.route.reason}
+
+## Owned records
+
+${contract.ownedRecords.map((path) => `- \`${path}\``).join("\n")}
+
+## Protected starting Git state
+
+- HEAD: \`${contract.protectedGit.head}\`
+- Working tree: ${status}
+- Existing staged work: ${contract.protectedGit.staged ? "yes — no record commit is allowed" : "no"}
+
+## Envelope checks — separate from cN
+
+${contract.envelopeChecks.map((check) => `- ${check}`).join("\n")}
+
+## Stop conditions
+
+${contract.stopConditions.map((condition) => `- ${condition}`).join("\n")}
+
+DONE means the one ${label} process completed, the Task-Spec-bound worker account and exact command events were retained separately, the append-only log row matches, protected starting work remains intact, and Cairn verified Git isolation and created the exact-path commit when the task started clean. It does not mean a worker claim became criterion evidence or a critic verdict.
+
+STOPPED means the call was not authorized, the model reported a stop, required process-event custody failed, protected work changed, or the result records could not be verified.
+`;
+  }
   const title = demo ? "offline serial demonstration" : `one confirmed real ${label} task`;
   const lane = demo
     ? "local, deterministic, record-only demonstration"
@@ -505,29 +689,59 @@ function validEvidence(value: unknown): boolean {
  * null-or-capped claims string, and a bounded numeric evidence map. All the
  * hostile-object paranoia the two old validators carried, in one place.
  */
-function validateWorkerResult(value: unknown, contract: AdapterTaskContract): value is WorkerRunResult {
+function parseWorkerResult(value: unknown, contract: AdapterTaskContract): WorkerRunResult | null {
   try {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) return false;
+    if (prototype !== Object.prototype && prototype !== null) return null;
     const keys = Reflect.ownKeys(value);
-    const expected = ["claimsText", "evidence", "kind", "requestSha256", "status", "taskNumber"];
-    if (keys.some((key) => typeof key !== "string") || !sameLines((keys as string[]).sort(), expected)) return false;
+    const expected = contract.version === "cairn-serial-task/v4"
+      ? [
+        "claimsText", "evidence", "evidencePlanSha256", "kind", "processEvents",
+        "requestSha256", "status", "taskNumber", "taskSpecSha256",
+      ]
+      : ["claimsText", "evidence", "kind", "requestSha256", "status", "taskNumber"];
+    if (keys.some((key) => typeof key !== "string") || !sameLines((keys as string[]).sort(), expected)) return null;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     for (const key of expected) {
       const descriptor = descriptors[key];
-      if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return false;
+      if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return null;
     }
     const claimsText = descriptors.claimsText.value;
-    return descriptors.kind.value === "worker-result/v2" &&
-      descriptors.taskNumber.value === contract.taskNumber &&
-      descriptors.requestSha256.value === contract.requestSha256 &&
-      (descriptors.status.value === "completed" || descriptors.status.value === "failed") &&
-      (claimsText === null || (typeof claimsText === "string" && claimsText.length <= 262_144)) &&
-      validEvidence(descriptors.evidence.value);
+    if (descriptors.taskNumber.value !== contract.taskNumber
+      || descriptors.requestSha256.value !== contract.requestSha256
+      || (descriptors.status.value !== "completed" && descriptors.status.value !== "failed")
+      || (claimsText !== null && (typeof claimsText !== "string" || claimsText.length > 262_144))
+      || !validEvidence(descriptors.evidence.value)) return null;
+    if (contract.version === "cairn-serial-task/v3") {
+      return descriptors.kind.value === "worker-result/v2" ? value as WorkerRunResult : null;
+    }
+    if (descriptors.kind.value !== "worker-result/v3"
+      || descriptors.taskSpecSha256.value !== contract.taskSpecSha256
+      || descriptors.evidencePlanSha256.value !== contract.evidencePlanSha256
+      || (typeof claimsText === "string" && Buffer.byteLength(claimsText, "utf8") > 262_144)) return null;
+    const processEvents = parseWorkerProcessEventBundle(descriptors.processEvents.value);
+    if (!processEvents || !processEvents.complete
+      || processEvents.representation !== CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION
+      || new Set(processEvents.events.map((event) => event.commandSha256)).size !== processEvents.events.length) return null;
+    return Object.freeze({
+      kind: "worker-result/v3",
+      taskNumber: contract.taskNumber,
+      requestSha256: contract.requestSha256,
+      taskSpecSha256: contract.taskSpecSha256,
+      evidencePlanSha256: contract.evidencePlanSha256,
+      status: descriptors.status.value,
+      claimsText,
+      evidence: Object.freeze(Object.fromEntries(Object.entries(descriptors.evidence.value as Record<string, number>))),
+      processEvents,
+    }) as QualityBoundWorkerRunResultV3;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function validateWorkerResult(value: unknown, contract: AdapterTaskContract): value is WorkerRunResult {
+  return parseWorkerResult(value, contract) !== null;
 }
 
 function verifyProtectedStartingPaths(root: string, start: GitSnapshot): boolean {
@@ -561,6 +775,100 @@ function changedSetForRecord(root: string): readonly string[] {
   return scanChangedPaths(root).slice(0, 100);
 }
 
+function taskSpecClaimExpectation(contract: QualityBoundAdapterTaskContractV4): {
+  taskSpecSha256: string;
+  criterionIds: readonly `c${number}`[];
+  preferenceIds: readonly `p${number}`[];
+} {
+  return Object.freeze({
+    taskSpecSha256: contract.taskSpecSha256,
+    criterionIds: Object.freeze(contract.taskSpecReview.criteria.map((criterion) => criterion.id)),
+    preferenceIds: Object.freeze(contract.taskSpecReview.preferences.map((preference) => preference.id)),
+  });
+}
+
+/** Main maps immutable plan command hashes to cN. The adapter event never gets
+ * to choose a criterion id, artifact id, result, source, or disposition. */
+function deriveAdapterAttestations(
+  contract: QualityBoundAdapterTaskContractV4,
+  result: QualityBoundWorkerRunResultV3,
+): readonly AdapterCommandAttestationV1[] | null {
+  const plannedCommandHashes = contract.evidencePlan.procedures.map((procedure) =>
+    procedure.kind === "adapter-command-attestation" ? procedure.command?.sha256 ?? null : null);
+  const plannedHashSet = new Set(plannedCommandHashes);
+  if (plannedCommandHashes.some((hash) => hash === null)
+    || plannedHashSet.size !== plannedCommandHashes.length
+    || result.processEvents.events.length !== plannedCommandHashes.length
+    || result.processEvents.events.some((event) => !plannedHashSet.has(event.commandSha256))) return null;
+  const attestations: AdapterCommandAttestationV1[] = [];
+  const seenCommandHashes = new Set<string>();
+  for (const procedure of contract.evidencePlan.procedures) {
+    if (procedure.kind !== "adapter-command-attestation") continue;
+    const commandSha256 = procedure.command?.sha256;
+    if (!commandSha256 || seenCommandHashes.has(commandSha256)) return null;
+    seenCommandHashes.add(commandSha256);
+    const matches = result.processEvents.events.filter((event) => event.commandSha256 === commandSha256);
+    if (matches.length !== 1) return null;
+    attestations.push(Object.freeze({
+      version: ADAPTER_COMMAND_ATTESTATION_VERSION,
+      taskSpecSha256: contract.taskSpecSha256,
+      evidencePlanSha256: contract.evidencePlanSha256,
+      criterionId: procedure.criterionId,
+      sequence: matches[0].sequence,
+      commandSha256,
+      exitCode: matches[0].exitCode,
+    }));
+  }
+  return Object.freeze(attestations);
+}
+
+function hasUnexpectedPlannedExit(
+  contract: QualityBoundAdapterTaskContractV4,
+  attestations: readonly AdapterCommandAttestationV1[],
+): boolean {
+  const byCriterion = new Map(attestations.map((attestation) => [attestation.criterionId, attestation]));
+  return contract.evidencePlan.procedures.some((procedure) => {
+    if (procedure.kind !== "adapter-command-attestation" || !procedure.command) return false;
+    const attestation = byCriterion.get(procedure.criterionId);
+    return !attestation || !procedure.command.expectedExitCodes.includes(attestation.exitCode);
+  });
+}
+
+function composeBoundRunRecord(
+  contract: AdapterTaskContract,
+  disposition: "DONE" | "STOPPED",
+  stopReason: SerialStopReason | null,
+  claims: TaskSpecWorkerClaims | null,
+  attestations: readonly AdapterCommandAttestationV1[],
+): TaskSpecRunRecordV1 | null {
+  if (contract.version !== "cairn-serial-task/v4") return null;
+  return composeTaskSpecRunRecord(contract.taskSpec, contract.evidencePlan, {
+    version: TASK_SPEC_RUN_RECORD_VERSION,
+    requestSha256: contract.requestSha256,
+    taskSpecSha256: contract.taskSpecSha256,
+    evidencePlanSha256: contract.evidencePlanSha256,
+    criteria: contract.taskSpecReview.criteria.map((criterion) => Object.freeze({
+      id: criterion.id,
+      promise: criterion.promise,
+    })),
+    preferences: contract.taskSpecReview.preferences.map((preference) => Object.freeze({
+      id: preference.id,
+      dimension: preference.dimension,
+      desiredDirection: preference.desiredDirection,
+    })),
+    workerClaims: claims,
+    adapterAttestations: attestations,
+    envelopeResult: Object.freeze({
+      version: ENVELOPE_RESULT_VERSION,
+      taskNumber: contract.taskNumber,
+      requestSha256: contract.requestSha256,
+      taskSpecSha256: contract.taskSpecSha256,
+      disposition,
+      stopReason,
+    }),
+  });
+}
+
 /**
  * Cairn authors the worker's task records from the parsed claims and its own
  * Git verification (Task 048, the inversion). The worker writes no record; this
@@ -580,7 +888,21 @@ function cairnWorkerRecords(
   commit: { status: "created" | "skipped"; reason: string } | null,
   evidence: Record<string, number> | null,
   recovery?: RecordRecovery,
+  taskSpecEvidence?: Readonly<{
+    claims: TaskSpecWorkerClaims | null;
+    attestations: readonly AdapterCommandAttestationV1[];
+  }>,
 ): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
+  const taskSpecRunRecord = composeBoundRunRecord(
+    contract,
+    disposition,
+    stopReason,
+    taskSpecEvidence?.claims ?? null,
+    taskSpecEvidence?.attestations ?? Object.freeze([]),
+  );
+  if (contract.version === "cairn-serial-task/v4" && !taskSpecRunRecord) {
+    throw new Error("INVALID_TASK_SPEC_RUN_RECORD");
+  }
   const input: ComposedRecordInput = {
     taskNumber: contract.taskNumber,
     route: contract.route,
@@ -594,6 +916,7 @@ function cairnWorkerRecords(
     evidenceSummary: evidence ? boundedEvidenceSummary(evidence) : null,
     processFailure: null,
     paidCallStarted: true,
+    ...(taskSpecRunRecord ? { taskSpecRunRecord } : {}),
     recordRecovery: recovery?.disclosure ?? null,
   };
   const report = composeWorkerReport(input);
@@ -614,7 +937,7 @@ function cairnWorkerRecords(
     outcome: disposition,
     decision: disposition === "DONE" ? "completed" : "stopped",
     summary: composeWorkerRowSummary(input),
-    moved: claims?.milestone ?? "NO",
+    moved: taskSpecRunRecord?.workerClaims?.milestone ?? claims?.milestone ?? "NO",
   };
   appendLogRow(root, row);
   const briefPath = paths.brief(root, contract.taskNumber);
@@ -662,8 +985,20 @@ function composedForClose(
     evidenceSummary: string | null;
     processFailure: ProcessFailureNote | null;
     paidCallStarted: boolean;
+    taskSpecClaims?: TaskSpecWorkerClaims | null;
+    adapterAttestations?: readonly AdapterCommandAttestationV1[];
   },
 ): ComposedRecordInput {
+  const taskSpecRunRecord = composeBoundRunRecord(
+    contract,
+    disposition,
+    stopReason,
+    site.taskSpecClaims ?? null,
+    site.adapterAttestations ?? Object.freeze([]),
+  );
+  if (contract.version === "cairn-serial-task/v4" && !taskSpecRunRecord) {
+    throw new Error("INVALID_TASK_SPEC_RUN_RECORD");
+  }
   return {
     taskNumber: contract.taskNumber,
     route: contract.route,
@@ -677,6 +1012,7 @@ function composedForClose(
     evidenceSummary: site.evidenceSummary,
     processFailure: site.processFailure,
     paidCallStarted: site.paidCallStarted,
+    ...(taskSpecRunRecord ? { taskSpecRunRecord } : {}),
     // Only the Task 052 owned-records gate authors a recovery line, and it
     // closes through cairnWorkerRecords; no legacy-template site has one.
     recordRecovery: null,
@@ -829,6 +1165,7 @@ function freezeContract(contract: AdapterTaskContract): AdapterTaskContract {
   Object.freeze(contract.protectedGit);
   Object.freeze(contract.ownedRecords);
   Object.freeze(contract.checks);
+  if (contract.version === "cairn-serial-task/v4") Object.freeze(contract.envelopeChecks);
   Object.freeze(contract.stopConditions);
   return Object.freeze(contract);
 }
@@ -875,9 +1212,43 @@ function writeClosedRecords(
   processFailure?: ProcessFailureNote,
   orphanRisk = false,
 ): { reportText: string; row: LogRow; verified: boolean } {
-  const report = reportText(contract, demo, disposition, reason, commitRequested, processEvidence, processFailure, orphanRisk);
+  let report: string;
+  let row: LogRow;
+  if (contract.version === "cairn-serial-task/v4") {
+    const taskSpecRunRecord = composeBoundRunRecord(contract, disposition, reason, null, Object.freeze([]));
+    if (!taskSpecRunRecord) throw new Error("INVALID_TASK_SPEC_RUN_RECORD");
+    const input: ComposedRecordInput = {
+      taskNumber: contract.taskNumber,
+      route: contract.route,
+      ...acceptedRequestForRecord(contract),
+      disposition,
+      stopReason: reason,
+      claims: null,
+      filesChanged: changedSetForRecord(root),
+      protectedIntact: verifyProtected(root, start, new Set(contract.ownedRecords)),
+      commit: null,
+      evidenceSummary: processEvidence ? boundedEvidenceSummary(processEvidence) : null,
+      processFailure: processFailure ?? null,
+      paidCallStarted: paidCallAlreadyStarted(demo, reason, processFailure),
+      taskSpecRunRecord,
+      recordRecovery: null,
+    };
+    report = composeWorkerReport(input);
+    row = {
+      task: pad(contract.taskNumber),
+      date: new Date().toISOString().slice(0, 10),
+      lane: "Standard",
+      mode: "Applied",
+      outcome: disposition,
+      decision: disposition === "DONE" ? "completed" : "stopped",
+      summary: composeWorkerRowSummary(input),
+      moved: "NO",
+    };
+  } else {
+    report = reportText(contract, demo, disposition, reason, commitRequested, processEvidence, processFailure, orphanRisk);
+    row = rowFor(contract, demo, disposition, reason);
+  }
   writeFileSync(paths.report(root, contract.taskNumber), report, { encoding: "utf8", flag: "wx" });
-  const row = rowFor(contract, demo, disposition, reason);
   appendLogRow(root, row);
   const actualLog = readFileSync(paths.log(root), "utf8");
   const checks = {
@@ -915,6 +1286,10 @@ function replaceDoneRecordsWithStopped(
   done: { reportText: string; row: LogRow },
   reason: SerialStopReason = "RECORD_VERIFICATION_FAILED",
   processEvidence?: Record<string, number>,
+  taskSpecEvidence?: Readonly<{
+    claims: TaskSpecWorkerClaims | null;
+    attestations: readonly AdapterCommandAttestationV1[];
+  }>,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   const reportPath = paths.report(root, contract.taskNumber);
   const currentReport = readFileSync(reportPath, "utf8");
@@ -923,8 +1298,48 @@ function replaceDoneRecordsWithStopped(
     return null;
   }
 
-  const stoppedReport = reportText(contract, demo, "STOPPED", reason, commitRequested, processEvidence);
-  const stoppedRow = rowFor(contract, demo, "STOPPED", reason);
+  let stoppedReport: string;
+  let stoppedRow: LogRow;
+  if (contract.version === "cairn-serial-task/v4") {
+    const taskSpecRunRecord = composeBoundRunRecord(
+      contract,
+      "STOPPED",
+      reason,
+      taskSpecEvidence?.claims ?? null,
+      taskSpecEvidence?.attestations ?? Object.freeze([]),
+    );
+    if (!taskSpecRunRecord) return null;
+    const input: ComposedRecordInput = {
+      taskNumber: contract.taskNumber,
+      route: contract.route,
+      ...acceptedRequestForRecord(contract),
+      disposition: "STOPPED",
+      stopReason: reason,
+      claims: null,
+      filesChanged: changedSetForRecord(root),
+      protectedIntact: verifyProtected(root, start, new Set(contract.ownedRecords)),
+      commit: null,
+      evidenceSummary: processEvidence ? boundedEvidenceSummary(processEvidence) : null,
+      processFailure: null,
+      paidCallStarted: true,
+      taskSpecRunRecord,
+      recordRecovery: null,
+    };
+    stoppedReport = composeWorkerReport(input);
+    stoppedRow = {
+      task: pad(contract.taskNumber),
+      date: new Date().toISOString().slice(0, 10),
+      lane: "Standard",
+      mode: "Applied",
+      outcome: "STOPPED",
+      decision: "stopped",
+      summary: composeWorkerRowSummary(input),
+      moved: taskSpecRunRecord.workerClaims?.milestone ?? "NO",
+    };
+  } else {
+    stoppedReport = reportText(contract, demo, "STOPPED", reason, commitRequested, processEvidence);
+    stoppedRow = rowFor(contract, demo, "STOPPED", reason);
+  }
   writeFileSync(reportPath, stoppedReport, "utf8");
   writeFileSync(paths.log(root), start.logText + expectedLogLine(stoppedRow), "utf8");
 
@@ -988,14 +1403,34 @@ export function previewSerialRoute(intent: TaskIntent, adapters: readonly TaskAd
   return routeTask({ outcome: intent.outcome.text, capability: "serial-task" }, adapters, adapterId);
 }
 
+export function previewTaskSpecSerialRoute(
+  intent: TaskIntent,
+  authority: SerialTaskSpecAuthorityV1,
+  adapters: readonly TaskAdapter[],
+  adapterId?: string,
+): RouteResult {
+  if (!serialTaskSpecAuthorityFor(intent, authority)) throw new Error("INVALID_TASK_SPEC_AUTHORITY");
+  return routeTask({
+    outcome: intent.outcome.text,
+    capability: "serial-task",
+    requiredCommandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  }, adapters, adapterId);
+}
+
 export async function runSerialTask(root: string, intent: TaskIntent, options: SerialRunOptions): Promise<SerialRunResult> {
   const requestSha256 = taskRequestSha256(intent);
   if (requestSha256 === null) throw new Error("INVALID_TASK_INTENT");
+  const taskSpecAuthority = serialTaskSpecAuthorityFor(intent, options.taskSpecAuthority);
+  if (options.taskSpecAuthority !== undefined && !taskSpecAuthority) throw new Error("INVALID_TASK_SPEC_AUTHORITY");
   const projectRoot = resolve(root);
   if (activeRoots.has(projectRoot)) throw new Error("SERIAL_RUN_ACTIVE: One task is already running for this project.");
   assertGoverned(projectRoot);
   const activities: SerialActivity[] = [];
-  const route = routeTask({ outcome: intent.outcome.text, capability: "serial-task" }, options.adapters, options.adapterId);
+  const route = routeTask(taskSpecAuthority ? {
+    outcome: intent.outcome.text,
+    capability: "serial-task",
+    requiredCommandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  } : { outcome: intent.outcome.text, capability: "serial-task" }, options.adapters, options.adapterId);
   emit(activities, options.events, {
     stage: "Route",
     state: route.status === "ready" ? "done" : "stopped",
@@ -1030,7 +1465,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
       rel(projectRoot, paths.log(projectRoot)),
     ];
     const ownedSet = new Set(owned);
-    const contract: AdapterTaskContract = {
+    const legacyContract = {
       version: "cairn-serial-task/v3",
       taskNumber,
       intent,
@@ -1069,7 +1504,18 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
       ],
-    };
+    } satisfies AdapterTaskContract;
+    const contract: AdapterTaskContract = taskSpecAuthority ? {
+      ...legacyContract,
+      version: "cairn-serial-task/v4",
+      taskSpec: taskSpecAuthority.taskSpec,
+      taskSpecSha256: taskSpecAuthority.taskSpecSha256,
+      taskSpecReview: taskSpecAuthority.taskSpecReview,
+      evidencePlan: taskSpecAuthority.evidencePlan,
+      evidencePlanSha256: taskSpecAuthority.evidencePlanSha256,
+      checks: [] as const,
+      envelopeChecks: legacyContract.checks,
+    } : legacyContract;
     const contractMarkdown = briefText(contract, demo);
     writeFileSync(paths.brief(projectRoot, taskNumber), contractMarkdown, { encoding: "utf8", flag: "wx" });
 
@@ -1082,6 +1528,9 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
     });
     let adapterValue: unknown;
     try {
+      if (taskSpecAuthority && serialTaskSpecAuthorityFor(intent, taskSpecAuthority) !== taskSpecAuthority) {
+        throw new WorkerBoundaryError("INVALID_TASK_SPEC_AUTHORITY");
+      }
       adapterValue = await chosen.run(freezeContract(contract), options.signal);
     } catch (error) {
       // The catch keys only on the UNIVERSAL error classes: a boundary stop is
@@ -1170,8 +1619,13 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
     });
     emit(activities, options.events, { stage: "Check", state: "working", detail: "Checking the result, records, and protected Git state." });
     if (!demo) {
-      const workerResult = validateWorkerResult(adapterValue, contract) ? adapterValue : null;
-      const resultValid = workerResult !== null;
+      const workerResult = parseWorkerResult(adapterValue, contract);
+      const qualityWorkerResult = contract.version === "cairn-serial-task/v4"
+        && workerResult?.kind === "worker-result/v3" ? workerResult : null;
+      const adapterAttestations = contract.version === "cairn-serial-task/v4" && qualityWorkerResult
+        ? deriveAdapterAttestations(contract, qualityWorkerResult)
+        : contract.version === "cairn-serial-task/v4" ? null : Object.freeze([]);
+      const resultValid = workerResult !== null && adapterAttestations !== null;
       if (workerResult) {
         emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEvidenceSummary(workerResult.evidence) });
       }
@@ -1190,24 +1644,42 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
       }
       const protectedValid = protectedStarting;
       // The worker authored no record; it speaks through one cairn-claims fence.
-      const claims = workerResult ? parseWorkerClaims(workerResult.claimsText) : null;
+      const claims = contract.version === "cairn-serial-task/v3" && workerResult
+        ? parseWorkerClaims(workerResult.claimsText)
+        : null;
+      const taskSpecClaims = contract.version === "cairn-serial-task/v4" && qualityWorkerResult
+        ? parseTaskSpecWorkerClaims(qualityWorkerResult.claimsText, taskSpecClaimExpectation(contract))
+        : null;
+      const claimDisposition = taskSpecClaims?.disposition ?? claims?.disposition ?? null;
+      const unexpectedPlannedExit = contract.version === "cairn-serial-task/v4" && adapterAttestations
+        ? hasUnexpectedPlannedExit(contract, adapterAttestations)
+        : false;
+      const taskSpecEvidence = contract.version === "cairn-serial-task/v4" ? Object.freeze({
+        claims: taskSpecClaims,
+        attestations: adapterAttestations ?? Object.freeze([]),
+      }) : undefined;
       const stopReason: SerialStopReason | null = !resultValid
         ? "INVALID_ADAPTER_RESULT"
         : !workerCompleted
           ? "ADAPTER_FAILED"
           : !protectedValid
             ? "PROTECTED_WORK_CHANGED"
-            : !claims
+            : !(taskSpecClaims ?? claims)
               ? "WORKER_CLAIMS_MISSING"
-              : claims.disposition === "STOPPED"
+              : claimDisposition === "STOPPED"
                 ? "MODEL_REPORTED_STOPPED"
+                : unexpectedPlannedExit
+                  ? "MODEL_RESULT_NOT_VERIFIED"
                 : null;
 
       // A STOPPED close: Cairn authors honest STOPPED records from whatever
       // claims (if any) survived, keeps the retained evidence, commits nothing.
       const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).` });
-        const records = cairnWorkerRecords(projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null, workerResult?.evidence ?? null, recovery);
+        const records = cairnWorkerRecords(
+          projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null,
+          workerResult?.evidence ?? null, recovery, taskSpecEvidence,
+        );
         if (!records.verified) {
           const restored = restoreLogBeforeThrow(projectRoot, start);
           throw recordVerificationFailed("Worker-authored evidence was retained without overwrite.", restored);
@@ -1230,7 +1702,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
       const closeRecordRewrite = (done: { reportText: string; row: LogRow }): SerialRunResult => {
         const stopped = replaceDoneRecordsWithStopped(
           projectRoot, contract, demo, start, Boolean(options.commitRecords), done,
-          "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined,
+          "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined, taskSpecEvidence,
         );
         if (!stopped?.verified) {
           // The DONE row could not be rewritten as an honest STOPPED row. That
@@ -1255,6 +1727,8 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
             evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
             processFailure: null,
             paidCallStarted: true,
+            taskSpecClaims,
+            adapterAttestations: adapterAttestations ?? Object.freeze([]),
           }),
         };
       };
@@ -1318,7 +1792,10 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         // A protected dirty start forbids an isolated commit: the records are
         // written but the product changes stay uncommitted for the owner.
         const commit: RecordCommit = { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
-        const records = cairnWorkerRecords(projectRoot, contract, start, "DONE", null, claims, protectedValid, commit, workerResult?.evidence ?? null);
+        const records = cairnWorkerRecords(
+          projectRoot, contract, start, "DONE", null, claims, protectedValid, commit,
+          workerResult?.evidence ?? null, undefined, taskSpecEvidence,
+        );
         if (!records.verified) return closeRecordRewrite(records);
         emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
         emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
@@ -1337,6 +1814,8 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         projectRoot, contract, start, "DONE", null, claims, protectedValid,
         { status: "created", reason: "One exact-path commit contains the product changes and these records." },
         workerResult?.evidence ?? null,
+        undefined,
+        taskSpecEvidence,
       );
       if (!records.verified) return closeRecordRewrite(records);
       const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
@@ -1365,7 +1844,8 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         // MODEL_RESULT_NOT_VERIFIED with the evidence retained.
         unstageExactPaths(projectRoot, expectedCommitSet);
         const stopped = replaceDoneRecordsWithStopped(
-          projectRoot, contract, demo, start, Boolean(options.commitRecords), records, "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined,
+          projectRoot, contract, demo, start, Boolean(options.commitRecords), records,
+          "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined, taskSpecEvidence,
         );
         if (!stopped?.verified) {
           // The verified DONE row above described a run that then failed to
@@ -1388,6 +1868,8 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
             evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
             processFailure: null,
             paidCallStarted: true,
+            taskSpecClaims,
+            adapterAttestations: adapterAttestations ?? Object.freeze([]),
           }),
         };
       }

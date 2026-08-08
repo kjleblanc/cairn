@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
   createOfflineDemoAdapter,
+  OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+  parseWorkerProcessEventBundle,
   routeTask,
   type TaskAdapter,
 } from "../src/routing.js";
@@ -99,4 +102,67 @@ test("serial route preview accepts only a Core-validated intent and routes from 
   }) as TaskIntent;
   assert.throws(() => previewSerialRoute(hostile, [adapter("ready", true, ["serial-task"])]), /INVALID_TASK_INTENT/);
   assert.equal(getterCalls, 0);
+});
+
+test("quality routing uses internal exact-command support without widening descriptors", () => {
+  const exact = adapter("exact", true, ["serial-task"], 5);
+  exact.qualitySupport = {
+    commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  };
+  const opaque = adapter("opaque", true, ["serial-task"], 50);
+  opaque.qualitySupport = {
+    commandEventRepresentation: OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+  };
+  const absent = adapter("absent", true, ["serial-task"], 100);
+  const legacy = routeTask({ outcome: "Show it", capability: "serial-task" }, [absent, opaque, exact]);
+  assert.equal(legacy.status, "ready");
+  if (legacy.status === "ready") assert.equal(legacy.recommended.id, "absent", "legacy priority remains unchanged");
+
+  const quality = routeTask({
+    outcome: "Show it",
+    capability: "serial-task",
+    requiredCommandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  }, [absent, opaque, exact]);
+  assert.equal(quality.status, "ready");
+  if (quality.status !== "ready") return;
+  assert.equal(quality.recommended.id, "exact");
+  assert.deepEqual(quality.candidates.map((candidate) => candidate.id), ["exact"]);
+  assert.equal(Object.hasOwn(quality.recommended, "qualitySupport"), false, "internal support never enters descriptor output");
+});
+
+test("a route requiring exact command events fails closed for opaque or absent support", () => {
+  const opaque = adapter("opaque", true, ["serial-task"]);
+  opaque.qualitySupport = { commandEventRepresentation: OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION };
+  const result = routeTask({
+    outcome: "Show it",
+    capability: "serial-task",
+    requiredCommandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  }, [opaque, adapter("absent", true, ["serial-task"])]);
+  assert.equal(result.status, "connection-required");
+  assert.throws(() => routeTask({
+    outcome: "Show it",
+    capability: "serial-task",
+    requiredCommandEventRepresentation: "invented" as never,
+  }, [opaque]), /INVALID_COMMAND_EVENT_REPRESENTATION/);
+});
+
+test("process-event bundles accept only bounded contiguous execution facts", () => {
+  const good = {
+    representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+    complete: true,
+    events: [
+      { sequence: 0, commandSha256: "a".repeat(64), exitCode: 0 },
+      { sequence: 1, commandSha256: "b".repeat(64), exitCode: 1 },
+    ],
+  };
+  const parsed = parseWorkerProcessEventBundle(good);
+  assert.deepEqual(parsed, good);
+  assert.ok(parsed && Object.isFrozen(parsed) && Object.isFrozen(parsed.events) && parsed.events.every(Object.isFrozen));
+  assert.equal(parseWorkerProcessEventBundle({ ...good, extra: true }), null);
+  assert.equal(parseWorkerProcessEventBundle({ ...good, events: [{ ...good.events[0], sequence: 1 }] }), null);
+  assert.equal(parseWorkerProcessEventBundle({ ...good, events: [{ ...good.events[0], commandSha256: "A".repeat(64) }] }), null);
+  assert.equal(parseWorkerProcessEventBundle({ ...good, events: [{ ...good.events[0], criterionId: "c1" }] }), null);
+  assert.equal(parseWorkerProcessEventBundle({ ...good, events: Array.from({ length: 65 }, (_, sequence) => ({
+    sequence, commandSha256: "a".repeat(64), exitCode: 0,
+  })) }), null);
 });

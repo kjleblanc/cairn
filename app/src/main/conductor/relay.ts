@@ -1,6 +1,6 @@
 import type { SerialRunResult, TaskRequestView } from "@cairn/core";
-import { isEvidenceRunId } from "../../shared/ipc.js";
-import type { ConductorTurn, ResultCard } from "../../shared/ipc.js";
+import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
+import type { ConductorTurn, ResultCard, TaskSpecResultProjectionV1 } from "../../shared/ipc.js";
 import { appendTurn } from "./store.js";
 
 /**
@@ -49,6 +49,58 @@ function copyAcceptedRequest(request: TaskRequestView): TaskRequestView {
   return {
     outcome: copyRow(request.outcome),
     requirements: request.requirements.map(copyRow),
+  };
+}
+
+type ClosedSerialResult = Exclude<SerialRunResult, { status: "connection-required" }>;
+type TaskSpecRunRecord = NonNullable<ClosedSerialResult["composed"]["taskSpecRunRecord"]>;
+
+/** Detach the Q4 record into the only Task-Spec data shape allowed to cross
+ * persistence/IPC. No Core brand is projected, and no event/claim can add a
+ * CriterionResult, critic finding, verdict, source, or envelope authority. */
+function copyTaskSpecResult(record: TaskSpecRunRecord): TaskSpecResultProjectionV1 {
+  const workerClaims = record.workerClaims === null ? null : {
+    version: record.workerClaims.version,
+    taskSpecSha256: record.workerClaims.taskSpecSha256,
+    disposition: record.workerClaims.disposition,
+    summary: record.workerClaims.summary,
+    changes: [...record.workerClaims.changes],
+    criteria: record.workerClaims.criteria.map((claim) => ({ id: claim.id, result: claim.result })),
+    preferences: record.workerClaims.preferences.map((claim) => ({ id: claim.id, result: claim.result })),
+    howToTry: record.workerClaims.howToTry,
+    limitations: record.workerClaims.limitations,
+    milestone: record.workerClaims.milestone,
+  };
+  return {
+    version: TASK_SPEC_RESULT_PROJECTION_VERSION,
+    requestSha256: record.requestSha256,
+    taskSpecSha256: record.taskSpecSha256,
+    evidencePlanSha256: record.evidencePlanSha256,
+    requiredPromises: record.criteria.map((criterion) => ({ id: criterion.id, promise: criterion.promise })),
+    advisoryPreferences: record.preferences.map((preference) => ({
+      id: preference.id,
+      dimension: preference.dimension,
+      desiredDirection: preference.desiredDirection,
+    })),
+    adapterAttestations: record.adapterAttestations.map((attestation) => ({
+      version: attestation.version,
+      taskSpecSha256: attestation.taskSpecSha256,
+      evidencePlanSha256: attestation.evidencePlanSha256,
+      criterionId: attestation.criterionId,
+      sequence: attestation.sequence,
+      commandSha256: attestation.commandSha256,
+      exitCode: attestation.exitCode,
+    })),
+    workerClaims,
+    envelopeResult: {
+      version: record.envelopeResult.version,
+      taskNumber: record.envelopeResult.taskNumber,
+      requestSha256: record.envelopeResult.requestSha256,
+      taskSpecSha256: record.envelopeResult.taskSpecSha256,
+      disposition: record.envelopeResult.disposition,
+      stopReason: record.envelopeResult.stopReason,
+    },
+    criticReady: false,
   };
 }
 
@@ -136,6 +188,9 @@ export function composeResultCard(result: SerialRunResult, evidenceRunId: string
     provider: composed.route.provider,
     model: composed.route.model,
   };
+  if (composed.taskSpecRunRecord) {
+    card.taskSpecResult = copyTaskSpecResult(composed.taskSpecRunRecord);
+  }
   return card;
 }
 
@@ -178,7 +233,7 @@ export function composeErrorCard(
  * words a reader of the report sees.
  */
 export function cardBriefing(card: ResultCard): string {
-  const { claims } = card;
+  const { claims, taskSpecResult } = card;
   // This is deliberately a whitelist rather than a rest-spread. The opaque
   // local run link is not provider context, and neither is any present or
   // future album metadata accidentally attached to the in-memory object.
@@ -198,10 +253,33 @@ export function cardBriefing(card: ResultCard): string {
   };
   const blocks = [
     `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(verified)}`,
-    `The worker's account (claims, not verified by Cairn):\n${
-      claims ? JSON.stringify(claims) : "The worker returned no readable claims block."
-    }`,
   ];
+  if (taskSpecResult) {
+    const taskSpecEvidence = {
+      version: taskSpecResult.version,
+      requestSha256: taskSpecResult.requestSha256,
+      taskSpecSha256: taskSpecResult.taskSpecSha256,
+      evidencePlanSha256: taskSpecResult.evidencePlanSha256,
+      requiredPromises: taskSpecResult.requiredPromises,
+      advisoryPreferences: taskSpecResult.advisoryPreferences,
+      adapterAttestations: taskSpecResult.adapterAttestations,
+      criticReady: taskSpecResult.criticReady,
+    };
+    blocks.push(
+      `Task Spec evidence (verified bindings and command-hash/exit facts only; pN is advisory and never a DONE gate; no critic authority):\n${JSON.stringify(taskSpecEvidence)}`,
+      `The Task-Spec worker's account (claims, not verified by Cairn):\n${
+        taskSpecResult.workerClaims
+          ? JSON.stringify(taskSpecResult.workerClaims)
+          : "The worker returned no readable Task-Spec-bound claims block."
+      }`,
+      `The Task-Spec envelope result (verified by Cairn's runtime; separate from worker claims and CriterionResult):\n${JSON.stringify(taskSpecResult.envelopeResult)}`,
+    );
+  } else {
+    // Keep the historical two-block briefing byte-for-byte when Q4 is absent.
+    blocks.push(`The worker's account (claims, not verified by Cairn):\n${
+      claims ? JSON.stringify(claims) : "The worker returned no readable claims block."
+    }`);
+  }
   if (card.acceptedRequest) {
     // Rebuild rather than spread. The card's request is context for the
     // conductor's comment, not a verified result fact or a worker claim, and
