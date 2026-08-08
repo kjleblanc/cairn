@@ -5,6 +5,7 @@ import { isAbsolute, join, relative } from "node:path";
 import { types as nodeTypes } from "node:util";
 import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
 import type { ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
+import { parseTaskReviewProjection } from "../../shared/task-review.js";
 import type { TaskIntentSourceInput } from "@cairn/core";
 import { cardDigest, cardDigestCandidates, cardMarkers, recordCardMarker } from "./cardauth.js";
 import { sanitizeFollowups } from "./followups.js";
@@ -569,6 +570,39 @@ function validTaskSpecResultProjection(value: unknown, card: Partial<ResultCard>
   return true;
 }
 
+function sameAcceptedRequest(
+  left: NonNullable<ResultCard["acceptedRequest"]>,
+  right: NonNullable<ResultCard["acceptedRequest"]>,
+): boolean {
+  const sameRow = (a: typeof left.outcome, b: typeof right.outcome): boolean =>
+    a.source === b.source && a.text === b.text && a.ownerText === b.ownerText;
+  return sameRow(left.outcome, right.outcome) && left.requirements.length === right.requirements.length
+    && left.requirements.every((row, index) => {
+      const other = right.requirements[index];
+      return other !== undefined && sameRow(row, other);
+    });
+}
+
+function validTaskReviewProjection(value: unknown, card: Partial<ResultCard>): boolean {
+  const projection = parseTaskReviewProjection(value);
+  if (projection === null || card.acceptedRequest === undefined || card.acceptedRequest === null
+    || !sameAcceptedRequest(projection.plan.request, card.acceptedRequest)) return false;
+  if (projection.criteria.some((criterion) => criterion.ownerChecks.some((check) => check.action !== null))) return false;
+  const result = card.taskSpecResult;
+  if (result === undefined) return true;
+  return projection.plan.criteria.length === result.requiredPromises.length
+    && projection.plan.criteria.every((criterion, index) => {
+      const required = result.requiredPromises[index];
+      return required !== undefined && required.id === criterion.id && required.promise === criterion.promise;
+    })
+    && projection.plan.preferences.length === result.advisoryPreferences.length
+    && projection.plan.preferences.every((preference, index) => {
+      const advisory = result.advisoryPreferences[index];
+      return advisory !== undefined && advisory.id === preference.id && advisory.dimension === preference.dimension
+        && advisory.desiredDirection === preference.desiredDirection;
+    });
+}
+
 function isResultCard(value: unknown): value is ResultCard {
   try {
     if (typeof value !== "object" || value === null || nodeTypes.isProxy(value)) return false;
@@ -579,6 +613,9 @@ function isResultCard(value: unknown): value is ResultCard {
     const taskSpecResult = Object.getOwnPropertyDescriptor(value, "taskSpecResult");
     if (taskSpecResult && (!("value" in taskSpecResult) || !taskSpecResult.enumerable
       || !validTaskSpecResultProjection(taskSpecResult.value, card))) return false;
+    const taskReview = Object.getOwnPropertyDescriptor(value, "taskReview");
+    if (taskReview && (!("value" in taskReview) || !taskReview.enumerable
+      || !validTaskReviewProjection(taskReview.value, card))) return false;
     return card.kind === "result"
       && (card.disposition === "DONE" || card.disposition === "STOPPED" || card.disposition === "ERROR")
       && Array.isArray(card.filesChanged)

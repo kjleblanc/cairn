@@ -25,7 +25,9 @@ import type {
   TaskRouteRequest,
   TaskRouteSource,
   TaskRunRequest,
+  TaskReviewProjectionV1,
 } from "../shared/ipc.js";
+import { parseTaskReviewActionRequest } from "../shared/task-review.js";
 import type { TaskSpecProposalPreviewV1 } from "../shared/quality-preview.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
 import {
@@ -50,12 +52,20 @@ import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, 
 import { runtimeWorkerIdentity } from "./workeridentity.js";
 import { composeDirectTaskSpecProposal } from "./conductor/qualityproposal.js";
 import { criticActivationStatus } from "./criticactivation.js";
+import {
+  applyTaskReviewAction,
+  composePendingTaskReviewAuthority,
+  invalidateTaskReviewAuthority,
+  taskReviewProjection,
+  type MainTaskReviewAuthorityV1,
+} from "./ownercheck.js";
 
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
 const sessions = new Map<string, RunSessionSnapshot>();
 const routeGenerations = new Map<string, number>();
 const previews = new Map<string, PendingPreview>();
+const reviewAuthorities = new Map<string, MainTaskReviewAuthorityV1>();
 const starting = new Set<string>();
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -87,6 +97,8 @@ type PendingPreview = Readonly<{
   source: TaskRouteSource;
   taskSpec?: TaskSpecV1;
   taskSpecPreview?: TaskSpecProposalPreviewV1;
+  taskReviewAuthority?: MainTaskReviewAuthorityV1;
+  taskReview?: TaskReviewProjectionV1;
 }>;
 
 /** Read-only runtime projection for workspace and IPC assembly. IPC callers
@@ -186,7 +198,20 @@ function nextGeneration(key: string): number {
   const generation = (routeGenerations.get(key) ?? 0) + 1;
   routeGenerations.set(key, generation);
   previews.delete(key);
+  const review = reviewAuthorities.get(key);
+  if (review !== undefined) invalidateTaskReviewAuthority(review);
+  reviewAuthorities.delete(key);
   return generation;
+}
+
+function pendingReviewIsCurrent(key: string, pending: PendingPreview): boolean {
+  if (pending.taskSpec === undefined) {
+    return pending.taskSpecPreview === undefined && pending.taskReviewAuthority === undefined
+      && pending.taskReview === undefined && !reviewAuthorities.has(key);
+  }
+  return pending.taskSpecPreview !== undefined && pending.taskReviewAuthority !== undefined && pending.taskReview !== undefined
+    && reviewAuthorities.get(key) === pending.taskReviewAuthority
+    && taskReviewProjection(pending.taskReviewAuthority) === pending.taskReview;
 }
 
 function invalidateProjectPreview(dir: string | null): void {
@@ -262,6 +287,16 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         }
       }
 
+      let taskReviewAuthority: MainTaskReviewAuthorityV1 | undefined;
+      let taskReview: TaskReviewProjectionV1 | undefined;
+      if (taskSpec !== undefined) {
+        taskReviewAuthority = composePendingTaskReviewAuthority(dir, taskSpec) ?? undefined;
+        taskReview = taskReviewAuthority === undefined ? undefined : taskReviewProjection(taskReviewAuthority) ?? undefined;
+        if (taskReviewAuthority === undefined || taskReview === undefined) {
+          throw new Error("TASK_REVIEW_UNAVAILABLE: Cairn could not bind the accepted Task Spec review.");
+        }
+      }
+
       const route = previewSerialRoute(intent, detected.adapters, adapterId);
       const value = route.status === "connection-required" && detected.status
         ? { ...route, reason: connectionRequiredReason(detected.status) }
@@ -287,9 +322,12 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         source: Object.freeze({ ...source }),
         ...(taskSpec === undefined ? {} : { taskSpec }),
         ...(taskSpecPreview === undefined ? {} : { taskSpecPreview }),
+        ...(taskReviewAuthority === undefined ? {} : { taskReviewAuthority }),
+        ...(taskReview === undefined ? {} : { taskReview }),
       });
       if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
       previews.set(key, pending);
+      if (taskReviewAuthority !== undefined) reviewAuthorities.set(key, taskReviewAuthority);
       return {
         ok: true,
         value: {
@@ -299,11 +337,45 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           route: value,
           ...(disclosure === undefined ? {} : { disclosure }),
           ...(taskSpecPreview === undefined ? {} : { taskSpecPreview }),
+          ...(taskReview === undefined ? {} : { taskReview }),
         },
       };
     } catch (error) {
       logError("task:route", error);
       return { ok: false, message: plainMessage(error) };
+    }
+  });
+
+  ipcMain.handle("task:review-action", (_event, unsafeRequest: unknown): Result<TaskReviewProjectionV1> => {
+    const request = parseTaskReviewActionRequest(unsafeRequest);
+    if (request === null) {
+      return { ok: false, message: "TASK_REVIEW_ACTION_INVALID: Cairn refused a malformed owner-check choice." };
+    }
+    try {
+      projectStatus(request.dir);
+      const key = canonicalProjectKey(request.dir);
+      const authority = reviewAuthorities.get(key);
+      if (authority === undefined) {
+        return { ok: false, message: "TASK_REVIEW_STALE: That owner check is no longer current." };
+      }
+      const projection = applyTaskReviewAction(authority, request);
+      if (projection === null) {
+        if (taskReviewProjection(authority) === null) {
+          invalidateTaskReviewAuthority(authority);
+          reviewAuthorities.delete(key);
+        }
+        return { ok: false, message: "TASK_REVIEW_STALE: That owner check is no longer current." };
+      }
+      const pending = previews.get(key);
+      if (pending?.taskReviewAuthority === authority) {
+        previews.set(key, Object.freeze({ ...pending, taskReview: projection }));
+      }
+      const session = sessions.get(request.dir);
+      if (session?.taskReview !== undefined) session.taskReview = projection;
+      return { ok: true, value: projection };
+    } catch (error) {
+      logError("task:review-action", error);
+      return { ok: false, message: "TASK_REVIEW_STALE: That owner check is no longer current." };
     }
   });
 
@@ -350,6 +422,9 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     if (!pending || pending.previewId !== previewId || routeGenerations.get(key) !== pending.generation) {
       return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
     }
+    if (!pendingReviewIsCurrent(key, pending)) {
+      return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
+    }
     // Once this invocation has proved it owns the reviewed preview, every
     // pre-acceptance uncertainty retires that authority. If another route or
     // an explicit cancellation already replaced it while an await was in
@@ -385,7 +460,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       return refuseBeforeAcceptance(plainMessage(error));
     }
 
-    if (previews.get(key) !== pending || routeGenerations.get(key) !== pending.generation) {
+    if (previews.get(key) !== pending || routeGenerations.get(key) !== pending.generation || !pendingReviewIsCurrent(key, pending)) {
       return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
     }
     if (isQuitDraining()) {
@@ -446,6 +521,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       previews.delete(key);
     }
 
+    const acceptedTaskReview = pending.taskReview;
+    if (pending.taskReviewAuthority !== undefined) {
+      invalidateTaskReviewAuthority(pending.taskReviewAuthority);
+      if (reviewAuthorities.get(key) === pending.taskReviewAuthority) reviewAuthorities.delete(key);
+    }
     const outcome = pending.request.outcome.text;
     const conversationId = pending.source.kind === "proposal" ? pending.source.conversationId : null;
     // Capture the output-only view at the acceptance point. Acknowledgement may
@@ -510,6 +590,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         result: null,
         error: null,
         evidenceRunId,
+        ...(acceptedTaskReview === undefined ? {} : { taskReview: acceptedTaskReview }),
       });
     } catch (error) {
       starting.delete(key);
@@ -522,11 +603,12 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           dir, outcome, acceptedPreviewId: previewId, request: pending.request, adapterId: routedAdapterId, conversationId,
           worker: routedWorker, startedAt: new Date().toISOString(), activities: [],
           phase: "closed", result: null, error: message, evidenceRunId: null,
+          ...(acceptedTaskReview === undefined ? {} : { taskReview: acceptedTaskReview }),
         });
       } catch {
         // Memory exhaustion can also prevent the retained error projection.
       }
-      post(() => composeErrorCard(message, acceptedRequest, null));
+      post(() => composeErrorCard(message, acceptedRequest, null, acceptedTaskReview));
       return { ok: false, message } satisfies Result<never>;
     }
     // Evidence exists only for a real routed worker. Bind both pictures to the
@@ -652,12 +734,12 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     if (conversationId !== null) {
       void run.then(
         (outcome) => post(() => (outcome.ok
-          ? composeResultCard(outcome.value, cardEvidenceRunId)
-          : composeErrorCard(outcome.message, acceptedRequest, cardEvidenceRunId))),
+          ? composeResultCard(outcome.value, cardEvidenceRunId, acceptedTaskReview)
+          : composeErrorCard(outcome.message, acceptedRequest, cardEvidenceRunId, acceptedTaskReview))),
         // Unreachable by construction — the closure above catches everything
         // and returns a refusal. It is still handled, so that no terminal state
         // can go unspoken and no rejection can escape unhandled.
-        (error: unknown) => post(() => composeErrorCard(plainMessage(error), acceptedRequest, cardEvidenceRunId)),
+        (error: unknown) => post(() => composeErrorCard(plainMessage(error), acceptedRequest, cardEvidenceRunId, acceptedTaskReview)),
       );
     }
     return run;

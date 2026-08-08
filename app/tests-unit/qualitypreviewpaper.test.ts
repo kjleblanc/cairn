@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const ipc = readFileSync(join(process.cwd(), "src", "shared", "ipc.ts"), "utf8");
 const chat = readFileSync(join(process.cwd(), "src", "renderer", "screens", "Chat.tsx"), "utf8");
+const taskReview = readFileSync(join(process.cwd(), "src", "renderer", "components", "TaskReview.tsx"), "utf8");
 
 function section(source: string, opening: string, closing: string): string {
   const start = source.indexOf(opening);
@@ -30,7 +31,7 @@ test("the Task Spec preview crosses IPC as optional output only", () => {
 });
 
 test("the pure preview view renders the owner-readable Quality Plan vocabulary", () => {
-  const view = section(chat, "function previewSourceLabel", "type TaskSessionRefreshDetail");
+  const view = section(taskReview, "function previewSourceLabel", "function evidenceList");
   assert.match(view, /<TaskIntentList request=\{preview\.request\} heading="Request and source"/);
   assert.match(view, /preview\.supportedPath\.statement/);
   assert.match(view, /preview\.supportedPath\.sources/);

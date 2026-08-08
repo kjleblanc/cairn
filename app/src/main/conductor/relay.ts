@@ -1,6 +1,7 @@
 import type { SerialRunResult, TaskRequestView } from "@cairn/core";
 import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
-import type { ConductorTurn, ResultCard, TaskSpecResultProjectionV1 } from "../../shared/ipc.js";
+import type { ConductorTurn, ResultCard, TaskSpecResultProjectionV1, TaskReviewProjectionV1 } from "../../shared/ipc.js";
+import { parseTaskReviewProjection } from "../../shared/task-review.js";
 import { appendTurn } from "./store.js";
 
 /**
@@ -104,6 +105,12 @@ function copyTaskSpecResult(record: TaskSpecRunRecord): TaskSpecResultProjection
   };
 }
 
+function copyTaskReview(review: TaskReviewProjectionV1): TaskReviewProjectionV1 {
+  const parsed = parseTaskReviewProjection(structuredClone(review));
+  if (parsed === null) throw new Error("INVALID_TASK_REVIEW: Cairn refused an invalid pre-seal review projection.");
+  return parsed;
+}
+
 /** The one card shape, with every "nothing to report" field already empty, so
  * each arm below states only what it actually knows. */
 function blankCard(disposition: ResultCard["disposition"]): ResultCard {
@@ -153,12 +160,21 @@ function blankCard(disposition: ResultCard["disposition"]): ResultCard {
  * readiness sentence rides `evidenceSummary`, the card's one free line, so the
  * render can say why without inventing a route that was never resolved.
  */
-export function composeResultCard(result: SerialRunResult, evidenceRunId: string | null = null): ResultCard {
+export function composeResultCard(
+  result: SerialRunResult,
+  evidenceRunId: string | null = null,
+  taskReview?: TaskReviewProjectionV1,
+): ResultCard {
   requireEvidenceRunId(evidenceRunId);
   if (result.status === "connection-required") {
     const card = blankCard("STOPPED");
     card.stopReason = "CONNECTION_REQUIRED";
     card.evidenceSummary = result.route.reason;
+    if (taskReview !== undefined) {
+      const review = copyTaskReview(taskReview);
+      card.taskReview = review;
+      card.acceptedRequest = copyAcceptedRequest(review.plan.request);
+    }
     return card;
   }
   const composed = result.composed;
@@ -191,6 +207,7 @@ export function composeResultCard(result: SerialRunResult, evidenceRunId: string
   if (composed.taskSpecRunRecord) {
     card.taskSpecResult = copyTaskSpecResult(composed.taskSpecRunRecord);
   }
+  if (taskReview !== undefined) card.taskReview = copyTaskReview(taskReview);
   return card;
 }
 
@@ -207,11 +224,13 @@ export function composeErrorCard(
   message: string,
   acceptedRequest: TaskRequestView | null,
   evidenceRunId: string | null = null,
+  taskReview?: TaskReviewProjectionV1,
 ): ResultCard {
   requireEvidenceRunId(evidenceRunId);
   const card = blankCard("ERROR");
   card.acceptedRequest = acceptedRequest === null ? null : copyAcceptedRequest(acceptedRequest);
   card.evidenceRunId = evidenceRunId;
+  if (taskReview !== undefined) card.taskReview = copyTaskReview(taskReview);
   const head = message.split(":", 1)[0]?.trim() ?? "";
   card.errorCode = head.length <= CODE_CAP && FIXED_CODE.test(head) ? head : null;
   return card;

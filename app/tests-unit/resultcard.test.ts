@@ -4,11 +4,13 @@ import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { RouteResult, SerialRunResult } from "@cairn/core";
+import { createDirectTaskIntent, type RouteResult, type SerialRunResult } from "@cairn/core";
 import { legacyCardDigest, recordCardMarker, setCardMarkerDir } from "../src/main/conductor/cardauth.js";
+import { composeDirectTaskSpecProposal } from "../src/main/conductor/qualityproposal.js";
 import { setTurnMarkerDir } from "../src/main/conductor/turnauth.js";
 import { cardBriefing, composeErrorCard, composeResultCard, postResultCard } from "../src/main/conductor/relay.js";
 import { appendTurn, conversationsDir, listConversations, newConversationId, readTurns } from "../src/main/conductor/store.js";
+import { composePendingTaskReviewAuthority, taskReviewProjection } from "../src/main/ownercheck.js";
 
 // The marker store lives outside every project — in the app it is Electron's
 // `userData`. A test process has no Electron, so it points at its own temp
@@ -245,6 +247,18 @@ function rawMarkerBackedCard(root: string, id: string, ts: string, card: unknown
   );
 }
 
+function pendingTaskReviewForResultCard() {
+  const intent = createDirectTaskIntent("Show a visible status badge.", "77777777-7777-4777-8777-777777777777");
+  assert.ok(intent);
+  const proposal = composeDirectTaskSpecProposal(intent);
+  assert.ok(proposal);
+  const authority = composePendingTaskReviewAuthority(process.cwd(), proposal.taskSpec);
+  assert.ok(authority);
+  const review = taskReviewProjection(authority);
+  assert.ok(review);
+  return review;
+}
+
 test("a done run composes a DONE card whose files changed come from composed, never from claims", () => {
   const result = doneResult();
   const card = composeResultCard(result);
@@ -338,6 +352,7 @@ test("a v4 close projects one detached Task-Spec result without merging claims, 
 test("legacy card objects and conductor briefing remain byte-identical when no Task-Spec record exists", () => {
   const card = composeResultCard(doneResult());
   assert.equal(Object.hasOwn(card, "taskSpecResult"), false);
+  assert.equal(Object.hasOwn(card, "taskReview"), false);
   assert.equal(JSON.stringify(card), JSON.stringify({
     kind: "result",
     disposition: "DONE",
@@ -398,6 +413,91 @@ test("legacy card objects and conductor briefing remain byte-identical when no T
   ].join("\n\n"));
 });
 
+test("a plan-only Task Review round-trips as detached output while legacy cards omit it", () => {
+  const review: any = structuredClone(pendingTaskReviewForResultCard());
+  const legacy = doneResult();
+  if (legacy.status !== "done") throw new Error("test fixture must be closed");
+  const card = composeResultCard({
+    ...legacy,
+    composed: { ...legacy.composed, acceptedRequest: review.plan.request },
+  }, null, review);
+  assert.deepEqual(card.taskReview, review);
+  assert.notEqual(card.taskReview, review);
+  assert.notEqual(card.taskReview?.plan, review.plan);
+  assert.notEqual(card.taskReview?.criteria, review.criteria);
+  assert.equal(card.taskReview?.preSealEvidence, true);
+  assert.deepEqual(card.taskReview?.criteria.map((row) => [row.id, row.state]), [["c1", "pending"]]);
+
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-review-card-"));
+  const id = newConversationId(root);
+  appendTurn(root, id, { role: "envelope", card, ts: "2026-08-07T20:30:00.000Z" });
+  const stored = readTurns(root, id)[0];
+  assert.equal(stored?.role, "envelope");
+  assert.deepEqual(stored?.role === "envelope" ? stored.card.taskReview : null, card.taskReview);
+
+  review.criteria[0].state = "met";
+  assert.equal(card.taskReview?.criteria[0]?.state, "pending", "renderer/output mutation cannot reach the card copy");
+});
+
+test("terminal card storage rejects forged Task Review authority and cross-boundary edits", () => {
+  const review = pendingTaskReviewForResultCard();
+  const legacy = doneResult();
+  if (legacy.status !== "done") throw new Error("test fixture must be closed");
+  const base = composeResultCard({
+    ...legacy,
+    composed: { ...legacy.composed, acceptedRequest: review.plan.request },
+  }, null, review);
+  const forged = [
+    {
+      name: "renderer action",
+      card: (() => {
+        const value: any = structuredClone(base);
+        value.taskReview.criteria[0].ownerChecks = [{
+          kind: "owner-observation",
+          status: "waiting-owner",
+          supportingEvidence: [],
+          counterEvidence: [],
+          action: { kind: "observe", actionId: "88888888-8888-4888-8888-888888888888" },
+        }];
+        return value;
+      })(),
+    },
+    {
+      name: "changed accepted request",
+      card: (() => {
+        const value: any = structuredClone(base);
+        value.taskReview.plan.request.outcome.text = "A different task";
+        return value;
+      })(),
+    },
+    {
+      name: "criterion substitution",
+      card: (() => {
+        const value: any = structuredClone(base);
+        value.taskReview.criteria[0].id = "c2";
+        return value;
+      })(),
+    },
+  ];
+
+  for (const [index, item] of forged.entries()) {
+    const appendRoot = mkdtempSync(join(tmpdir(), "cairn-task-review-card-drop-"));
+    const appendId = newConversationId(appendRoot);
+    assert.throws(
+      () => appendTurn(appendRoot, appendId, {
+        role: "envelope", card: item.card, ts: `2026-08-07T20:${40 + index}:00.000Z`,
+      } as never),
+      /INVALID_RESULT_CARD/,
+      `${item.name} must refuse before persistence`,
+    );
+
+    const readRoot = mkdtempSync(join(tmpdir(), "cairn-task-review-card-read-drop-"));
+    const readId = newConversationId(readRoot);
+    rawMarkerBackedCard(readRoot, readId, `2026-08-07T20:${50 + index}:00.000Z`, item.card);
+    assert.deepEqual(readTurns(readRoot, readId), [], `${item.name} must be dropped on authenticated read`);
+  }
+});
+
 test("a stopped run carries its fixed stop reason, the real protected-work finding, and no commit", () => {
   const card = composeResultCard(stoppedResult(), EVIDENCE_RUN_ID);
   assert.equal(card.disposition, "STOPPED");
@@ -435,6 +535,25 @@ test("a connection-required close maps to a STOPPED card that claims no task, no
   assert.equal(card.evidenceRunId, null, "a connection refusal has no accepted run to link");
   assert.equal(Object.prototype.hasOwnProperty.call(card, "acceptedRequest"), true);
   assert.equal(card.acceptedRequest, null, "a new no-task card records null rather than pretending to be legacy");
+});
+
+test("a connection-required close retains and authenticates its accepted plan-only Task Review", () => {
+  const review = pendingTaskReviewForResultCard();
+  const card = composeResultCard({
+    status: "connection-required",
+    route: { status: "connection-required", candidates: [], reason: "No compatible worker is currently available." },
+    activities: [],
+  }, null, review);
+  assert.deepEqual(card.acceptedRequest, review.plan.request);
+  assert.deepEqual(card.taskReview, review);
+  assert.notEqual(card.taskReview, review);
+
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-review-connection-card-"));
+  const id = newConversationId(root);
+  appendTurn(root, id, { role: "envelope", card, ts: "2026-08-07T20:35:00.000Z" });
+  const stored = readTurns(root, id)[0];
+  assert.equal(stored?.role, "envelope");
+  assert.deepEqual(stored?.role === "envelope" ? stored.card.taskReview : null, card.taskReview);
 });
 
 test("an error card carries the fixed code, the accepted request when there was one, and none of the raw message", () => {
@@ -475,10 +594,12 @@ test("every accepted task error path supplies the retained request to error-card
   const tasksSource = readFileSync(resolve(__dirname, "../../src/main/tasks.ts"), "utf8");
   assert.match(tasksSource, /const acceptedRequest = pending\.request;/,
     "the output-only view is captured at the atomic acceptance point");
+  assert.match(tasksSource, /const acceptedTaskReview = pending\.taskReview;/,
+    "the output-only Q5 review is captured at the same atomic acceptance point");
   assert.equal((tasksSource.match(/composeErrorCard\(/g) ?? []).length, 3,
     "all three accepted setup, settled-error, and rejected-run paths stay pinned");
   assert.equal(
-    (tasksSource.match(/composeErrorCard\([^,\n]+, acceptedRequest, (?:null|cardEvidenceRunId)\)/g) ?? []).length,
+    (tasksSource.match(/composeErrorCard\([^,\n]+, acceptedRequest, (?:null|cardEvidenceRunId), acceptedTaskReview\)/g) ?? []).length,
     3,
     "no accepted error path may regress to null or reconstruct provenance later",
   );

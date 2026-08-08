@@ -267,6 +267,7 @@ const mock: CairnApi = {
   taskPreviewDiscard: (_dir: string, _previewId?: string): Promise<Result<null>> => soon(ok(null)),
   taskRun: (_request: TaskRunRequest): Promise<Result<SerialRunResult>> =>
     soon(nope("the lab never runs tasks — pose DONE or STOPPED from the lab panel")),
+  taskReviewAction: (_request) => soon(nope("the lab has no authenticated candidate review")),
   taskCancel: (_dir: string) => soon(ok(null)),
   taskCurrent: (_dir: string) => soon(world.session),
   taskAcknowledge: (_dir: string) => soon(ok(null)),

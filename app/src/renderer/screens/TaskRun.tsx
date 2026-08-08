@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
-import type { RunSessionSnapshot } from "../../shared/ipc";
+import type { RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { DisclosureConfirm } from "../components/DisclosureConfirm";
 import { ModelRoute } from "../components/ModelRoute";
+import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoice } from "../components/TaskReview";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 
 type Phase = "entry" | "route" | "running" | "result";
@@ -23,6 +24,8 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [requestView, setRequestView] = useState<TaskRequestView | null>(null);
   const [requestContext, setRequestContext] = useState<readonly string[]>([]);
+  const [taskSpecPreview, setTaskSpecPreview] = useState<TaskSpecProposalPreviewV1 | null>(null);
+  const [taskReview, setTaskReview] = useState<TaskReviewProjectionV1 | null>(null);
   const [disclosure, setDisclosure] = useState<WorkerDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
   const [activities, setActivities] = useState<SerialActivity[]>([]);
@@ -30,6 +33,8 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const [sessionWorker, setSessionWorker] = useState(false);
+  const routeGeneration = useRef(0);
+  const pendingReviewAction = useRef<{ generation: number; actionId: string } | null>(null);
   // The lane is a real worker whenever the routed adapter is not the offline
   // demo — a capability check, never an adapter-id check, so a third adapter
   // needs no renderer change.
@@ -44,8 +49,11 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
 
   const applySession = useCallback((session: RunSessionSnapshot | null) => {
     if (!session) return;
+    routeGeneration.current += 1;
+    pendingReviewAction.current = null;
     setOutcome(session.outcome);
     setRequestView(session.request ?? null);
+    setTaskReview(session.taskReview ?? null);
     setSessionWorker(session.worker);
     setActivities(session.activities);
     if (session.phase === "running") setPhase("running");
@@ -87,12 +95,18 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   }, [applySession, dir]);
 
   async function findRoute() {
+    const generation = routeGeneration.current + 1;
+    routeGeneration.current = generation;
+    pendingReviewAction.current = null;
     setError(null);
     const response = await cairn.taskRoute({ dir, source: { kind: "manual", rawOutcome: outcome } });
+    if (routeGeneration.current !== generation) return;
     if (!response.ok) { setError(response.message); return; }
     setPreviewId(response.value.previewId);
     setRequestView(response.value.request);
     setRequestContext(response.value.context);
+    setTaskSpecPreview(response.value.taskSpecPreview ?? null);
+    setTaskReview(response.value.taskReview ?? null);
     setRoute(response.value.route);
     setDisclosure(response.value.disclosure ?? null);
     setPhase("route");
@@ -101,6 +115,8 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   async function run() {
     if (!route || route.status !== "ready" || previewId === null) return;
     if (workerRoute && !realCallConfirmed) { setError(`Confirm the displayed real-call boundary before starting ${route.recommended.label}.`); return; }
+    routeGeneration.current += 1;
+    pendingReviewAction.current = null;
     setError(null); setActivities([]); setPhase("running");
     const response = await cairn.taskRun({
       dir,
@@ -125,13 +141,41 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
     setPhase("result");
   }
 
+  async function applyTaskReviewChoice(actionId: string, action: TaskReviewActionChoice): Promise<void> {
+    const generation = routeGeneration.current;
+    if (previewId === null || taskReview === null
+      || !taskReview.criteria.some((criterion) => criterion.ownerChecks.some((check) => check.action?.actionId === actionId))
+      || pendingReviewAction.current?.generation === generation) return;
+    const pending = { generation, actionId };
+    pendingReviewAction.current = pending;
+    const request = action.kind === "observe"
+      ? { dir, actionId, action: { kind: "observe" as const, decision: action.decision } }
+      : { dir, actionId, action: { kind: "resolve" as const, decision: action.decision } };
+    try {
+      const response = await cairn.taskReviewAction(request);
+      if (pendingReviewAction.current !== pending || routeGeneration.current !== generation) return;
+      pendingReviewAction.current = null;
+      if (!response.ok) { setError(response.message); return; }
+      setError(null);
+      setTaskReview(response.value);
+    } catch {
+      if (pendingReviewAction.current !== pending || routeGeneration.current !== generation) return;
+      pendingReviewAction.current = null;
+      setError("Cairn could not apply that owner-check choice. Review the current task again.");
+    }
+  }
+
   function tryAnother() {
+    routeGeneration.current += 1;
+    pendingReviewAction.current = null;
     void cairn.taskPreviewDiscard(dir, previewId ?? undefined);
     void cairn.taskAcknowledge(dir);
-    setPhase("entry"); setOutcome(""); setPreviewId(null); setRequestView(null); setRequestContext([]); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false); setSessionWorker(false);
+    setPhase("entry"); setOutcome(""); setPreviewId(null); setRequestView(null); setRequestContext([]); setTaskSpecPreview(null); setTaskReview(null); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false); setSessionWorker(false);
   }
 
   function leave(): void {
+    routeGeneration.current += 1;
+    pendingReviewAction.current = null;
     void cairn.taskPreviewDiscard(dir, previewId ?? undefined);
     onBack();
   }
@@ -158,6 +202,12 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
         </Card>
       ) : null}
 
+      {phase === "route" && taskReview ? (
+        <TaskReviewView review={taskReview} heading="Final Task Spec" onAction={(actionId, choice) => void applyTaskReviewChoice(actionId, choice)} />
+      ) : phase === "route" && taskSpecPreview ? (
+        <TaskSpecProposalPreviewView preview={taskSpecPreview} heading="Final quality plan" />
+      ) : null}
+
       {phase === "route" && route?.status === "connection-required" ? (
         <Card>
           <h2>Connect a model to continue</h2>
@@ -172,7 +222,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
 
       {phase === "route" && route?.status === "ready" ? (
         <>
-          {requestView ? (
+          {requestView && taskReview === null && taskSpecPreview === null ? (
             <Card title="what you asked for">
               <p className="small muted">Interpretation ({requestView.outcome.source})</p>
               <p>{requestView.outcome.text}</p>
@@ -210,6 +260,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
         </>
       ) : null}
 
+      {phase === "running" && taskReview ? <TaskReviewView review={taskReview} heading="Accepted Task Spec" /> : null}
       {phase === "running" ? (
         <Card title="route → run → check → result">
           <p>{workerish
@@ -224,6 +275,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
 
       {phase === "result" && result && result.status !== "connection-required" ? (
         <>
+          {taskReview ? <TaskReviewView review={taskReview} heading="Accepted Task Spec" /> : null}
           <Card title={result.status === "done" ? "verified" : "stopped safely"}>
             <h2>{result.status === "done"
               ? workerish ? "Verified real Codex Exec result" : "Verified offline result"

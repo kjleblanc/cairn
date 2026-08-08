@@ -258,6 +258,57 @@ function evidencePlan(spec: TaskSpecV1): EvidencePlanV1 {
   return plan;
 }
 
+function ownerComparisonTaskSpec(mode: "required" | "optional" | "off"): TaskSpecV1 {
+  const candidate = clone(qualityPlan(mode)) as any;
+  candidate.references[0].basis = { kind: "intent-requirement", index: 0 };
+  candidate.acceptanceChecks[3] = acceptance("c4", "owner", {
+    kind: "comparison",
+    failureCondition: {
+      id: "failure-c4",
+      statement: "The frozen c4 comparison is broken.",
+      allowedArtifactIds: ["artifact-owner-candidate", "artifact-owner-reference"],
+    },
+    evidenceStandard: {
+      mode: "comparison",
+      proves: "The frozen candidate/reference comparison decides c4.",
+      precondition: "The owner can inspect both frozen states.",
+    },
+    comparison: {
+      id: "comparison-c4",
+      referenceId: "reference-one",
+      dimensionId: "layout",
+      candidateStateId: "candidate-main",
+      comparator: "match",
+      threshold: "The declared layout relationship is preserved.",
+      tieOutcome: "meets",
+    },
+  });
+  const parsed = parseQualityPlanCandidate(candidate);
+  assert.ok(parsed);
+  const spec = bindTaskSpec(boundIntent(), parsed);
+  assert.ok(spec);
+  return spec;
+}
+
+function ownerComparisonEvidencePlan(spec: TaskSpecV1): EvidencePlanV1 {
+  const plan = bindInitialEvidencePlan(spec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [
+      { criterionId: "c1", kind: "packet-artifact", command: null, artifactIds: ["artifact-output"] },
+      { criterionId: "c2", kind: "packet-artifact", command: null, artifactIds: ["artifact-secondary"] },
+      { criterionId: "c3", kind: "packet-artifact", command: null, artifactIds: ["evidence-regression"] },
+      {
+        criterionId: "c4",
+        kind: "comparison-capture",
+        command: null,
+        artifactIds: ["artifact-owner-candidate", "artifact-owner-reference"],
+      },
+    ],
+  });
+  assert.ok(plan);
+  return plan;
+}
+
 function provenance(): Record<string, unknown> {
   return {
     selectorVersion: "cairn-conductor-context-selector/v1",
@@ -1346,6 +1397,77 @@ test("critic policy: owner observations are assessment-independent under every c
     assert.ok(result);
     assert.equal(result.blockers.length, 0, JSON.stringify(mismatch));
   }
+});
+
+test("critic policy: owner comparison observations use only the exact comparison-capture pair", () => {
+  const comparisonArtifacts = ["artifact-owner-candidate", "artifact-owner-reference"];
+  for (const mode of ["required", "optional", "off"] as const) {
+    const spec = ownerComparisonTaskSpec(mode);
+    const plan = ownerComparisonEvidencePlan(spec);
+    const observation = ownerObservation(spec, {
+      stateArtifactIds: comparisonArtifacts,
+      evidenceRefsSeen: comparisonArtifacts,
+    });
+    const failed = deriveCriticPolicy(spec, plan, null, policyContext(spec, plan, null, {
+      ownerObservations: [observation],
+    }));
+    assert.equal(failed.state, "blocked", mode);
+    assert.deepEqual(failed.blockers.map((row) => [row.source, row.criterionIds]), [["owner", ["c4"]]], mode);
+
+    const met = deriveCriticPolicy(spec, plan, null, policyContext(spec, plan, null, {
+      ownerObservations: [{ ...observation, decision: "met" }],
+    }));
+    assert.equal(met.blockers.length, 0, mode);
+    assert.equal(met.state, mode === "required" ? "critic-unavailable" : "clear", mode);
+
+    const unplanned = deriveCriticPolicy(spec, plan, null, policyContext(spec, plan, null, {
+      ownerObservations: [{ ...observation, evidenceRefsSeen: ["artifact-owner"] }],
+    }));
+    assert.equal(unplanned.blockers.length, 0, `${mode}: unplanned evidence`);
+
+    for (const incomplete of [
+      { ...observation, stateArtifactIds: [comparisonArtifacts[0]] },
+      { ...observation, evidenceRefsSeen: [comparisonArtifacts[1]] },
+      { ...observation, stateArtifactIds: [...comparisonArtifacts].reverse() },
+    ]) {
+      const partial = deriveCriticPolicy(spec, plan, null, policyContext(spec, plan, null, {
+        ownerObservations: [incomplete],
+      }));
+      assert.equal(partial.blockers.length, 0, `${mode}: incomplete or reordered comparison custody`);
+    }
+  }
+
+  const comparisonSpec = ownerComparisonTaskSpec("off");
+  assert.equal(bindInitialEvidencePlan(comparisonSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [
+      { criterionId: "c1", kind: "packet-artifact", command: null, artifactIds: ["artifact-output"] },
+      { criterionId: "c2", kind: "packet-artifact", command: null, artifactIds: ["artifact-secondary"] },
+      { criterionId: "c3", kind: "packet-artifact", command: null, artifactIds: ["evidence-regression"] },
+      { criterionId: "c4", kind: "owner-observation", command: null, artifactIds: comparisonArtifacts },
+    ],
+  }), null, "a comparison criterion cannot borrow an owner-observation procedure");
+
+  const observationSpec = taskSpec("off");
+  assert.equal(bindInitialEvidencePlan(observationSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [
+      { criterionId: "c1", kind: "packet-artifact", command: null, artifactIds: ["artifact-output"] },
+      { criterionId: "c2", kind: "packet-artifact", command: null, artifactIds: ["artifact-secondary"] },
+      { criterionId: "c3", kind: "packet-artifact", command: null, artifactIds: ["evidence-regression"] },
+      { criterionId: "c4", kind: "comparison-capture", command: null, artifactIds: ["artifact-owner"] },
+    ],
+  }), null, "an observation criterion cannot borrow a comparison-capture procedure");
+
+  const scopedPlan = ownerComparisonEvidencePlan(comparisonSpec);
+  const wrongJudge = deriveCriticPolicy(comparisonSpec, scopedPlan, null, policyContext(comparisonSpec, scopedPlan, null, {
+    ownerObservations: [ownerObservation(comparisonSpec, {
+      criterionId: "c3",
+      stateArtifactIds: ["evidence-regression"],
+      evidenceRefsSeen: ["evidence-regression"],
+    })],
+  }));
+  assert.equal(wrongJudge.blockers.length, 0, "an owner-shaped row cannot seize a Cairn-judged criterion");
 });
 
 test("critic policy: a critic cN allegation waits, and only its exact authenticated owner confirmation blocks", () => {

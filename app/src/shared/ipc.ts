@@ -1,7 +1,9 @@
 import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 import type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
+import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
 
 export type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
+export type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
 
 export type {
   AccountLabelProvenance,
@@ -77,6 +79,8 @@ export type TaskRoutePreview = {
   /** Optional output-only Quality Plan review. Main remains the sole owner of
    * the branded Task Spec; `task:run` accepts only `previewId`. */
   taskSpecPreview?: TaskSpecProposalPreviewV1;
+  /** Optional output-only pre-seal evidence state for that exact Task Spec. */
+  taskReview?: TaskReviewProjectionV1;
 };
 /** `pushPreview`'s local-only, network-free look at what a push would do:
  * null when the current branch has no upstream configured (there is
@@ -135,6 +139,8 @@ export type RunSessionSnapshot = {
   error: string | null;
   /** Opaque main-owned identity used only to bind local captures to this run. */
   evidenceRunId?: string | null;
+  /** Output-only accepted Task Spec and pre-seal evidence state. */
+  taskReview?: TaskReviewProjectionV1;
 };
 
 /** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
@@ -393,6 +399,7 @@ export interface CairnApi {
   taskRoute(request: TaskRouteRequest): Promise<Result<TaskRoutePreview>>;
   taskPreviewDiscard(dir: string, previewId?: string): Promise<Result<null>>;
   taskRun(request: TaskRunRequest): Promise<Result<SerialRunResult>>;
+  taskReviewAction(request: TaskReviewActionRequest): Promise<Result<TaskReviewProjectionV1>>;
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
   taskAcknowledge(dir: string): Promise<Result<null>>;
@@ -568,6 +575,8 @@ export interface ResultCard {
    * legacy/live empty-registry card byte and meaning unchanged.
    */
   taskSpecResult?: TaskSpecResultProjectionV1;
+  /** Q5's source-marked Task Spec and pre-seal owner/critic evidence state. */
+  taskReview?: TaskReviewProjectionV1;
 }
 
 /** The two turns owner and Cairn take in the conversation itself. */

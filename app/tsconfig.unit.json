@@ -14,6 +14,7 @@
     "src/main/adapters.ts",
     "src/main/atomicwrite.ts",
     "src/main/evidence.ts",
+    "src/main/ownercheck.ts",
     "src/main/evidencecapture.ts",
     "src/main/workeridentity.ts",
     "src/main/connections/schema.ts",
