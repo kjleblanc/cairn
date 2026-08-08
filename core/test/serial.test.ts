@@ -795,6 +795,76 @@ test("an unrelated task-record path prevents Cairn from committing model work", 
   assert.match(readFileSync(result.reportPath, "utf8"), /MODEL_RESULT_NOT_VERIFIED/);
 });
 
+test("a verdict path in the change set prevents Cairn from committing model work", async () => {
+  // The owner's verdict is a record ABOUT a run. A run must never sweep one
+  // into its own commit and attribute it to the worker, and a worker must
+  // never be able to plant one. Before Task 212 the verdict tree had no
+  // rejection at all: a file under docs/ai-work/verdicts/ was returned as a
+  // product path and committed inside "complete verified worker task".
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      mkdirSync(join(root, "docs", "ai-work", "verdicts"), { recursive: true });
+      writeFileSync(join(root, "docs", "ai-work", "verdicts", "197.md"), "a planted verdict\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added a visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), fake)],
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "MODEL_RESULT_NOT_VERIFIED");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
+  // The evidence stays on disk; Cairn stops rather than tidying up after a worker.
+  assert.equal(existsSync(join(root, "docs", "ai-work", "verdicts", "197.md")), true);
+});
+
+test("an ordinary product path is still committed — the verdict guard is not a widening", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      mkdirSync(join(root, "docs", "notes"), { recursive: true });
+      writeFileSync(join(root, "docs", "notes", "verdicts-elsewhere.md"), "not a verdict path\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 2, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added a visible result.",
+          changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+        }),
+      };
+    },
+  };
+  const result = await runSerialTask(root, "Add one visible result", {
+    adapters: [createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, "Add one visible result"), fake)],
+  });
+
+  assert.equal(result.status, "done");
+  assert.notEqual(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  const committed = git(root, ["show", "--name-only", "--format=", "HEAD"]).trim().split("\n");
+  assert.ok(committed.includes("docs/notes/verdicts-elsewhere.md"), "a path merely containing the word must still commit");
+});
+
 test("claims saying STOPPED close as MODEL_REPORTED_STOPPED with evidence retained", async () => {
   const root = project();
   const beforeHead = git(root, ["rev-parse", "HEAD"]);

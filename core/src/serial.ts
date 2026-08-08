@@ -767,6 +767,14 @@ function changedTaskPaths(root: string, contract: AdapterTaskContract): string[]
     if (!path || isAbsolute(path) || relativePath.startsWith("../") || isAbsolute(relativePath)) return null;
     if (path.split("/").includes(".git")) return null;
     if (path.startsWith("docs/ai-work/tasks/") && !owned.has(path)) return null;
+    // Task 212: a verdict is a record ABOUT a completed run — Cairn's, on the
+    // owner's behalf — and no run ever owns one. Without this, a file under
+    // `docs/ai-work/verdicts/` was returned as a product path and committed
+    // inside "complete verified worker task", attributing the owner's judgment
+    // to the worker and letting a worker plant one. The rejection is flat
+    // rather than owned-gated because the owned set is only ever the brief,
+    // the report, and the log.
+    if (path.startsWith("docs/ai-work/verdicts/")) return null;
   }
   // Cairn now authors the owned records AFTER this scan (Task 048), so they are
   // no longer required to pre-exist in the change set. Every other safety line
