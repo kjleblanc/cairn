@@ -9,6 +9,7 @@ import {
   type AdapterDescriptor,
   type SerialRunResult,
   type TaskIntent,
+  type TaskSpecV1,
   type WorkerDisclosure,
 } from "@cairn/core";
 import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
@@ -25,6 +26,7 @@ import type {
   TaskRouteSource,
   TaskRunRequest,
 } from "../shared/ipc.js";
+import type { TaskSpecProposalPreviewV1 } from "../shared/quality-preview.js";
 import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
 import {
   commentary,
@@ -46,6 +48,8 @@ import { captureBeforeWorkerStage, captureTerminalStage, type StageCaptureWindow
 import { logError, plainMessage } from "./log.js";
 import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
 import { runtimeWorkerIdentity } from "./workeridentity.js";
+import { composeDirectTaskSpecProposal } from "./conductor/qualityproposal.js";
+import { criticActivationStatus } from "./criticactivation.js";
 
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
@@ -57,11 +61,18 @@ const starting = new Set<string>();
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const DIRECT_TASK_TOO_LONG = "TASK_REQUEST_TOO_LONG: Keep a direct task request to 2,000 characters or fewer.";
 const DIRECT_TASK_INVALID = "Describe one visible outcome using at least five non-whitespace characters.";
+const DIRECT_TASK_QUALITY_INVALID = "TASK_QUALITY_UNCLEAR: Name one finite result Cairn can honestly inspect; references and taste-only standards need a conversation first.";
 const PREVIEW_STALE = "TASK_PREVIEW_STALE: That dispatch review is no longer current. Review the task again.";
 const PROPOSAL_STALE = "TASK_PROPOSAL_STALE: That proposed task is no longer current.";
 const PROPOSAL_RISKS = "TASK_PROPOSAL_HAS_RISKS: Resolve or set aside every current risk before reviewing dispatch.";
 const ROUTE_CHANGED = "TASK_ROUTE_CHANGED: The selected worker changed while you were deciding. Nothing was started.";
 const REAL_CALL_NOT_AUTHORIZED = "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting.";
+
+/** Q3 cannot name an exact calibrated critic route yet. This deliberate null
+ * identity keeps every new Task Spec producer out of normal task routing; Q10
+ * must replace it with a complete registry-bound identity, never a flag. */
+const QUALITY_PREVIEW_ACTIVATION_IDENTITY: unknown = null;
+const QUALITY_PREVIEW_ACTIVE = criticActivationStatus(QUALITY_PREVIEW_ACTIVATION_IDENTITY).kind === "active";
 
 type PendingPreview = Readonly<{
   previewId: string;
@@ -74,6 +85,8 @@ type PendingPreview = Readonly<{
   worker: boolean;
   disclosure?: WorkerDisclosure;
   source: TaskRouteSource;
+  taskSpec?: TaskSpecV1;
+  taskSpecPreview?: TaskSpecProposalPreviewV1;
 }>;
 
 /** Read-only runtime projection for workspace and IPC assembly. IPC callers
@@ -217,22 +230,33 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const generation = nextGeneration(key);
 
       let intent: TaskIntent | null = null;
+      let taskSpec: TaskSpecV1 | undefined;
+      let taskSpecPreview: TaskSpecProposalPreviewV1 | undefined;
       if (source.kind === "manual") {
         if (source.rawOutcome.length > 2_000) return { ok: false, message: DIRECT_TASK_TOO_LONG } satisfies Result<never>;
         intent = createDirectTaskIntent(source.rawOutcome, randomUUID());
         if (intent === null) return { ok: false, message: DIRECT_TASK_INVALID } satisfies Result<never>;
+        if (QUALITY_PREVIEW_ACTIVE) {
+          const proposal = composeDirectTaskSpecProposal(intent);
+          if (proposal === null) return { ok: false, message: DIRECT_TASK_QUALITY_INVALID } satisfies Result<never>;
+          taskSpec = proposal.taskSpec;
+          taskSpecPreview = proposal.preview;
+        }
       } else {
         const current = currentTaskProposal(dir, source.conversationId, source.proposalId);
         if (current === null) return { ok: false, message: PROPOSAL_STALE } satisfies Result<never>;
         if (current.unresolvedRisks !== 0) return { ok: false, message: PROPOSAL_RISKS } satisfies Result<never>;
         intent = current.intent;
+        taskSpec = current.taskSpec;
+        taskSpecPreview = current.taskSpecPreview;
       }
 
       const detected = await detectedAdapters(mock, dir);
       if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
       if (source.kind === "proposal") {
         const current = currentTaskProposal(dir, source.conversationId, source.proposalId);
-        if (current === null || current.unresolvedRisks !== 0 || current.intent !== intent) {
+        if (current === null || current.unresolvedRisks !== 0 || current.intent !== intent
+            || current.taskSpec !== taskSpec || current.taskSpecPreview !== taskSpecPreview) {
           nextGeneration(key);
           return { ok: false, message: PROPOSAL_STALE } satisfies Result<never>;
         }
@@ -261,6 +285,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         worker: identity.worker,
         ...(disclosure === undefined ? {} : { disclosure: Object.freeze({ ...disclosure }) }),
         source: Object.freeze({ ...source }),
+        ...(taskSpec === undefined ? {} : { taskSpec }),
+        ...(taskSpecPreview === undefined ? {} : { taskSpecPreview }),
       });
       if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
       previews.set(key, pending);
@@ -272,6 +298,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           context: [...intent.context],
           route: value,
           ...(disclosure === undefined ? {} : { disclosure }),
+          ...(taskSpecPreview === undefined ? {} : { taskSpecPreview }),
         },
       };
     } catch (error) {
@@ -345,7 +372,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         logError("task:run proposal recheck", error);
         return refuseBeforeAcceptance(PROPOSAL_STALE);
       }
-      if (current === null || current.unresolvedRisks !== 0 || current.intent !== pending.intent) {
+      if (current === null || current.unresolvedRisks !== 0 || current.intent !== pending.intent
+          || current.taskSpec !== pending.taskSpec || current.taskSpecPreview !== pending.taskSpecPreview) {
         return refuseBeforeAcceptance(PROPOSAL_STALE);
       }
     }
@@ -371,7 +399,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         logError("task:run proposal recheck", error);
         return refuseBeforeAcceptance(PROPOSAL_STALE);
       }
-      if (current === null || current.unresolvedRisks !== 0 || current.intent !== pending.intent) {
+      if (current === null || current.unresolvedRisks !== 0 || current.intent !== pending.intent
+          || current.taskSpec !== pending.taskSpec || current.taskSpecPreview !== pending.taskSpecPreview) {
         return refuseBeforeAcceptance(PROPOSAL_STALE);
       }
     }
@@ -409,7 +438,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         logError("task:run proposal consume", error);
         return refuseBeforeAcceptance(PROPOSAL_STALE);
       }
-      if (consumed === null || consumed.intent !== pending.intent) {
+      if (consumed === null || consumed.intent !== pending.intent
+          || consumed.taskSpec !== pending.taskSpec || consumed.taskSpecPreview !== pending.taskSpecPreview) {
         return refuseBeforeAcceptance(PROPOSAL_STALE);
       }
     } else {

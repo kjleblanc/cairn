@@ -29,6 +29,7 @@
     "src/main/connections/resolve.ts",
     "src/main/conductor/constitution.ts",
     "src/main/conductor/taskblock.ts",
+    "src/main/conductor/qualityproposal.ts",
     "src/main/conductor/context.ts",
     "src/main/conductor/client.ts",
     "src/main/conductor/transports/types.ts",

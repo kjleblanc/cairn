@@ -1,7 +1,14 @@
 import { shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { types as nodeTypes } from "node:util";
-import { bindTaskIntent, taskRequestView, type TaskIntent } from "@cairn/core";
+import {
+  bindTaskIntent,
+  taskRequestView,
+  taskSpecSha256,
+  validateTaskSpec,
+  type TaskIntent,
+  type TaskSpecV1,
+} from "@cairn/core";
 import type {
   ConductorAction,
   ConductorActionReply,
@@ -23,6 +30,7 @@ import type {
   ResultCard,
   TaskBlock,
 } from "../../shared/ipc.js";
+import type { TaskSpecProposalPreviewV1 } from "../../shared/quality-preview.js";
 import { OPENROUTER_BASE_URL } from "../../shared/bodies.js";
 import { isQuitDraining, runningDirs } from "../rungate.js";
 import { logError } from "../log.js";
@@ -38,7 +46,7 @@ import {
   type ConductorTransportMessage,
 } from "./transports/types.js";
 import { consentCardFor } from "./consent.js";
-import { CONSTITUTION } from "./constitution.js";
+import { CONSTITUTION, QUALITY_CONSTITUTION } from "./constitution.js";
 import { assembleBriefing } from "./context.js";
 import * as keystore from "./keystore.js";
 import { beginOpenRouterOAuth, createLoopbackListener, OAUTH_CANCELLED, type OAuthAttempt } from "./oauth.js";
@@ -47,10 +55,22 @@ import { connectionNoteFor } from "./seatnote.js";
 import type { StoredConnection } from "./keystore.js";
 import { appendCairnTurn, appendOwnerTurn, ConversationAppendUncertainError, ensureCairnExcluded, listConversations, newConversationId, readHistorySnapshot, readTurns, type ConductorHistorySnapshot } from "./store.js";
 import { extractFollowups, followupSafeStreamingText } from "./followups.js";
-import { controlSafeStreamingText, extractConductorControl, type ConductorControlCandidate } from "./taskblock.js";
+import {
+  controlSafeStreamingText,
+  extractConductorControl,
+  extractQualityConductorControl,
+  type ConductorControlCandidate,
+  type QualityConductorControlCandidate,
+} from "./taskblock.js";
 import { isConversationId } from "./conversation-id.js";
 import { canonicalProjectKey, validateOwnerReplyContext, type OwnerReplyContext } from "./turnauth.js";
 import { buildSetAsideReplacement, preservesSetAsideReplacement, type SetAsideReplacement } from "./setaside.js";
+import {
+  composeConversationTaskSpecProposal,
+  sameConductorQualityProposal,
+  type ConductorQualityProposalV1,
+} from "./qualityproposal.js";
+import { criticActivationStatus } from "../criticactivation.js";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
@@ -114,6 +134,16 @@ const SET_ASIDE_PENDING_ACKNOWLEDGEMENT = "Updating the plan...";
 const SET_ASIDE_ACKNOWLEDGEMENT = "I carried that concern forward.";
 const ACTION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+/**
+ * Q3 has no exact calibrated critic route identity. Passing `null` to the
+ * registry is therefore the deliberate fail-closed decision: the live
+ * conductor keeps the byte-identical v8 prompt/parser, while the staged v9
+ * composer is exercised only by offline fakes. Q10 must supply an exact
+ * registry identity before either staged producer can become reachable.
+ */
+const QUALITY_PREVIEW_ACTIVATION_IDENTITY: unknown = null;
+const QUALITY_PREVIEW_ACTIVE = criticActivationStatus(QUALITY_PREVIEW_ACTIVATION_IDENTITY).kind === "active";
+
 /** One live stream per project dir, so a stray second send can't stomp on a
  * stream already in flight and `stop` has something to abort. It carries its
  * `kind` because the refusal the next send gets has to name what is actually in
@@ -150,6 +180,9 @@ type InternalAction =
       request: Extract<ConductorAction, { kind: "task" }>["request"];
       context: readonly string[];
       risks: readonly { riskId: string; text: string }[];
+      qualityProposal?: ConductorQualityProposalV1;
+      taskSpec?: TaskSpecV1;
+      taskSpecPreview?: TaskSpecProposalPreviewV1;
     };
 
 const currentActions = new Map<string, InternalAction>();
@@ -253,6 +286,7 @@ function actionView(value: InternalAction): ConductorAction {
     request: value.request,
     context: [...value.context],
     risks: value.risks.map((risk) => ({ ...risk })),
+    ...(value.taskSpecPreview === undefined ? {} : { taskSpecPreview: value.taskSpecPreview }),
   };
 }
 
@@ -684,13 +718,39 @@ export function currentTaskProposal(
   dir: string,
   conversationId: string,
   proposalId: string,
-): { intent: TaskIntent; unresolvedRisks: number } | null {
+): {
+  intent: TaskIntent;
+  unresolvedRisks: number;
+  taskSpec?: TaskSpecV1;
+  taskSpecPreview?: TaskSpecProposalPreviewV1;
+} | null {
   if (!isConversationId(conversationId) || !ACTION_UUID.test(proposalId)) return null;
   const current = currentActions.get(actionKey(dir));
   if (!current || current.kind !== "task" || current.conversationId !== conversationId || current.actionId !== proposalId) {
     return null;
   }
-  return { intent: current.intent, unresolvedRisks: current.risks.length };
+  if (current.taskSpec !== undefined) {
+    // Active Q3 previews are re-authenticated from the latest saved owner
+    // sources before every route/run lookup. Editing the project-owned JSONL
+    // cannot keep an old in-memory Task Spec current merely because its action
+    // UUID still matches.
+    let authenticatedSources: unknown;
+    try {
+      authenticatedSources = readHistorySnapshot(dir, conversationId).authenticatedSources;
+    } catch {
+      return null;
+    }
+    const validated = validateTaskSpec(current.taskSpec, authenticatedSources);
+    const storedHash = taskSpecSha256(current.taskSpec);
+    const validatedHash = taskSpecSha256(validated);
+    if (validated === null || storedHash === null || validatedHash !== storedHash) return null;
+  }
+  return {
+    intent: current.intent,
+    unresolvedRisks: current.risks.length,
+    ...(current.taskSpec === undefined ? {} : { taskSpec: current.taskSpec }),
+    ...(current.taskSpecPreview === undefined ? {} : { taskSpecPreview: current.taskSpecPreview }),
+  };
 }
 
 /**
@@ -702,7 +762,7 @@ export function consumeCurrentTaskProposal(
   dir: string,
   conversationId: string,
   proposalId: string,
-): { intent: TaskIntent } | null {
+): { intent: TaskIntent; taskSpec?: TaskSpecV1; taskSpecPreview?: TaskSpecProposalPreviewV1 } | null {
   const current = currentTaskProposal(dir, conversationId, proposalId);
   if (current === null || current.unresolvedRisks !== 0) return null;
   const key = actionKey(dir);
@@ -711,7 +771,11 @@ export function consumeCurrentTaskProposal(
   currentActions.delete(key);
   proposals.delete(key);
   notifyTaskProposalChanged(dir);
-  return { intent: current.intent };
+  return {
+    intent: current.intent,
+    ...(current.taskSpec === undefined ? {} : { taskSpec: current.taskSpec }),
+    ...(current.taskSpecPreview === undefined ? {} : { taskSpecPreview: current.taskSpecPreview }),
+  };
 }
 
 /** Retire only the exact proposal main emitted and the owner is now sending.
@@ -831,6 +895,7 @@ export function send(
   // one-time authority remain available. The provider may still supply a
   // valid fresh action; this value is used when its reply has no safe one.
   let setAsideReplacement: SetAsideReplacement | undefined;
+  let setAsideQualityProposal: ConductorQualityProposalV1 | undefined;
   if (request.actionReply?.kind === "set-risk-aside") {
     const current = currentActions.get(key);
     if (conversationId === null || current?.kind !== "task") {
@@ -845,6 +910,7 @@ export function send(
       );
       if (replacement === null) return { ok: false, message: SET_ASIDE_REPLACEMENT_UNAVAILABLE };
       setAsideReplacement = replacement;
+      setAsideQualityProposal = current.qualityProposal;
     } catch {
       return { ok: false, message: SET_ASIDE_REPLACEMENT_UNAVAILABLE };
     }
@@ -931,7 +997,18 @@ export function send(
     text: "",
     ...(request.actionReply === undefined ? {} : { settlementKind: request.actionReply.kind }),
   });
-  void streamTurn(dir, id, conn, controller, onDelta, "reply", eventDir, historySnapshot, setAsideReplacement);
+  void streamTurn(
+    dir,
+    id,
+    conn,
+    controller,
+    onDelta,
+    "reply",
+    eventDir,
+    historySnapshot,
+    setAsideReplacement,
+    setAsideQualityProposal,
+  );
 
   return { ok: true, value: { conversationId: id } };
 }
@@ -1043,8 +1120,14 @@ function fixedExplanation(text: string, explanation: string): string {
   return text.trim() ? `${text.trim()}\n\n${explanation}` : explanation;
 }
 
+function configuredConductorControl(reply: string) {
+  return QUALITY_PREVIEW_ACTIVE
+    ? extractQualityConductorControl(reply)
+    : extractConductorControl(reply);
+}
+
 function internalActionFor(
-  candidate: ConductorControlCandidate,
+  candidate: ConductorControlCandidate | QualityConductorControlCandidate,
   conversationId: string,
   authenticatedSources: unknown,
 ): InternalAction | null {
@@ -1054,6 +1137,11 @@ function internalActionFor(
   const intent = bindTaskIntent(candidate.intent, authenticatedSources);
   const request = intent === null ? null : taskRequestView(intent);
   if (intent === null || request === null) return null;
+  const qualityProposal = "quality" in candidate ? candidate.quality : undefined;
+  const taskSpecProposal = qualityProposal === undefined
+    ? null
+    : composeConversationTaskSpecProposal(intent, qualityProposal);
+  if (qualityProposal !== undefined && taskSpecProposal === null) return null;
   return {
     kind: "task",
     actionId: randomUUID(),
@@ -1062,20 +1150,32 @@ function internalActionFor(
     request,
     context: Object.freeze([...intent.context]),
     risks: Object.freeze(candidate.risks.map((text) => Object.freeze({ riskId: randomUUID(), text }))),
+    ...(qualityProposal === undefined || taskSpecProposal === null ? {} : {
+      qualityProposal,
+      taskSpec: taskSpecProposal.taskSpec,
+      taskSpecPreview: taskSpecProposal.preview,
+    }),
   };
 }
 
 /** Read-only early classification for presentation. It creates no action IDs
  * and grants no authority; final parsing below still owns the real action. */
 function actionableTaskCandidate(
-  candidate: ConductorControlCandidate | null,
+  candidate: ConductorControlCandidate | QualityConductorControlCandidate | null,
   authenticatedSources: unknown,
   replacement?: SetAsideReplacement,
+  replacementQuality?: ConductorQualityProposalV1,
 ): boolean {
   if (candidate?.kind !== "task") return false;
   const intent = bindTaskIntent(candidate.intent, authenticatedSources);
   const request = intent === null ? null : taskRequestView(intent);
   if (intent === null || request === null) return false;
+  if ("quality" in candidate && composeConversationTaskSpecProposal(intent, candidate.quality) === null) return false;
+  const candidateQuality = "quality" in candidate ? candidate.quality : undefined;
+  const qualityPreserved = replacementQuality === undefined
+    ? candidateQuality === undefined
+    : candidateQuality !== undefined && sameConductorQualityProposal(candidateQuality, replacementQuality);
+  if (replacement !== undefined && !qualityPreserved) return false;
   return replacement === undefined || preservesSetAsideReplacement({
     request,
     context: intent.context,
@@ -1086,7 +1186,12 @@ function actionableTaskCandidate(
 function internalActionFromSetAside(
   replacement: SetAsideReplacement,
   conversationId: string,
-): Extract<InternalAction, { kind: "task" }> {
+  qualityProposal?: ConductorQualityProposalV1,
+): Extract<InternalAction, { kind: "task" }> | null {
+  const taskSpecProposal = qualityProposal === undefined
+    ? null
+    : composeConversationTaskSpecProposal(replacement.intent, qualityProposal);
+  if (qualityProposal !== undefined && taskSpecProposal === null) return null;
   return {
     kind: "task",
     actionId: randomUUID(),
@@ -1098,6 +1203,11 @@ function internalActionFromSetAside(
     // can never target a risk that merely survived into the fresh review.
     risks: Object.freeze(replacement.remainingRisks
       .map((risk) => Object.freeze({ riskId: randomUUID(), text: risk.text }))),
+    ...(qualityProposal === undefined || taskSpecProposal === null ? {} : {
+      qualityProposal,
+      taskSpec: taskSpecProposal.taskSpec,
+      taskSpecPreview: taskSpecProposal.preview,
+    }),
   };
 }
 
@@ -1113,6 +1223,7 @@ async function streamTurn(
   eventDir: string,
   retainedHistory?: ConductorHistorySnapshot,
   setAsideReplacement?: SetAsideReplacement,
+  setAsideQualityProposal?: ConductorQualityProposalV1,
   transportFactory: ConductorTransportFactory = createOpenAICompatibleTransport,
 ): Promise<void> {
   let full = "";
@@ -1146,7 +1257,7 @@ async function streamTurn(
     // never a secret. Curated seats add nothing (`null`).
     const seatNote = connectionNoteFor(conn.baseUrl, selectedModel);
     const messages: ConductorTransportMessage[] = [
-      { role: "system", content: CONSTITUTION },
+      { role: "system", content: QUALITY_PREVIEW_ACTIVE ? QUALITY_CONSTITUTION : CONSTITUTION },
       { role: "system", content: assembleBriefing(dir, undefined, latestOwnerText) },
       ...(seatNote ? [{ role: "system", content: seatNote } satisfies ConductorTransportMessage] : []),
       // A result card enters the prompt as SYSTEM context, labeled for what it
@@ -1203,12 +1314,17 @@ async function streamTurn(
     )) {
       if (event.kind === "delta" && event.text) {
         full += event.text;
-        const streamedCandidate = kind === "reply" ? extractConductorControl(full).candidate : null;
+        const streamedCandidate = kind === "reply" ? configuredConductorControl(full).candidate : null;
         const acknowledgement = kind !== "reply"
           ? null
           : setAsideReplacement !== undefined
             ? SET_ASIDE_PENDING_ACKNOWLEDGEMENT
-            : actionableTaskCandidate(streamedCandidate, historySnapshot.authenticatedSources)
+            : actionableTaskCandidate(
+                streamedCandidate,
+                historySnapshot.authenticatedSources,
+                setAsideReplacement,
+                setAsideQualityProposal,
+              )
               ? PROPOSAL_ACKNOWLEDGEMENT
               : null;
         if (acknowledgement !== null) {
@@ -1234,13 +1350,13 @@ async function streamTurn(
       }
     }
 
-    const { block, candidate } = extractConductorControl(full);
+    const { block, candidate } = configuredConductorControl(full);
     // Task 157: the suggestions ride the commentary turn only. A reply that
     // emits the fence anyway has it stripped and dropped — symmetric with the
     // commentary task-block drop below: neither voice may grow a control the
     // other turn's owner never asked for.
     const { followups: found, text: withoutFollowups } = extractFollowups(full);
-    const { text: withoutPrivateControls } = extractConductorControl(withoutFollowups);
+    const { text: withoutPrivateControls } = configuredConductorControl(withoutFollowups);
     const followups = kind === "commentary" ? found : null;
     const parsedAction = kind === "reply" && candidate !== null
       ? internalActionFor(candidate, id, historySnapshot.authenticatedSources)
@@ -1249,13 +1365,19 @@ async function streamTurn(
     // only when it preserves the exact request, every remaining risk, and the
     // full main-prepared context prefix (including the selected concern).
     // Otherwise main's deterministic replacement is the safe visible truth.
+    const candidateQualityPreserved = parsedAction?.kind === "task"
+      && (setAsideQualityProposal === undefined
+        ? parsedAction.qualityProposal === undefined
+        : parsedAction.qualityProposal !== undefined
+          && sameConductorQualityProposal(parsedAction.qualityProposal, setAsideQualityProposal));
     const candidateAction = setAsideReplacement === undefined
       ? parsedAction
-      : parsedAction?.kind === "task" && preservesSetAsideReplacement(parsedAction, setAsideReplacement)
+      : parsedAction?.kind === "task" && candidateQualityPreserved
+          && preservesSetAsideReplacement(parsedAction, setAsideReplacement)
         ? parsedAction
         : null;
     const fallbackAction = kind === "reply" && candidateAction === null && setAsideReplacement !== undefined
-      ? internalActionFromSetAside(setAsideReplacement, id)
+      ? internalActionFromSetAside(setAsideReplacement, id, setAsideQualityProposal)
       : null;
     const nextAction = candidateAction ?? fallbackAction;
     const fallbackUsed = fallbackAction !== null;

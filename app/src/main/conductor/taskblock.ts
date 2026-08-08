@@ -4,6 +4,10 @@ import {
   type TaskIntentCandidate,
 } from "@cairn/core";
 import type { TaskBlock, TaskBlockConcern } from "../../shared/ipc.js";
+import {
+  parseConductorQualityProposal,
+  type ConductorQualityProposalV1,
+} from "./qualityproposal.js";
 
 const FORBIDDEN_VISIBLE_CONTROLS = /[\u0000\u202a-\u202e\u2066-\u2069]/u;
 
@@ -16,6 +20,24 @@ export interface ConductorControlResult {
   /** Legacy proposal compatibility. Task 3 removes this path only when the
    * attributed intent can travel through dispatch without being downgraded. */
   block: TaskBlock | null;
+  text: string;
+}
+
+/** The staged Q3 control is deliberately disjoint from the live v8 control.
+ * Its quality value is bounded proposal content only; main still owns every
+ * id, source resolution, hash, and frozen Task Spec. */
+export type QualityConductorControlCandidate =
+  | Readonly<{ kind: "question"; question: string }>
+  | Readonly<{
+      kind: "task";
+      intent: TaskIntentCandidate;
+      quality: ConductorQualityProposalV1;
+      risks: readonly string[];
+    }>;
+
+export interface QualityConductorControlResult {
+  candidate: QualityConductorControlCandidate | null;
+  block: null;
   text: string;
 }
 
@@ -187,6 +209,30 @@ function parseAttributedTask(raw: string): ConductorControlCandidate | null {
   return Object.freeze({ kind: "task", intent, risks: Object.freeze(risks) });
 }
 
+function parseQualityAttributedTask(raw: string): QualityConductorControlCandidate | null {
+  // Reuse the intent envelope's complete raw-body limit and hostile JSON
+  // boundary. The staged task is not allowed a larger private control merely
+  // because it carries bounded quality content too.
+  const value = parseTaskIntentCandidateEnvelopeJson(raw);
+  const record = exactRecord(value, ["intent", "quality", "risks"]);
+  if (!record || !Array.isArray(record.risks) || record.risks.length > 3) return null;
+  const intent = parseTaskIntentCandidate(record.intent);
+  const quality = parseConductorQualityProposal(record.quality);
+  if (!intent || !quality) return null;
+  const risks: string[] = [];
+  for (const value of record.risks) {
+    const risk = exactRecord(value, ["text"]);
+    if (!risk || !safeControlText(risk.text)) return null;
+    risks.push(risk.text.trim());
+  }
+  return Object.freeze({
+    kind: "task",
+    intent,
+    quality,
+    risks: Object.freeze(risks),
+  });
+}
+
 /** Scan the whole reply, remove every delimited control fence, and create a
  * candidate only when exactly one such fence exists and validates. Malformed,
  * mixed, or duplicated controls therefore leave readable prose but no power. */
@@ -202,6 +248,28 @@ export function extractConductorControl(reply: string): ConductorControlResult {
   const candidate = parseAttributedTask(raw);
   if (candidate !== null) return { candidate, block: null, text };
   return { candidate: null, block: parseBlock(raw), text };
+}
+
+/** Parse the staged Q3 protocol without changing the live v8 parser. It uses
+ * the same fence scanner and stripping rules, but accepts only the exact
+ * `{intent,quality,risks}` task envelope and never falls back to a legacy
+ * TaskBlock. Normal routing does not call this export while activation is
+ * empty. */
+export function extractQualityConductorControl(reply: string): QualityConductorControlResult {
+  const controls = controlFences(reply);
+  if (controls.length === 0) return { candidate: null, block: null, text: reply };
+  const text = stripControls(reply, controls);
+  if (controls.length !== 1 || controls[0].raw === null) return { candidate: null, block: null, text };
+  const { kind, raw } = controls[0];
+  if (kind === "cairn-question") {
+    const question = parseQuestion(raw);
+    return {
+      candidate: question?.kind === "question" ? question : null,
+      block: null,
+      text,
+    };
+  }
+  return { candidate: parseQualityAttributedTask(raw), block: null, text };
 }
 
 /** Compatibility wrapper for the still-live v2 proposal path. */

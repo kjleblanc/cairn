@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { controlSafeStreamingText, extractConductorControl, extractTaskBlock } from "../src/main/conductor/taskblock.js";
+import {
+  controlSafeStreamingText,
+  extractConductorControl,
+  extractQualityConductorControl,
+  extractTaskBlock,
+} from "../src/main/conductor/taskblock.js";
 
 const fence = (body: string) => "Here is my proposal.\n\n```cairn-task\n" + body + "\n```\nAnything else?";
 
@@ -76,6 +81,40 @@ const intent = (quote = "Use 300 milliseconds") => ({
   context: ["Desktop only"],
 });
 
+const quality = () => ({
+  version: "cairn-quality-proposal/v1",
+  supportedPath: {
+    statement: "The existing timing control remains usable.",
+    basis: [{ kind: "outcome" }],
+  },
+  critic: {
+    mode: "optional",
+    reason: "No required critic was requested.",
+    basis: [],
+  },
+  checks: [{
+    promise: "The requested timing is visible and the existing control remains usable.",
+    basis: [{ kind: "outcome" }],
+    supportsPath: true,
+    judge: "cairn",
+    failure: "The requested timing is absent or the existing control no longer works.",
+    evidence: {
+      mode: "adapter-attestation",
+      proves: "The requested timing and supported path were checked.",
+      precondition: null,
+    },
+  }],
+  preferences: [],
+  referenceRequests: [],
+  unknowns: [],
+});
+
+const qualityEnvelope = (qualityValue: unknown = quality()) => ({
+  intent: intent(),
+  quality: qualityValue,
+  risks: [{ text: "The timing change may alter the animation feel." }],
+});
+
 test("a valid question becomes a passive candidate and its control disappears", () => {
   const result = extractConductorControl(questionFence('{"question":"Which settling speed should Cairn use?"}'));
   assert.deepEqual(result.candidate, { kind: "question", question: "Which settling speed should Cairn use?" });
@@ -93,6 +132,117 @@ test("a valid attributed task candidate carries no ids or offsets from the model
   assert.equal(JSON.stringify(result.candidate).includes("actionId"), false);
   assert.equal(JSON.stringify(result.candidate).includes("inputId"), false);
   assert.equal(JSON.stringify(result.candidate).includes("start"), false);
+});
+
+test("the staged parser accepts only the exact intent-quality-risks envelope", () => {
+  const reply = fence(JSON.stringify(qualityEnvelope()));
+  const result = extractQualityConductorControl(reply);
+  assert.equal(result.candidate?.kind, "task");
+  if (result.candidate?.kind !== "task") assert.fail("expected staged task candidate");
+  assert.equal(result.candidate.intent.outcome.ownerQuote, "Use 300 milliseconds");
+  assert.equal(result.candidate.quality.version, "cairn-quality-proposal/v1");
+  assert.equal(result.candidate.quality.checks.length, 1);
+  assert.deepEqual(result.candidate.risks, ["The timing change may alter the animation feel."]);
+  assert.equal(result.block, null);
+  assert.doesNotMatch(result.text, /cairn-task|quality-proposal/);
+  assert.equal(Object.isFrozen(result.candidate), true);
+  assert.equal(Object.isFrozen(result.candidate.risks), true);
+
+  const old = extractConductorControl(reply);
+  assert.equal(old.candidate, null, "live v8 must not accept the staged envelope");
+  assert.equal(old.block, null, "staged JSON must not become a legacy block");
+
+  const legacy = fence(JSON.stringify({ intent: intent(), risks: [] }));
+  assert.equal(extractConductorControl(legacy).candidate?.kind, "task");
+  assert.equal(extractQualityConductorControl(legacy).candidate, null,
+    "staged parsing must require quality rather than infer it");
+});
+
+test("staged questions reuse the exact passive question boundary", () => {
+  const result = extractQualityConductorControl(questionFence('{"question":"Which visible timing should be required?"}'));
+  assert.deepEqual(result.candidate, { kind: "question", question: "Which visible timing should be required?" });
+  assert.equal(result.block, null);
+  assert.equal(result.text, "Before.\n\nAfter.");
+});
+
+test("model-authored quality authority keys reject the staged task", () => {
+  const cases: readonly [string, () => Record<string, unknown>][] = [
+    ["root Task Spec hash", () => ({ ...qualityEnvelope(), taskSpecSha256: "a".repeat(64) })],
+    ["quality coverage", () => ({ ...qualityEnvelope(), quality: { ...quality(), coverage: { outcomeCriterionIds: ["c1"] } } })],
+    ["check id", () => {
+      const value = quality();
+      return { ...qualityEnvelope(), quality: { ...value, checks: [{ ...value.checks[0], id: "c1" }] } };
+    }],
+    ["failure id", () => {
+      const value = quality();
+      return { ...qualityEnvelope(), quality: { ...value, checks: [{ ...value.checks[0], failureId: "failure-c1" }] } };
+    }],
+    ["artifact ids", () => {
+      const value = quality();
+      const check = value.checks[0];
+      return { ...qualityEnvelope(), quality: {
+        ...value,
+        checks: [{ ...check, evidence: { ...check.evidence, artifactIds: ["artifact-1"] } }],
+      } };
+    }],
+    ["basis source label", () => {
+      const value = quality();
+      return { ...qualityEnvelope(), quality: {
+        ...value,
+        supportedPath: { ...value.supportedPath, basis: [{ kind: "outcome", source: "owner-stated" }] },
+      } };
+    }],
+    ["basis source offset", () => {
+      const value = quality();
+      return { ...qualityEnvelope(), quality: {
+        ...value,
+        supportedPath: { ...value.supportedPath, basis: [{ kind: "outcome", start: 0, end: 8 }] },
+      } };
+    }],
+    ["critic verdict", () => ({ ...qualityEnvelope(), quality: { ...quality(), verdict: "PASS" } })],
+    ["custody", () => ({ ...qualityEnvelope(), quality: { ...quality(), runId: "model-run" } })],
+  ];
+  for (const [label, build] of cases) {
+    const result = extractQualityConductorControl(fence(JSON.stringify(build())));
+    assert.equal(result.candidate, null, label);
+    assert.equal(result.block, null, label);
+    assert.doesNotMatch(result.text, /cairn-task/, `${label} private control must still be stripped`);
+  }
+});
+
+test("the staged parser preserves the complete 12,000-character raw control cap", () => {
+  const body = JSON.stringify(qualityEnvelope());
+  assert.ok(body.length < 12_000);
+  const atLimit = body + " ".repeat(12_000 - body.length);
+  assert.equal(extractQualityConductorControl(fence(atLimit)).candidate?.kind, "task");
+  assert.equal(extractQualityConductorControl(fence(`${atLimit} `)).candidate, null);
+});
+
+test("duplicate, mixed, malformed, and legacy staged controls strip fail-closed", () => {
+  const staged = fence(JSON.stringify(qualityEnvelope()));
+  const question = questionFence('{"question":"Which standard?"}');
+  for (const reply of [
+    `${staged}\n${staged}`,
+    `${question}\n${staged}`,
+    `${fence("{broken")}\n${staged}`,
+    fence(JSON.stringify({ outcome: "legacy", concerns: [], notes: "" })),
+  ]) {
+    const result = extractQualityConductorControl(reply);
+    assert.equal(result.candidate, null);
+    assert.equal(result.block, null);
+    assert.doesNotMatch(result.text, /cairn-question|cairn-task|quality-proposal/);
+  }
+});
+
+test("calling the staged parser cannot alter the live v8 parse result", () => {
+  const reply = fence(JSON.stringify({ intent: intent(), risks: [{ text: "Keep the old path exact." }] }));
+  const before = extractConductorControl(reply);
+  extractQualityConductorControl(fence(JSON.stringify(qualityEnvelope())));
+  const after = extractConductorControl(reply);
+  assert.deepEqual(after, before);
+  assert.equal(after.candidate?.kind, "task");
+  assert.deepEqual(after.candidate && "risks" in after.candidate ? after.candidate.risks : null,
+    ["Keep the old path exact."]);
 });
 
 test("question and risk visible-text boundaries are exact", () => {

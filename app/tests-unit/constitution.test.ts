@@ -1,9 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ATTRIBUTED_ACTION_PROTOCOL, CONSTITUTION, CONSTITUTION_VERSION } from "../src/main/conductor/constitution.js";
+import { createHash } from "node:crypto";
+import {
+  ATTRIBUTED_ACTION_PROTOCOL,
+  CONSTITUTION,
+  CONSTITUTION_VERSION,
+  QUALITY_ATTRIBUTED_ACTION_PROTOCOL,
+  QUALITY_CONSTITUTION,
+  QUALITY_CONSTITUTION_VERSION,
+} from "../src/main/conductor/constitution.js";
 
 test("constitution version is pinned", () => {
   assert.equal(CONSTITUTION_VERSION, "conductor-v8");
+});
+
+test("the staged quality constitution leaves every live v8 byte unchanged", () => {
+  assert.equal(CONSTITUTION_VERSION, "conductor-v8");
+  assert.equal(CONSTITUTION.length, 7_628);
+  assert.equal(createHash("sha256").update(CONSTITUTION).digest("hex"),
+    "bc7570b7b17a6bbbee6fcd2efb1cce3d7690371270313eae5290d465ece99304");
+  assert.equal(ATTRIBUTED_ACTION_PROTOCOL.length, 2_607);
+  assert.equal(createHash("sha256").update(ATTRIBUTED_ACTION_PROTOCOL).digest("hex"),
+    "6f6877381678b122f0dd5d44656c69b66c031be857e34aabd115c2efddf5abee");
 });
 
 const FLAT = CONSTITUTION.replace(/\s+/g, " ");
@@ -97,8 +115,82 @@ test("the attributed-action protocol is exact and active in conductor v8", () =>
   assert.doesNotMatch(CONSTITUTION, /task proposal's notes/);
 });
 
+test("the staged v9 quality protocol is exact, source-honest, and not live v8", () => {
+  assert.equal(QUALITY_CONSTITUTION_VERSION, "conductor-v9-quality-preview");
+  assert.equal(QUALITY_CONSTITUTION.split(QUALITY_ATTRIBUTED_ACTION_PROTOCOL).length - 1, 1);
+  assert.equal(QUALITY_CONSTITUTION.includes(ATTRIBUTED_ACTION_PROTOCOL), false);
+  assert.equal(
+    QUALITY_CONSTITUTION.replace(QUALITY_ATTRIBUTED_ACTION_PROTOCOL, ATTRIBUTED_ACTION_PROTOCOL),
+    CONSTITUTION,
+  );
+  assert.notEqual(QUALITY_CONSTITUTION, CONSTITUTION);
+  assert.match(QUALITY_ATTRIBUTED_ACTION_PROTOCOL,
+    /\{"intent":\{"version":"cairn-task-intent\/v1"[\s\S]*?"quality":\{"version":"cairn-quality-proposal\/v1"[\s\S]*?"risks":\[\]\}/);
+  assert.match(QUALITY_ATTRIBUTED_ACTION_PROTOCOL,
+    /A basis is only \{"kind":"outcome"\} or\s+\{"kind":"requirement","position":<one-based position in intent\.requirements>\}/);
+  assert.match(QUALITY_ATTRIBUTED_ACTION_PROTOCOL, /Main\s+alone assigns and resolves those values, freezes the Task Spec/);
+});
+
+test("the staged protocol asks or refuses instead of inventing quality authority", () => {
+  const qualityFlat = QUALITY_ATTRIBUTED_ACTION_PROTOCOL.replace(/\s+/gu, " ");
+  for (const required of [
+    "quality is vague",
+    "a delegated choice remains unresolved",
+    "taste has no honestly observable standard",
+    "a required standard is missing",
+    "a requested reference is unavailable as a frozen authorized snapshot",
+    "refuse plainly and emit no task proposal",
+    `Words such as "perfect", "premium", "best", and "wow" are preferences`,
+    `asks for "the critic must approve" without a finite promise and failure condition`,
+    "Set critic mode to required or off only when exact owner wording says so",
+    "Otherwise use optional with an empty basis",
+    "Tentative owner values and choices you made stay preferences or unknowns, never required checks",
+  ]) {
+    assert.ok(qualityFlat.includes(required), `missing staged quality rule: ${required}`);
+  }
+});
+
+test("the staged task example contains bounded content and basis, not model-authored authority", () => {
+  const task = /```cairn-task\n([^\n]+)\n```/u.exec(QUALITY_ATTRIBUTED_ACTION_PROTOCOL);
+  assert.ok(task);
+  const envelope = JSON.parse(task[1]) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(envelope), ["intent", "quality", "risks"]);
+  const quality = envelope.quality as Record<string, unknown>;
+  assert.deepEqual(Object.keys(quality), [
+    "version", "supportedPath", "critic", "checks", "preferences", "referenceRequests", "unknowns",
+  ]);
+  assert.equal(
+    (quality.supportedPath as { statement: string }).statement,
+    (quality.checks as Array<{ promise: string }>)[0].promise,
+    "the staged supported path must be the exact promise Main binds as non-regression",
+  );
+
+  const keys: string[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    for (const [key, entry] of Object.entries(value)) {
+      keys.push(key);
+      visit(entry);
+    }
+  };
+  visit(quality);
+  for (const forbidden of [
+    "id", "cN", "pN", "hash", "sha256", "coverage", "offset", "verdict", "blocks",
+    "disposition", "custody", "source", "runId", "actionId", "riskId",
+  ]) {
+    assert.equal(keys.includes(forbidden), false, `staged example must not contain authority key ${forbidden}`);
+  }
+  assert.match(QUALITY_ATTRIBUTED_ACTION_PROTOCOL,
+    /Never emit cN or\s+pN labels; check, failure, artifact, reference, comparison, state, action, risk,\s+source, run, or custody IDs; hashes; source labels or offsets; coverage maps;\s+verdicts; blocker decisions; dispatch authority; or approval metadata\./);
+});
+
 test("constitution has no emoji", () => {
   assert.doesNotMatch(CONSTITUTION, /[\u{1F300}-\u{1FAFF}]/u);
+  assert.doesNotMatch(QUALITY_CONSTITUTION, /[\u{1F300}-\u{1FAFF}]/u);
 });
 
 test("constitution no longer claims all file contents are unreadable", () => {

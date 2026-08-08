@@ -167,7 +167,7 @@ test("main owns one concise acknowledgement for every settled task proposal", ()
   assert.match(conductorService, /const SET_ASIDE_PENDING_ACKNOWLEDGEMENT = "Updating the plan\.\.\."/);
   assert.match(conductorService, /const SET_ASIDE_ACKNOWLEDGEMENT = "I carried that concern forward\."/);
   assert.match(conductorService, /nextAction\?\.kind === "task"[\s\S]*?text = setAsideReplacement === undefined \? PROPOSAL_ACKNOWLEDGEMENT : SET_ASIDE_ACKNOWLEDGEMENT/);
-  assert.match(conductorService, /setAsideReplacement !== undefined[\s\S]*?SET_ASIDE_PENDING_ACKNOWLEDGEMENT[\s\S]*?actionableTaskCandidate\(streamedCandidate, historySnapshot\.authenticatedSources\)[\s\S]*?kind: "replace", text: publicFull/);
+  assert.match(conductorService, /setAsideReplacement !== undefined[\s\S]*?SET_ASIDE_PENDING_ACKNOWLEDGEMENT[\s\S]*?actionableTaskCandidate\(\s*streamedCandidate,\s*historySnapshot\.authenticatedSources,[\s\S]*?setAsideQualityProposal,\s*\)[\s\S]*?kind: "replace", text: publicFull/);
   assert.doesNotMatch(conductorService, /replyStreamingPreview|REPLY_STREAMING_PREVIEW_LIMIT/);
   assert.match(conductorService, /const nextPublic = followupSafeStreamingText\(controlSafeStreamingText\(full\)\)/,
     "ordinary replies and commentary must share the complete private-control-safe streaming projection");
@@ -249,8 +249,8 @@ test("stale main refusals reconcile authority and expose no looping retry", () =
 });
 
 test("proposal, final preview, and result reuse the attributed intent list", () => {
-  assert.equal((chat.match(/<TaskIntentList/g) ?? []).length, 2,
-    "Chat owns final and result instances; TaskCard owns the proposal instance");
+  assert.equal((chat.match(/<TaskIntentList/g) ?? []).length, 3,
+    "Chat owns the reusable Quality Plan view plus final and result instances; TaskCard owns the legacy proposal instance");
   assert.match(chat, /<TaskIntentList request=\{dispatch\.request\} context=\{dispatch\.context\}/);
   assert.match(chat, /setDispatch\(\{ previewId: null, request: null, context: \[\]/);
   assert.ok(!/setDispatch\(\{[^}]*request: (?:action|candidate)\.request/.test(chat));

@@ -1,4 +1,7 @@
 import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
+import type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
+
+export type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
 
 export type {
   AccountLabelProvenance,
@@ -71,6 +74,9 @@ export type TaskRoutePreview = {
   context: readonly string[];
   route: RouteResult;
   disclosure?: WorkerDisclosure;
+  /** Optional output-only Quality Plan review. Main remains the sole owner of
+   * the branded Task Spec; `task:run` accepts only `previewId`. */
+  taskSpecPreview?: TaskSpecProposalPreviewV1;
 };
 /** `pushPreview`'s local-only, network-free look at what a push would do:
  * null when the current branch has no upstream configured (there is
@@ -305,6 +311,9 @@ export type ConductorAction =
       request: TaskRequestView;
       context: readonly string[];
       risks: readonly { riskId: string; text: string }[];
+      /** Optional output-only projection. It is never accepted back as task
+       * or dispatch authority. */
+      taskSpecPreview?: TaskSpecProposalPreviewV1;
     };
 
 export interface ConductorDelta {

@@ -279,7 +279,7 @@ function sourceFiles(directory: string): string[] {
   return files;
 }
 
-test("the activation module has no live caller, provider client, IPC, environment switch, or mutator", () => {
+test("the activation module has only the two fail-closed Q3 staging callers and no switch or mutator", () => {
   const sourceRoot = resolve(process.cwd(), "src");
   const modulePath = resolve(sourceRoot, "main", "criticactivation.ts");
   const moduleSource = readFileSync(modulePath, "utf8");
@@ -294,6 +294,32 @@ test("the activation module has no live caller, provider client, IPC, environmen
   const callers = sourceFiles(sourceRoot)
     .filter((path) => resolve(path) !== modulePath)
     .filter((path) => /["'][^"']*criticactivation(?:\.js|\.ts)?["']/u.test(readFileSync(path, "utf8")))
-    .map((path) => path.slice(sourceRoot.length + 1).replaceAll("\\", "/"));
-  assert.deepEqual(callers, []);
+    .map((path) => path.slice(sourceRoot.length + 1).replaceAll("\\", "/"))
+    .sort();
+  assert.deepEqual(callers, ["main/conductor/service.ts", "main/tasks.ts"]);
+
+  for (const relative of callers) {
+    const source = readFileSync(resolve(sourceRoot, relative), "utf8");
+    assert.match(source, /const QUALITY_PREVIEW_ACTIVATION_IDENTITY: unknown = null;/u, relative);
+    assert.match(
+      source,
+      /criticActivationStatus\(QUALITY_PREVIEW_ACTIVATION_IDENTITY\)\.kind === "active"/u,
+      relative,
+    );
+    assert.equal((source.match(/criticActivationStatus\(/gu) ?? []).length, 1, relative);
+    assert.equal((source.match(/const QUALITY_PREVIEW_ACTIVE =/gu) ?? []).length, 1, relative);
+    assert.doesNotMatch(source, /activeCriticActivationCount|process\.env[^\r\n]{0,80}QUALITY|QUALITY[^\r\n]{0,80}process\.env/u, relative);
+  }
+
+  const serviceSource = readFileSync(resolve(sourceRoot, "main", "conductor", "service.ts"), "utf8");
+  assert.match(serviceSource, /QUALITY_PREVIEW_ACTIVE \? QUALITY_CONSTITUTION : CONSTITUTION/u);
+  assert.match(serviceSource, /QUALITY_PREVIEW_ACTIVE\s*\?\s*extractQualityConductorControl\(reply\)\s*:\s*extractConductorControl\(reply\)/u);
+
+  const tasksSource = readFileSync(resolve(sourceRoot, "main", "tasks.ts"), "utf8");
+  assert.match(tasksSource, /if \(QUALITY_PREVIEW_ACTIVE\) \{/u);
+  assert.match(tasksSource, /runSerialTask\(dir, pending\.intent, \{/u);
+  assert.deepEqual(criticActivationStatus(null), {
+    kind: "invalid",
+    code: "CRITIC_ACTIVATION_IDENTITY_INVALID",
+  });
 });
