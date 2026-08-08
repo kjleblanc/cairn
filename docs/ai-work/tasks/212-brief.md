@@ -81,7 +81,7 @@ records, reopened for a record type that does not exist yet.
    ordinary product file is still committed normally. The two-arm harness that
    found this becomes that test.
 2. **`c2`** — the spec's false sentence is gone, replaced by what the code
-   does, and marked as a correction; the `serial.test.ts:763` citation no
+   does, and marked as a correction; the `core/test/serial.test.ts:763` citation no
    longer carries a claim it does not support.
 3. **`c3`** — `core`, `cli`, and `app` `package.json` all read 0.8.0, every
    lockfile agrees, and `CHANGELOG.md` carries a 0.8.0 entry.
