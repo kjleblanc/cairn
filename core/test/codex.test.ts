@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { aliasedSpelling } from "./alias-spelling.js";
@@ -29,7 +30,22 @@ import {
   taskRequestView,
   type TaskIntent,
 } from "../src/intent.js";
-import type { AdapterTaskContract } from "../src/routing.js";
+import {
+  bindInitialEvidencePlan,
+  bindTaskSpec,
+  EVIDENCE_PLAN_CANDIDATE_VERSION,
+  evidencePlanSha256,
+  QUALITY_PLAN_VERSION,
+  taskSpecReviewView,
+  taskSpecSha256,
+  type QualityPlanCandidateV1,
+} from "../src/quality.js";
+import {
+  OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+  type AdapterTaskContract,
+  type AdapterTaskQualityBinding,
+  type QualityBoundAdapterTaskContractV4,
+} from "../src/routing.js";
 
 const SECRET_SENTINEL = "sk-secret-auth-method-account-detail";
 
@@ -136,6 +152,104 @@ function contract(intent = directRequest()): AdapterTaskContract {
   };
 }
 
+function qualityBinding(
+  intent: TaskIntent,
+  preference = "Prefer a clear result.",
+): AdapterTaskQualityBinding {
+  const candidate = {
+    version: QUALITY_PLAN_VERSION,
+    target: { kind: "local-task", basis: [{ kind: "intent-outcome" }] },
+    supportedPath: { statement: intent.outcome.text, basis: [{ kind: "intent-outcome" }] },
+    critic: {
+      mode: "off",
+      basis: [{ kind: "cairn-default", reason: "not-requested" }],
+      reason: "No critic is required for this fixture.",
+    },
+    candidateStates: [{
+      id: "candidate-main", route: "/main", viewport: null,
+      inputFixtureId: "fixture-input", dataFixtureId: "fixture-data",
+      versionOrTime: "v1", locale: "en-US", accessibilityMode: "default",
+    }],
+    acceptanceChecks: [{
+      id: "c1",
+      promise: "The requested visible result exists and the supported path still works.",
+      kind: "non-regression",
+      judge: "cairn",
+      basis: [{ kind: "intent-outcome" }],
+      failureCondition: {
+        id: "failure-c1",
+        statement: "The requested visible result is absent or the supported path fails.",
+        allowedArtifactIds: ["artifact-c1"],
+      },
+      evidenceStandard: {
+        mode: "adapter-attestation",
+        proves: "The exact predeclared command completed with its expected exit.",
+        precondition: null,
+      },
+      comparison: null,
+    }],
+    qualityPreferences: [{
+      id: "p1", dimension: "clarity", desiredDirection: preference,
+      basis: [{ kind: "intent-requirement", index: 0 }], comparison: null,
+    }],
+    references: [],
+    unknowns: [{ text: "Clarity is advisory.", basis: [{ kind: "intent-requirement", index: 0 }] }],
+    coverage: { outcomeCriterionIds: ["c1"], requirementCriteria: [], supportedPathCriterionId: "c1" },
+  } as unknown as QualityPlanCandidateV1;
+  const spec = bindTaskSpec(intent, candidate);
+  assert.ok(spec);
+  const taskSpecDigest = taskSpecSha256(spec);
+  const review = taskSpecReviewView(spec);
+  assert.ok(taskSpecDigest && review);
+  const evidencePlan = bindInitialEvidencePlan(spec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [{
+      criterionId: "c1",
+      kind: "adapter-command-attestation",
+      command: {
+        executablePath: "node",
+        executableSha256: "e".repeat(64),
+        arguments: [{ kind: "literal", value: "--version" }],
+        fixtureBindings: [],
+        cwdRelative: ".",
+        expectedExitCodes: [0],
+        timeoutMs: 60_000,
+        resultParserMode: "exit-code",
+        assertion: { id: "node-version", expectedResult: "exit code zero" },
+      },
+      artifactIds: ["artifact-c1"],
+    }],
+  });
+  assert.ok(evidencePlan);
+  const evidencePlanDigest = evidencePlanSha256(evidencePlan);
+  assert.ok(evidencePlanDigest);
+  return {
+    taskSpec: spec,
+    taskSpecSha256: taskSpecDigest,
+    taskSpecReview: review,
+    evidencePlan,
+    evidencePlanSha256: evidencePlanDigest,
+  };
+}
+
+function qualityContract(
+  intent: TaskIntent,
+  quality: AdapterTaskQualityBinding,
+): QualityBoundAdapterTaskContractV4 {
+  const legacy = contract(intent);
+  return {
+    ...legacy,
+    version: "cairn-serial-task/v4",
+    taskSpec: quality.taskSpec,
+    taskSpecSha256: quality.taskSpecSha256,
+    taskSpecReview: quality.taskSpecReview,
+    evidencePlan: quality.evidencePlan,
+    evidencePlanSha256: quality.evidencePlanSha256,
+    checks: [],
+    envelopeChecks: ["Verify the exact Task Spec and process result custody."],
+  };
+}
+
 test("Codex readiness keeps only installed and connected booleans", async () => {
   const root = resolve("codex-status-fixture");
   const missing = new FakeProbe(["not-found"]);
@@ -219,6 +333,14 @@ test("the system process reduces JSONL items to numeric evidence without retaini
       fileChangeCount: 2,
       failedToolItemCount: 2,
       finalMessage: SECRET_SENTINEL,
+      processEvents: {
+        representation: OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+        complete: false,
+        events: [
+          { sequence: 0, commandSha256: createHash("sha256").update(SECRET_SENTINEL, "utf8").digest("hex"), exitCode: 0 },
+          { sequence: 1, commandSha256: createHash("sha256").update(SECRET_SENTINEL, "utf8").digest("hex"), exitCode: 1 },
+        ],
+      },
     });
     assert.equal(result.finalMessage, SECRET_SENTINEL, "the last agent message text is retained for claims parsing");
     const { finalMessage: _retained, ...bounded } = result;
@@ -381,6 +503,7 @@ test("an oversized output line is skipped without killing the run", async () => 
     assert.equal(result.terminalEvent, "turn.completed");
     assert.equal(result.agentMessageCount, 0);
     assert.equal(result.finalMessage, null);
+    assert.equal(result.processEvents?.complete, false, "a dropped line could have hidden a command event");
   });
 });
 
@@ -421,6 +544,52 @@ test("a valid agent message arriving after a dropped oversized line still become
     });
     assert.equal(result.terminalEvent, "turn.completed");
     assert.equal(result.finalMessage, "recovered final", "a message genuinely later than the dropped line must still legitimately overwrite it");
+  });
+});
+
+test("malformed and over-cap command streams retain hashes only and become incomplete", async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "cairn-codex-command-events-ws-"));
+  const malformedText = "command-text-that-must-not-be-retained";
+  const malformedBody = [
+    JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: malformedText, status: "completed" } }),
+    TURN_COMPLETED.trimEnd(),
+  ].join("\n") + "\n";
+  const malformedInstall = fakeInstall(malformedBody, "");
+  await withFakeEnvironment(malformedInstall.bin, malformedInstall.localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"], cwd: workspace, stdin: "bounded fake request",
+    });
+    assert.deepEqual(result.processEvents, {
+      representation: OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+      complete: false,
+      events: [],
+    });
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(malformedText));
+  });
+
+  const commands = Array.from({ length: 65 }, (_, index) => `private-command-${index}`);
+  const overCapBody = [
+    ...commands.map((command) => JSON.stringify({
+      type: "item.completed",
+      item: { type: "command_execution", command, status: "completed", exit_code: 0 },
+    })),
+    TURN_COMPLETED.trimEnd(),
+  ].join("\n") + "\n";
+  const overCapInstall = fakeInstall(overCapBody, "");
+  await withFakeEnvironment(overCapInstall.bin, overCapInstall.localAppData, async () => {
+    const result = await createSystemCodexExecProcess().run({
+      command: process.platform === "win32" ? "codex.exe" : "codex",
+      args: ["exec", "-"], cwd: workspace, stdin: "bounded fake request",
+    });
+    assert.equal(result.processEvents?.complete, false);
+    assert.equal(result.processEvents?.events.length, 64);
+    assert.deepEqual(result.processEvents?.events.map((event) => event.sequence), Array.from({ length: 64 }, (_, index) => index));
+    assert.deepEqual(
+      result.processEvents?.events.map((event) => event.commandSha256),
+      commands.slice(0, 64).map((command) => createHash("sha256").update(command, "utf8").digest("hex")),
+    );
+    for (const command of commands) assert.doesNotMatch(JSON.stringify(result), new RegExp(command));
   });
 });
 
@@ -601,15 +770,160 @@ test("one authorized fake verifies the real-call request without a model", async
   });
 });
 
+test("a Task-Spec-bound Codex request echoes exact quality custody while retaining only opaque events", async () => {
+  const workspace = resolve("codex-quality-fake-workspace");
+  const requests: CodexExecRequest[] = [];
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run(request) {
+      requests.push(request);
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 0, failedToolItemCount: 0,
+        finalMessage: null,
+        processEvents: {
+          representation: OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+          complete: true,
+          events: [{ sequence: 0, commandSha256: "d".repeat(64), exitCode: 0 }],
+        },
+      };
+    },
+  };
+  const intent = markedRequest(undefined, "owner-unsure");
+  const quality = qualityBinding(intent);
+  const disclosure = codexExecDisclosure(workspace, intent, quality);
+  assert.equal(disclosure.taskSpecSha256, quality.taskSpecSha256);
+  assert.equal(disclosure.evidencePlanSha256, quality.evidencePlanSha256);
+  const authorization = authorizeCodexExec(workspace, intent, quality);
+  const adapter = createCodexExecAdapter(
+    workspace,
+    { installed: true, connected: true },
+    authorization,
+    fake,
+  );
+  assert.equal(
+    adapter.qualitySupport?.commandEventRepresentation,
+    OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+    "Codex never advertises canonical Evidence Plan command events",
+  );
+  const result = await adapter.run(qualityContract(intent, quality));
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].taskSpecSha256, quality.taskSpecSha256);
+  assert.equal(requests[0].evidencePlanSha256, quality.evidencePlanSha256);
+  assert.match(requests[0].stdin, new RegExp(`Accepted Task Spec SHA-256: ${quality.taskSpecSha256}`));
+  assert.match(requests[0].stdin, /Required Task Spec promises/);
+  assert.match(requests[0].stdin, /- c1:/);
+  assert.match(requests[0].stdin, /Advisory Task Spec preferences/);
+  assert.match(requests[0].stdin, /- p1:/);
+  assert.match(requests[0].stdin, /pN guides quality but never gates DONE/);
+  assert.match(requests[0].stdin, /worker claims, not Cairn verification/);
+  assert.equal(result.kind, "worker-result/v3");
+  if (result.kind !== "worker-result/v3") return;
+  assert.equal(result.taskSpecSha256, quality.taskSpecSha256);
+  assert.equal(result.evidencePlanSha256, quality.evidencePlanSha256);
+  assert.deepEqual(result.processEvents, {
+    representation: OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+    complete: true,
+    events: [{ sequence: 0, commandSha256: "d".repeat(64), exitCode: 0 }],
+  });
+  assert.doesNotMatch(JSON.stringify(result), /criterionId|artifactId|cairn-verifier|critic|verdict|seal|envelope/i);
+});
+
+test("same intent with different quality authorization refuses before process spawn", async () => {
+  const workspace = resolve("codex-quality-mismatch-workspace");
+  const intent = markedRequest(undefined, "owner-unsure");
+  const acceptedQuality = qualityBinding(intent, "Prefer a clear result.");
+  const changedQuality = qualityBinding(intent, "Prefer a concise result.");
+  assert.notEqual(acceptedQuality.taskSpecSha256, changedQuality.taskSpecSha256);
+  let calls = 0;
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      calls += 1;
+      throw new Error("must not spawn");
+    },
+  };
+  const adapter = createCodexExecAdapter(
+    workspace,
+    { installed: true, connected: true },
+    authorizeCodexExec(workspace, intent, acceptedQuality),
+    fake,
+  );
+  await assert.rejects(
+    () => adapter.run(qualityContract(intent, changedQuality)),
+    /REAL_MODEL_CALL_NOT_AUTHORIZED/,
+  );
+  assert.equal(calls, 0);
+
+  const tampered = {
+    ...qualityContract(intent, acceptedQuality),
+    taskSpecSha256: "0".repeat(64),
+  } as QualityBoundAdapterTaskContractV4;
+  await assert.rejects(() => adapter.run(tampered), /INVALID_TASK_SPEC_BINDING/);
+  assert.equal(calls, 0);
+});
+
+test("a same-hash substituted Task Spec review is rejected before disclosure or process spawn", async () => {
+  const workspace = resolve("codex-quality-review-substitution-workspace");
+  const intent = markedRequest(undefined, "owner-unsure");
+  const quality = qualityBinding(intent);
+  const substituted = {
+    ...quality,
+    taskSpecReview: {
+      ...quality.taskSpecReview,
+      criteria: quality.taskSpecReview.criteria.map((criterion) => ({
+        ...criterion,
+        promise: "Forged cN promise with the original Task Spec hash.",
+      })),
+      preferences: quality.taskSpecReview.preferences.map((preference) => ({
+        ...preference,
+        desiredDirection: "Forged pN direction with the original Task Spec hash.",
+      })),
+    },
+  } as AdapterTaskQualityBinding;
+  assert.equal(substituted.taskSpecSha256, quality.taskSpecSha256);
+  assert.equal(substituted.taskSpecReview.taskSpecSha256, quality.taskSpecSha256);
+  assert.throws(() => codexExecDisclosure(workspace, intent, substituted), /INVALID_TASK_SPEC_BINDING/);
+  assert.throws(() => authorizeCodexExec(workspace, intent, substituted), /INVALID_TASK_SPEC_BINDING/);
+
+  let calls = 0;
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      calls += 1;
+      throw new Error("must not spawn");
+    },
+  };
+  const adapter = createCodexExecAdapter(
+    workspace,
+    { installed: true, connected: true },
+    authorizeCodexExec(workspace, intent, quality),
+    fake,
+  );
+  await assert.rejects(
+    () => adapter.run(qualityContract(intent, substituted)),
+    /INVALID_TASK_SPEC_BINDING/,
+  );
+  assert.equal(calls, 0);
+});
+
 function wedgedInstall(mode: "silent" | "chatter"): { bin: string; localAppData: string } {
   // A hermetic fake codex whose child either goes silent forever or chatters
   // forever — used to prove the watchdog kills the tree and rejects precisely.
   const bin = mkdtempSync(join(tmpdir(), "cairn-codex-wedged-bin-"));
   const localAppData = mkdtempSync(join(tmpdir(), "cairn-codex-wedged-lad-"));
   const dispatcher = join(bin, "dispatcher.cjs");
+  const parentExitGuard = [
+    `const parentPid = process.ppid;`,
+    `setInterval(() => {`,
+    `  try { process.kill(parentPid, 0); } catch { process.exit(0); }`,
+    `}, 50);`,
+  ];
   writeFileSync(dispatcher, mode === "silent"
-    ? `process.stdin.resume();\nsetInterval(() => {}, 1000);\n`
+    ? [...parentExitGuard, `process.stdin.resume();`, `setInterval(() => {}, 1000);`, ""].join("\n")
     : [
+      ...parentExitGuard,
       `process.stdin.resume();`,
       `setInterval(() => {`,
       `  process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "still going" } }) + "\\n");`,

@@ -1951,13 +1951,20 @@ function ownerObservationSatisfies(
   criterion: CriticProjectedCriterionV1,
   evidencePlan: EvidencePlanV1,
 ): boolean {
-  if (criterion.evidenceStandard.mode !== "owner-observation") return false;
+  if (criterion.judge !== "owner") return false;
+  const expectedProcedureKind = criterion.evidenceStandard.mode === "owner-observation"
+    ? "owner-observation"
+    : criterion.evidenceStandard.mode === "comparison"
+      ? "comparison-capture"
+      : null;
+  if (expectedProcedureKind === null) return false;
   const procedure = evidencePlan.procedures.find((item) => item.criterionId === criterion.id);
-  if (procedure === undefined || procedure.kind !== "owner-observation") return false;
+  if (procedure === undefined || procedure.kind !== expectedProcedureKind) return false;
   const allowed = new Set(criterion.allowedArtifactIds);
-  const planned = new Set(procedure.artifactIds);
-  const allRefs = [...observation.stateArtifactIds, ...observation.evidenceRefsSeen];
-  return allRefs.length > 0 && allRefs.every((ref) => allowed.has(ref) && planned.has(ref));
+  const exactPlannedArtifacts = (refs: readonly string[]): boolean => refs.length === procedure.artifactIds.length
+    && refs.every((ref, index) => ref === procedure.artifactIds[index] && allowed.has(ref));
+  return procedure.artifactIds.length > 0 && exactPlannedArtifacts(observation.stateArtifactIds)
+    && exactPlannedArtifacts(observation.evidenceRefsSeen);
 }
 
 /**

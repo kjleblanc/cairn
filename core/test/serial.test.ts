@@ -1,15 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   chmodSync,
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,8 +41,46 @@ import {
   taskRequestSha256,
   type TaskIntent,
 } from "../src/intent.js";
-import { createOfflineDemoAdapter, type AdapterTaskContract, type TaskAdapter } from "../src/routing.js";
-import { runSerialTask as runSerialTaskWithIntent, type SerialRunOptions } from "../src/serial.js";
+import {
+  CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  createOfflineDemoAdapter,
+  type AdapterTaskContract,
+  type TaskAdapter,
+} from "../src/routing.js";
+import {
+  bindInitialEvidencePlan,
+  bindTaskSpec,
+  EVIDENCE_PLAN_CANDIDATE_VERSION,
+  parseQualityPlanCandidate,
+  QUALITY_PLAN_VERSION,
+} from "../src/quality.js";
+import {
+  SERIAL_CANDIDATE_VERSION,
+  SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
+  SERIAL_CANDIDATE_TRANSITION_VERSION,
+  SERIAL_REPAIR_INSTRUCTION_VERSION,
+  advanceSerialCandidate,
+  composeSerialCandidate,
+  composeSerialCandidateSealAuthorization,
+  composeSerialCandidateTaskSpecAuthority,
+  composeSerialCandidateTransition,
+  replaceSerialCandidateAfterRepair,
+  type SerialCandidateV1,
+} from "../src/candidate.js";
+import {
+  authorizeSerialCandidateRepair,
+  captureSerialCandidateAfterRepair,
+  composeSerialTaskSpecAuthority,
+  finalizeSerialCandidate,
+  previewSerialCandidateRoute,
+  previewSerialRoute,
+  previewTaskSpecSerialRoute,
+  runSerialTaskToCandidate,
+  runSerialTask as runSerialTaskWithIntent,
+  stopSerialCandidate,
+  type SerialRunOptions,
+} from "../src/serial.js";
+import { classifyTaskSpecRunRecord } from "../src/records.js";
 import { projectStatus } from "../src/steps.js";
 
 const LOG_HEADER =
@@ -186,6 +228,657 @@ function validResult(contract: Parameters<TaskAdapter["run"]>[0]) {
 function claimsFence(claims: Record<string, unknown>): string {
   return ["Done.", "", "```cairn-claims", JSON.stringify(claims), "```"].join("\n");
 }
+
+function qualityInputs(criticMode: "off" | "optional" | "required" = "off") {
+  const intent = bindTaskIntent({
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Build the local result.", ownerQuote: "Build the local result." },
+    requirements: [{
+      source: "owner-unsure",
+      text: "Maybe prefer a polished result.",
+      ownerQuote: "Maybe prefer a polished result.",
+    }],
+    context: [],
+  }, [{
+    kind: "conversation",
+    inputId: "30000000-0000-4000-8000-000000000055",
+    text: "Build the local result. Maybe prefer a polished result.",
+  }]);
+  assert.ok(intent);
+  const candidate = parseQualityPlanCandidate({
+    version: QUALITY_PLAN_VERSION,
+    target: { kind: "local-task", basis: [{ kind: "intent-outcome" }] },
+    supportedPath: { statement: "Build the local result.", basis: [{ kind: "intent-outcome" }] },
+    critic: criticMode === "required" ? {
+      mode: "required",
+      reason: "The frozen quality plan requires critic review.",
+      basis: [{ kind: "intent-outcome" }],
+    } : {
+      mode: criticMode,
+      reason: criticMode === "optional" ? "Critic review could help but is not required." : "No critic was requested.",
+      basis: [{
+        kind: "cairn-default",
+        reason: criticMode === "optional" ? "no-useful-inspection" : "not-requested",
+      }],
+    },
+    candidateStates: [{
+      id: "candidate-main",
+      route: "/main",
+      viewport: { width: 1280, height: 720 },
+      inputFixtureId: "fixture-input",
+      dataFixtureId: "fixture-data",
+      versionOrTime: "v1",
+      locale: "en-US",
+      accessibilityMode: "default",
+    }],
+    acceptanceChecks: [{
+      id: "c1",
+      promise: "Build the local result.",
+      kind: "non-regression",
+      judge: "cairn",
+      basis: [{ kind: "intent-outcome" }],
+      failureCondition: {
+        id: "failure-c1",
+        statement: "The local result is absent.",
+        allowedArtifactIds: ["artifact-output"],
+      },
+      evidenceStandard: {
+        mode: "adapter-attestation",
+        proves: "The approved local check completed.",
+        precondition: null,
+      },
+      comparison: null,
+    }],
+    qualityPreferences: [{
+      id: "p1",
+      dimension: "polish",
+      desiredDirection: "Prefer a polished result when it changes no required behavior.",
+      basis: [{ kind: "intent-requirement", index: 0 }],
+      comparison: null,
+    }],
+    references: [],
+    unknowns: [],
+    coverage: {
+      outcomeCriterionIds: ["c1"],
+      requirementCriteria: [],
+      supportedPathCriterionId: "c1",
+    },
+  });
+  assert.ok(candidate);
+  const taskSpec = bindTaskSpec(intent, candidate);
+  assert.ok(taskSpec);
+  const evidencePlan = bindInitialEvidencePlan(taskSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [{
+      criterionId: "c1",
+      kind: "adapter-command-attestation",
+      command: {
+        executablePath: "node",
+        executableSha256: "e".repeat(64),
+        arguments: [{ kind: "literal", value: "--test" }],
+        fixtureBindings: [],
+        cwdRelative: "core",
+        expectedExitCodes: [0],
+        timeoutMs: 60_000,
+        resultParserMode: "node-test-tap",
+        assertion: { id: "local-check-passes", expectedResult: "zero failing tests" },
+      },
+      artifactIds: ["artifact-output"],
+    }],
+  });
+  assert.ok(evidencePlan);
+  return { intent, taskSpec, evidencePlan };
+}
+
+function qualityFixture() {
+  const inputs = qualityInputs();
+  const authority = composeSerialTaskSpecAuthority(inputs.taskSpec, inputs.evidencePlan);
+  assert.ok(authority);
+  return { ...inputs, authority };
+}
+
+function unsupportedQualityFixture(mode: "zero-command" | "mixed") {
+  const requestedOutcome = mode === "zero-command"
+    ? "Build a result that needs packet evidence."
+    : "Build a result that needs command and packet evidence.";
+  const intent = directRequest(requestedOutcome);
+  const commandCriterion = {
+    id: "c1",
+    promise: requestedOutcome,
+    kind: "non-regression",
+    judge: "cairn",
+    basis: [{ kind: "intent-outcome" }],
+    failureCondition: {
+      id: "failure-c1",
+      statement: "The required result is absent.",
+      allowedArtifactIds: ["artifact-command"],
+    },
+    evidenceStandard: {
+      mode: mode === "zero-command" ? "artifact-inspection" : "adapter-attestation",
+      proves: mode === "zero-command" ? "The packet contains the result." : "The approved command completed.",
+      precondition: null,
+    },
+    comparison: null,
+  };
+  const packetCriterion = {
+    id: mode === "zero-command" ? "c1" : "c2",
+    promise: mode === "zero-command" ? requestedOutcome : "The packet contains the required artifact.",
+    kind: mode === "zero-command" ? "non-regression" : "acceptance",
+    judge: "cairn",
+    basis: [{ kind: "intent-outcome" }],
+    failureCondition: {
+      id: mode === "zero-command" ? "failure-c1" : "failure-c2",
+      statement: "The required packet artifact is absent.",
+      allowedArtifactIds: ["artifact-packet"],
+    },
+    evidenceStandard: {
+      mode: "artifact-inspection",
+      proves: "The packet contains the required artifact.",
+      precondition: null,
+    },
+    comparison: null,
+  };
+  const acceptanceChecks = mode === "zero-command" ? [packetCriterion] : [commandCriterion, packetCriterion];
+  const candidate = parseQualityPlanCandidate({
+    version: QUALITY_PLAN_VERSION,
+    target: { kind: "local-task", basis: [{ kind: "intent-outcome" }] },
+    supportedPath: { statement: requestedOutcome, basis: [{ kind: "intent-outcome" }] },
+    critic: {
+      mode: "off",
+      reason: "No critic was requested.",
+      basis: [{ kind: "cairn-default", reason: "not-requested" }],
+    },
+    candidateStates: [{
+      id: "candidate-main",
+      route: "/main",
+      viewport: { width: 1280, height: 720 },
+      inputFixtureId: "fixture-input",
+      dataFixtureId: "fixture-data",
+      versionOrTime: "v1",
+      locale: "en-US",
+      accessibilityMode: "default",
+    }],
+    acceptanceChecks,
+    qualityPreferences: [],
+    references: [],
+    unknowns: [],
+    coverage: {
+      outcomeCriterionIds: mode === "zero-command" ? ["c1"] : ["c1", "c2"],
+      requirementCriteria: [],
+      supportedPathCriterionId: "c1",
+    },
+  });
+  assert.ok(candidate);
+  const taskSpec = bindTaskSpec(intent, candidate);
+  assert.ok(taskSpec);
+  const commandProcedure = {
+    criterionId: "c1",
+    kind: "adapter-command-attestation",
+    command: {
+      executablePath: "node",
+      executableSha256: "e".repeat(64),
+      arguments: [{ kind: "literal", value: "--test" }],
+      fixtureBindings: [],
+      cwdRelative: "core",
+      expectedExitCodes: [0],
+      timeoutMs: 60_000,
+      resultParserMode: "node-test-tap",
+      assertion: { id: "local-check-passes", expectedResult: "zero failing tests" },
+    },
+    artifactIds: ["artifact-command"],
+  };
+  const packetProcedure = {
+    criterionId: mode === "zero-command" ? "c1" : "c2",
+    kind: "packet-artifact",
+    command: null,
+    artifactIds: ["artifact-packet"],
+  };
+  const evidencePlan = bindInitialEvidencePlan(taskSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: mode === "zero-command" ? [packetProcedure] : [commandProcedure, packetProcedure],
+  });
+  assert.ok(evidencePlan);
+  return { intent, taskSpec, evidencePlan };
+}
+
+function assertLegacyComposedOmitsTaskSpecRunRecord(composed: object): void {
+  assert.equal(Object.hasOwn(composed, "taskSpecRunRecord"), false);
+  assert.equal(
+    JSON.stringify(composed).includes('"taskSpecRunRecord":'),
+    false,
+    "legacy composed JSON bytes must not acquire a staged v4 field",
+  );
+}
+
+function taskSpecClaimsFence(
+  taskSpecSha256: string,
+  disposition: "DONE" | "STOPPED" = "DONE",
+  overrides: Record<string, unknown> = {},
+): string {
+  return claimsFence({
+    version: "cairn-task-spec-worker-claims/v1",
+    taskSpecSha256,
+    disposition,
+    summary: "The worker reports the local result complete.",
+    changes: [],
+    criteria: [{ id: "c1", result: "The worker says the required promise holds." }],
+    preferences: [{ id: "p1", result: "The worker says polish was considered." }],
+    howToTry: "Inspect the local result.",
+    limitations: "The adapter event proves execution and exit only.",
+    milestone: "NO",
+    ...overrides,
+  });
+}
+
+function qualityResult(
+  contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+  assert.ok(commandSha256);
+  return {
+    kind: "worker-result/v3",
+    taskNumber: contract.taskNumber,
+    requestSha256: contract.requestSha256,
+    taskSpecSha256: contract.taskSpecSha256,
+    evidencePlanSha256: contract.evidencePlanSha256,
+    status: "completed",
+    claimsText: taskSpecClaimsFence(contract.taskSpecSha256),
+    evidence: { outputTokens: 12 },
+    processEvents: {
+      representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+      complete: true,
+      events: [{ sequence: 0, commandSha256, exitCode: 0 }],
+    },
+    ...overrides,
+  };
+}
+
+function qualityAdapter(
+  resultOverride?: (contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>) => unknown,
+): TaskAdapter {
+  return {
+    descriptor: {
+      id: "quality-fake",
+      label: "Quality fake",
+      provider: "local-test",
+      model: "deterministic",
+      connected: true,
+      capabilities: ["serial-task"],
+      priority: 100,
+    },
+    qualitySupport: { commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION },
+    async run(contract) {
+      assert.equal(contract.version, "cairn-serial-task/v4");
+      if (contract.version !== "cairn-serial-task/v4") throw new Error("expected v4");
+      if (resultOverride) return resultOverride(contract) as never;
+      return qualityResult(contract) as never;
+    },
+  };
+}
+
+function candidateQualityAdapter(
+  productRoot?: string,
+  resultOverride?: (contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>) => unknown,
+): TaskAdapter {
+  const adapter = qualityAdapter(resultOverride);
+  const run = adapter.run.bind(adapter);
+  adapter.descriptor = {
+    ...adapter.descriptor,
+    id: "candidate-quality-fake",
+    label: "Candidate quality fake",
+    capabilities: [...adapter.descriptor.capabilities, "serial-task-candidate"],
+  };
+  adapter.run = async (contract, signal) => {
+    if (productRoot) writeFileSync(join(productRoot, "candidate-output.txt"), "frozen candidate bytes\n", "utf8");
+    return run(contract, signal);
+  };
+  return adapter;
+}
+
+function candidateFixture(criticMode: "off" | "optional" | "required" = "off") {
+  const inputs = qualityInputs(criticMode);
+  const authority = composeSerialCandidateTaskSpecAuthority(inputs.taskSpec, inputs.evidencePlan);
+  assert.ok(authority);
+  return { ...inputs, authority };
+}
+
+function candidateTransitionBinding(candidate: SerialCandidateV1) {
+  return {
+    version: SERIAL_CANDIDATE_TRANSITION_VERSION,
+    runId: candidate.runId,
+    generation: candidate.generation,
+    taskNumber: candidate.taskNumber,
+    projectRootSha256: candidate.projectRootSha256,
+    round: candidate.round,
+    taskSpecSha256: candidate.taskSpecSha256,
+    evidencePlanSha256: candidate.evidencePlanSha256,
+    candidateSha256: candidate.candidateSha256,
+    bundleSha256: candidate.bundleSha256,
+    evidenceStateSha256: candidate.evidenceStateSha256,
+  };
+}
+
+function transitionCandidate(
+  candidate: SerialCandidateV1,
+  decision: "optional-critic-declined" | "critic-clear" | "critic-allegation" | "owner-confirmed" | "owner-dismissed",
+): SerialCandidateV1 {
+  const transition = composeSerialCandidateTransition(candidate, { ...candidateTransitionBinding(candidate), decision });
+  assert.ok(transition);
+  const next = advanceSerialCandidate(candidate, transition);
+  assert.ok(next);
+  return next;
+}
+
+function sealCandidate(candidate: SerialCandidateV1) {
+  const authorization = composeSerialCandidateSealAuthorization(candidate, {
+    ...candidateTransitionBinding(candidate),
+    version: SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
+    requiredCriteriaComplete: true,
+    confirmedBlockerCount: 0,
+    nativeStopCount: 0,
+  });
+  assert.ok(authorization);
+  return authorization;
+}
+
+function assertCandidateCustody(
+  report: string,
+  candidate: SerialCandidateV1,
+  liveRepairEligibility?: "available" | "spent"
+    | "unavailable — ignored write set could not be proven empty"
+    | "unavailable — candidate workspace no longer matches captured bundle",
+): void {
+  assert.equal(report.match(/## Candidate custody/g)?.length, 1);
+  assert.ok(report.includes(`- Run ID: \`${candidate.runId}\``));
+  assert.ok(report.includes(`- Candidate round: ${candidate.round}`));
+  assert.ok(report.includes(`- Task Spec SHA-256: \`${candidate.taskSpecSha256}\``));
+  assert.ok(report.includes(`- Evidence Plan SHA-256: \`${candidate.evidencePlanSha256}\``));
+  assert.ok(report.includes(`- Candidate SHA-256: \`${candidate.candidateSha256}\``));
+  assert.ok(report.includes(`- Candidate bundle SHA-256: \`${candidate.bundleSha256}\``));
+  assert.ok(report.includes(`- Evidence-state SHA-256: \`${candidate.evidenceStateSha256}\``));
+  const repairEligibility = liveRepairEligibility ?? (candidate.repairUnavailableReason === "IGNORED_WRITE_SET_UNAVAILABLE"
+    ? "unavailable — ignored write set could not be proven empty"
+    : candidate.repairUnavailableReason === "REPAIR_SPENT" ? "spent" : "available");
+  assert.ok(report.includes(`- Repair eligibility: ${repairEligibility}`));
+}
+
+test("Task-Spec serial authority is branded and canonical event capability is opt-in", () => {
+  const { intent, taskSpec, evidencePlan, authority } = qualityFixture();
+  assert.equal(composeSerialTaskSpecAuthority(structuredClone(taskSpec), evidencePlan), null);
+  assert.equal(composeSerialTaskSpecAuthority(taskSpec, structuredClone(evidencePlan)), null);
+  assert.throws(
+    () => previewTaskSpecSerialRoute(intent, structuredClone(authority), [qualityAdapter()]),
+    /INVALID_TASK_SPEC_AUTHORITY/,
+  );
+
+  const legacy = qualityAdapter();
+  delete legacy.qualitySupport;
+  legacy.descriptor = { ...legacy.descriptor, id: "legacy-fake", priority: 10 };
+  assert.equal(previewSerialRoute(intent, [legacy]).status, "ready", "legacy routing stays unchanged");
+  assert.equal(previewTaskSpecSerialRoute(intent, authority, [legacy]).status, "connection-required");
+  assert.equal(previewTaskSpecSerialRoute(intent, authority, [legacy, qualityAdapter()]).status, "ready");
+});
+
+test("Q4 authority rejects a required critic before worker spawn while optional remains eligible", async () => {
+  const optional = qualityInputs("optional");
+  const optionalAuthority = composeSerialTaskSpecAuthority(optional.taskSpec, optional.evidencePlan);
+  assert.ok(optionalAuthority);
+  assert.equal(previewTaskSpecSerialRoute(optional.intent, optionalAuthority, [qualityAdapter()]).status, "ready");
+
+  const required = qualityInputs("required");
+  const rejectedAuthority = composeSerialTaskSpecAuthority(required.taskSpec, required.evidencePlan);
+  assert.equal(rejectedAuthority, null);
+  let workerCalls = 0;
+  const shouldNotRun: TaskAdapter = {
+    descriptor: {
+      id: "required-critic-fake",
+      label: "Required critic fake",
+      provider: "local-test",
+      model: "deterministic",
+      connected: true,
+      capabilities: ["serial-task"],
+      priority: 100,
+    },
+    qualitySupport: { commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION },
+    async run(contract) {
+      workerCalls += 1;
+      return validResult(contract);
+    },
+  };
+  const root = project();
+  await assert.rejects(
+    () => runSerialTaskWithIntent(root, required.intent, {
+      adapters: [shouldNotRun],
+      taskSpecAuthority: rejectedAuthority as never,
+    }),
+    /INVALID_TASK_SPEC_AUTHORITY/,
+  );
+  assert.equal(workerCalls, 0);
+  assert.deepEqual(requireTaskNames(root), []);
+});
+
+test("Q4 authority rejects zero-command and mixed non-command plans before a worker can claim DONE", async (t) => {
+  for (const mode of ["zero-command", "mixed"] as const) {
+    await t.test(mode, async () => {
+      const { intent, taskSpec, evidencePlan } = unsupportedQualityFixture(mode);
+      const rejectedAuthority = composeSerialTaskSpecAuthority(taskSpec, evidencePlan);
+      assert.equal(rejectedAuthority, null);
+
+      let workerCalls = 0;
+      const shouldNotRun: TaskAdapter = {
+        descriptor: {
+          id: `unsupported-${mode}`,
+          label: "Unsupported quality fake",
+          provider: "local-test",
+          model: "deterministic",
+          connected: true,
+          capabilities: ["serial-task"],
+          priority: 100,
+        },
+        qualitySupport: { commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION },
+        async run(contract) {
+          workerCalls += 1;
+          return validResult(contract);
+        },
+      };
+      const root = project();
+      await assert.rejects(
+        () => runSerialTaskWithIntent(root, intent, {
+          adapters: [shouldNotRun],
+          taskSpecAuthority: rejectedAuthority as never,
+        }),
+        /INVALID_TASK_SPEC_AUTHORITY/,
+      );
+      assert.equal(workerCalls, 0, "unsupported evidence never reaches process spawn");
+      assert.deepEqual(requireTaskNames(root), [], "no DONE or STOPPED task record was authored");
+    });
+  }
+});
+
+test("the staged v4 run keeps Task Spec, claims, adapter events, and envelope result separate", async () => {
+  const root = project();
+  const { intent, authority } = qualityFixture();
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [qualityAdapter()],
+    taskSpecAuthority: authority,
+  });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(Object.hasOwn(result.composed, "taskSpecRunRecord"), true);
+  assert.match(JSON.stringify(result.composed), /"taskSpecRunRecord":\{/);
+  const record = result.composed.taskSpecRunRecord;
+  assert.ok(record);
+  assert.equal(record.taskSpecSha256, authority.taskSpecSha256);
+  assert.equal(record.evidencePlanSha256, authority.evidencePlanSha256);
+  assert.deepEqual(record.workerClaims?.criteria.map((claim) => claim.id), ["c1"]);
+  assert.deepEqual(record.workerClaims?.preferences.map((claim) => claim.id), ["p1"]);
+  assert.deepEqual(record.adapterAttestations.map((attestation) => attestation.criterionId), ["c1"]);
+  assert.equal(record.adapterAttestations[0].exitCode, 0);
+  assert.equal(record.envelopeResult.disposition, "DONE");
+  assert.equal(classifyTaskSpecRunRecord(record).kind, "task-spec-bound");
+  assert.equal(classifyTaskSpecRunRecord(structuredClone(record)).kind, "invalid");
+  assert.equal(classifyTaskSpecRunRecord(record).criticReady, false);
+
+  const brief = readFileSync(result.briefPath, "utf8");
+  const report = readFileSync(result.reportPath, "utf8");
+  assert.match(brief, /### Required promises[\s\S]*- c1: Build the local result\./);
+  assert.match(brief, /### Advisory preferences — not DONE gates[\s\S]*- p1: polish/);
+  assert.doesNotMatch(brief, /## Checks\n\n- c1/);
+  assert.match(report, /Task Spec evidence — separate from claims and envelope facts/);
+  assert.match(report, /proves command identity and exit only/);
+  assert.match(report, /worker's Task-Spec-bound account \(claims, not verified by Cairn\)/);
+  assert.match(report, /Envelope result — Cairn's separate terminal fact/);
+});
+
+test("v4 refuses substituted identities and unavailable or forged process-event custody", async (t) => {
+  const cases: readonly Readonly<{
+    name: string;
+    expectedReason: string;
+    result: (contract: Extract<AdapterTaskContract, { version: "cairn-serial-task/v4" }>) => unknown;
+  }>[] = [
+    {
+      name: "legacy v2 result",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => ({
+        kind: "worker-result/v2",
+        taskNumber: contract.taskNumber,
+        requestSha256: contract.requestSha256,
+        status: "completed",
+        claimsText: null,
+        evidence: {},
+      }),
+    },
+    {
+      name: "substituted Task Spec hash",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => qualityResult(contract, { taskSpecSha256: "f".repeat(64) }),
+    },
+    {
+      name: "substituted Evidence Plan hash",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => qualityResult(contract, { evidencePlanSha256: "f".repeat(64) }),
+    },
+    {
+      name: "only an unrelated successful command",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => qualityResult(contract, {
+        processEvents: {
+          representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+          complete: true,
+          events: [{ sequence: 0, commandSha256: "a".repeat(64), exitCode: 0 }],
+        },
+      }),
+    },
+    {
+      name: "planned command plus an unrelated successful command",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [
+              { sequence: 0, commandSha256, exitCode: 0 },
+              { sequence: 1, commandSha256: "a".repeat(64), exitCode: 0 },
+            ],
+          },
+        });
+      },
+    },
+    {
+      name: "duplicate command events",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [
+              { sequence: 0, commandSha256, exitCode: 0 },
+              { sequence: 1, commandSha256, exitCode: 0 },
+            ],
+          },
+        });
+      },
+    },
+    {
+      name: "incomplete event stream",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const base = qualityResult(contract);
+        const processEvents = base.processEvents as Record<string, unknown>;
+        return { ...base, processEvents: { ...processEvents, complete: false } };
+      },
+    },
+    {
+      name: "record-unsafe Task-Spec claims",
+      expectedReason: "WORKER_CLAIMS_MISSING",
+      result: (contract) => qualityResult(contract, {
+        claimsText: taskSpecClaimsFence(contract.taskSpecSha256, "DONE", { summary: " \t " }),
+      }),
+    },
+    {
+      name: "event tries to choose criterion authority",
+      expectedReason: "INVALID_ADAPTER_RESULT",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [{ sequence: 0, commandSha256, exitCode: 0, criterionId: "c1" }],
+          },
+        });
+      },
+    },
+    {
+      name: "unexpected planned exit",
+      expectedReason: "MODEL_RESULT_NOT_VERIFIED",
+      result: (contract) => {
+        const commandSha256 = contract.evidencePlan.procedures[0].command?.sha256;
+        assert.ok(commandSha256);
+        return qualityResult(contract, {
+          processEvents: {
+            representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+            complete: true,
+            events: [{ sequence: 0, commandSha256, exitCode: 1 }],
+          },
+        });
+      },
+    },
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const root = project();
+      const { intent, authority } = qualityFixture();
+      const result = await runSerialTaskWithIntent(root, intent, {
+        adapters: [qualityAdapter(item.result)],
+        taskSpecAuthority: authority,
+      });
+      assert.equal(result.status, "stopped");
+      if (result.status !== "stopped") return;
+      assert.equal(result.reason, item.expectedReason);
+      assert.equal(result.composed.taskSpecRunRecord?.taskSpecSha256, authority.taskSpecSha256);
+      assert.equal(result.composed.taskSpecRunRecord?.envelopeResult.disposition, "STOPPED");
+      if (item.name === "unexpected planned exit" || item.name === "record-unsafe Task-Spec claims") {
+        assert.equal(
+          result.composed.taskSpecRunRecord?.adapterAttestations[0]?.exitCode,
+          item.name === "unexpected planned exit" ? 1 : 0,
+          "valid process custody remains separate from rejected worker claims",
+        );
+      } else {
+        assert.deepEqual(result.composed.taskSpecRunRecord?.adapterAttestations, []);
+      }
+    });
+  }
+});
 
 test("normal mode stops at connection-required without writing records", async () => {
   const root = project();
@@ -1622,6 +2315,7 @@ test("one frozen attributed intent reaches the v3 contract, brief, and composed 
   assert.match(brief, /> Word counts: 74, 477, 256/);
   assert.match(brief, /Context kept with the task — not a requirement/);
   if (result.status === "done") {
+    assertLegacyComposedOmitsTaskSpecRunRecord(result.composed);
     assert.deepEqual(result.composed.acceptedRequest.requirements, [{
       source: "owner-stated", text: "Use these exact word counts", ownerText: "Word counts: 74, 477, 256",
     }]);
@@ -1729,6 +2423,7 @@ test("a verified DONE carries the Git-derived composed record for the result car
   assert.equal(result.composed.route.model, CODEX_EXEC_MODEL);
   assert.match(result.composed.evidenceSummary ?? "", /^Bounded worker evidence: /);
   assert.equal(result.composed.processFailure, null);
+  assertLegacyComposedOmitsTaskSpecRunRecord(result.composed);
   // The composed value is the very input the report was rendered from, so the
   // card and the record cannot tell two different stories about one run.
   assert.equal(result.reportText, readFileSync(result.reportPath, "utf8"));
@@ -2038,4 +2733,2026 @@ test("a Git failure after the task commit leaves no DONE row standing (repo task
     beforeLog,
     "no DONE row may stand in the work log for a run that threw",
   );
+});
+
+test("Q6 candidate routing is dark and requires the explicit candidate capability", () => {
+  const { intent, authority } = candidateFixture();
+  assert.equal(previewSerialCandidateRoute(intent, authority, [qualityAdapter()]).status, "connection-required");
+  const ready = previewSerialCandidateRoute(intent, authority, [qualityAdapter(), candidateQualityAdapter()]);
+  assert.equal(ready.status, "ready");
+  if (ready.status === "ready") assert.equal(ready.recommended.id, "candidate-quality-fake");
+  assert.throws(
+    () => previewSerialCandidateRoute(intent, structuredClone(authority), [candidateQualityAdapter()]),
+    /INVALID_SERIAL_CANDIDATE_AUTHORITY/,
+  );
+});
+
+test("Q6 repo-shaping Git environments fail before Builder and the managed safe.directory triplet is stripped", async (t) => {
+  const restore = (snapshot: Readonly<Record<string, string | undefined>>): void => {
+    for (const [name, value] of Object.entries(snapshot)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+  for (const kind of ["index", "objects", "config"] as const) {
+    await t.test(`reject ${kind}`, async () => {
+      const root = project();
+      const outside = mkdtempSync(join(tmpdir(), `cairn-git-env-${kind}-`));
+      const outsideIndex = join(outside, "outside.index");
+      const outsideCanary = join(outside, "canary.txt");
+      writeFileSync(outsideIndex, "OUTSIDE-INDEX-CANARY\n", "utf8");
+      writeFileSync(outsideCanary, "OUTSIDE-OBJECT-CANARY\n", "utf8");
+      const names = [
+        "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1",
+      ];
+      const before = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+      if (kind === "index") process.env.GIT_INDEX_FILE = outsideIndex;
+      if (kind === "objects") process.env.GIT_OBJECT_DIRECTORY = outside;
+      if (kind === "config") {
+        process.env.GIT_CONFIG_COUNT = "2";
+        process.env.GIT_CONFIG_KEY_0 = "safe.directory";
+        process.env.GIT_CONFIG_VALUE_0 = "*";
+        process.env.GIT_CONFIG_KEY_1 = "core.hooksPath";
+        process.env.GIT_CONFIG_VALUE_1 = outside;
+      }
+      let builderCalled = false;
+      const adapter = candidateQualityAdapter();
+      const run = adapter.run.bind(adapter);
+      adapter.run = async (contract, signal) => {
+        builderCalled = true;
+        return run(contract, signal);
+      };
+      const fixture = candidateFixture("off");
+      try {
+        await assert.rejects(
+          () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+          /UNSAFE_SERIAL_CANDIDATE_GIT_ENVIRONMENT/,
+        );
+      } finally {
+        restore(before);
+      }
+      assert.equal(builderCalled, false);
+      assert.equal(readFileSync(outsideIndex, "utf8"), "OUTSIDE-INDEX-CANARY\n");
+      assert.equal(readFileSync(outsideCanary, "utf8"), "OUTSIDE-OBJECT-CANARY\n");
+      assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-brief.md")), false);
+      assert.equal(existsSync(lockPath(root)), false);
+    });
+  }
+
+  await t.test("accept and strip one managed safe.directory value", async () => {
+    const root = project();
+    const names = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"];
+    const before = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "safe.directory";
+    process.env.GIT_CONFIG_VALUE_0 = "*";
+    const fixture = candidateFixture("off");
+    try {
+      const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+        adapters: [candidateQualityAdapter(root)],
+        authority: fixture.authority,
+      });
+      assert.equal(pending.status, "candidate");
+      if (pending.status === "candidate") assert.ok(stopSerialCandidate(pending.candidate));
+    } finally {
+      restore(before);
+    }
+    assert.equal(existsSync(lockPath(root)), false);
+  });
+});
+
+test("Q6 restores denied Git environment keys mutated by the Builder before failing closed", async () => {
+  const root = project();
+  const outside = mkdtempSync(join(tmpdir(), "cairn-builder-git-env-"));
+  const outsideIndex = join(outside, "outside.index");
+  writeFileSync(outsideIndex, "OUTSIDE-INDEX-CANARY\n", "utf8");
+  const original = process.env.GIT_INDEX_FILE;
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    process.env.GIT_INDEX_FILE = outsideIndex;
+    return run(contract, signal);
+  };
+  let observedAfter: string | undefined;
+  try {
+    await assert.rejects(
+      () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+      /UNSAFE_SERIAL_CANDIDATE_GIT_ENVIRONMENT/,
+    );
+    observedAfter = process.env.GIT_INDEX_FILE;
+  } finally {
+    if (original === undefined) delete process.env.GIT_INDEX_FILE;
+    else process.env.GIT_INDEX_FILE = original;
+  }
+  assert.equal(observedAfter, original, "the candidate runner restores the exact denied-key baseline");
+  assert.equal(readFileSync(outsideIndex, "utf8"), "OUTSIDE-INDEX-CANARY\n");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 Git trace and redirect authority cannot write outside candidate custody", async (t) => {
+  await t.test("trace environment is rejected before Builder", async () => {
+    const root = project();
+    const outside = mkdtempSync(join(tmpdir(), "cairn-trace-env-"));
+    const canary = join(outside, "trace-canary.txt");
+    writeFileSync(canary, "TRACE-CANARY\n", "utf8");
+    const originalTrace = process.env.GIT_TRACE;
+    process.env.GIT_TRACE = canary;
+    let builderCalled = false;
+    const adapter = candidateQualityAdapter();
+    const run = adapter.run.bind(adapter);
+    adapter.run = async (contract, signal) => {
+      builderCalled = true;
+      return run(contract, signal);
+    };
+    const fixture = candidateFixture("off");
+    try {
+      await assert.rejects(
+        () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+        /UNSAFE_SERIAL_CANDIDATE_GIT_ENVIRONMENT/,
+      );
+    } finally {
+      if (originalTrace === undefined) delete process.env.GIT_TRACE;
+      else process.env.GIT_TRACE = originalTrace;
+    }
+    assert.equal(builderCalled, false);
+    assert.equal(readFileSync(canary, "utf8"), "TRACE-CANARY\n");
+    assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-brief.md")), false);
+    assert.equal(existsSync(lockPath(root)), false);
+  });
+
+  await t.test("global Trace2 targets are overridden to zero in every candidate child", async () => {
+    const root = project();
+    const fakeHome = mkdtempSync(join(tmpdir(), "cairn-trace-home-"));
+    const outside = mkdtempSync(join(tmpdir(), "cairn-trace-global-"));
+    const traceTarget = join(outside, "trace2-event.json");
+    const configTarget = traceTarget.replace(/\\/gu, "/");
+    writeFileSync(join(fakeHome, ".gitconfig"), [
+      "[trace2]",
+      `\teventTarget = ${configTarget}`,
+      `\tnormalTarget = ${configTarget}`,
+      `\tperfTarget = ${configTarget}`,
+      "",
+    ].join("\n"), "utf8");
+    const originalHome = process.env.HOME;
+    const originalProfile = process.env.USERPROFILE;
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+    const fixture = candidateFixture("off");
+    try {
+      const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+        adapters: [candidateQualityAdapter(root)],
+        authority: fixture.authority,
+      });
+      assert.equal(pending.status, "candidate");
+      if (pending.status === "candidate") assert.ok(stopSerialCandidate(pending.candidate));
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      if (originalProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalProfile;
+    }
+    assert.equal(existsSync(traceTarget), false, "system/global Trace2 configuration cannot select an output target");
+    assert.equal(existsSync(lockPath(root)), false);
+  });
+});
+
+test("Q6 a Builder HEAD move closes with protectedIntact false before any candidate is exposed", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter(root);
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    git(root, ["commit", "--allow-empty", "-q", "-m", "Builder moved HEAD"]);
+    return run(contract, signal);
+  };
+  const stopped = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(stopped.status, "stopped");
+  if (stopped.status !== "stopped") return;
+  assert.equal(stopped.reason, "MODEL_RESULT_NOT_VERIFIED");
+  assert.equal(stopped.composed.protectedIntact, false);
+  assert.match(stopped.reportText, /Protected starting work: CHANGED/u);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 prospective owned topology rejects a linked tasks parent before outside reads, writes, or Builder dispatch", async (t) => {
+  const root = project();
+  const outside = mkdtempSync(join(tmpdir(), "cairn-serial-outside-"));
+  const tasks = join(root, "docs", "ai-work", "tasks");
+  rmSync(tasks, { recursive: true });
+  try {
+    symlinkSync(outside, tasks, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    t.skip(`directory links are unavailable in this environment: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+    return;
+  }
+  let builderCalled = false;
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    builderCalled = true;
+    return run(contract, signal);
+  };
+  const fixture = candidateFixture("off");
+  await assert.rejects(
+    () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+    /UNSAFE_SERIAL_CANDIDATE_OWNED_RECORD_TOPOLOGY/,
+  );
+  assert.equal(builderCalled, false);
+  assert.equal(existsSync(join(outside, "001-brief.md")), false);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 a linked protected parent is rejected before Builder and never reads or changes its outside canary", async (t) => {
+  const root = project();
+  const nested = join(root, "nested-owner");
+  mkdirSync(nested);
+  writeFileSync(join(nested, "owner.txt"), "tracked owner bytes\n", "utf8");
+  git(root, ["add", "nested-owner/owner.txt"]);
+  git(root, ["commit", "-q", "-m", "add nested protected fixture"]);
+  rmSync(nested, { recursive: true });
+  const outside = mkdtempSync(join(tmpdir(), "cairn-protected-outside-"));
+  const outsideCanary = join(outside, "owner.txt");
+  writeFileSync(outsideCanary, "OUTSIDE-CANARY\n", "utf8");
+  try {
+    symlinkSync(outside, nested, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    t.skip(`directory links are unavailable in this environment: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+    return;
+  }
+  let builderCalled = false;
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    builderCalled = true;
+    return run(contract, signal);
+  };
+  const fixture = candidateFixture("off");
+  await assert.rejects(
+    () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+    /UNSAFE_CANDIDATE_PROTECTED_PARENT/,
+  );
+  assert.equal(builderCalled, false);
+  assert.equal(readFileSync(outsideCanary, "utf8"), "OUTSIDE-CANARY\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 concealment flags, external filters, and fsmonitor commands reject after Builder without executing metadata helpers", async () => {
+  const runCase = async (kind: "assume" | "filter" | "fsmonitor") => {
+    const root = project();
+    writeFileSync(join(root, "hidden.txt"), "tracked base\n", "utf8");
+    git(root, ["add", "hidden.txt"]);
+    git(root, ["commit", "-q", "-m", "add metadata fixture"]);
+    const marker = join(root, ".git", `${kind}-helper-ran`);
+    const script = join(root, ".git", `${kind}-helper.cjs`);
+    writeFileSync(script, [
+      "const fs = require('node:fs');",
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => { input += chunk; });",
+      `process.stdin.on('end', () => { fs.writeFileSync('.git/${kind}-helper-ran', 'ran\\n'); process.stdout.write(input); });`,
+      "",
+    ].join("\n"), "utf8");
+    const fixture = candidateFixture("off");
+    const adapter = candidateQualityAdapter();
+    const run = adapter.run.bind(adapter);
+    adapter.run = async (contract, signal) => {
+      if (kind === "assume") {
+        git(root, ["update-index", "--assume-unchanged", "--", "hidden.txt"]);
+      } else if (kind === "filter") {
+        writeFileSync(join(root, ".git", "info", "attributes"), "hidden.txt filter=conceal\n", "utf8");
+        git(root, ["config", "filter.conceal.clean", "node .git/filter-helper.cjs"]);
+      } else {
+        git(root, ["config", "core.fsmonitor", "node .git/fsmonitor-helper.cjs"]);
+      }
+      writeFileSync(join(root, "hidden.txt"), "hidden raw mutation\n", "utf8");
+      writeFileSync(join(root, "visible-decoy.txt"), "visible decoy\n", "utf8");
+      return run(contract, signal);
+    };
+    const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+    await assert.rejects(
+      () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+      /UNSAFE_SERIAL_CANDIDATE_POST_BUILDER_BOUNDARY/,
+    );
+    assert.equal(existsSync(marker), false, `${kind} helper never runs`);
+    assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+    assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+    assert.equal(existsSync(lockPath(root)), false);
+  };
+  await runCase("assume");
+  await runCase("filter");
+  await runCase("fsmonitor");
+});
+
+test("Q6 late fsmonitor configuration cannot execute during repair authorization or direct STOP", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const alleged = transitionCandidate(pending.candidate, "critic-allegation");
+  const awaitingRepair = transitionCandidate(alleged, "owner-confirmed");
+  const marker = join(root, ".git", "late-fsmonitor-ran");
+  const helper = join(root, ".git", "late-fsmonitor.cjs");
+  writeFileSync(helper, [
+    "const fs=require('node:fs');",
+    "fs.writeFileSync('.git/late-fsmonitor-ran','ran\\n');",
+    "process.stdout.write('');",
+    "",
+  ].join("\n"), "utf8");
+  git(root, ["config", "core.fsmonitor", "node .git/late-fsmonitor.cjs"]);
+  const instruction = authorizeSerialCandidateRepair(awaitingRepair, {
+    ...candidateTransitionBinding(awaitingRepair),
+    version: SERIAL_REPAIR_INSTRUCTION_VERSION,
+    blockers: [{
+      criterionId: "c1",
+      failureConditionId: "failure-c1",
+      artifactIds: ["artifact-output"],
+    }],
+  });
+  assert.equal(instruction, null);
+  assert.equal(stopSerialCandidate(awaitingRepair), null);
+  assert.equal(existsSync(marker), false, "neither candidate-module freshness nor serial metadata starts the hook");
+  git(root, ["config", "--unset-all", "core.fsmonitor"]);
+  const stopped = stopSerialCandidate(awaitingRepair, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(existsSync(marker), false);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 an owned report hardlink planted by Builder is never followed or overwritten", async (t) => {
+  const root = project();
+  const target = join(root, "outside-report-target.txt");
+  writeFileSync(target, "PROTECTED-TARGET\n", "utf8");
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    try {
+      linkSync(target, join(root, "docs", "ai-work", "tasks", "001-report.md"));
+    } catch (error) {
+      throw Object.assign(new Error("HARDLINK_UNAVAILABLE"), { cause: error });
+    }
+    return run(contract, signal);
+  };
+  try {
+    await assert.rejects(
+      () => runSerialTaskToCandidate(root, fixture.intent, { adapters: [adapter], authority: fixture.authority }),
+      /UNSAFE_SERIAL_CANDIDATE_POST_BUILDER_BOUNDARY/,
+    );
+  } catch (error) {
+    if ((error as Error).message.includes("HARDLINK_UNAVAILABLE")) {
+      t.skip("hardlinks are unavailable in this environment");
+      return;
+    }
+    throw error;
+  }
+  assert.equal(readFileSync(target, "utf8"), "PROTECTED-TARGET\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 Builder completion freezes the required, optional, and off phases without terminal writes", async () => {
+  const cases = [
+    { mode: "required" as const, phase: "awaiting-critic" },
+    { mode: "optional" as const, phase: "awaiting-critic" },
+    { mode: "off" as const, phase: "ready-to-seal" },
+  ];
+  for (const item of cases) {
+    const root = project();
+    const fixture = candidateFixture(item.mode);
+    const beforeHead = git(root, ["rev-parse", "HEAD"]);
+    const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+    const result = await runSerialTaskToCandidate(root, fixture.intent, {
+      adapters: [candidateQualityAdapter(root)],
+      authority: fixture.authority,
+    });
+    assert.equal(result.status, "candidate");
+    if (result.status !== "candidate") continue;
+    assert.equal(result.candidate.phase, item.phase);
+    assert.equal(result.candidate.round, 0);
+    assert.equal(result.candidate.callsUsed.builder, 1);
+    assert.equal(result.candidate.callsUsed.repair, 0);
+    assert.equal(result.candidate.callsUsed.critic, 0);
+    assert.equal(Object.hasOwn(result, "reportPath"), false);
+    assert.equal(Object.hasOwn(result, "reportText"), false);
+    assert.equal(Object.hasOwn(result, "row"), false);
+    assert.equal(Object.hasOwn(result, "commit"), false);
+    const candidateBrief = readFileSync(result.briefPath, "utf8");
+    assert.match(candidateBrief, /Candidate creation is a non-terminal pause/);
+    assert.match(candidateBrief, /a later explicit, exact branded seal proves complete required evidence/);
+    assert.doesNotMatch(candidateBrief, /exact command events were retained separately/);
+    assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+    assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+    assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+    assert.equal(git(root, ["diff", "--cached", "--name-only"]), "");
+    assert.equal(result.activities.some((activity) => activity.stage === "Result"), false);
+    assert.equal(existsSync(lockPath(root)), true, "the cross-process lock remains held with the candidate");
+    const alias = aliasedSpelling(root);
+    assert.ok(alias);
+    await assert.rejects(
+      () => runSerialTaskToCandidate(alias, fixture.intent, {
+        adapters: [candidateQualityAdapter()],
+        authority: fixture.authority,
+      }),
+      /SERIAL_RUN_ACTIVE/,
+      "an aliased second task cannot pass the pending candidate",
+    );
+    const stopped = stopSerialCandidate(result.candidate, "CANCELLED_BY_OWNER");
+    assert.ok(stopped);
+    assert.equal(stopped.status, "stopped");
+    assert.equal(stopped.candidate.phase, "stopped");
+    assert.equal(existsSync(lockPath(root)), false);
+    assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "frozen candidate bytes\n");
+  }
+});
+
+test("Q6 an ignored Builder write keeps the candidate visible but makes repair unavailable", async () => {
+  const root = project();
+  writeFileSync(join(root, ".gitignore"), "ignored-builder.txt\n", "utf8");
+  git(root, ["add", ".gitignore"]);
+  git(root, ["commit", "-q", "-m", "ignore fixture-only builder output"]);
+  const fixture = candidateFixture("optional");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "ignored-builder.txt"), "CANARY-IGNORED-BUILDER\n", "utf8");
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.equal(pending.candidate.repairEligibility, null);
+  assert.equal(pending.candidate.repairUnavailableReason, "IGNORED_WRITE_SET_UNAVAILABLE");
+  assert.doesNotMatch(JSON.stringify(pending.candidate), /ignored-builder|CANARY-IGNORED-BUILDER/iu,
+    "ignored names and bytes never enter candidate custody");
+  const alleged = transitionCandidate(pending.candidate, "critic-allegation");
+  const confirmed = composeSerialCandidateTransition(alleged, {
+    ...candidateTransitionBinding(alleged),
+    decision: "owner-confirmed",
+  });
+  assert.ok(confirmed);
+  assert.equal(advanceSerialCandidate(alleged, confirmed), null,
+    "repair cannot be authorized without ignored-write custody");
+  const ready = transitionCandidate(alleged, "owner-dismissed");
+  const seal = sealCandidate(ready);
+  const done = finalizeSerialCandidate(ready, seal);
+  assert.ok(done);
+  assert.equal(done.status, "done",
+    "ignored-tree custody is a repair gate, not a universal DONE gate");
+  assertCandidateCustody(done.reportText, ready);
+  assert.match(done.reportText, /Repair eligibility: unavailable — ignored write set could not be proven empty/);
+  assert.doesNotMatch(done.reportText, /ignored-builder|CANARY-IGNORED-BUILDER/iu);
+  assert.doesNotMatch(git(root, ["show", "--format=", "--name-only", "HEAD"]), /ignored-builder/iu);
+  assert.equal(readFileSync(join(root, "ignored-builder.txt"), "utf8"), "CANARY-IGNORED-BUILDER\n");
+});
+
+test("Q6 unsafe Git path capture failure redacts the attacker-controlled name from terminal records", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const unique = "UNSAFE-PATH-CANARY-90731";
+  const unsafeName = `${unique}-\u202Etxt.md`;
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, unsafeName), "untrusted product bytes\n", "utf8");
+    return run(contract, signal);
+  };
+  const stopped = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(stopped.status, "stopped");
+  if (stopped.status !== "stopped") return;
+  assert.match(stopped.reportText, /\[redacted unsafe Git path\]/u);
+  assert.doesNotMatch(stopped.reportText, new RegExp(unique, "u"));
+  assert.doesNotMatch(JSON.stringify(stopped), new RegExp(unique, "u"));
+  assert.equal(existsSync(join(root, unsafeName)), true, "the rejected product remains untouched for inspection");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 optional decline and an exact branded seal finalize once with terminal custody", async () => {
+  const root = project();
+  const fixture = candidateFixture("optional");
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const ready = transitionCandidate(pending.candidate, "optional-critic-declined");
+  assert.equal(ready.phase, "ready-to-seal");
+  const seal = sealCandidate(ready);
+  const done = finalizeSerialCandidate(ready, seal);
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(done.disposition, "DONE");
+  assert.equal(done.candidate.phase, "done");
+  assert.equal(done.commit.status, "created");
+  assert.notEqual(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+  assert.deepEqual(
+    git(root, ["show", "--format=", "--name-only", "HEAD"]).split(/\r?\n/).filter(Boolean).sort(),
+    [
+      "candidate-output.txt",
+      "docs/ai-work/LOG.md",
+      "docs/ai-work/tasks/001-brief.md",
+      "docs/ai-work/tasks/001-report.md",
+    ],
+  );
+  assertCandidateCustody(done.reportText, ready);
+  assert.match(done.reportText, /Disposition: \*\*DONE\*\*\n$/);
+  const closedLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal((closedLog.match(/\| 001 \|/g) ?? []).length, 1);
+  assert.equal(finalizeSerialCandidate(ready, seal), null);
+  assert.equal(stopSerialCandidate(ready), null);
+  assert.equal(stopSerialCandidate(done.candidate), null);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), closedLog);
+});
+
+test("Q6 candidate commit verifies filter-aware Git blobs while retaining exact CRLF worktree bytes", async () => {
+  const root = project();
+  writeFileSync(join(root, ".gitattributes"), "candidate-output.txt text eol=lf\n", "utf8");
+  git(root, ["add", ".gitattributes"]);
+  git(root, ["commit", "-q", "-m", "declare candidate output line endings"]);
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "candidate-output.txt"), "first\r\nsecond\r\n", "utf8");
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const entry = pending.candidate.bundle.entries.find((item) => item.projectRelativePath === "candidate-output.txt");
+  assert.ok(entry && entry.state === "regular-file");
+  assert.ok(entry.contentBase64 && entry.gitBlobOid);
+  assert.equal(Buffer.from(entry.contentBase64, "base64").toString("utf8"), "first\r\nsecond\r\n",
+    "candidate custody remains lossless even when Git normalizes its blob");
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.match(git(root, ["ls-tree", "HEAD", "--", "candidate-output.txt"]),
+    new RegExp(`^100644 blob ${entry.gitBlobOid}\\t`));
+  assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "first\r\nsecond\r\n");
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 candidate owned records use built-in EOL normalization and leave a CRLF worktree clean", async () => {
+  const root = project();
+  writeFileSync(join(root, ".gitattributes"), "docs/ai-work/** text eol=lf\n", "utf8");
+  git(root, ["add", ".gitattributes"]);
+  git(root, ["commit", "-q", "-m", "normalize Cairn records"]);
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  writeFileSync(logPath, readFileSync(logPath, "utf8").replace(/\r?\n/gu, "\r\n"), "utf8");
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 candidate commit preserves an executable tracked LOG mode and rejects a late mode drift", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX executable worktree modes are not observable on Windows.");
+    return;
+  }
+  const prepare = (): string => {
+    const root = project();
+    const logPath = join(root, "docs", "ai-work", "LOG.md");
+    chmodSync(logPath, 0o755);
+    git(root, ["add", "--", "docs/ai-work/LOG.md"]);
+    git(root, ["commit", "-q", "-m", "make fixture work log executable"]);
+    assert.match(git(root, ["ls-files", "--stage", "--", "docs/ai-work/LOG.md"]), /^100755 /u);
+    return root;
+  };
+
+  const root = prepare();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.match(git(root, ["ls-tree", "HEAD", "--", "docs/ai-work/LOG.md"]), /^100755 blob /u);
+  assert.notEqual(Number(lstatSync(join(root, "docs", "ai-work", "LOG.md")).mode) & 0o111, 0);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+
+  const driftRoot = prepare();
+  const driftFixture = candidateFixture("off");
+  const driftPending = await runSerialTaskToCandidate(driftRoot, driftFixture.intent, {
+    adapters: [candidateQualityAdapter(driftRoot)],
+    authority: driftFixture.authority,
+  });
+  assert.equal(driftPending.status, "candidate");
+  if (driftPending.status !== "candidate") return;
+  const driftLog = join(driftRoot, "docs", "ai-work", "LOG.md");
+  const logBefore = readFileSync(driftLog, "utf8");
+  chmodSync(driftLog, 0o644);
+  assert.equal(finalizeSerialCandidate(driftPending.candidate, sealCandidate(driftPending.candidate)), null);
+  assert.equal(readFileSync(driftLog, "utf8"), logBefore);
+  assert.equal(existsSync(join(driftRoot, "docs", "ai-work", "tasks", "001-report.md")), false);
+  chmodSync(driftLog, 0o755);
+  const retried = finalizeSerialCandidate(driftPending.candidate, sealCandidate(driftPending.candidate));
+  assert.ok(retried);
+  assert.equal(retried.status, "done");
+  assert.equal(git(driftRoot, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 candidate commit parses an exact Unicode product path without Git quote-path ambiguity", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "naïve.txt"), "Unicode candidate path\n", "utf8");
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.deepEqual(pending.candidate.bundle.entries.map((entry) => entry.projectRelativePath), ["naïve.txt"]);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(git(root, ["-c", "core.quotePath=false", "ls-tree", "--name-only", "HEAD", "--", "naïve.txt"]), "naïve.txt");
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 candidate commit proves a captured tracked deletion in the staged and committed trees", async () => {
+  const root = project();
+  writeFileSync(join(root, "obsolete-candidate.txt"), "remove this exact tracked file\n", "utf8");
+  git(root, ["add", "obsolete-candidate.txt"]);
+  git(root, ["commit", "-q", "-m", "add deletion fixture"]);
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    rmSync(join(root, "obsolete-candidate.txt"));
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const entry = pending.candidate.bundle.entries.find((item) => item.projectRelativePath === "obsolete-candidate.txt");
+  assert.ok(entry && entry.state === "deleted");
+  assert.equal(entry.gitBlobOid, null);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(git(root, ["ls-tree", "HEAD", "--", "obsolete-candidate.txt"]), "");
+  assert.equal(existsSync(join(root, "obsolete-candidate.txt")), false);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 a Builder-staged-only product remains visible in the candidate and exact commit", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "staged-only.txt"), "Builder staged bytes\n", "utf8");
+    git(root, ["add", "--", "staged-only.txt"]);
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.deepEqual(pending.candidate.bundle.entries.map((entry) => entry.projectRelativePath), ["staged-only.txt"]);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.match(git(root, ["show", "HEAD:staged-only.txt"]), /Builder staged bytes/);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 an externally staged candidate mutation makes zero terminal writes and can be retried after exact unstaging", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  const seal = sealCandidate(pending.candidate);
+  git(root, ["add", "--", "candidate-output.txt"]);
+  git(root, ["update-index", "--chmod=+x", "--", "candidate-output.txt"]);
+  assert.equal(finalizeSerialCandidate(pending.candidate, seal), null);
+  assert.equal(existsSync(reportPath), false);
+  assert.equal(readFileSync(logPath, "utf8"), beforeLog);
+  git(root, ["restore", "--staged", "--", "candidate-output.txt"]);
+  const done = finalizeSerialCandidate(pending.candidate, seal);
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(git(root, ["ls-tree", "HEAD", "--", "candidate-output.txt"]).startsWith("100644 blob "), true);
+});
+
+test("Q6 candidate atomic commit bypasses a hostile pre-commit staged-mode mutation", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const hook = join(root, ".git", "hooks", "pre-commit");
+  writeFileSync(hook, [
+    "#!/bin/sh",
+    "git update-index --chmod=+x -- candidate-output.txt",
+    "printf 'HOOK-RAN\\n' > hostile-hook-ran.txt",
+    "",
+  ].join("\n"), "utf8");
+  chmodSync(hook, 0o755);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(existsSync(join(root, "hostile-hook-ran.txt")), false);
+  assert.equal(git(root, ["ls-tree", "HEAD", "--", "candidate-output.txt"]).startsWith("100644 blob "), true);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 candidate index CAS preserves a concurrent exact-path stage instead of overwriting it", async () => {
+  const root = project();
+  writeFileSync(join(root, "owner-index-race.txt"), "owner base\n", "utf8");
+  git(root, ["add", "--", "owner-index-race.txt"]);
+  git(root, ["commit", "-q", "-m", "add concurrent index fixture"]);
+  const startHead = git(root, ["rev-parse", "HEAD"]);
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    for (let index = 0; index < 16; index += 1) {
+      writeFileSync(join(root, `candidate-race-${index.toString().padStart(2, "0")}.txt`), "candidate byte\n", "utf8");
+    }
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+
+  const marker = join(root, ".git", "candidate-index-race-result");
+  const raceScript = [
+    "const fs=require('node:fs'),cp=require('node:child_process');",
+    "const [root,gitDir,marker]=process.argv.slice(1);",
+    "const until=Date.now()+30000;",
+    "for(;;){",
+    "  if(fs.readdirSync(gitDir).some((name)=>/^cairn-candidate-.*\\.index$/.test(name))){",
+    "    try{cp.execFileSync('git',['update-index','--chmod=+x','--','owner-index-race.txt'],{cwd:root,stdio:'ignore'});fs.writeFileSync(marker,'staged');}",
+    "    catch{fs.writeFileSync(marker,'locked');}",
+    "    break;",
+    "  }",
+    "  if(Date.now()>=until){fs.writeFileSync(marker,'timeout');break;}",
+    "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2);",
+    "}",
+  ].join("");
+  const child = spawn(process.execPath, ["-e", raceScript, root, join(root, ".git"), marker], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const childDone = new Promise<number | null>((resolveChild) => child.once("exit", resolveChild));
+  const terminal = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  const childExit = await childDone;
+  assert.equal(childExit, 0);
+  assert.equal(readFileSync(marker, "utf8"), "staged", "the concurrent writer won before Cairn's held sentinel");
+  assert.ok(terminal);
+  assert.equal(terminal.status, "stopped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), startHead);
+  assert.match(git(root, ["ls-files", "--stage", "--", "owner-index-race.txt"]), /^100755 /u,
+    "the raced real-index entry is retained exactly");
+  assert.equal(existsSync(join(root, ".git", "index.lock")), false);
+});
+
+test("Q6 candidate index install and rollback preserve exact POSIX index permissions", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX index permission bits are not authoritative on Windows");
+    return;
+  }
+  await t.test("successful install", async () => {
+    const root = project();
+    const fixture = candidateFixture("off");
+    const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+      adapters: [candidateQualityAdapter(root)],
+      authority: fixture.authority,
+    });
+    assert.equal(pending.status, "candidate");
+    if (pending.status !== "candidate") return;
+    const indexPath = join(root, ".git", "index");
+    chmodSync(indexPath, 0o660);
+    const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+    assert.ok(done);
+    assert.equal(done.status, "done");
+    assert.equal(lstatSync(indexPath).mode & 0o777, 0o660,
+      "the umask cannot narrow the installed candidate index mode");
+  });
+
+  await t.test("pre-CAS rollback", async () => {
+    const root = project();
+    const startHead = git(root, ["rev-parse", "HEAD"]);
+    const fixture = candidateFixture("off");
+    const adapter = candidateQualityAdapter();
+    const run = adapter.run.bind(adapter);
+    adapter.run = async (contract, signal) => {
+      for (let index = 0; index < 48; index += 1) {
+        writeFileSync(join(root, `mode-rollback-${index.toString().padStart(2, "0")}.txt`), "candidate byte\n", "utf8");
+      }
+      return run(contract, signal);
+    };
+    const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+      adapters: [adapter],
+      authority: fixture.authority,
+    });
+    assert.equal(pending.status, "candidate");
+    if (pending.status !== "candidate") return;
+    const indexPath = join(root, ".git", "index");
+    const indexLockPath = `${indexPath}.lock`;
+    chmodSync(indexPath, 0o660);
+    const originalIndex = readFileSync(indexPath);
+    const originalSnapshot = join(root, ".git", "mode-rollback-original-index");
+    writeFileSync(originalSnapshot, originalIndex);
+    const alternate = git(root, ["commit-tree", `${startHead}^{tree}`, "-p", startHead, "-m", "concurrent ref move"]);
+    const marker = join(root, ".git", "mode-rollback-marker");
+    const raceScript = [
+      "const fs=require('node:fs'),cp=require('node:child_process');",
+      "const [root,indexPath,lockPath,snapshot,marker,next,old]=process.argv.slice(1);",
+      "const original=fs.readFileSync(snapshot),until=Date.now()+30000;",
+      "for(;;){",
+      " if(fs.existsSync(lockPath)){",
+      "  try{const current=fs.readFileSync(indexPath);if(!current.equals(original)){cp.execFileSync('git',['update-ref','HEAD',next,old],{cwd:root,stdio:'ignore'});fs.writeFileSync(marker,'moved');break;}}catch{}",
+      " }",
+      " if(Date.now()>=until){fs.writeFileSync(marker,'timeout');break;}",
+      " Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);",
+      "}",
+    ].join("");
+    const child = spawn(process.execPath, [
+      "-e", raceScript, root, indexPath, indexLockPath, originalSnapshot, marker, alternate, startHead,
+    ], { stdio: "ignore", windowsHide: true });
+    const childDone = new Promise<number | null>((resolveChild) => child.once("exit", resolveChild));
+    const terminal = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+    assert.equal(await childDone, 0);
+    assert.equal(readFileSync(marker, "utf8"), "moved");
+    assert.ok(terminal);
+    assert.equal(terminal.status, "stopped");
+    assert.equal(readFileSync(indexPath).equals(originalIndex), true, "rollback restores exact original index bytes");
+    assert.equal(lstatSync(indexPath).mode & 0o777, 0o660, "rollback restores exact original index mode");
+    assert.equal(existsSync(indexLockPath), false);
+    assert.equal(git(root, ["rev-parse", "HEAD"]), alternate, "the concurrent ref move remains authoritative");
+  });
+});
+
+test("Q6 a dirty-start candidate revalidates its product after DONE records and stays uncommitted", async () => {
+  const root = project();
+  writeFileSync(join(root, "owner-protected.txt"), "owner work remains exact\n", "utf8");
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  pending.activities.push({ stage: "Result", state: "done", detail: "FORGED-CALLER-ACTIVITY" });
+  Object.freeze(pending.activities);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(done.commit.status, "skipped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(readFileSync(join(root, "owner-protected.txt"), "utf8"), "owner work remains exact\n");
+  assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "frozen candidate bytes\n");
+  assert.match(done.reportText, /Disposition: \*\*DONE\*\*\n$/);
+  assert.equal(done.activities.some((activity) => activity.detail === "FORGED-CALLER-ACTIVITY"), false);
+  assert.equal(done.activities.some((activity) => activity.stage === "Result" && activity.state === "done"), true);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 a preexisting dirty LOG remains an exact prefix of one dirty-start DONE row", async () => {
+  const root = project();
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  appendFileSync(logPath, "<!-- owner-maintained dirty LOG bytes -->\n", "utf8");
+  const startLog = readFileSync(logPath, "utf8");
+  const startHead = git(root, ["rev-parse", "HEAD"]);
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(done.commit.status, "skipped");
+  const closedLog = readFileSync(logPath, "utf8");
+  assert.equal(closedLog.startsWith(startLog), true, "every pre-run dirty LOG byte remains an exact prefix");
+  assert.equal((closedLog.match(/\| 001 \|/gu) ?? []).length, 1);
+  assert.equal(git(root, ["rev-parse", "HEAD"]), startHead);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 dirty post-record custody catches both a late index mutation and an extra task path", async (t) => {
+  for (const kind of ["index", "extra"] as const) {
+    await t.test(kind, async () => {
+      const root = project();
+      const logPath = join(root, "docs", "ai-work", "LOG.md");
+      appendFileSync(logPath, `<!-- dirty terminal-race window ${"x".repeat(8 * 1024 * 1024)} -->\n`, "utf8");
+      const startLog = readFileSync(logPath, "utf8");
+      const startHead = git(root, ["rev-parse", "HEAD"]);
+      const fixture = candidateFixture("off");
+      const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+        adapters: [candidateQualityAdapter(root)],
+        authority: fixture.authority,
+      });
+      assert.equal(pending.status, "candidate");
+      if (pending.status !== "candidate") return;
+
+      const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+      const marker = join(root, ".git", `late-${kind}-terminal-marker`);
+      const realIndex = join(root, ".git", "index");
+      const replacementIndex = join(root, ".git", "late-stage.index");
+      if (kind === "index") {
+        writeFileSync(replacementIndex, readFileSync(realIndex));
+        execFileSync("git", ["add", "--", "candidate-output.txt"], {
+          cwd: root,
+          encoding: "utf8",
+          env: { ...process.env, GIT_INDEX_FILE: replacementIndex },
+        });
+      }
+      const raceScript = [
+        "const fs=require('node:fs');",
+        "const [kind,report,marker,replacement,indexPath,extraPath]=process.argv.slice(1);",
+        "const until=Date.now()+30000;",
+        "for(;;){",
+        " if(fs.existsSync(report)){",
+        "  if(kind==='index') fs.renameSync(replacement,indexPath); else fs.writeFileSync(extraPath,'late extra path\\n');",
+        "  fs.writeFileSync(marker,'changed'); break;",
+        " }",
+        " if(Date.now()>=until){fs.writeFileSync(marker,'timeout');break;}",
+        " Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);",
+        "}",
+      ].join("");
+      const child = spawn(process.execPath, [
+        "-e", raceScript, kind, reportPath, marker, replacementIndex, realIndex, join(root, "late-extra.txt"),
+      ], { stdio: "ignore", windowsHide: true });
+      const childDone = new Promise<number | null>((resolveChild) => child.once("exit", resolveChild));
+      const terminal = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+      assert.equal(await childDone, 0);
+      assert.equal(readFileSync(marker, "utf8"), "changed");
+      assert.ok(terminal);
+      assert.equal(terminal.status, "stopped", `${kind} drift cannot leave a dirty-start DONE standing`);
+      assert.equal(terminal.composed.protectedIntact, false);
+      assert.match(terminal.reportText, /Disposition: \*\*STOPPED\*\*/u);
+      assert.match(terminal.reportText, /candidate workspace no longer matches captured bundle/u);
+      const closedLog = readFileSync(logPath, "utf8");
+      assert.equal(closedLog.startsWith(startLog), true);
+      assert.equal((closedLog.match(/\| 001 \|/gu) ?? []).length, 1);
+      assert.equal(git(root, ["rev-parse", "HEAD"]), startHead);
+      if (kind === "index") {
+        assert.equal(git(root, ["diff", "--cached", "--name-only", "--", "candidate-output.txt"]), "candidate-output.txt");
+      } else {
+        assert.equal(readFileSync(join(root, "late-extra.txt"), "utf8"), "late extra path\n");
+      }
+      assert.equal(existsSync(lockPath(root)), false);
+    });
+  }
+});
+
+test("Q6 STOP rewrites protected custody false when protected work drifts after its report write", async () => {
+  const root = project();
+  const ownerPath = join(root, "owner-stop-race.txt");
+  writeFileSync(ownerPath, "owner tracked base\n", "utf8");
+  git(root, ["add", "--", "owner-stop-race.txt"]);
+  git(root, ["commit", "-q", "-m", "add protected STOP race fixture"]);
+  writeFileSync(ownerPath, "owner protected start\n", "utf8");
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  appendFileSync(logPath, `<!-- dirty STOP-race window ${"y".repeat(8 * 1024 * 1024)} -->\n`, "utf8");
+  const startLog = readFileSync(logPath, "utf8");
+  const fixture = candidateFixture("required");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const marker = join(root, ".git", "late-protected-stop-marker");
+  const raceScript = [
+    "const fs=require('node:fs');",
+    "const [report,owner,marker]=process.argv.slice(1);",
+    "const until=Date.now()+30000;",
+    "for(;;){",
+    " if(fs.existsSync(report)){fs.writeFileSync(owner,'owner changed after report\\n');fs.writeFileSync(marker,'changed');break;}",
+    " if(Date.now()>=until){fs.writeFileSync(marker,'timeout');break;}",
+    " Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);",
+    "}",
+  ].join("");
+  const child = spawn(process.execPath, ["-e", raceScript, reportPath, ownerPath, marker], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const childDone = new Promise<number | null>((resolveChild) => child.once("exit", resolveChild));
+  const stopped = stopSerialCandidate(pending.candidate, "PROTECTED_WORK_CHANGED");
+  assert.equal(await childDone, 0);
+  assert.equal(readFileSync(marker, "utf8"), "changed");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(stopped.composed.protectedIntact, false);
+  assert.match(stopped.reportText, /Protected starting work: CHANGED/u);
+  const closedLog = readFileSync(logPath, "utf8");
+  assert.equal(closedLog.startsWith(startLog), true, "the dirty LOG prefix survives the conservative rewrite exactly");
+  assert.equal((closedLog.match(/\| 001 \|/gu) ?? []).length, 1);
+  assert.equal(readFileSync(ownerPath, "utf8"), "owner changed after report\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 STOP refreshes product, index, path, and ignored custody after its first report write", async () => {
+  const root = project();
+  writeFileSync(join(root, ".gitignore"), "late-stop-ignored.txt\n", "utf8");
+  git(root, ["add", ".gitignore"]);
+  git(root, ["commit", "-q", "-m", "add STOP custody fixture"]);
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  appendFileSync(logPath, `<!-- STOP custody race ${"z".repeat(8 * 1024 * 1024)} -->\n`, "utf8");
+  const fixture = candidateFixture("optional");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+
+  const productPath = join(root, "candidate-output.txt");
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const marker = join(root, ".git", "late-stop-custody-marker");
+  const indexPath = join(root, ".git", "index");
+  const replacementIndex = join(root, ".git", "late-stop-custody.index");
+  writeFileSync(replacementIndex, readFileSync(indexPath));
+  const lateBytes = "late STOP product and index bytes\n";
+  const lateOid = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+    cwd: root,
+    encoding: "utf8",
+    input: lateBytes,
+  }).trim();
+  execFileSync("git", ["update-index", "--add", "--cacheinfo", "100644", lateOid, "candidate-output.txt"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, GIT_INDEX_FILE: replacementIndex },
+  });
+  const ignoredPath = join(root, "late-stop-ignored.txt");
+  const raceScript = [
+    "const fs=require('node:fs');",
+    "const [report,product,indexPath,replacement,ignored,marker,bytes]=process.argv.slice(1);",
+    "const until=Date.now()+30000;",
+    "for(;;){",
+    " if(fs.existsSync(report)){fs.writeFileSync(product,bytes);fs.renameSync(replacement,indexPath);fs.writeFileSync(ignored,'IGNORED-STOP-CANARY\\n');fs.writeFileSync(marker,'changed');break;}",
+    " if(Date.now()>=until){fs.writeFileSync(marker,'timeout');break;}",
+    " Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);",
+    "}",
+  ].join("");
+  const child = spawn(process.execPath, [
+    "-e", raceScript, reportPath, productPath, indexPath, replacementIndex, ignoredPath, marker, lateBytes,
+  ], { stdio: "ignore", windowsHide: true });
+  const childDone = new Promise<number | null>((resolveChild) => child.once("exit", resolveChild));
+  const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+  assert.equal(await childDone, 0);
+  assert.equal(readFileSync(marker, "utf8"), "changed");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.match(stopped.reportText, /Repair eligibility: unavailable/u);
+  assert.doesNotMatch(stopped.reportText, /late-stop-ignored|IGNORED-STOP-CANARY/u);
+  assert.equal(readFileSync(productPath, "utf8"), lateBytes);
+  assert.equal(git(root, ["diff", "--cached", "--name-only", "--", "candidate-output.txt"]), "candidate-output.txt");
+  assert.equal(readFileSync(ignoredPath, "utf8"), "IGNORED-STOP-CANARY\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 STOP never returns after a concurrent stage of its first owned record bytes", async () => {
+  const root = project();
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  appendFileSync(logPath, `<!-- STOP owned-index race ${"i".repeat(8 * 1024 * 1024)} -->\n`, "utf8");
+  const startLog = readFileSync(logPath, "utf8");
+  const fixture = candidateFixture("required");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const reportRelative = "docs/ai-work/tasks/001-report.md";
+  const logRelative = "docs/ai-work/LOG.md";
+  const marker = join(root, ".git", "late-stop-owned-index-marker");
+  const raceScript = [
+    "const fs=require('node:fs'),cp=require('node:child_process');",
+    "const [root,report,marker,reportRelative,logRelative]=process.argv.slice(1);",
+    "const until=Date.now()+30000;",
+    "for(;;){",
+    " if(fs.existsSync(report)){cp.execFileSync('git',['add','--',reportRelative,logRelative],{cwd:root,stdio:'ignore'});fs.writeFileSync(marker,'staged');break;}",
+    " if(Date.now()>=until){fs.writeFileSync(marker,'timeout');break;}",
+    " Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);",
+    "}",
+  ].join("");
+  const child = spawn(process.execPath, ["-e", raceScript, root, reportPath, marker, reportRelative, logRelative], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const childDone = new Promise<number | null>((resolveChild) => child.once("exit", resolveChild));
+  assert.throws(
+    () => stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED"),
+    /RECORD_VERIFICATION_FAILED/,
+  );
+  assert.equal(await childDone, 0);
+  assert.equal(readFileSync(marker, "utf8"), "staged");
+  assert.equal(readFileSync(logPath, "utf8"), startLog, "the no-follow failure path restores the exact starting LOG");
+  const staged = git(root, ["diff", "--cached", "--name-only"]);
+  assert.match(staged, /docs\/ai-work\/LOG\.md/u);
+  assert.match(staged, /docs\/ai-work\/tasks\/001-report\.md/u);
+  assert.equal(existsSync(reportPath), true, "the must-inspect report remains visible beside the rejected staged bytes");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 STOP safely recreates a missing work log even when the returned activity view is frozen", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  pending.activities.push({ stage: "Result", state: "stopped", detail: "FORGED-CALLER-ACTIVITY" });
+  Object.freeze(pending.activities);
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  rmSync(logPath);
+  const stopped = stopSerialCandidate(pending.candidate, "CANCELLED_BY_OWNER");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal((readFileSync(logPath, "utf8").match(/\| 001 \|/g) ?? []).length, 1);
+  assert.match(stopped.reportText, /restored the task-start snapshot/);
+  assert.equal(stopped.activities.some((activity) => activity.detail === "FORGED-CALLER-ACTIVITY"), false);
+  assert.equal(stopped.activities.some((activity) => activity.stage === "Result" && activity.state === "stopped"), true);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 candidate commit preserves a tracked Git mode when core.fileMode is false", async () => {
+  const root = project();
+  writeFileSync(join(root, "mode-stable.txt"), "tracked mode base\n", "utf8");
+  git(root, ["add", "mode-stable.txt"]);
+  git(root, ["update-index", "--chmod=+x", "--", "mode-stable.txt"]);
+  git(root, ["commit", "-q", "-m", "add executable-mode fixture"]);
+  git(root, ["config", "core.fileMode", "false"]);
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "mode-stable.txt"), "candidate bytes with preserved Git mode\n", "utf8");
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const entry = pending.candidate.bundle.entries.find((item) => item.projectRelativePath === "mode-stable.txt");
+  assert.ok(entry && entry.state === "regular-file");
+  assert.equal(entry.gitMode, "100755", "Git mode is index-derived when this checkout ignores worktree mode bits");
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(git(root, ["ls-tree", "HEAD", "--", "mode-stable.txt"]).startsWith("100755 blob "), true);
+});
+
+test("Q6 candidate finalization rejects a late hostile record filter without invoking it, then retries cleanly", async () => {
+  const root = project();
+  const filterScript = join(root, ".git", "hostile-record-filter.cjs");
+  const filterMarker = join(root, ".git", "hostile-record-filter-ran");
+  writeFileSync(filterScript, [
+    "const fs = require('node:fs');",
+    "let input = '';",
+    "process.stdin.setEncoding('utf8');",
+    "process.stdin.on('data', (chunk) => { input += chunk; });",
+    "process.stdin.on('end', () => {",
+    "  fs.writeFileSync('.git/hostile-record-filter-ran', 'ran\\n');",
+    "  process.stdout.write(input.replace('Disposition: **DONE**', 'Disposition: **FORGED**'));",
+    "});",
+    "",
+  ].join("\n"), "utf8");
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  const infoAttributes = join(root, ".git", "info", "attributes");
+  writeFileSync(infoAttributes, "docs/ai-work/tasks/*-report.md filter=hostile-record\n", "utf8");
+  git(root, ["config", "filter.hostile-record.clean", "node .git/hostile-record-filter.cjs"]);
+  git(root, ["config", "filter.hostile-record.smudge", "cat"]);
+  assert.equal(finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate)), null);
+  assert.equal(existsSync(filterMarker), false, "metadata rejection happens before the clean driver can run");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+  rmSync(infoAttributes);
+  git(root, ["config", "--unset-all", "filter.hostile-record.clean"]);
+  git(root, ["config", "--unset-all", "filter.hostile-record.smudge"]);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(existsSync(filterMarker), false, "the candidate transaction never starts a repository clean filter");
+  const committedReport = git(root, ["show", "HEAD:docs/ai-work/tasks/001-report.md"]);
+  assert.match(committedReport, /Disposition: \*\*DONE\*\*/);
+  assert.doesNotMatch(committedReport, /FORGED/);
+  assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), "");
+});
+
+test("Q6 raw-z protected custody preserves a dirty tracked Unicode path", async () => {
+  const root = project();
+  writeFileSync(join(root, "naïve-owner.txt"), "tracked owner base\n", "utf8");
+  git(root, ["add", "naïve-owner.txt"]);
+  git(root, ["commit", "-q", "-m", "add Unicode owner fixture"]);
+  writeFileSync(join(root, "naïve-owner.txt"), "tracked owner dirty bytes\n", "utf8");
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(done.commit.status, "skipped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(readFileSync(join(root, "naïve-owner.txt"), "utf8"), "tracked owner dirty bytes\n");
+});
+
+test("Q6 raw-z protected custody detects a changed untracked Unicode path before terminal writes", async () => {
+  const root = project();
+  const ownerPath = join(root, "naïve-untracked-owner.txt");
+  writeFileSync(ownerPath, "untracked owner start\n", "utf8");
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  writeFileSync(ownerPath, "untracked owner changed later\n", "utf8");
+  assert.equal(finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate)), null);
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+  assert.ok(stopSerialCandidate(pending.candidate, "PROTECTED_WORK_CHANGED"));
+});
+
+test("Q6 POSIX raw-z custody protects a literal backslash filename without aliasing a nested path", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("a backslash is a directory separator rather than a literal POSIX filename on Windows");
+    return;
+  }
+  const root = project();
+  const literalPath = "owner\\work.txt";
+  writeFileSync(join(root, literalPath), "tracked owner base\n", "utf8");
+  git(root, ["add", "--", `:(top,literal)${literalPath}`]);
+  git(root, ["commit", "-q", "-m", "add literal-backslash owner fixture"]);
+  writeFileSync(join(root, literalPath), "owner dirty start\n", "utf8");
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter(root);
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, literalPath), "Builder changed the exact literal-backslash owner\n", "utf8");
+    return run(contract, signal);
+  };
+  const stopped = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(stopped.status, "stopped");
+  if (stopped.status !== "stopped") return;
+  assert.equal(stopped.reason, "PROTECTED_WORK_CHANGED");
+  assert.match(stopped.reportText, /\[redacted unsafe Git path\]/u);
+  assert.equal(stopped.reportText.includes(literalPath), false);
+  assert.equal(JSON.stringify(stopped).includes("owner\\\\work.txt"), false);
+  assert.equal(
+    readFileSync(join(root, literalPath), "utf8"),
+    "Builder changed the exact literal-backslash owner\n",
+    "the real literal path was protected and detected; no phantom owner/work.txt path was consulted",
+  );
+  assert.equal(existsSync(join(root, "owner", "work.txt")), false);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 POSIX literal and nested backslash spellings cannot collapse into one candidate path", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("a backslash is a directory separator rather than a literal POSIX filename on Windows");
+    return;
+  }
+  const root = project();
+  const literalPath = "a\\b.txt";
+  const nestedPath = "a/b.txt";
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    mkdirSync(join(root, "a"));
+    writeFileSync(join(root, literalPath), "literal backslash product\n", "utf8");
+    writeFileSync(join(root, nestedPath), "nested slash product\n", "utf8");
+    return run(contract, signal);
+  };
+  const stopped = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(stopped.status, "stopped");
+  if (stopped.status !== "stopped") return;
+  assert.match(stopped.reportText, /\[redacted unsafe Git path\]/u);
+  assert.match(stopped.reportText, /`a\/b\.txt`/u, "the distinct safe nested path remains separately reported");
+  assert.equal(stopped.reportText.includes(literalPath), false);
+  assert.equal(JSON.stringify(stopped).includes("a\\\\b.txt"), false);
+  assert.equal(readFileSync(join(root, literalPath), "utf8"), "literal backslash product\n");
+  assert.equal(readFileSync(join(root, nestedPath), "utf8"), "nested slash product\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 POSIX tracked and new case-colliding paths stop redacted without an incomplete candidate", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("the Windows fixture filesystem cannot create two names that differ only by case");
+    return;
+  }
+  const root = project();
+  const trackedName = "Case-Collision-Canary.txt";
+  const newName = "case-collision-canary.txt";
+  writeFileSync(join(root, trackedName), "tracked case owner\n", "utf8");
+  git(root, ["add", "--", trackedName]);
+  git(root, ["commit", "-q", "-m", "add case collision fixture"]);
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, newName), "new colliding product\n", "utf8");
+    return run(contract, signal);
+  };
+  const stopped = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(stopped.status, "stopped");
+  if (stopped.status !== "stopped") return;
+  assert.match(stopped.reportText, /\[redacted unsafe Git path\]/u);
+  assert.equal(JSON.stringify(stopped).includes(trackedName), false);
+  assert.equal(JSON.stringify(stopped).includes(newName), false);
+  assert.equal(readFileSync(join(root, trackedName), "utf8"), "tracked case owner\n");
+  assert.equal(readFileSync(join(root, newName), "utf8"), "new colliding product\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 typed protected custody detects a symlink retarget without following its target", async (t) => {
+  const root = project();
+  writeFileSync(join(root, "link-target-a.txt"), "target A\n", "utf8");
+  writeFileSync(join(root, "link-target-b.txt"), "target B\n", "utf8");
+  git(root, ["add", "link-target-a.txt", "link-target-b.txt"]);
+  git(root, ["commit", "-q", "-m", "add symlink targets"]);
+  const ownerLink = join(root, "owner-link.txt");
+  try {
+    symlinkSync("link-target-a.txt", ownerLink, "file");
+  } catch (error) {
+    t.skip(`file symlinks are unavailable in this environment: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+    return;
+  }
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  rmSync(ownerLink);
+  symlinkSync("link-target-b.txt", ownerLink, "file");
+  assert.equal(finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate)), null);
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+  assert.ok(stopSerialCandidate(pending.candidate, "PROTECTED_WORK_CHANGED"));
+});
+
+test("Q6 a product hardlink to the work log makes STOP a zero-write refusal until safely separated", async (t) => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const productPath = join(root, "candidate-output.txt");
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  rmSync(productPath);
+  try {
+    linkSync(logPath, productPath);
+  } catch (error) {
+    writeFileSync(productPath, "frozen candidate bytes\n", "utf8");
+    t.skip(`hardlinks are unavailable in this environment: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+    assert.ok(stopSerialCandidate(pending.candidate));
+    return;
+  }
+  assert.equal(stopSerialCandidate(pending.candidate), null);
+  assert.equal(existsSync(reportPath), false);
+  assert.equal(readFileSync(logPath, "utf8"), beforeLog);
+  assert.equal(readFileSync(productPath, "utf8"), beforeLog);
+  rmSync(productPath);
+  writeFileSync(productPath, "frozen candidate bytes\n", "utf8");
+  const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal((readFileSync(logPath, "utf8").match(/\| 001 \|/g) ?? []).length, 1);
+});
+
+test("Q6 deletion of a captured regular product refuses DONE but remains stoppable without recreation", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const productPath = join(root, "candidate-output.txt");
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  rmSync(productPath);
+  assert.equal(finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate)), null);
+  assert.equal(existsSync(reportPath), false);
+  assert.equal(readFileSync(logPath, "utf8"), beforeLog);
+  const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(existsSync(productPath), false, "STOP retains the observed deletion and never recreates product bytes");
+  assert.match(stopped.reportText, /candidate workspace no longer matches captured bundle/u);
+  assert.equal((readFileSync(logPath, "utf8").match(/\| 001 \|/g) ?? []).length, 1);
+  assert.equal(stopSerialCandidate(pending.candidate), null);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 a missing regular product moved onto report or LOG is a zero-write STOP refusal", async (t) => {
+  for (const ownedTarget of ["report", "log"] as const) {
+    await t.test(ownedTarget, async () => {
+      const root = project();
+      const fixture = candidateFixture("off");
+      const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+        adapters: [candidateQualityAdapter(root)],
+        authority: fixture.authority,
+      });
+      assert.equal(pending.status, "candidate");
+      if (pending.status !== "candidate") return;
+      const productPath = join(root, "candidate-output.txt");
+      const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+      const logPath = join(root, "docs", "ai-work", "LOG.md");
+      const targetPath = ownedTarget === "report" ? reportPath : logPath;
+      const beforeLog = readFileSync(logPath, "utf8");
+      const productBytes = readFileSync(productPath, "utf8");
+      if (ownedTarget === "log") rmSync(logPath);
+      renameSync(productPath, targetPath);
+
+      assert.equal(stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED"), null);
+      assert.equal(readFileSync(targetPath, "utf8"), productBytes, "Cairn never overwrites the moved product bytes");
+      assert.equal(existsSync(productPath), false);
+      assert.equal(
+        ownedTarget === "report" ? readFileSync(logPath, "utf8") : beforeLog,
+        beforeLog,
+        "the untouched starting LOG receives no terminal row",
+      );
+      assert.equal(existsSync(lockPath(root)), true, "the current context remains held for a safe correction");
+
+      renameSync(targetPath, productPath);
+      if (ownedTarget === "log") writeFileSync(logPath, beforeLog, "utf8");
+      const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+      assert.ok(stopped);
+      assert.equal(stopped.status, "stopped");
+      assert.equal(readFileSync(productPath, "utf8"), productBytes);
+      assert.equal(existsSync(lockPath(root)), false);
+    });
+  }
+});
+
+test("Q6 a product moved onto an owned record during STOP recovery is never wildcard-overwritten", async (t) => {
+  for (const ownedTarget of ["report", "log"] as const) {
+    await t.test(ownedTarget, async () => {
+      const root = project();
+      const fixture = candidateFixture("off");
+      const productPath = join(root, "candidate-output.txt");
+      const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+      const logPath = join(root, "docs", "ai-work", "LOG.md");
+      const targetPath = ownedTarget === "report" ? reportPath : logPath;
+      let armed = false;
+      let moved = false;
+      const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+        adapters: [candidateQualityAdapter(root)],
+        authority: fixture.authority,
+        events: {
+          onActivity(activity) {
+            if (!armed || activity.detail !== "Rechecking pending candidate record custody before STOP.") return;
+            armed = false;
+            if (ownedTarget === "log") rmSync(logPath);
+            renameSync(productPath, targetPath);
+            moved = true;
+          },
+        },
+      });
+      assert.equal(pending.status, "candidate");
+      if (pending.status !== "candidate") return;
+      const beforeLog = readFileSync(logPath, "utf8");
+      const productBytes = readFileSync(productPath, "utf8");
+      armed = true;
+
+      assert.equal(stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED"), null);
+      assert.equal(moved, true, "the move happened after the initial STOP preflight");
+      assert.equal(readFileSync(targetPath, "utf8"), productBytes, "the moved product bytes survive exactly");
+      assert.equal(existsSync(productPath), false);
+      if (ownedTarget === "report") {
+        assert.equal(readFileSync(logPath, "utf8"), beforeLog, "no terminal row was appended");
+      }
+      assert.equal(existsSync(lockPath(root)), true, "the unreserved candidate remains recoverable");
+
+      renameSync(targetPath, productPath);
+      if (ownedTarget === "log") writeFileSync(logPath, beforeLog, "utf8");
+      const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+      assert.ok(stopped);
+      assert.equal(stopped.status, "stopped");
+      assert.equal(readFileSync(productPath, "utf8"), productBytes);
+      assert.equal(existsSync(lockPath(root)), false);
+    });
+  }
+});
+
+test("Q6 direct STOP refreshes late ignored-tree drift and renders only redacted unavailable custody", async () => {
+  const root = project();
+  writeFileSync(join(root, ".gitignore"), "late-ignored.txt\n", "utf8");
+  git(root, ["add", ".gitignore"]);
+  git(root, ["commit", "-q", "-m", "add late ignored fixture"]);
+  const fixture = candidateFixture("optional");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  writeFileSync(join(root, "late-ignored.txt"), "LATE-IGNORED-CANARY\n", "utf8");
+  const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.match(stopped.reportText, /Repair eligibility: unavailable — ignored write set could not be proven empty/);
+  assert.doesNotMatch(stopped.reportText, /late-ignored|LATE-IGNORED-CANARY/iu);
+});
+
+test("Q6 terminal observer exceptions cannot overturn one committed DONE", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+    events: {
+      onActivity(activity) {
+        if (activity.stage === "Result" && activity.state === "done") throw new Error("terminal observer failed");
+      },
+    },
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(done.commit.status, "created");
+  assert.equal((readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8").match(/\| 001 \|/g) ?? []).length, 1);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 a pending stop is one-shot, writes one STOP row, and never rewrites product bytes", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const cloned = structuredClone(pending.candidate);
+  assert.equal(stopSerialCandidate(cloned), null, "a structural clone has no terminal authority");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  const stopped = stopSerialCandidate(pending.candidate, "CANCELLED_BY_OWNER");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(stopped.candidate.phase, "stopped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "frozen candidate bytes\n");
+  assertCandidateCustody(stopped.reportText, pending.candidate);
+  assert.match(stopped.reportText, /Disposition: \*\*STOPPED\*\*\n$/);
+  const closedLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal((closedLog.match(/\| 001 \|/g) ?? []).length, 1);
+  assert.equal((closedLog.match(/\| STOPPED \|/g) ?? []).length, 1);
+  assert.equal(stopSerialCandidate(pending.candidate), null);
+  assert.equal(stopSerialCandidate(stopped.candidate), null);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), closedLog);
+});
+
+test("Q6 STOP reports protectedIntact false after HEAD moves and verifies that moved boundary once", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  git(root, ["commit", "--allow-empty", "-q", "-m", "concurrent owner commit"]);
+  const stopped = stopSerialCandidate(pending.candidate, "PROTECTED_WORK_CHANGED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(stopped.composed.protectedIntact, false);
+  assert.equal((readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8").match(/\| 001 \|/g) ?? []).length, 1);
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 a dirty-start staged owner path stays protected while a Builder-staged task path is captured", async () => {
+  const root = project();
+  writeFileSync(join(root, "owner-staged.txt"), "owner base\n", "utf8");
+  git(root, ["add", "owner-staged.txt"]);
+  git(root, ["commit", "-q", "-m", "add staged owner fixture"]);
+  writeFileSync(join(root, "owner-staged.txt"), "owner staged change\n", "utf8");
+  git(root, ["add", "owner-staged.txt"]);
+  const ownerIndexBefore = git(root, ["ls-files", "--stage", "--", "owner-staged.txt"]);
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "builder-staged.txt"), "Builder staged task bytes\n", "utf8");
+    git(root, ["add", "builder-staged.txt"]);
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.deepEqual(pending.candidate.bundle.entries.map((entry) => entry.projectRelativePath), ["builder-staged.txt"]);
+  assert.equal(git(root, ["ls-files", "--stage", "--", "owner-staged.txt"]), ownerIndexBefore);
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(done.commit.status, "skipped");
+  assert.equal(git(root, ["ls-files", "--stage", "--", "owner-staged.txt"]), ownerIndexBefore);
+});
+
+test("Q6 replace refs cannot hide a staged product from candidate capture or DONE", async () => {
+  const root = project();
+  const productRelative = "replace-product.txt";
+  const productPath = join(root, productRelative);
+  writeFileSync(productPath, "actual base X\n", "utf8");
+  git(root, ["add", "--", productRelative]);
+  git(root, ["commit", "-q", "-m", "add replace-ref fixture"]);
+  const baseHead = git(root, ["rev-parse", "HEAD"]);
+  const replacementIndex = join(root, ".git", "replacement-view.index");
+  writeFileSync(replacementIndex, readFileSync(join(root, ".git", "index")));
+  const stagedBytes = "staged product hidden by replacement view\n";
+  const stagedOid = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+    cwd: root,
+    encoding: "utf8",
+    input: stagedBytes,
+  }).trim();
+  const replacementEnvironment = { ...process.env, GIT_INDEX_FILE: replacementIndex };
+  execFileSync("git", ["update-index", "--cacheinfo", `100644,${stagedOid},${productRelative}`], {
+    cwd: root,
+    encoding: "utf8",
+    env: replacementEnvironment,
+  });
+  const replacementTree = execFileSync("git", ["write-tree"], {
+    cwd: root,
+    encoding: "utf8",
+    env: replacementEnvironment,
+  }).trim();
+  const replacementCommit = execFileSync("git", ["commit-tree", replacementTree, "-p", baseHead, "-m", "replacement view"], {
+    cwd: root,
+    encoding: "utf8",
+    env: process.env,
+  }).trim();
+  git(root, ["replace", baseHead, replacementCommit]);
+
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(productPath, stagedBytes, "utf8");
+    git(root, ["add", "--", productRelative]);
+    assert.equal(git(root, ["diff", "--cached", "--name-only", "--", productRelative]), "",
+      "the hostile replacement view really hides the staged path from ordinary Git");
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.deepEqual(pending.candidate.bundle.entries.map((entry) => entry.projectRelativePath), [productRelative]);
+  assert.equal(pending.candidate.bundle.entries[0]?.indexRelation, "product");
+  const done = finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate));
+  assert.ok(done);
+  assert.equal(done.status, "done");
+  assert.equal(git(root, ["show", `HEAD:${productRelative}`]), stagedBytes.trimEnd());
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 dirty-start third-state partial staging closes one redacted STOP without retaining staged bytes", async () => {
+  const root = project();
+  writeFileSync(join(root, "partial-stage.txt"), "frozen base X\n", "utf8");
+  git(root, ["add", "--", "partial-stage.txt"]);
+  git(root, ["commit", "-q", "-m", "add partial-stage fixture"]);
+  writeFileSync(join(root, "owner-dirty.txt"), "owner dirty start remains exact\n", "utf8");
+  const stagedCanary = "THIRD-STATE-STAGED-CANARY-43192";
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    writeFileSync(join(root, "partial-stage.txt"), `${stagedCanary}\n`, "utf8");
+    git(root, ["add", "--", "partial-stage.txt"]);
+    writeFileSync(join(root, "partial-stage.txt"), "safe worktree B\n", "utf8");
+    return run(contract, signal);
+  };
+  const stopped = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(stopped.status, "stopped");
+  if (stopped.status !== "stopped") return;
+  assert.match(stopped.reportText, /\[redacted unsafe Git path\]/u);
+  assert.doesNotMatch(JSON.stringify(stopped), /partial-stage|THIRD-STATE-STAGED-CANARY|43192/u);
+  assert.equal(readFileSync(join(root, "partial-stage.txt"), "utf8"), "safe worktree B\n");
+  assert.equal(readFileSync(join(root, "owner-dirty.txt"), "utf8"), "owner dirty start remains exact\n");
+  assert.equal(git(root, ["diff", "--cached", "--name-only", "--", "partial-stage.txt"]), "partial-stage.txt",
+    "the rejected third-stage index state remains untouched for owner inspection");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 post-capture stage-0 drift refuses DONE and STOP reports workspace custody honestly", async () => {
+  const root = project();
+  writeFileSync(join(root, "owner-dirty.txt"), "owner dirty start remains exact\n", "utf8");
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  git(root, ["add", "--", "candidate-output.txt"]);
+  assert.equal(finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate)), null);
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+  const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(stopped.composed.protectedIntact, true);
+  assert.match(stopped.reportText, /Repair eligibility: unavailable .* candidate workspace no longer matches captured bundle/u);
+  assert.equal(git(root, ["diff", "--cached", "--name-only", "--", "candidate-output.txt"]), "candidate-output.txt");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 terminal bundle checks reject a product parent swapped to a directory link", async (t) => {
+  const root = project();
+  const nested = join(root, "candidate-parent");
+  const fixture = candidateFixture("off");
+  const adapter = candidateQualityAdapter();
+  const run = adapter.run.bind(adapter);
+  adapter.run = async (contract, signal) => {
+    mkdirSync(nested);
+    writeFileSync(join(nested, "output.txt"), "nested candidate bytes\n", "utf8");
+    return run(contract, signal);
+  };
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [adapter],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const outside = mkdtempSync(join(tmpdir(), "cairn-candidate-parent-outside-"));
+  const outsideOutput = join(outside, "output.txt");
+  const outsideCanary = join(outside, "canary.txt");
+  writeFileSync(outsideOutput, "nested candidate bytes\n", "utf8");
+  writeFileSync(outsideCanary, "OUTSIDE-CANARY\n", "utf8");
+  rmSync(nested, { recursive: true });
+  try {
+    symlinkSync(outside, nested, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    mkdirSync(nested);
+    writeFileSync(join(nested, "output.txt"), "nested candidate bytes\n", "utf8");
+    assert.ok(stopSerialCandidate(pending.candidate));
+    t.skip(`directory links are unavailable in this environment: ${(error as NodeJS.ErrnoException).code ?? "unknown"}`);
+    return;
+  }
+  const beforeLog = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal(finalizeSerialCandidate(pending.candidate, sealCandidate(pending.candidate)), null);
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), beforeLog);
+  assert.equal(readFileSync(outsideOutput, "utf8"), "nested candidate bytes\n");
+  assert.equal(readFileSync(outsideCanary, "utf8"), "OUTSIDE-CANARY\n");
+  rmSync(nested, { recursive: true, force: true });
+  mkdirSync(nested);
+  writeFileSync(join(nested, "output.txt"), "nested candidate bytes\n", "utf8");
+  assert.ok(stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED"));
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 nonready, stale, clone, and cross-candidate seal attempts make zero terminal writes", async () => {
+  const rootA = project();
+  const rootB = project();
+  const optional = candidateFixture("optional");
+  const off = candidateFixture("off");
+  const pendingA = await runSerialTaskToCandidate(rootA, optional.intent, {
+    adapters: [candidateQualityAdapter(rootA)],
+    authority: optional.authority,
+  });
+  const pendingB = await runSerialTaskToCandidate(rootB, off.intent, {
+    adapters: [candidateQualityAdapter(rootB)],
+    authority: off.authority,
+  });
+  assert.equal(pendingA.status, "candidate");
+  assert.equal(pendingB.status, "candidate");
+  if (pendingA.status !== "candidate" || pendingB.status !== "candidate") return;
+  const duplicateB = composeSerialCandidate(off.authority, {
+    version: SERIAL_CANDIDATE_VERSION,
+    runId: pendingB.candidate.runId,
+    taskNumber: pendingB.candidate.taskNumber,
+    requestSha256: pendingB.candidate.requestSha256,
+    claimsText: taskSpecClaimsFence(pendingB.candidate.taskSpecSha256),
+    bundle: pendingB.candidate.bundle,
+    repairEligibility: pendingB.candidate.repairEligibility,
+  });
+  assert.ok(duplicateB);
+  assert.equal(duplicateB.candidateSha256, pendingB.candidate.candidateSha256,
+    "the attack deliberately repeats every public candidate digest");
+  const duplicateSealB = sealCandidate(duplicateB);
+  assert.equal(finalizeSerialCandidate(duplicateB, duplicateSealB), null,
+    "a separately branded duplicate cannot borrow the runner's private context");
+  assert.equal(stopSerialCandidate(duplicateB), null);
+  const sealB = sealCandidate(pendingB.candidate);
+  assert.equal(finalizeSerialCandidate(pendingA.candidate, sealB), null, "nonready and cross-bound cannot seal");
+  assert.equal(existsSync(join(rootA, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(rootA, "docs", "ai-work", "LOG.md"), "utf8"), LOG_HEADER);
+  const readyA = transitionCandidate(pendingA.candidate, "optional-critic-declined");
+  const sealA = sealCandidate(readyA);
+  assert.equal(stopSerialCandidate(pendingA.candidate), null, "the previous generation is stale");
+  assert.equal(stopSerialCandidate(structuredClone(readyA)), null, "a current-looking clone is not branded");
+  assert.equal(finalizeSerialCandidate(pendingB.candidate, sealA), null, "a seal is bound to one exact candidate");
+  assert.equal(existsSync(join(rootB, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(rootB, "docs", "ai-work", "LOG.md"), "utf8"), LOG_HEADER);
+  assert.ok(stopSerialCandidate(readyA));
+  assert.ok(stopSerialCandidate(pendingB.candidate));
+});
+
+test("Q6 post-capture tampering refuses DONE with zero writes and remains inspectable after STOP", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const seal = sealCandidate(pending.candidate);
+  const logPath = join(root, "docs", "ai-work", "LOG.md");
+  const reportPath = join(root, "docs", "ai-work", "tasks", "001-report.md");
+  const beforeLog = readFileSync(logPath, "utf8");
+  writeFileSync(join(root, "candidate-output.txt"), "post-capture tamper\n", "utf8");
+  assert.equal(finalizeSerialCandidate(pending.candidate, seal), null);
+  assert.equal(existsSync(reportPath), false);
+  assert.equal(readFileSync(logPath, "utf8"), beforeLog);
+  const stopped = stopSerialCandidate(pending.candidate, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "post-capture tamper\n");
+  assertCandidateCustody(
+    stopped.reportText,
+    pending.candidate,
+    "unavailable — candidate workspace no longer matches captured bundle",
+  );
+});
+
+test("Q6 serial can stop a same-lineage round-one candidate but cannot seal it with stale round-zero context", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  const alleged = transitionCandidate(pending.candidate, "critic-allegation");
+  const awaitingRepair = transitionCandidate(alleged, "owner-confirmed");
+  assert.equal(awaitingRepair.phase, "awaiting-repair");
+  const instruction = authorizeSerialCandidateRepair(awaitingRepair, {
+    ...candidateTransitionBinding(awaitingRepair),
+    version: SERIAL_REPAIR_INSTRUCTION_VERSION,
+    blockers: [{
+      criterionId: "c1",
+      failureConditionId: "failure-c1",
+      artifactIds: ["artifact-output"],
+    }],
+  });
+  assert.ok(instruction);
+  writeFileSync(join(root, "candidate-output.txt"), "separately captured round one\n", "utf8");
+  const captured = captureSerialCandidateAfterRepair(awaitingRepair, instruction);
+  assert.equal(captured.eligible, true);
+  if (!captured.eligible) return;
+  const repaired = replaceSerialCandidateAfterRepair(
+    awaitingRepair,
+    instruction,
+    captured.bundle,
+    taskSpecClaimsFence(awaitingRepair.taskSpecSha256, "DONE", { summary: "Round one worker account." }),
+  );
+  assert.ok(repaired);
+  assert.equal(repaired.round, 1);
+  assert.equal(repaired.callsUsed.repair, 1);
+  const ready = transitionCandidate(repaired, "critic-clear");
+  const seal = sealCandidate(ready);
+  assert.equal(finalizeSerialCandidate(ready, seal), null,
+    "Q9 has not supplied refreshed round-one process/evidence context");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), LOG_HEADER);
+  const stopped = stopSerialCandidate(ready, "MODEL_RESULT_NOT_VERIFIED");
+  assert.ok(stopped);
+  assert.equal(stopped.status, "stopped");
+  assert.equal(stopped.candidate.phase, "stopped");
+  assert.equal(stopped.composed.evidenceSummary, null, "round-zero process evidence is not relabeled as round one");
+  assert.equal(stopped.composed.taskSpecRunRecord?.adapterAttestations.length, 0);
+  assert.equal(stopped.composed.taskSpecRunRecord?.workerClaims?.summary, "Round one worker account.");
+  assertCandidateCustody(stopped.reportText, ready);
+  assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "separately captured round one\n");
+  assert.equal(existsSync(lockPath(root)), false);
+});
+
+test("Q6 a throwing activity observer cannot strand an unreachable candidate lock", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  await assert.rejects(
+    () => runSerialTaskToCandidate(root, fixture.intent, {
+      adapters: [candidateQualityAdapter(root)],
+      authority: fixture.authority,
+      events: {
+        onActivity(activity) {
+          if (activity.stage === "Check" && activity.state === "done") throw new Error("observer failed");
+        },
+      },
+    }),
+    /observer failed/,
+  );
+  assert.equal(existsSync(lockPath(root)), false);
+  const next = await runSerialTaskWithIntent(root, fixture.intent, { adapters: [] });
+  assert.equal(next.status, "connection-required", "the in-process root guard was released too");
 });

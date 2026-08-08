@@ -4,11 +4,13 @@ import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { RouteResult, SerialRunResult } from "@cairn/core";
+import { createDirectTaskIntent, type RouteResult, type SerialRunResult } from "@cairn/core";
 import { legacyCardDigest, recordCardMarker, setCardMarkerDir } from "../src/main/conductor/cardauth.js";
+import { composeDirectTaskSpecProposal } from "../src/main/conductor/qualityproposal.js";
 import { setTurnMarkerDir } from "../src/main/conductor/turnauth.js";
 import { cardBriefing, composeErrorCard, composeResultCard, postResultCard } from "../src/main/conductor/relay.js";
 import { appendTurn, conversationsDir, listConversations, newConversationId, readTurns } from "../src/main/conductor/store.js";
+import { composePendingTaskReviewAuthority, taskReviewProjection } from "../src/main/ownercheck.js";
 
 // The marker store lives outside every project — in the app it is Electron's
 // `userData`. A test process has no Electron, so it points at its own temp
@@ -146,6 +148,95 @@ function stoppedResult(): SerialRunResult {
   };
 }
 
+const TASK_REQUEST_SHA256 = "1".repeat(64);
+const TASK_SPEC_SHA256 = "2".repeat(64);
+const EVIDENCE_PLAN_SHA256 = "3".repeat(64);
+const COMMAND_SHA256 = "4".repeat(64);
+const SECOND_COMMAND_SHA256 = "6".repeat(64);
+
+/** A fake compatible v4 close, shaped like Core's branded record after the
+ * serial envelope has already validated it. The App must only detach/project
+ * these fields; it receives no Task Spec authority and mints no verdict. */
+function taskSpecDoneResult(): SerialRunResult {
+  const legacy = doneResult();
+  if (legacy.status !== "done") throw new Error("test fixture must be closed");
+  return {
+    ...legacy,
+    composed: {
+      ...legacy.composed,
+      claims: null,
+      taskSpecRunRecord: {
+        version: "cairn-task-spec-run-record/v1",
+        requestSha256: TASK_REQUEST_SHA256,
+        taskSpecSha256: TASK_SPEC_SHA256,
+        evidencePlanSha256: EVIDENCE_PLAN_SHA256,
+        criteria: [{ id: "c1", promise: "The requested visible result exists." }],
+        preferences: [{
+          id: "p1",
+          dimension: "clarity",
+          desiredDirection: "Prefer a clear result without changing required behavior.",
+        }],
+        workerClaims: {
+          version: "cairn-task-spec-worker-claims/v1",
+          taskSpecSha256: TASK_SPEC_SHA256,
+          disposition: "DONE",
+          summary: "The worker says the visible result is complete.",
+          changes: ["The worker says it changed visible.txt."],
+          criteria: [{ id: "c1", result: "The worker says c1 is satisfied." }],
+          preferences: [{ id: "p1", result: "The worker says it considered clarity." }],
+          howToTry: "Open the visible result.",
+          limitations: "This remains an unverified worker account.",
+          milestone: "NO",
+        },
+        adapterAttestations: [{
+          version: "cairn-adapter-command-attestation/v1",
+          taskSpecSha256: TASK_SPEC_SHA256,
+          evidencePlanSha256: EVIDENCE_PLAN_SHA256,
+          criterionId: "c1",
+          sequence: 0,
+          commandSha256: COMMAND_SHA256,
+          exitCode: 0,
+        }],
+        envelopeResult: {
+          version: "cairn-envelope-result/v1",
+          taskNumber: 4,
+          requestSha256: TASK_REQUEST_SHA256,
+          taskSpecSha256: TASK_SPEC_SHA256,
+          disposition: "DONE",
+          stopReason: null,
+        },
+      },
+    },
+  };
+}
+
+function twoCriterionTaskSpecCard(disposition: "DONE" | "STOPPED", partial = false) {
+  const card = structuredClone(composeResultCard(taskSpecDoneResult()));
+  const projection = card.taskSpecResult;
+  if (!projection) throw new Error("test fixture must carry a Task-Spec projection");
+  projection.requiredPromises.push({ id: "c2", promise: "The required regression check still passes." });
+  projection.workerClaims?.criteria.push({ id: "c2", result: "The worker says c2 is satisfied." });
+  if (!partial) {
+    projection.adapterAttestations.push({
+      version: "cairn-adapter-command-attestation/v1",
+      taskSpecSha256: TASK_SPEC_SHA256,
+      evidencePlanSha256: EVIDENCE_PLAN_SHA256,
+      criterionId: "c2",
+      sequence: 1,
+      commandSha256: SECOND_COMMAND_SHA256,
+      exitCode: 0,
+    });
+  }
+  if (disposition === "STOPPED") {
+    card.disposition = "STOPPED";
+    card.stopReason = "MODEL_RESULT_NOT_VERIFIED";
+    card.commit = null;
+    projection.envelopeResult.disposition = "STOPPED";
+    projection.envelopeResult.stopReason = "MODEL_RESULT_NOT_VERIFIED";
+  }
+  return card;
+}
+
 function rawMarkerBackedCard(root: string, id: string, ts: string, card: unknown): void {
   mkdirSync(conversationsDir(root), { recursive: true });
   recordCardMarker(root, id, ts, card);
@@ -154,6 +245,18 @@ function rawMarkerBackedCard(root: string, id: string, ts: string, card: unknown
     `${JSON.stringify({ role: "envelope", card, ts })}\n`,
     "utf8",
   );
+}
+
+function pendingTaskReviewForResultCard() {
+  const intent = createDirectTaskIntent("Show a visible status badge.", "77777777-7777-4777-8777-777777777777");
+  assert.ok(intent);
+  const proposal = composeDirectTaskSpecProposal(intent);
+  assert.ok(proposal);
+  const authority = composePendingTaskReviewAuthority(process.cwd(), proposal.taskSpec);
+  assert.ok(authority);
+  const review = taskReviewProjection(authority);
+  assert.ok(review);
+  return review;
 }
 
 test("a done run composes a DONE card whose files changed come from composed, never from claims", () => {
@@ -188,6 +291,211 @@ test("a done run composes a DONE card whose files changed come from composed, ne
   assert.notEqual(card.acceptedRequest?.outcome, ACCEPTED_REQUEST.outcome);
   assert.notEqual(card.acceptedRequest?.requirements, ACCEPTED_REQUEST.requirements);
   assert.notEqual(card.acceptedRequest?.requirements[0], ACCEPTED_REQUEST.requirements[0]);
+});
+
+test("a v4 close projects one detached Task-Spec result without merging claims, attestations, or envelope authority", () => {
+  const result = taskSpecDoneResult();
+  const card = composeResultCard(result);
+  const projection = card.taskSpecResult;
+  const record = result.status === "done" ? result.composed.taskSpecRunRecord : null;
+  assert.ok(projection && record);
+  assert.equal(projection.version, "cairn-task-spec-result-projection/v1");
+  assert.equal(projection.requestSha256, TASK_REQUEST_SHA256);
+  assert.equal(projection.taskSpecSha256, TASK_SPEC_SHA256);
+  assert.equal(projection.evidencePlanSha256, EVIDENCE_PLAN_SHA256);
+  assert.deepEqual(projection.requiredPromises, [{ id: "c1", promise: "The requested visible result exists." }]);
+  assert.deepEqual(projection.advisoryPreferences, [{
+    id: "p1",
+    dimension: "clarity",
+    desiredDirection: "Prefer a clear result without changing required behavior.",
+  }]);
+  assert.deepEqual(projection.adapterAttestations, [{
+    version: "cairn-adapter-command-attestation/v1",
+    taskSpecSha256: TASK_SPEC_SHA256,
+    evidencePlanSha256: EVIDENCE_PLAN_SHA256,
+    criterionId: "c1",
+    sequence: 0,
+    commandSha256: COMMAND_SHA256,
+    exitCode: 0,
+  }]);
+  assert.equal(projection.workerClaims?.criteria[0]?.id, "c1");
+  assert.equal(projection.workerClaims?.preferences[0]?.id, "p1");
+  assert.deepEqual(projection.envelopeResult, {
+    version: "cairn-envelope-result/v1",
+    taskNumber: 4,
+    requestSha256: TASK_REQUEST_SHA256,
+    taskSpecSha256: TASK_SPEC_SHA256,
+    disposition: "DONE",
+    stopReason: null,
+  });
+  assert.equal(projection.criticReady, false);
+  assert.equal(card.claims, null, "legacy worker claims stay a different field");
+  assert.doesNotMatch(
+    JSON.stringify(projection.adapterAttestations),
+    /status|source|artifact|criterionResult|critic|verdict|seal|disposition/i,
+    "hash/exit attestations cannot acquire decision authority",
+  );
+
+  assert.notEqual(projection.requiredPromises, record.criteria);
+  assert.notEqual(projection.requiredPromises[0], record.criteria[0]);
+  assert.notEqual(projection.advisoryPreferences, record.preferences);
+  assert.notEqual(projection.advisoryPreferences[0], record.preferences[0]);
+  assert.notEqual(projection.adapterAttestations, record.adapterAttestations);
+  assert.notEqual(projection.adapterAttestations[0], record.adapterAttestations[0]);
+  assert.notEqual(projection.workerClaims, record.workerClaims);
+  assert.notEqual(projection.workerClaims?.changes, record.workerClaims?.changes);
+  assert.notEqual(projection.workerClaims?.criteria, record.workerClaims?.criteria);
+  assert.notEqual(projection.workerClaims?.preferences, record.workerClaims?.preferences);
+  assert.notEqual(projection.envelopeResult, record.envelopeResult);
+});
+
+test("legacy card objects and conductor briefing remain byte-identical when no Task-Spec record exists", () => {
+  const card = composeResultCard(doneResult());
+  assert.equal(Object.hasOwn(card, "taskSpecResult"), false);
+  assert.equal(Object.hasOwn(card, "taskReview"), false);
+  assert.equal(JSON.stringify(card), JSON.stringify({
+    kind: "result",
+    disposition: "DONE",
+    taskNumber: 4,
+    stopReason: null,
+    errorCode: null,
+    filesChanged: ["docs/ai-work/LOG.md", "visible.txt"],
+    protectedIntact: true,
+    commit: "One exact-path commit contains the product changes and these records.",
+    evidenceSummary: "Bounded worker evidence: files_changed=1.",
+    recordRecovery: null,
+    processFailure: null,
+    claims: {
+      summary: "Added the visible result.",
+      changes: ["visible.txt — created"],
+      checks: [{ name: "read back", result: "matches" }],
+      howToTry: "Open visible.txt.",
+      limitations: "None.",
+      milestone: "YES",
+    },
+    route: { adapterLabel: "Codex Exec", provider: "OpenAI", model: "gpt-5-codex" },
+    acceptedRequest: ACCEPTED_REQUEST,
+    evidenceRunId: null,
+  }));
+  const expectedVerified = {
+    kind: "result",
+    disposition: "DONE",
+    taskNumber: 4,
+    stopReason: null,
+    errorCode: null,
+    filesChanged: ["docs/ai-work/LOG.md", "visible.txt"],
+    protectedIntact: true,
+    commit: "One exact-path commit contains the product changes and these records.",
+    evidenceSummary: "Bounded worker evidence: files_changed=1.",
+    recordRecovery: null,
+    processFailure: null,
+    route: { adapterLabel: "Codex Exec", provider: "OpenAI", model: "gpt-5-codex" },
+  };
+  const expectedRequest = {
+    outcome: {
+      label: "You said so",
+      interpretation: "Add the visible result",
+      ownerQuotation: "  Add the visible result\nwithout changing the old cards.\t",
+    },
+    requirements: [{
+      label: "You weren’t sure",
+      interpretation: "Treat the older wording as tentative",
+      ownerQuotation: "Maybe keep the older wording",
+    }, {
+      label: "Cairn chose",
+      interpretation: "Use the existing compatibility field",
+    }],
+  };
+  assert.equal(cardBriefing(card), [
+    `Envelope result card (verified by Cairn's runtime, not by the conversation model):\n${JSON.stringify(expectedVerified)}`,
+    `The worker's account (claims, not verified by Cairn):\n${JSON.stringify(card.claims)}`,
+    `The accepted request (source-marked; not a result fact):\n${JSON.stringify(expectedRequest)}`,
+  ].join("\n\n"));
+});
+
+test("a plan-only Task Review round-trips as detached output while legacy cards omit it", () => {
+  const review: any = structuredClone(pendingTaskReviewForResultCard());
+  const legacy = doneResult();
+  if (legacy.status !== "done") throw new Error("test fixture must be closed");
+  const card = composeResultCard({
+    ...legacy,
+    composed: { ...legacy.composed, acceptedRequest: review.plan.request },
+  }, null, review);
+  assert.deepEqual(card.taskReview, review);
+  assert.notEqual(card.taskReview, review);
+  assert.notEqual(card.taskReview?.plan, review.plan);
+  assert.notEqual(card.taskReview?.criteria, review.criteria);
+  assert.equal(card.taskReview?.preSealEvidence, true);
+  assert.deepEqual(card.taskReview?.criteria.map((row) => [row.id, row.state]), [["c1", "pending"]]);
+
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-review-card-"));
+  const id = newConversationId(root);
+  appendTurn(root, id, { role: "envelope", card, ts: "2026-08-07T20:30:00.000Z" });
+  const stored = readTurns(root, id)[0];
+  assert.equal(stored?.role, "envelope");
+  assert.deepEqual(stored?.role === "envelope" ? stored.card.taskReview : null, card.taskReview);
+
+  review.criteria[0].state = "met";
+  assert.equal(card.taskReview?.criteria[0]?.state, "pending", "renderer/output mutation cannot reach the card copy");
+});
+
+test("terminal card storage rejects forged Task Review authority and cross-boundary edits", () => {
+  const review = pendingTaskReviewForResultCard();
+  const legacy = doneResult();
+  if (legacy.status !== "done") throw new Error("test fixture must be closed");
+  const base = composeResultCard({
+    ...legacy,
+    composed: { ...legacy.composed, acceptedRequest: review.plan.request },
+  }, null, review);
+  const forged = [
+    {
+      name: "renderer action",
+      card: (() => {
+        const value: any = structuredClone(base);
+        value.taskReview.criteria[0].ownerChecks = [{
+          kind: "owner-observation",
+          status: "waiting-owner",
+          supportingEvidence: [],
+          counterEvidence: [],
+          action: { kind: "observe", actionId: "88888888-8888-4888-8888-888888888888" },
+        }];
+        return value;
+      })(),
+    },
+    {
+      name: "changed accepted request",
+      card: (() => {
+        const value: any = structuredClone(base);
+        value.taskReview.plan.request.outcome.text = "A different task";
+        return value;
+      })(),
+    },
+    {
+      name: "criterion substitution",
+      card: (() => {
+        const value: any = structuredClone(base);
+        value.taskReview.criteria[0].id = "c2";
+        return value;
+      })(),
+    },
+  ];
+
+  for (const [index, item] of forged.entries()) {
+    const appendRoot = mkdtempSync(join(tmpdir(), "cairn-task-review-card-drop-"));
+    const appendId = newConversationId(appendRoot);
+    assert.throws(
+      () => appendTurn(appendRoot, appendId, {
+        role: "envelope", card: item.card, ts: `2026-08-07T20:${40 + index}:00.000Z`,
+      } as never),
+      /INVALID_RESULT_CARD/,
+      `${item.name} must refuse before persistence`,
+    );
+
+    const readRoot = mkdtempSync(join(tmpdir(), "cairn-task-review-card-read-drop-"));
+    const readId = newConversationId(readRoot);
+    rawMarkerBackedCard(readRoot, readId, `2026-08-07T20:${50 + index}:00.000Z`, item.card);
+    assert.deepEqual(readTurns(readRoot, readId), [], `${item.name} must be dropped on authenticated read`);
+  }
 });
 
 test("a stopped run carries its fixed stop reason, the real protected-work finding, and no commit", () => {
@@ -229,6 +537,25 @@ test("a connection-required close maps to a STOPPED card that claims no task, no
   assert.equal(card.acceptedRequest, null, "a new no-task card records null rather than pretending to be legacy");
 });
 
+test("a connection-required close retains and authenticates its accepted plan-only Task Review", () => {
+  const review = pendingTaskReviewForResultCard();
+  const card = composeResultCard({
+    status: "connection-required",
+    route: { status: "connection-required", candidates: [], reason: "No compatible worker is currently available." },
+    activities: [],
+  }, null, review);
+  assert.deepEqual(card.acceptedRequest, review.plan.request);
+  assert.deepEqual(card.taskReview, review);
+  assert.notEqual(card.taskReview, review);
+
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-review-connection-card-"));
+  const id = newConversationId(root);
+  appendTurn(root, id, { role: "envelope", card, ts: "2026-08-07T20:35:00.000Z" });
+  const stored = readTurns(root, id)[0];
+  assert.equal(stored?.role, "envelope");
+  assert.deepEqual(stored?.role === "envelope" ? stored.card.taskReview : null, card.taskReview);
+});
+
 test("an error card carries the fixed code, the accepted request when there was one, and none of the raw message", () => {
   const card = composeErrorCard("RECORD_VERIFICATION_FAILED: Task records were retained for inspection.", null);
   assert.equal(card.kind, "result");
@@ -267,10 +594,12 @@ test("every accepted task error path supplies the retained request to error-card
   const tasksSource = readFileSync(resolve(__dirname, "../../src/main/tasks.ts"), "utf8");
   assert.match(tasksSource, /const acceptedRequest = pending\.request;/,
     "the output-only view is captured at the atomic acceptance point");
+  assert.match(tasksSource, /const acceptedTaskReview = pending\.taskReview;/,
+    "the output-only Q5 review is captured at the same atomic acceptance point");
   assert.equal((tasksSource.match(/composeErrorCard\(/g) ?? []).length, 3,
     "all three accepted setup, settled-error, and rejected-run paths stay pinned");
   assert.equal(
-    (tasksSource.match(/composeErrorCard\([^,\n]+, acceptedRequest, (?:null|cardEvidenceRunId)\)/g) ?? []).length,
+    (tasksSource.match(/composeErrorCard\([^,\n]+, acceptedRequest, (?:null|cardEvidenceRunId), acceptedTaskReview\)/g) ?? []).length,
     3,
     "no accepted error path may regress to null or reconstruct provenance later",
   );
@@ -307,6 +636,130 @@ test("absent, null, and present accepted requests remain three distinct authenti
   assert.equal(cards[1].acceptedRequest, null);
   assert.equal(Object.prototype.hasOwnProperty.call(cards[2], "acceptedRequest"), true);
   assert.deepEqual(cards[2].acceptedRequest, ACCEPTED_REQUEST, "every accepted visible byte survives JSONL reload");
+});
+
+test("a valid Task-Spec result projection round-trips whole through authenticated card storage", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-spec-card-roundtrip-"));
+  const id = newConversationId(root);
+  const card = composeResultCard(taskSpecDoneResult());
+  appendTurn(root, id, { role: "envelope", card, ts: "2026-08-07T18:00:00.000Z" });
+  const turn = readTurns(root, id)[0];
+  assert.equal(turn?.role, "envelope");
+  if (turn?.role !== "envelope") return;
+  assert.equal(Object.hasOwn(turn.card, "taskSpecResult"), true);
+  assert.deepEqual(turn.card.taskSpecResult, card.taskSpecResult);
+  assert.deepEqual(turn.card.taskSpecResult?.requiredPromises.map((row) => row.id), ["c1"]);
+  assert.deepEqual(turn.card.taskSpecResult?.advisoryPreferences.map((row) => row.id), ["p1"]);
+  assert.equal(turn.card.taskSpecResult?.envelopeResult.disposition, turn.card.disposition);
+  assert.equal(turn.card.taskSpecResult?.criticReady, false);
+});
+
+test("Task-Spec persistence accepts complete multi-cN DONE and partial STOPPED evidence", () => {
+  const permissiveStopped = twoCriterionTaskSpecCard("STOPPED", true);
+  if (!permissiveStopped.taskSpecResult) throw new Error("test fixture must carry a Task-Spec projection");
+  permissiveStopped.taskSpecResult.workerClaims = null;
+  permissiveStopped.taskSpecResult.adapterAttestations[0].sequence = 7;
+  const cases = [
+    { name: "complete DONE", card: twoCriterionTaskSpecCard("DONE") },
+    { name: "partial STOPPED", card: twoCriterionTaskSpecCard("STOPPED", true) },
+    { name: "STOPPED with null claims and a retained gapped event", card: permissiveStopped },
+  ] as const;
+  for (const [index, item] of cases.entries()) {
+    const root = mkdtempSync(join(tmpdir(), "cairn-task-spec-card-completeness-"));
+    const id = newConversationId(root);
+    appendTurn(root, id, {
+      role: "envelope",
+      card: item.card,
+      ts: `2026-08-07T20:0${index}:00.000Z`,
+    });
+    const turn = readTurns(root, id)[0];
+    assert.equal(turn?.role, "envelope", item.name);
+    if (turn?.role !== "envelope") continue;
+    assert.deepEqual(turn.card.taskSpecResult, item.card.taskSpecResult, item.name);
+  }
+});
+
+test("Task-Spec card persistence rejects malformed or extra authority shapes before write and on read", () => {
+  const extraCritic = structuredClone(composeResultCard(taskSpecDoneResult()));
+  Object.assign(extraCritic.taskSpecResult ?? {}, { critic: { verdict: "met" } });
+  const attestationStatus = structuredClone(composeResultCard(taskSpecDoneResult()));
+  Object.assign(attestationStatus.taskSpecResult?.adapterAttestations[0] ?? {}, { status: "met", source: "cairn-verifier" });
+  const claimSource = structuredClone(composeResultCard(taskSpecDoneResult()));
+  Object.assign(claimSource.taskSpecResult?.workerClaims?.criteria[0] ?? {}, { source: "cairn-verifier" });
+  const criticReady = structuredClone(composeResultCard(taskSpecDoneResult()));
+  Object.assign(criticReady.taskSpecResult ?? {}, { criticReady: true });
+  const wrongPlan = structuredClone(composeResultCard(taskSpecDoneResult()));
+  if (wrongPlan.taskSpecResult) wrongPlan.taskSpecResult.adapterAttestations[0].evidencePlanSha256 = "5".repeat(64);
+  const forgedEnvelope = structuredClone(composeResultCard(taskSpecDoneResult()));
+  if (forgedEnvelope.taskSpecResult) forgedEnvelope.taskSpecResult.envelopeResult.disposition = "STOPPED";
+  const duplicateClaim = structuredClone(composeResultCard(taskSpecDoneResult()));
+  if (duplicateClaim.taskSpecResult?.workerClaims) {
+    duplicateClaim.taskSpecResult.workerClaims.criteria = [
+      ...duplicateClaim.taskSpecResult.workerClaims.criteria,
+      { id: "c1", result: "duplicate" },
+    ];
+  }
+  const doneWithoutAttestations = structuredClone(composeResultCard(taskSpecDoneResult()));
+  if (doneWithoutAttestations.taskSpecResult) doneWithoutAttestations.taskSpecResult.adapterAttestations = [];
+  const doneMissingOneAttestation = twoCriterionTaskSpecCard("DONE", true);
+  const doneWithoutClaims = structuredClone(composeResultCard(taskSpecDoneResult()));
+  if (doneWithoutClaims.taskSpecResult) doneWithoutClaims.taskSpecResult.workerClaims = null;
+  const doneWithStoppedClaim = structuredClone(composeResultCard(taskSpecDoneResult()));
+  if (doneWithStoppedClaim.taskSpecResult?.workerClaims) {
+    doneWithStoppedClaim.taskSpecResult.workerClaims.disposition = "STOPPED";
+  }
+  const doneWithGappedSequence = twoCriterionTaskSpecCard("DONE");
+  if (doneWithGappedSequence.taskSpecResult) {
+    doneWithGappedSequence.taskSpecResult.adapterAttestations[1].sequence = 2;
+  }
+  const malformed: ReadonlyArray<Readonly<{ name: string; card: unknown }>> = [
+    { name: "extra critic/verdict authority", card: extraCritic },
+    { name: "attestation status/source authority", card: attestationStatus },
+    { name: "worker claim source authority", card: claimSource },
+    { name: "critic-ready promotion", card: criticReady },
+    { name: "attestation plan substitution", card: wrongPlan },
+    { name: "worker-authored envelope mismatch", card: forgedEnvelope },
+    { name: "duplicate cN claim", card: duplicateClaim },
+    { name: "DONE without attestations", card: doneWithoutAttestations },
+    { name: "DONE missing one required cN attestation", card: doneMissingOneAttestation },
+    { name: "DONE without worker claims", card: doneWithoutClaims },
+    { name: "DONE with a worker-claimed STOPPED disposition", card: doneWithStoppedClaim },
+    { name: "DONE with a gapped process-event sequence", card: doneWithGappedSequence },
+  ];
+
+  for (const [index, item] of malformed.entries()) {
+    const appendRoot = mkdtempSync(join(tmpdir(), "cairn-task-spec-card-refuse-"));
+    const appendId = newConversationId(appendRoot);
+    assert.throws(
+      () => appendTurn(appendRoot, appendId, {
+        role: "envelope",
+        card: item.card,
+        ts: `2026-08-07T18:${String(index).padStart(2, "0")}:00.000Z`,
+      } as never),
+      /INVALID_RESULT_CARD/,
+      `${item.name} must refuse before persistence`,
+    );
+    assert.deepEqual(readTurns(appendRoot, appendId), []);
+
+    const readRoot = mkdtempSync(join(tmpdir(), "cairn-task-spec-card-drop-"));
+    const readId = newConversationId(readRoot);
+    rawMarkerBackedCard(
+      readRoot,
+      readId,
+      `2026-08-07T19:${String(index).padStart(2, "0")}:00.000Z`,
+      item.card,
+    );
+    assert.deepEqual(readTurns(readRoot, readId), [], `${item.name} must be dropped even with a matching marker`);
+  }
+
+  const erasedByJson = { ...composeResultCard(doneResult()), taskSpecResult: undefined };
+  const root = mkdtempSync(join(tmpdir(), "cairn-task-spec-card-undefined-"));
+  const id = newConversationId(root);
+  assert.throws(
+    () => appendTurn(root, id, { role: "envelope", card: erasedByJson, ts: "2026-08-07T20:00:00.000Z" } as never),
+    /INVALID_RESULT_CARD/,
+    "a present undefined projection cannot be erased into legacy absence",
+  );
 });
 
 test("a marker authenticates the original accepted-request shape, never a compatibility-normalized replacement", () => {
@@ -678,6 +1131,38 @@ test("a replayed copy of a genuine card renders once, and two real cards both su
   );
   assert.deepEqual(both.map((item) => item.role === "envelope" ? item.card.acceptedRequest : null),
     [ACCEPTED_REQUEST, ACCEPTED_REQUEST]);
+});
+
+test("the Task-Spec conductor briefing keeps bindings, hash/exit facts, worker claims, and Main's envelope in separate blocks", () => {
+  const briefing = cardBriefing(composeResultCard(taskSpecDoneResult()));
+  const blocks = briefing.split("\n\n");
+  assert.equal(blocks.length, 5, "Task Spec cards add three source-labelled blocks before request context");
+  const [runtime, evidence, worker, envelope, request] = blocks;
+  assert.match(runtime, /^Envelope result card \(verified by Cairn's runtime, not by the conversation model\):\n/);
+  assert.match(evidence, /^Task Spec evidence \(verified bindings and command-hash\/exit facts only; pN is advisory and never a DONE gate; no critic authority\):\n/);
+  assert.match(worker, /^The Task-Spec worker's account \(claims, not verified by Cairn\):\n/);
+  assert.match(envelope, /^The Task-Spec envelope result \(verified by Cairn's runtime; separate from worker claims and CriterionResult\):\n/);
+  assert.match(request, /^The accepted request \(source-marked; not a result fact\):\n/);
+
+  assert.ok(evidence.includes(TASK_SPEC_SHA256));
+  assert.ok(evidence.includes(EVIDENCE_PLAN_SHA256));
+  assert.ok(evidence.includes(COMMAND_SHA256));
+  assert.ok(evidence.includes('"requiredPromises":[{"id":"c1"'));
+  assert.ok(evidence.includes('"advisoryPreferences":[{"id":"p1"'));
+  assert.ok(evidence.includes('"exitCode":0'));
+  assert.ok(evidence.includes('"criticReady":false'));
+  assert.doesNotMatch(evidence, /"status"|"source"|"verdict"|"seal"|"workerClaims"/);
+
+  const workerSentence = "The worker says c1 is satisfied.";
+  assert.ok(worker.includes(workerSentence));
+  assert.ok(!runtime.includes(workerSentence));
+  assert.ok(!evidence.includes(workerSentence));
+  assert.ok(!envelope.includes(workerSentence));
+  assert.ok(!request.includes(workerSentence));
+  assert.ok(envelope.includes('"disposition":"DONE"'));
+  assert.ok(envelope.includes(TASK_REQUEST_SHA256));
+  assert.ok(!envelope.includes("workerClaims"));
+  assert.ok(!worker.includes(COMMAND_SHA256), "process attestations never enter the worker-claim block");
 });
 
 test("the conductor reads an accepted card as three separated parts: verified facts, worker claims, and request context", () => {

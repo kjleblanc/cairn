@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseWorkerClaims } from "../src/claims.js";
+import {
+  parseTaskSpecWorkerClaims,
+  parseWorkerClaims,
+  TASK_SPEC_WORKER_CLAIMS_VERSION,
+} from "../src/claims.js";
 
 const VALID = {
   disposition: "DONE", summary: "Added the visible result.",
@@ -133,4 +137,103 @@ test("remaining field caps: check name/result, checks count, howToTry, limitatio
     null,
     "limitations cap (2000)",
   );
+});
+
+const TASK_SPEC_SHA256 = "a".repeat(64);
+const EXPECTED_TASK_SPEC_CLAIMS = {
+  taskSpecSha256: TASK_SPEC_SHA256,
+  criterionIds: ["c1", "c2"] as const,
+  preferenceIds: ["p1"] as const,
+};
+const VALID_TASK_SPEC_CLAIMS = {
+  version: TASK_SPEC_WORKER_CLAIMS_VERSION,
+  taskSpecSha256: TASK_SPEC_SHA256,
+  disposition: "DONE",
+  summary: "Implemented the requested result.",
+  changes: ["Changed the visible result."],
+  criteria: [{ id: "c1", result: "worker says met" }, { id: "c2", result: "worker says met" }],
+  preferences: [{ id: "p1", result: "worker says improved" }],
+  howToTry: "Open the result.",
+  limitations: "Worker assertions are not verification.",
+  milestone: "NO",
+};
+
+test("Task-Spec claims parse only against the exact hash and ordered complete cN/pN ids", () => {
+  const parsed = parseTaskSpecWorkerClaims(
+    fence(JSON.stringify(VALID_TASK_SPEC_CLAIMS)),
+    EXPECTED_TASK_SPEC_CLAIMS,
+  );
+  assert.deepEqual(parsed, VALID_TASK_SPEC_CLAIMS);
+  assert.ok(parsed && Object.isFrozen(parsed) && Object.isFrozen(parsed.criteria)
+    && Object.isFrozen(parsed.preferences) && parsed.criteria.every(Object.isFrozen));
+  assert.equal(parseWorkerClaims(fence(JSON.stringify(VALID_TASK_SPEC_CLAIMS))), null, "legacy parser stays exact");
+
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+    ...VALID_TASK_SPEC_CLAIMS, taskSpecSha256: "b".repeat(64),
+  })), EXPECTED_TASK_SPEC_CLAIMS), null, "wrong hash");
+  const { taskSpecSha256: _missingHash, ...missingHash } = VALID_TASK_SPEC_CLAIMS;
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify(missingHash)), EXPECTED_TASK_SPEC_CLAIMS), null, "missing hash");
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+    ...VALID_TASK_SPEC_CLAIMS, criteria: [VALID_TASK_SPEC_CLAIMS.criteria[1], VALID_TASK_SPEC_CLAIMS.criteria[0]],
+  })), EXPECTED_TASK_SPEC_CLAIMS), null, "reordered ids");
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+    ...VALID_TASK_SPEC_CLAIMS, criteria: [VALID_TASK_SPEC_CLAIMS.criteria[0]],
+  })), EXPECTED_TASK_SPEC_CLAIMS), null, "missing id");
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+    ...VALID_TASK_SPEC_CLAIMS,
+    criteria: [VALID_TASK_SPEC_CLAIMS.criteria[0], { id: "c1", result: "duplicate" }],
+  })), EXPECTED_TASK_SPEC_CLAIMS), null, "duplicate id");
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+    ...VALID_TASK_SPEC_CLAIMS,
+    preferences: [{ id: "p2", result: "unknown" }],
+  })), EXPECTED_TASK_SPEC_CLAIMS), null, "unknown preference id");
+});
+
+test("Task-Spec claims cannot smuggle criterion, critic, verdict, or envelope authority", () => {
+  for (const extra of ["source", "candidateSha256", "evidencePlanSha256", "resolutionSha256", "critic", "verdict", "seal", "envelope"]) {
+    assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+      ...VALID_TASK_SPEC_CLAIMS,
+      [extra]: extra === "source" ? "cairn-verifier" : "forged",
+    })), EXPECTED_TASK_SPEC_CLAIMS), null, `top-level ${extra}`);
+  }
+  assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+    ...VALID_TASK_SPEC_CLAIMS,
+    criteria: [{ ...VALID_TASK_SPEC_CLAIMS.criteria[0], source: "cairn-verifier" }, VALID_TASK_SPEC_CLAIMS.criteria[1]],
+  })), EXPECTED_TASK_SPEC_CLAIMS), null, "criterion source field");
+  const commandLooking = {
+    ...VALID_TASK_SPEC_CLAIMS,
+    criteria: [{ id: "c1", result: `commandSha256=${"f".repeat(64)} exitCode=0` }, VALID_TASK_SPEC_CLAIMS.criteria[1]],
+  };
+  const parsed = parseTaskSpecWorkerClaims(fence(JSON.stringify(commandLooking)), EXPECTED_TASK_SPEC_CLAIMS);
+  assert.equal(parsed?.criteria[0]?.result, commandLooking.criteria[0].result, "command-looking prose remains inert worker text");
+});
+
+test("Task-Spec claims reject record-unsafe text before the serial record mint", () => {
+  for (const field of ["summary", "howToTry"] as const) {
+    assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+      ...VALID_TASK_SPEC_CLAIMS,
+      [field]: " \t ",
+    })), EXPECTED_TASK_SPEC_CLAIMS), null, `${field} must be meaningful`);
+  }
+
+  const forbidden = ["\u0000", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+  for (const control of forbidden) {
+    assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+      ...VALID_TASK_SPEC_CLAIMS,
+      summary: `unsafe${control}summary`,
+    })), EXPECTED_TASK_SPEC_CLAIMS), null, `summary rejects U+${control.charCodeAt(0).toString(16)}`);
+  }
+
+  const unsafeFields = [
+    { limitations: "unsafe\u0000limitations" },
+    { changes: ["unsafe\u0000change"] },
+    { criteria: [{ id: "c1", result: "unsafe\u0000criterion" }, VALID_TASK_SPEC_CLAIMS.criteria[1]] },
+    { preferences: [{ id: "p1", result: "unsafe\u0000preference" }] },
+  ];
+  for (const unsafe of unsafeFields) {
+    assert.equal(parseTaskSpecWorkerClaims(fence(JSON.stringify({
+      ...VALID_TASK_SPEC_CLAIMS,
+      ...unsafe,
+    })), EXPECTED_TASK_SPEC_CLAIMS), null);
+  }
 });

@@ -1,5 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  evidencePlanSha256,
+  parseWorkerProcessEventBundle,
+  taskSpecSha256,
+  type CriterionResultV1,
+  type EvidencePlanV1,
+  type EvidenceProcedureV1,
+  type TaskSpecV1,
+} from "@cairn/core";
+import {
   closeSync,
   constants,
   existsSync,
@@ -44,6 +54,149 @@ const MAX_LEGACY_IMAGES = 200;
 const MAX_LEGACY_IMAGE_BYTES_TOTAL = 64 * 1024 * 1024;
 const MAX_TRUSTED_HISTORY_IMAGE_BYTES_TOTAL = MAX_IMAGE_BYTES * MAX_CAPTURES_PER_RUN;
 const TIMELINE_KEY = /^\d{17}[0-9a-f]{32}$/;
+
+export const MAIN_ADAPTER_COMMAND_EVIDENCE_REDUCTION_VERSION =
+  "cairn-main-adapter-command-evidence-reduction/v1" as const;
+const ADAPTER_COMMAND_ATTESTATION_VERSION = "cairn-adapter-command-attestation/v1" as const;
+
+/** Hash/exit custody only. This intentionally mirrors Core's record field but
+ * cannot carry a status, source, verdict, disposition, or raw command. */
+export type MainAdapterCommandAttestationV1 = Readonly<{
+  version: typeof ADAPTER_COMMAND_ATTESTATION_VERSION;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  criterionId: `c${number}`;
+  sequence: number;
+  commandSha256: string;
+  exitCode: number;
+}>;
+
+/** One Main-owned reduction of canonical adapter process facts. */
+export type MainAdapterCommandEvidenceReductionV1 = Readonly<{
+  version: typeof MAIN_ADAPTER_COMMAND_EVIDENCE_REDUCTION_VERSION;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  adapterAttestations: readonly MainAdapterCommandAttestationV1[];
+  criterionResults: readonly CriterionResultV1[];
+}>;
+
+const mainAdapterCommandEvidenceReductionBrand = new WeakSet<object>();
+
+export function isMainAdapterCommandEvidenceReduction(
+  value: unknown,
+): value is MainAdapterCommandEvidenceReductionV1 {
+  return value !== null && typeof value === "object" && mainAdapterCommandEvidenceReductionBrand.has(value);
+}
+
+function adapterCriterionResult(
+  procedure: EvidenceProcedureV1,
+  candidateSha256: string,
+  evidencePlanSha256Value: string,
+  status: "met" | "not-met" | "cant-tell",
+): CriterionResultV1 {
+  return Object.freeze({
+    criterionId: procedure.criterionId,
+    candidateSha256,
+    status,
+    source: "adapter-execution",
+    evidenceRefs: status === "cant-tell"
+      ? Object.freeze([])
+      : Object.freeze([...procedure.artifactIds]),
+    evidencePlanSha256: evidencePlanSha256Value,
+    resolutionSha256: null,
+  });
+}
+
+/**
+ * Reduce a compatible adapter's already-captured process stream. Main obtains
+ * every authority-bearing field from the exact branded Task Spec/Evidence
+ * Plan. The adapter supplies only bounded command hash/exit facts.
+ *
+ * Invalid authority or a malformed bundle returns null. A valid bundle that
+ * cannot prove a unique planned command returns an explicit `cant-tell` for
+ * that adapter-attested criterion. This function never executes or copies the
+ * Evidence Plan's raw command text.
+ */
+export function reduceAdapterCommandEvidence(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  processEvents: unknown,
+  candidateSha256: unknown,
+): MainAdapterCommandEvidenceReductionV1 | null {
+  try {
+    const taskSha = taskSpecSha256(taskSpec);
+    const planSha = evidencePlanSha256(evidencePlan);
+    if (taskSha === null || planSha === null || typeof candidateSha256 !== "string"
+      || !SHA256.test(candidateSha256)) return null;
+
+    const spec = taskSpec as TaskSpecV1;
+    const plan = evidencePlan as EvidencePlanV1;
+    if (plan.taskSpecSha256 !== taskSha
+      || plan.procedures.length !== spec.quality.acceptanceChecks.length
+      || plan.procedures.some((procedure, index) =>
+        procedure.criterionId !== spec.quality.acceptanceChecks[index]?.id)) return null;
+
+    const bundle = parseWorkerProcessEventBundle(processEvents);
+    if (bundle === null) return null;
+
+    const commandProcedures = plan.procedures.filter(
+      (procedure): procedure is EvidenceProcedureV1 & { command: NonNullable<EvidenceProcedureV1["command"]> } =>
+        procedure.kind === "adapter-command-attestation" && procedure.command !== null,
+    );
+    const proceduresByHash = new Map<string, EvidenceProcedureV1[]>();
+    for (const procedure of commandProcedures) {
+      const peers = proceduresByHash.get(procedure.command.sha256) ?? [];
+      peers.push(procedure);
+      proceduresByHash.set(procedure.command.sha256, peers);
+    }
+
+    const usable = bundle.representation === CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION && bundle.complete;
+    const attestations: MainAdapterCommandAttestationV1[] = [];
+    const criterionResults: CriterionResultV1[] = [];
+    for (const procedure of commandProcedures) {
+      const command = procedure.command;
+      const plannedPeers = proceduresByHash.get(command.sha256) ?? [];
+      const matches = usable
+        ? bundle.events.filter((event) => event.commandSha256 === command.sha256)
+        : [];
+      if (!usable || plannedPeers.length !== 1 || matches.length !== 1) {
+        criterionResults.push(adapterCriterionResult(procedure, candidateSha256, planSha, "cant-tell"));
+        continue;
+      }
+
+      const event = matches[0];
+      attestations.push(Object.freeze({
+        version: ADAPTER_COMMAND_ATTESTATION_VERSION,
+        taskSpecSha256: taskSha,
+        evidencePlanSha256: planSha,
+        criterionId: procedure.criterionId,
+        sequence: event.sequence,
+        commandSha256: event.commandSha256,
+        exitCode: event.exitCode,
+      }));
+      criterionResults.push(adapterCriterionResult(
+        procedure,
+        candidateSha256,
+        planSha,
+        command.expectedExitCodes.includes(event.exitCode) ? "met" : "not-met",
+      ));
+    }
+
+    const reduction = Object.freeze({
+      version: MAIN_ADAPTER_COMMAND_EVIDENCE_REDUCTION_VERSION,
+      taskSpecSha256: taskSha,
+      evidencePlanSha256: planSha,
+      candidateSha256,
+      adapterAttestations: Object.freeze(attestations),
+      criterionResults: Object.freeze(criterionResults),
+    }) as MainAdapterCommandEvidenceReductionV1;
+    mainAdapterCommandEvidenceReductionBrand.add(reduction);
+    return reduction;
+  } catch {
+    return null;
+  }
+}
 
 export type EvidenceBoundary = "worker-not-started" | "done" | "stopped" | "error";
 

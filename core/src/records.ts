@@ -1,9 +1,321 @@
 import type { WorkerClaims } from "./claims.js";
-import { taskRequestView, type TaskIntent, type TaskRequestRow, type TaskRequestView } from "./intent.js";
+import {
+  taskRequestSha256,
+  taskRequestView,
+  type TaskIntent,
+  type TaskRequestRow,
+  type TaskRequestView,
+} from "./intent.js";
+import {
+  evidencePlanSha256,
+  taskSpecSha256,
+  type EvidencePlanV1,
+  type TaskSpecV1,
+} from "./quality.js";
 import type { AdapterTaskContract } from "./routing.js";
 // Type-only, and it must stay that way: serial.ts already imports this module
 // as a value, so a runtime import back would create a cycle.
 import type { SerialStopReason } from "./serial.js";
+
+export const TASK_SPEC_RUN_RECORD_VERSION = "cairn-task-spec-run-record/v1" as const;
+export const ADAPTER_COMMAND_ATTESTATION_VERSION = "cairn-adapter-command-attestation/v1" as const;
+export const ENVELOPE_RESULT_VERSION = "cairn-envelope-result/v1" as const;
+
+export type TaskSpecCriterionClaimV1 = Readonly<{ id: `c${number}`; result: string }>;
+export type TaskSpecPreferenceClaimV1 = Readonly<{ id: `p${number}`; result: string }>;
+
+/** The worker's Task-Spec-bound account. It is still only a claim: carrying
+ * the right hash and ids never turns any sentence here into criterion evidence
+ * or an envelope fact. */
+export type TaskSpecWorkerClaimsRecordV1 = Readonly<{
+  version: "cairn-task-spec-worker-claims/v1";
+  taskSpecSha256: string;
+  disposition: "DONE" | "STOPPED";
+  summary: string;
+  changes: readonly string[];
+  criteria: readonly TaskSpecCriterionClaimV1[];
+  preferences: readonly TaskSpecPreferenceClaimV1[];
+  howToTry: string;
+  limitations: string;
+  milestone: "YES" | "NO" | "UNCLEAR";
+}>;
+
+/** A Main-derived link between one frozen cN procedure and one exact process
+ * event. It proves only command identity and exit. It is deliberately not a
+ * CriterionResultV1 and carries no met/not-met status, source, verdict, critic
+ * field, resolution, or disposition. */
+export type AdapterCommandAttestationV1 = Readonly<{
+  version: typeof ADAPTER_COMMAND_ATTESTATION_VERSION;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  criterionId: `c${number}`;
+  sequence: number;
+  commandSha256: string;
+  exitCode: number;
+}>;
+
+/** The envelope's own terminal fact. Keeping it nested and separately
+ * versioned prevents a worker claim or adapter event from masquerading as
+ * Cairn's Git/record disposition. */
+export type EnvelopeResultV1 = Readonly<{
+  version: typeof ENVELOPE_RESULT_VERSION;
+  taskNumber: number;
+  requestSha256: string;
+  taskSpecSha256: string;
+  disposition: "DONE" | "STOPPED";
+  stopReason: string | null;
+}>;
+
+export type TaskSpecRunRecordV1 = Readonly<{
+  version: typeof TASK_SPEC_RUN_RECORD_VERSION;
+  requestSha256: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  criteria: readonly Readonly<{ id: `c${number}`; promise: string }>[];
+  preferences: readonly Readonly<{
+    id: `p${number}`;
+    dimension: string;
+    desiredDirection: string;
+  }>[];
+  workerClaims: TaskSpecWorkerClaimsRecordV1 | null;
+  adapterAttestations: readonly AdapterCommandAttestationV1[];
+  envelopeResult: EnvelopeResultV1;
+}>;
+
+export type TaskSpecRunRecordClassification =
+  | Readonly<{ kind: "legacy"; taskSpecBound: false; criticReady: false }>
+  | Readonly<{ kind: "task-spec-bound"; taskSpecBound: true; criticReady: false; record: TaskSpecRunRecordV1 }>
+  | Readonly<{ kind: "invalid"; taskSpecBound: false; criticReady: false }>;
+
+const taskSpecRunRecordBrand = new WeakSet<object>();
+const SHA256 = /^[0-9a-f]{64}$/;
+const CRITERION_ID = /^c(?:[1-9]|1[0-2])$/;
+const PREFERENCE_ID = /^p(?:[1-9]|1[0-2])$/;
+
+function safeRecordText(value: unknown, cap = 2_000): value is string {
+  return typeof value === "string" && value.length <= cap && !/[\u0000\u202a-\u202e\u2066-\u2069]/u.test(value);
+}
+
+function nonBlankRecordText(value: unknown, cap = 2_000): value is string {
+  return safeRecordText(value, cap) && value.trim().length > 0;
+}
+
+function uniqueIds<T extends { id: string }>(values: readonly T[], pattern: RegExp): boolean {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!pattern.test(value.id) || seen.has(value.id)) return false;
+    seen.add(value.id);
+  }
+  return true;
+}
+
+function exactDataRecord(value: unknown, expectedKeys: readonly string[]): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== "string")) return false;
+  const actual = [...(keys as string[])].sort();
+  const expected = [...expectedKeys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) return false;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  return expectedKeys.every((key) => {
+    const descriptor = descriptors[key];
+    return Boolean(descriptor && !descriptor.get && !descriptor.set && "value" in descriptor && descriptor.enumerable);
+  });
+}
+
+function denseDataArray(value: unknown, cap: number): readonly unknown[] | null {
+  if (!Array.isArray(value) || value.length > cap) return null;
+  const keys = Reflect.ownKeys(value);
+  const expected = ["length", ...Array.from({ length: value.length }, (_, index) => String(index))];
+  if (keys.length !== expected.length || expected.some((key) => !keys.includes(key))) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return null;
+  }
+  return value;
+}
+
+function exactTaskSpecRunRecordInput(value: unknown): value is TaskSpecRunRecordV1 {
+  if (!exactDataRecord(value, [
+    "adapterAttestations", "criteria", "envelopeResult", "evidencePlanSha256",
+    "preferences", "requestSha256", "taskSpecSha256", "version", "workerClaims",
+  ])) return false;
+  const record = value as TaskSpecRunRecordV1;
+  const criteria = denseDataArray(record.criteria, 12);
+  const preferences = denseDataArray(record.preferences, 12);
+  const attestations = denseDataArray(record.adapterAttestations, 12);
+  if (!criteria || !preferences || !attestations
+    || criteria.some((entry) => !exactDataRecord(entry, ["id", "promise"]))
+    || preferences.some((entry) => !exactDataRecord(entry, ["desiredDirection", "dimension", "id"]))
+    || attestations.some((entry) => !exactDataRecord(entry, [
+      "commandSha256", "criterionId", "evidencePlanSha256", "exitCode", "sequence", "taskSpecSha256", "version",
+    ]))
+    || !exactDataRecord(record.envelopeResult, [
+      "disposition", "requestSha256", "stopReason", "taskNumber", "taskSpecSha256", "version",
+    ])) return false;
+  if (record.workerClaims === null) return true;
+  if (!exactDataRecord(record.workerClaims, [
+    "changes", "criteria", "disposition", "howToTry", "limitations", "milestone",
+    "preferences", "summary", "taskSpecSha256", "version",
+  ])) return false;
+  const changes = denseDataArray(record.workerClaims.changes, 50);
+  const claimCriteria = denseDataArray(record.workerClaims.criteria, 12);
+  const claimPreferences = denseDataArray(record.workerClaims.preferences, 12);
+  return Boolean(changes && claimCriteria && claimPreferences
+    && claimCriteria.every((entry) => exactDataRecord(entry, ["id", "result"]))
+    && claimPreferences.every((entry) => exactDataRecord(entry, ["id", "result"])));
+}
+
+/** Main's one Q4 record mint. It detaches and deeply freezes the exact
+ * Task-Spec/claim/attestation/envelope split. Plain structural copies are not
+ * branded and classify as invalid rather than critic-ready. */
+export function composeTaskSpecRunRecord(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  rawInput: unknown,
+): TaskSpecRunRecordV1 | null {
+  try {
+    if (!exactTaskSpecRunRecordInput(rawInput)) return null;
+    const input = rawInput;
+    const specSha = taskSpecSha256(taskSpec);
+    const planSha = evidencePlanSha256(evidencePlan);
+    if (!specSha || !planSha) return null;
+    const spec = taskSpec as TaskSpecV1;
+    const plan = evidencePlan as EvidencePlanV1;
+    if (input.taskSpecSha256 !== specSha || input.evidencePlanSha256 !== planSha
+      || input.requestSha256 !== taskRequestSha256(spec.intent)
+      || plan.taskSpecSha256 !== specSha
+      || input.criteria.length !== spec.quality.acceptanceChecks.length
+      || input.criteria.some((criterion, index) => criterion.id !== spec.quality.acceptanceChecks[index]?.id
+        || criterion.promise !== spec.quality.acceptanceChecks[index]?.promise)
+      || input.preferences.length !== spec.quality.qualityPreferences.length
+      || input.preferences.some((preference, index) => preference.id !== spec.quality.qualityPreferences[index]?.id
+        || preference.dimension !== spec.quality.qualityPreferences[index]?.dimension
+        || preference.desiredDirection !== spec.quality.qualityPreferences[index]?.desiredDirection)) return null;
+    if (input.version !== TASK_SPEC_RUN_RECORD_VERSION || !SHA256.test(input.requestSha256)
+      || !SHA256.test(input.taskSpecSha256) || !SHA256.test(input.evidencePlanSha256)
+      || !Array.isArray(input.criteria) || input.criteria.length === 0 || input.criteria.length > 12
+      || !Array.isArray(input.preferences) || input.preferences.length > 12
+      || !uniqueIds(input.criteria, CRITERION_ID) || !uniqueIds(input.preferences, PREFERENCE_ID)) return null;
+    if (input.criteria.some((criterion) => !safeRecordText(criterion.promise, 1_000))
+      || input.preferences.some((preference) => !safeRecordText(preference.dimension, 1_000)
+        || !safeRecordText(preference.desiredDirection, 1_000))) return null;
+
+    const criterionIds = input.criteria.map((criterion) => criterion.id);
+    const preferenceIds = input.preferences.map((preference) => preference.id);
+    const claims = input.workerClaims;
+    if (claims !== null) {
+      if (claims.version !== "cairn-task-spec-worker-claims/v1" || claims.taskSpecSha256 !== input.taskSpecSha256
+        || (claims.disposition !== "DONE" && claims.disposition !== "STOPPED")
+        || (claims.milestone !== "YES" && claims.milestone !== "NO" && claims.milestone !== "UNCLEAR")
+        || !nonBlankRecordText(claims.summary, 300) || !nonBlankRecordText(claims.howToTry)
+        || !safeRecordText(claims.limitations) || !Array.isArray(claims.changes) || claims.changes.length > 50
+        || claims.changes.some((change) => !safeRecordText(change, 500))
+        || !Array.isArray(claims.criteria) || !Array.isArray(claims.preferences)
+        || claims.criteria.length !== criterionIds.length || claims.preferences.length !== preferenceIds.length
+        || claims.criteria.some((claim, index) => claim.id !== criterionIds[index] || !safeRecordText(claim.result, 500))
+        || claims.preferences.some((claim, index) => claim.id !== preferenceIds[index] || !safeRecordText(claim.result, 500))) return null;
+    }
+
+    if (!Array.isArray(input.adapterAttestations) || input.adapterAttestations.length > 12) return null;
+    const seenCriteria = new Set<string>();
+    const seenSequences = new Set<number>();
+    const seenCommandHashes = new Set<string>();
+    const attestations: AdapterCommandAttestationV1[] = [];
+    for (const attestation of input.adapterAttestations) {
+      const procedure = plan.procedures.find((entry) => entry.criterionId === attestation.criterionId);
+      const commandProcedures = plan.procedures.filter((entry) =>
+        entry.kind === "adapter-command-attestation"
+        && entry.command?.sha256 === attestation.commandSha256);
+      if (attestation.version !== ADAPTER_COMMAND_ATTESTATION_VERSION
+        || attestation.taskSpecSha256 !== input.taskSpecSha256
+        || attestation.evidencePlanSha256 !== input.evidencePlanSha256
+        || !criterionIds.includes(attestation.criterionId)
+        || !Number.isSafeInteger(attestation.sequence) || attestation.sequence < 0 || attestation.sequence >= 64
+        || seenSequences.has(attestation.sequence) || seenCriteria.has(attestation.criterionId)
+        || !SHA256.test(attestation.commandSha256)
+        || seenCommandHashes.has(attestation.commandSha256)
+        || procedure?.kind !== "adapter-command-attestation"
+        || procedure.command?.sha256 !== attestation.commandSha256
+        || commandProcedures.length !== 1
+        || commandProcedures[0]?.criterionId !== attestation.criterionId
+        || !Number.isSafeInteger(attestation.exitCode) || Object.is(attestation.exitCode, -0)
+        || attestation.exitCode < -1 || attestation.exitCode > 255) return null;
+      seenSequences.add(attestation.sequence);
+      seenCriteria.add(attestation.criterionId);
+      seenCommandHashes.add(attestation.commandSha256);
+      attestations.push(Object.freeze({ ...attestation }));
+    }
+
+    const envelope = input.envelopeResult;
+    if (envelope.version !== ENVELOPE_RESULT_VERSION || !Number.isSafeInteger(envelope.taskNumber)
+      || envelope.taskNumber < 1 || envelope.requestSha256 !== input.requestSha256
+      || envelope.taskSpecSha256 !== input.taskSpecSha256
+      || (envelope.disposition !== "DONE" && envelope.disposition !== "STOPPED")
+      || (envelope.disposition === "DONE" ? envelope.stopReason !== null : !nonBlankRecordText(envelope.stopReason, 128))) return null;
+    if (envelope.disposition === "DONE") {
+      // This record format carries only adapter-command custody. It must not
+      // brand DONE for a plan whose required evidence is absent from the
+      // record, nor for a command that exited outside its frozen expectation.
+      const orderedSequences = attestations.map((attestation) => attestation.sequence).sort((left, right) => left - right);
+      if (!claims || claims.disposition !== "DONE"
+        || spec.quality.critic.mode === "required"
+        || plan.procedures.some((procedure) =>
+          procedure.kind !== "adapter-command-attestation" || !procedure.command)
+        || attestations.length !== plan.procedures.length
+        || orderedSequences.some((sequence, index) => sequence !== index)) return null;
+      for (const procedure of plan.procedures) {
+        const attestation = attestations.find((entry) => entry.criterionId === procedure.criterionId);
+        if (!attestation || !procedure.command
+          || attestation.commandSha256 !== procedure.command.sha256
+          || !procedure.command.expectedExitCodes.includes(attestation.exitCode)) return null;
+      }
+    }
+
+    const copiedClaims = claims === null ? null : Object.freeze({
+      ...claims,
+      changes: Object.freeze([...claims.changes]),
+      criteria: Object.freeze(claims.criteria.map((claim) => Object.freeze({ ...claim }))),
+      preferences: Object.freeze(claims.preferences.map((claim) => Object.freeze({ ...claim }))),
+    });
+    const record = Object.freeze({
+      version: TASK_SPEC_RUN_RECORD_VERSION,
+      requestSha256: input.requestSha256,
+      taskSpecSha256: input.taskSpecSha256,
+      evidencePlanSha256: input.evidencePlanSha256,
+      criteria: Object.freeze(input.criteria.map((criterion) => Object.freeze({ ...criterion }))),
+      preferences: Object.freeze(input.preferences.map((preference) => Object.freeze({ ...preference }))),
+      workerClaims: copiedClaims,
+      adapterAttestations: Object.freeze(attestations),
+      envelopeResult: Object.freeze({ ...envelope }),
+    }) as TaskSpecRunRecordV1;
+    taskSpecRunRecordBrand.add(record);
+    return record;
+  } catch {
+    return null;
+  }
+}
+
+/** Missing is an honestly readable legacy record. A non-null unbranded object
+ * is invalid, even if every field resembles the v1 shape. Q4 never calls
+ * either form critic-ready because no critic/candidate custody exists yet. */
+export function classifyTaskSpecRunRecord(value: unknown): TaskSpecRunRecordClassification {
+  if (value === undefined || value === null) {
+    return Object.freeze({ kind: "legacy", taskSpecBound: false, criticReady: false });
+  }
+  if (typeof value !== "object" || !taskSpecRunRecordBrand.has(value)) {
+    return Object.freeze({ kind: "invalid", taskSpecBound: false, criticReady: false });
+  }
+  return Object.freeze({
+    kind: "task-spec-bound",
+    taskSpecBound: true,
+    criticReady: false,
+    record: value as TaskSpecRunRecordV1,
+  });
+}
 
 export interface ComposedRecordInput {
   taskNumber: number;
@@ -21,6 +333,9 @@ export interface ComposedRecordInput {
   evidenceSummary: string | null; // the bounded numeric line, or null
   processFailure: { code: string; debugPath: string | null } | null;
   paidCallStarted: boolean;
+  /** Present only on the staged v4 path. Missing/null is a readable legacy
+   * record, never an implied Task Spec or critic-ready state. */
+  taskSpecRunRecord?: TaskSpecRunRecordV1 | null;
   // Task 052: a Cairn-authored disclosure line for any owned-record recovery
   // (work-log restore and/or report-path overwrite). Optional so every existing
   // construction site stays valid; rendered under "Verified by Cairn" when set.
@@ -142,6 +457,12 @@ function filesChangedLine(filesChanged: readonly string[]): string {
   return `- Files changed (from Git, not from claims):\n${entries}`;
 }
 
+function taskSpecRecordFor(input: ComposedRecordInput): TaskSpecRunRecordV1 | null {
+  const classification = classifyTaskSpecRunRecord(input.taskSpecRunRecord);
+  if (classification.kind === "invalid") throw new Error("INVALID_TASK_SPEC_RUN_RECORD");
+  return classification.kind === "task-spec-bound" ? classification.record : null;
+}
+
 /**
  * Every line here states the REAL verified result. `protectedIntact` and
  * `filesChanged` come from Git, never from the worker's claims — a
@@ -162,6 +483,15 @@ function verifiedByCairnLines(input: ComposedRecordInput): string {
       input.commit ? input.commit.reason : "none — stopped evidence is retained for inspection, never committed by Cairn"
     }`,
   ];
+  const taskSpecRecord = taskSpecRecordFor(input);
+  if (taskSpecRecord) {
+    lines.push(`- Task Spec binding: \`${taskSpecRecord.taskSpecSha256}\``);
+    lines.push(`- Evidence Plan binding: \`${taskSpecRecord.evidencePlanSha256}\``);
+    lines.push(
+      `- Envelope result binding: request \`${taskSpecRecord.envelopeResult.requestSha256}\`; ` +
+      `Task Spec \`${taskSpecRecord.envelopeResult.taskSpecSha256}\``,
+    );
+  }
   if (input.recordRecovery) lines.push(`- ${input.recordRecovery}`);
   if (input.evidenceSummary) lines.push(`- ${input.evidenceSummary}`);
   if (input.processFailure) {
@@ -282,6 +612,49 @@ function workersAccountBlock(claims: WorkerClaims | null): string {
   ].join("\n\n");
 }
 
+function taskSpecEvidenceBlock(record: TaskSpecRunRecordV1): string {
+  const attestations = new Map(record.adapterAttestations.map((attestation) => [attestation.criterionId, attestation]));
+  const criteria = record.criteria.map((criterion) => {
+    const attestation = attestations.get(criterion.id);
+    const execution = attestation
+      ? `adapter event #${attestation.sequence} matched command \`${attestation.commandSha256}\` and exited ${attestation.exitCode}`
+      : "no authenticated adapter command event was retained";
+    return quarantineBlock(
+      `- ${criterion.id} required promise: ${criterion.promise} — ${execution}. ` +
+      "This proves command identity and exit only; it is not a worker claim, critic finding, or judgment that the test was sufficient.",
+    );
+  }).join("\n");
+  const preferences = record.preferences.length > 0
+    ? record.preferences.map((preference) => quarantineBlock(
+      `- ${preference.id} advisory preference (not a DONE gate): ${preference.dimension} — ${preference.desiredDirection}`,
+    )).join("\n")
+    : "- None.";
+  return [
+    "### Required promises and adapter execution attestations",
+    criteria,
+    "### Advisory preferences — not DONE gates",
+    preferences,
+  ].join("\n\n");
+}
+
+function taskSpecWorkersAccountBlock(claims: TaskSpecWorkerClaimsRecordV1 | null): string {
+  if (!claims) return "The worker returned no readable Task-Spec-bound claims block.";
+  const criteria = claims.criteria.length > 0
+    ? claims.criteria.map((claim) => quarantineBlock(`- ${claim.id}: ${claim.result}`)).join("\n")
+    : "- None reported.";
+  const preferences = claims.preferences.length > 0
+    ? claims.preferences.map((claim) => quarantineBlock(`- ${claim.id}: ${claim.result}`)).join("\n")
+    : "- None reported.";
+  return [
+    quarantineBlock(claims.summary),
+    `What changed:\n${bulletsOrNone(claims.changes)}`,
+    `Required-promise answers the worker claims:\n${criteria}`,
+    `Advisory-preference notes the worker claims:\n${preferences}`,
+    `How to try it: ${quarantineInline(claims.howToTry)}`,
+    `Limitations: ${quarantineInline(claims.limitations)}`,
+  ].join("\n\n");
+}
+
 /**
  * Composes the worker report with a hard separation between what Cairn
  * itself verified (Git-derived facts and the real protected-work result) and
@@ -291,6 +664,7 @@ function workersAccountBlock(claims: WorkerClaims | null): string {
  * once.
  */
 export function composeWorkerReport(input: ComposedRecordInput): string {
+  const taskSpecRecord = taskSpecRecordFor(input);
   const sections: string[] = [
     `# Task ${pad(input.taskNumber)} — ${input.route.adapterLabel} worker report`,
     "## Verified by Cairn",
@@ -300,9 +674,22 @@ export function composeWorkerReport(input: ComposedRecordInput): string {
   if (stopped) sections.push(stopped);
   sections.push(PRIVACY_PARAGRAPH);
   sections.push(renderAcceptedRequestView(input.acceptedRequest, input.requestContext));
-  sections.push("## The worker's account (claims, not verified by Cairn)");
-  sections.push(workersAccountBlock(input.claims));
-  sections.push(`Milestone movement: **${input.claims?.milestone ?? "NO"}**`);
+  if (taskSpecRecord) {
+    sections.push("## Task Spec evidence — separate from claims and envelope facts");
+    sections.push(taskSpecEvidenceBlock(taskSpecRecord));
+    sections.push("## The worker's Task-Spec-bound account (claims, not verified by Cairn)");
+    sections.push(taskSpecWorkersAccountBlock(taskSpecRecord.workerClaims));
+    sections.push(`Worker-claimed milestone movement: **${taskSpecRecord.workerClaims?.milestone ?? "NO"}**`);
+    sections.push(
+      `## Envelope result — Cairn's separate terminal fact\n\n` +
+      `Task ${pad(taskSpecRecord.envelopeResult.taskNumber)}: **${taskSpecRecord.envelopeResult.disposition}**` +
+      `${taskSpecRecord.envelopeResult.stopReason ? ` (${taskSpecRecord.envelopeResult.stopReason})` : ""}.`,
+    );
+  } else {
+    sections.push("## The worker's account (claims, not verified by Cairn)");
+    sections.push(workersAccountBlock(input.claims));
+    sections.push(`Milestone movement: **${input.claims?.milestone ?? "NO"}**`);
+  }
   sections.push(`Disposition: **${input.disposition}**`);
   return `${sections.join("\n\n")}\n`;
 }
@@ -310,7 +697,8 @@ export function composeWorkerReport(input: ComposedRecordInput): string {
 /** One bounded LOG.md cell, honest about the claim/verified split, capped to 160 chars. */
 export function composeWorkerRowSummary(input: ComposedRecordInput): string {
   if (input.disposition === "DONE") {
-    const summary = input.claims?.summary ?? "The worker reported completion.";
+    const taskSpecRecord = taskSpecRecordFor(input);
+    const summary = taskSpecRecord?.workerClaims?.summary ?? input.claims?.summary ?? "The worker reported completion.";
     return truncateRow(`${summary} (worker claim; files verified against Git by Cairn)`);
   }
   return truncateRow(`${input.route.adapterLabel} stopped safely (${input.stopReason}); requested change was not verified.`);

@@ -496,7 +496,15 @@ function fakeKimiExecInstall(
   if (body === null) {
     // A wedged CLI: never exits on its own. "chatter" keeps stdout active so
     // only the absolute cap can fire; otherwise it goes silent so only the
-    // inactivity timer can.
+    // inactivity timer can. If a Windows taskkill fallback can terminate only
+    // the cmd shim, this hermetic grandchild observes that parent loss and
+    // exits itself instead of leaking beyond the completed test process.
+    lines.push(
+      `const parentPid = process.ppid;`,
+      `setInterval(() => {`,
+      `  try { process.kill(parentPid, 0); } catch { process.exit(0); }`,
+      `}, 50);`,
+    );
     if (options.chatter) {
       lines.push(
         `setInterval(() => {`,

@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { types as nodeTypes } from "node:util";
-import { isEvidenceRunId } from "../../shared/ipc.js";
+import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
 import type { ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
+import { parseTaskReviewProjection } from "../../shared/task-review.js";
 import type { TaskIntentSourceInput } from "@cairn/core";
 import { cardDigest, cardDigestCandidates, cardMarkers, recordCardMarker } from "./cardauth.js";
 import { sanitizeFollowups } from "./followups.js";
@@ -34,6 +35,10 @@ const REQUEST_REQUIREMENT_CAP = 500;
 const REQUEST_OWNER_TEXT_CAP = 2_000;
 const REQUEST_REQUIREMENT_COUNT_CAP = 8;
 const REQUEST_VISIBLE_TOTAL_CAP = 6_000;
+const TASK_SPEC_ROW_CAP = 12;
+const TASK_SPEC_ATTESTATION_CAP = 12;
+const TASK_SPEC_CHANGE_CAP = 50;
+const SHA256 = /^[a-f0-9]{64}$/;
 
 /** Once an append syscall starts, a later error cannot honestly prove that no
  * bytes reached disk. Callers that gate one-time authority must distinguish
@@ -441,6 +446,163 @@ function validAcceptedRequestView(value: unknown): boolean {
   return total <= REQUEST_VISIBLE_TOTAL_CAP;
 }
 
+function safeTaskSpecText(value: unknown, cap: number, meaningful = false): value is string {
+  if (typeof value !== "string" || value.length > cap
+    || (meaningful && value.trim().length === 0) || FORBIDDEN_ATTRIBUTION_CONTROLS.test(value)) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function validTaskSpecResultProjection(value: unknown, card: Partial<ResultCard>): boolean {
+  const projection = exactDataRecord(value, [
+    "adapterAttestations", "advisoryPreferences", "criticReady", "envelopeResult",
+    "evidencePlanSha256", "requestSha256", "requiredPromises", "taskSpecSha256",
+    "version", "workerClaims",
+  ]);
+  if (!projection || projection.version !== TASK_SPEC_RESULT_PROJECTION_VERSION
+    || projection.criticReady !== false || typeof projection.requestSha256 !== "string"
+    || !SHA256.test(projection.requestSha256) || typeof projection.taskSpecSha256 !== "string"
+    || !SHA256.test(projection.taskSpecSha256) || typeof projection.evidencePlanSha256 !== "string"
+    || !SHA256.test(projection.evidencePlanSha256)) {
+    return false;
+  }
+  const requestSha256 = projection.requestSha256 as string;
+  const taskSpecSha256 = projection.taskSpecSha256 as string;
+  const evidencePlanSha256 = projection.evidencePlanSha256 as string;
+
+  const required = denseDataArray(projection.requiredPromises, TASK_SPEC_ROW_CAP);
+  const advisory = denseDataArray(projection.advisoryPreferences, TASK_SPEC_ROW_CAP);
+  if (!required || required.length === 0 || !advisory) return false;
+  const criterionIds: string[] = [];
+  for (let index = 0; index < required.length; index += 1) {
+    const row = exactDataRecord(required[index], ["id", "promise"]);
+    if (!row || row.id !== `c${index + 1}` || !safeTaskSpecText(row.promise, 1_000, true)) return false;
+    criterionIds.push(row.id);
+  }
+  const preferenceIds: string[] = [];
+  for (let index = 0; index < advisory.length; index += 1) {
+    const row = exactDataRecord(advisory[index], ["desiredDirection", "dimension", "id"]);
+    if (!row || row.id !== `p${index + 1}` || !safeTaskSpecText(row.dimension, 1_000, true)
+      || !safeTaskSpecText(row.desiredDirection, 1_000, true)) return false;
+    preferenceIds.push(row.id);
+  }
+
+  const attestations = denseDataArray(projection.adapterAttestations, TASK_SPEC_ATTESTATION_CAP);
+  if (!attestations) return false;
+  const seenCriteria = new Set<string>();
+  const seenSequences = new Set<number>();
+  const seenCommandHashes = new Set<string>();
+  for (const value of attestations) {
+    const attestation = exactDataRecord(value, [
+      "commandSha256", "criterionId", "evidencePlanSha256", "exitCode", "sequence",
+      "taskSpecSha256", "version",
+    ]);
+    if (!attestation || attestation.version !== "cairn-adapter-command-attestation/v1"
+      || attestation.taskSpecSha256 !== taskSpecSha256 || attestation.evidencePlanSha256 !== evidencePlanSha256
+      || typeof attestation.criterionId !== "string" || !criterionIds.includes(attestation.criterionId)
+      || seenCriteria.has(attestation.criterionId) || typeof attestation.commandSha256 !== "string"
+      || !SHA256.test(attestation.commandSha256) || seenCommandHashes.has(attestation.commandSha256)
+      || !Number.isSafeInteger(attestation.sequence)
+      || (attestation.sequence as number) < 0 || (attestation.sequence as number) >= 64
+      || seenSequences.has(attestation.sequence as number) || !Number.isSafeInteger(attestation.exitCode)
+      || Object.is(attestation.exitCode, -0) || (attestation.exitCode as number) < -1
+      || (attestation.exitCode as number) > 255) return false;
+    seenCriteria.add(attestation.criterionId);
+    seenSequences.add(attestation.sequence as number);
+    seenCommandHashes.add(attestation.commandSha256);
+  }
+
+  let workerClaimDisposition: "DONE" | "STOPPED" | null = null;
+  if (projection.workerClaims !== null) {
+    const claims = exactDataRecord(projection.workerClaims, [
+      "changes", "criteria", "disposition", "howToTry", "limitations", "milestone",
+      "preferences", "summary", "taskSpecSha256", "version",
+    ]);
+    if (!claims || claims.version !== "cairn-task-spec-worker-claims/v1"
+      || claims.taskSpecSha256 !== taskSpecSha256
+      || (claims.disposition !== "DONE" && claims.disposition !== "STOPPED")
+      || (claims.milestone !== "YES" && claims.milestone !== "NO" && claims.milestone !== "UNCLEAR")
+      || !safeTaskSpecText(claims.summary, 300, true) || !safeTaskSpecText(claims.howToTry, 2_000, true)
+      || !safeTaskSpecText(claims.limitations, 2_000)) return false;
+    const changes = denseDataArray(claims.changes, TASK_SPEC_CHANGE_CAP);
+    const criteria = denseDataArray(claims.criteria, TASK_SPEC_ROW_CAP);
+    const preferences = denseDataArray(claims.preferences, TASK_SPEC_ROW_CAP);
+    if (!changes || changes.some((change) => !safeTaskSpecText(change, 500))
+      || !criteria || criteria.length !== criterionIds.length
+      || !preferences || preferences.length !== preferenceIds.length) return false;
+    for (let index = 0; index < criteria.length; index += 1) {
+      const claim = exactDataRecord(criteria[index], ["id", "result"]);
+      if (!claim || claim.id !== criterionIds[index] || !safeTaskSpecText(claim.result, 500)) return false;
+    }
+    for (let index = 0; index < preferences.length; index += 1) {
+      const claim = exactDataRecord(preferences[index], ["id", "result"]);
+      if (!claim || claim.id !== preferenceIds[index] || !safeTaskSpecText(claim.result, 500)) return false;
+    }
+    workerClaimDisposition = claims.disposition;
+  }
+
+  const envelope = exactDataRecord(projection.envelopeResult, [
+    "disposition", "requestSha256", "stopReason", "taskNumber", "taskSpecSha256", "version",
+  ]);
+  if (!envelope || envelope.version !== "cairn-envelope-result/v1"
+    || envelope.requestSha256 !== requestSha256 || envelope.taskSpecSha256 !== taskSpecSha256
+    || !Number.isSafeInteger(envelope.taskNumber) || (envelope.taskNumber as number) < 1
+    || (envelope.disposition !== "DONE" && envelope.disposition !== "STOPPED")
+    || (envelope.disposition === "DONE"
+      ? envelope.stopReason !== null
+      : !safeTaskSpecText(envelope.stopReason, 128, true))
+    || envelope.taskNumber !== card.taskNumber || envelope.disposition !== card.disposition
+    || envelope.stopReason !== card.stopReason || card.claims !== null) return false;
+  if (envelope.disposition === "DONE"
+    && (workerClaimDisposition !== "DONE"
+      || attestations.length !== criterionIds.length
+      || criterionIds.some((criterionId) => !seenCriteria.has(criterionId))
+      || criterionIds.some((_, index) => !seenSequences.has(index)))) return false;
+  return true;
+}
+
+function sameAcceptedRequest(
+  left: NonNullable<ResultCard["acceptedRequest"]>,
+  right: NonNullable<ResultCard["acceptedRequest"]>,
+): boolean {
+  const sameRow = (a: typeof left.outcome, b: typeof right.outcome): boolean =>
+    a.source === b.source && a.text === b.text && a.ownerText === b.ownerText;
+  return sameRow(left.outcome, right.outcome) && left.requirements.length === right.requirements.length
+    && left.requirements.every((row, index) => {
+      const other = right.requirements[index];
+      return other !== undefined && sameRow(row, other);
+    });
+}
+
+function validTaskReviewProjection(value: unknown, card: Partial<ResultCard>): boolean {
+  const projection = parseTaskReviewProjection(value);
+  if (projection === null || card.acceptedRequest === undefined || card.acceptedRequest === null
+    || !sameAcceptedRequest(projection.plan.request, card.acceptedRequest)) return false;
+  if (projection.criteria.some((criterion) => criterion.ownerChecks.some((check) => check.action !== null))) return false;
+  const result = card.taskSpecResult;
+  if (result === undefined) return true;
+  return projection.plan.criteria.length === result.requiredPromises.length
+    && projection.plan.criteria.every((criterion, index) => {
+      const required = result.requiredPromises[index];
+      return required !== undefined && required.id === criterion.id && required.promise === criterion.promise;
+    })
+    && projection.plan.preferences.length === result.advisoryPreferences.length
+    && projection.plan.preferences.every((preference, index) => {
+      const advisory = result.advisoryPreferences[index];
+      return advisory !== undefined && advisory.id === preference.id && advisory.dimension === preference.dimension
+        && advisory.desiredDirection === preference.desiredDirection;
+    });
+}
+
 function isResultCard(value: unknown): value is ResultCard {
   try {
     if (typeof value !== "object" || value === null || nodeTypes.isProxy(value)) return false;
@@ -448,6 +610,12 @@ function isResultCard(value: unknown): value is ResultCard {
     const acceptedRequest = Object.getOwnPropertyDescriptor(value, "acceptedRequest");
     if (acceptedRequest && (!("value" in acceptedRequest) || !acceptedRequest.enumerable
       || (acceptedRequest.value !== null && !validAcceptedRequestView(acceptedRequest.value)))) return false;
+    const taskSpecResult = Object.getOwnPropertyDescriptor(value, "taskSpecResult");
+    if (taskSpecResult && (!("value" in taskSpecResult) || !taskSpecResult.enumerable
+      || !validTaskSpecResultProjection(taskSpecResult.value, card))) return false;
+    const taskReview = Object.getOwnPropertyDescriptor(value, "taskReview");
+    if (taskReview && (!("value" in taskReview) || !taskReview.enumerable
+      || !validTaskReviewProjection(taskReview.value, card))) return false;
     return card.kind === "result"
       && (card.disposition === "DONE" || card.disposition === "STOPPED" || card.disposition === "ERROR")
       && Array.isArray(card.filesChanged)

@@ -4,14 +4,359 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  EVIDENCE_PLAN_CANDIDATE_VERSION,
+  bindInitialEvidencePlan,
+  bindTaskIntent,
+  evidencePlanSha256,
+  parseTaskIntentCandidate,
+  taskSpecSha256,
+  type EvidenceCommandCandidateV1,
+  type EvidencePlanV1,
+  type TaskSpecV1,
+} from "@cairn/core";
+import {
+  composeConversationTaskSpecProposal,
+  parseConductorQualityProposal,
+} from "../src/main/conductor/qualityproposal.js";
+import {
   discardUnfinalizedEvidenceRun,
   evidenceRunRecordPath,
   finalizeEvidenceRun,
+  isMainAdapterCommandEvidenceReduction,
   readEvidenceAlbum,
   readEvidenceImage,
   recordEvidenceCapture,
+  reduceAdapterCommandEvidence,
   setEvidenceMarkerDir,
 } from "../src/main/evidence.js";
+
+const EVIDENCE_OWNER_ID = "12121212-1212-4212-8212-121212121212";
+const EVIDENCE_OWNER_TEXT = "Show the status badge. Keep the save flow working.";
+const CANDIDATE_SHA256 = "c".repeat(64);
+
+function commandEvidenceTaskSpec(): TaskSpecV1 {
+  const candidate = parseTaskIntentCandidate({
+    version: "cairn-task-intent/v1",
+    outcome: {
+      source: "owner-stated",
+      text: "Show the status badge.",
+      ownerQuote: "Show the status badge.",
+    },
+    requirements: [{
+      source: "owner-stated",
+      text: "Keep the save flow working.",
+      ownerQuote: "Keep the save flow working.",
+    }],
+    context: [],
+  });
+  assert.ok(candidate);
+  const intent = bindTaskIntent(candidate, [{
+    kind: "conversation",
+    inputId: EVIDENCE_OWNER_ID,
+    text: EVIDENCE_OWNER_TEXT,
+  }]);
+  assert.ok(intent);
+  const failureFor = (promise: string) =>
+    `The result does not satisfy this exact request or its supported path: ${promise}`;
+  const proofFor = (promise: string) =>
+    `The approved check answers this exact request and its supported path: ${promise}`;
+  const proposal = parseConductorQualityProposal({
+    version: "cairn-quality-proposal/v1",
+    supportedPath: {
+      statement: "Keep the save flow working.",
+      basis: [{ kind: "requirement", position: 1 }],
+    },
+    critic: {
+      mode: "optional",
+      reason: "No required critic was requested.",
+      basis: [],
+    },
+    checks: [
+      {
+        promise: "Show the status badge.",
+        basis: [{ kind: "outcome" }],
+        supportsPath: false,
+        judge: "cairn",
+        failure: failureFor("Show the status badge."),
+        evidence: {
+          mode: "adapter-attestation",
+          proves: proofFor("Show the status badge."),
+          precondition: null,
+        },
+      },
+      {
+        promise: "Keep the save flow working.",
+        basis: [{ kind: "requirement", position: 1 }],
+        supportsPath: true,
+        judge: "cairn",
+        failure: failureFor("Keep the save flow working."),
+        evidence: {
+          mode: "adapter-attestation",
+          proves: proofFor("Keep the save flow working."),
+          precondition: null,
+        },
+      },
+    ],
+    preferences: [],
+    referenceRequests: [],
+    unknowns: [],
+  });
+  assert.ok(proposal);
+  const bundle = composeConversationTaskSpecProposal(intent, proposal);
+  assert.ok(bundle);
+  return bundle.taskSpec;
+}
+
+function evidenceCommand(
+  id: string,
+  overrides: Partial<EvidenceCommandCandidateV1> = {},
+): EvidenceCommandCandidateV1 {
+  return {
+    executablePath: "node",
+    executableSha256: "e".repeat(64),
+    arguments: [
+      { kind: "literal", value: "--test" },
+      { kind: "literal", value: id },
+    ],
+    fixtureBindings: [],
+    cwdRelative: "app",
+    expectedExitCodes: [0],
+    timeoutMs: 60_000,
+    resultParserMode: "exit-code",
+    assertion: { id: `assert-${id}`, expectedResult: "the selected test exits zero" },
+    ...overrides,
+  };
+}
+
+function commandEvidenceFixture(
+  commands: readonly EvidenceCommandCandidateV1[] = [evidenceCommand("first"), evidenceCommand("second")],
+): Readonly<{ taskSpec: TaskSpecV1; evidencePlan: EvidencePlanV1; hashes: readonly string[] }> {
+  const taskSpec = commandEvidenceTaskSpec();
+  assert.equal(commands.length, taskSpec.quality.acceptanceChecks.length);
+  const evidencePlan = bindInitialEvidencePlan(taskSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: taskSpec.quality.acceptanceChecks.map((criterion, index) => ({
+      criterionId: criterion.id,
+      kind: "adapter-command-attestation",
+      command: commands[index],
+      artifactIds: [criterion.failureCondition.allowedArtifactIds[0]],
+    })),
+  });
+  assert.ok(evidencePlan);
+  return Object.freeze({
+    taskSpec,
+    evidencePlan,
+    hashes: Object.freeze(evidencePlan.procedures.map((procedure) => {
+      assert.ok(procedure.command);
+      return procedure.command.sha256;
+    })),
+  });
+}
+
+function canonicalEvents(events: readonly Readonly<{
+  sequence: number;
+  commandSha256: string;
+  exitCode: number;
+}>[], complete = true, representation: "cairn-evidence-command/v1" | "opaque-provider-command/v1" = "cairn-evidence-command/v1") {
+  return { representation, complete, events };
+}
+
+test("canonical unique command events become branded Main attestations and criterion results", () => {
+  const fx = commandEvidenceFixture();
+  const reduction = reduceAdapterCommandEvidence(
+    fx.taskSpec,
+    fx.evidencePlan,
+    canonicalEvents([
+      { sequence: 0, commandSha256: fx.hashes[0], exitCode: 0 },
+      { sequence: 1, commandSha256: fx.hashes[1], exitCode: 0 },
+    ]),
+    CANDIDATE_SHA256,
+  );
+  assert.ok(reduction);
+  assert.equal(isMainAdapterCommandEvidenceReduction(reduction), true);
+  assert.equal(isMainAdapterCommandEvidenceReduction(structuredClone(reduction)), false);
+  assert.deepEqual(reduction.criterionResults.map((result) => ({
+    id: result.criterionId,
+    status: result.status,
+    source: result.source,
+    refs: result.evidenceRefs,
+    resolution: result.resolutionSha256,
+  })), fx.taskSpec.quality.acceptanceChecks.map((criterion) => ({
+    id: criterion.id,
+    status: "met",
+    source: "adapter-execution",
+    refs: [criterion.failureCondition.allowedArtifactIds[0]],
+    resolution: null,
+  })));
+  assert.deepEqual(reduction.adapterAttestations.map((attestation) => ({
+    id: attestation.criterionId,
+    sequence: attestation.sequence,
+    hash: attestation.commandSha256,
+    exit: attestation.exitCode,
+  })), [
+    { id: "c1", sequence: 0, hash: fx.hashes[0], exit: 0 },
+    { id: "c2", sequence: 1, hash: fx.hashes[1], exit: 0 },
+  ]);
+  assert.equal(reduction.taskSpecSha256, taskSpecSha256(fx.taskSpec));
+  assert.equal(reduction.evidencePlanSha256, evidencePlanSha256(fx.evidencePlan));
+  assert.equal(reduction.candidateSha256, CANDIDATE_SHA256);
+  assert.ok(Object.isFrozen(reduction));
+  assert.ok(Object.isFrozen(reduction.adapterAttestations));
+  assert.ok(reduction.adapterAttestations.every(Object.isFrozen));
+  assert.ok(Object.isFrozen(reduction.criterionResults));
+  assert.ok(reduction.criterionResults.every((result) => Object.isFrozen(result) && Object.isFrozen(result.evidenceRefs)));
+});
+
+test("unexpected exit and a successful but ill-chosen command affect only their planned cN", () => {
+  const fx = commandEvidenceFixture();
+  const mixed = reduceAdapterCommandEvidence(
+    fx.taskSpec,
+    fx.evidencePlan,
+    canonicalEvents([
+      { sequence: 0, commandSha256: fx.hashes[0], exitCode: 7 },
+      { sequence: 1, commandSha256: fx.hashes[1], exitCode: 0 },
+    ]),
+    CANDIDATE_SHA256,
+  );
+  assert.ok(mixed);
+  assert.deepEqual(mixed.criterionResults.map((result) => result.status), ["not-met", "met"]);
+  assert.deepEqual(mixed.adapterAttestations.map((attestation) => attestation.exitCode), [7, 0]);
+
+  const onlySecond = reduceAdapterCommandEvidence(
+    fx.taskSpec,
+    fx.evidencePlan,
+    canonicalEvents([{ sequence: 0, commandSha256: fx.hashes[1], exitCode: 0 }]),
+    CANDIDATE_SHA256,
+  );
+  assert.ok(onlySecond);
+  assert.deepEqual(onlySecond.criterionResults.map((result) => result.status), ["cant-tell", "met"]);
+  assert.deepEqual(onlySecond.criterionResults[0].evidenceRefs, []);
+  assert.deepEqual(onlySecond.adapterAttestations.map((attestation) => attestation.criterionId), ["c2"]);
+});
+
+test("missing, duplicate, incomplete, opaque, and unrelated process facts stay cant-tell", () => {
+  const fx = commandEvidenceFixture();
+  const cases = [
+    canonicalEvents([]),
+    canonicalEvents([
+      { sequence: 0, commandSha256: fx.hashes[0], exitCode: 0 },
+      { sequence: 1, commandSha256: fx.hashes[0], exitCode: 0 },
+    ]),
+    canonicalEvents([
+      { sequence: 0, commandSha256: fx.hashes[0], exitCode: 0 },
+      { sequence: 1, commandSha256: fx.hashes[1], exitCode: 0 },
+    ], false),
+    canonicalEvents([
+      { sequence: 0, commandSha256: fx.hashes[0], exitCode: 0 },
+      { sequence: 1, commandSha256: fx.hashes[1], exitCode: 0 },
+    ], true, "opaque-provider-command/v1"),
+    canonicalEvents([{ sequence: 0, commandSha256: "9".repeat(64), exitCode: 0 }]),
+  ];
+  for (const events of cases) {
+    const reduction = reduceAdapterCommandEvidence(
+      fx.taskSpec,
+      fx.evidencePlan,
+      events,
+      CANDIDATE_SHA256,
+    );
+    assert.ok(reduction);
+    assert.ok(reduction.criterionResults.every((result) =>
+      result.status === "cant-tell" && result.evidenceRefs.length === 0));
+  }
+  assert.equal(reduceAdapterCommandEvidence(
+    fx.taskSpec,
+    fx.evidencePlan,
+    cases[2],
+    CANDIDATE_SHA256,
+  )?.adapterAttestations.length, 0, "an incomplete stream mints no attestations");
+});
+
+test("an ambiguous predeclared command hash cannot let one event choose either cN", () => {
+  const shared = evidenceCommand("shared");
+  const fx = commandEvidenceFixture([shared, shared]);
+  assert.equal(fx.hashes[0], fx.hashes[1]);
+  const reduction = reduceAdapterCommandEvidence(
+    fx.taskSpec,
+    fx.evidencePlan,
+    canonicalEvents([{ sequence: 0, commandSha256: fx.hashes[0], exitCode: 0 }]),
+    CANDIDATE_SHA256,
+  );
+  assert.ok(reduction);
+  assert.deepEqual(reduction.criterionResults.map((result) => result.status), ["cant-tell", "cant-tell"]);
+  assert.deepEqual(reduction.adapterAttestations, []);
+});
+
+test("authority injection, clones, and executable-looking command text fail closed or remain inert", () => {
+  const base = mkdtempSync(join(tmpdir(), "cairn-command-inert-"));
+  const sentinel = join(base, "must-not-exist.txt");
+  try {
+    const dangerous = evidenceCommand("inert", {
+      arguments: [{ kind: "literal", value: `--write-file=${sentinel}` }],
+      assertion: { id: "inert-command", expectedResult: "the executable-looking prose stays inert" },
+    });
+    const fx = commandEvidenceFixture([dangerous, evidenceCommand("second")]);
+    const event = { sequence: 0, commandSha256: fx.hashes[0], exitCode: 0 };
+    const reduction = reduceAdapterCommandEvidence(
+      fx.taskSpec,
+      fx.evidencePlan,
+      canonicalEvents([event]),
+      CANDIDATE_SHA256,
+    );
+    assert.ok(reduction);
+    assert.equal(existsSync(sentinel), false);
+    const retained = JSON.stringify(reduction);
+    assert.equal(retained.includes(sentinel), false);
+    assert.equal(retained.includes("--write-file"), false);
+    assert.equal(retained.includes("executablePath"), false);
+    assert.equal(retained.includes("expectedExitCodes"), false);
+
+    let accessorRead = false;
+    const accessorBundle = canonicalEvents([event]) as Record<string, unknown>;
+    Object.defineProperty(accessorBundle, "events", {
+      enumerable: true,
+      get() {
+        accessorRead = true;
+        return [event];
+      },
+    });
+    assert.equal(reduceAdapterCommandEvidence(
+      fx.taskSpec,
+      fx.evidencePlan,
+      accessorBundle,
+      CANDIDATE_SHA256,
+    ), null);
+    assert.equal(accessorRead, false);
+
+    for (const authorityField of ["criterionId", "artifactIds", "source", "status", "rawCommand"]) {
+      assert.equal(reduceAdapterCommandEvidence(
+        fx.taskSpec,
+        fx.evidencePlan,
+        canonicalEvents([{ ...event, [authorityField]: authorityField === "criterionId" ? "c2" : "forged" }]),
+        CANDIDATE_SHA256,
+      ), null, authorityField);
+    }
+    assert.equal(reduceAdapterCommandEvidence(
+      structuredClone(fx.taskSpec),
+      fx.evidencePlan,
+      canonicalEvents([event]),
+      CANDIDATE_SHA256,
+    ), null);
+    assert.equal(reduceAdapterCommandEvidence(
+      fx.taskSpec,
+      structuredClone(fx.evidencePlan),
+      canonicalEvents([event]),
+      CANDIDATE_SHA256,
+    ), null);
+    assert.equal(reduceAdapterCommandEvidence(
+      fx.taskSpec,
+      fx.evidencePlan,
+      canonicalEvents([event]),
+      "C".repeat(64),
+    ), null);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
 
 function png(width = 1320, height = 820, fill = 0): Buffer {
   const value = Buffer.alloc(32, fill);

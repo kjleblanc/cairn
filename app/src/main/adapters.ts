@@ -10,6 +10,7 @@ import {
   kimiExecConnectionReason,
   type CodexExecStatus,
   type CodexStatusProbe,
+  type AdapterTaskQualityBinding,
   type KimiDetectionProbes,
   type KimiExecStatus,
   type TaskAdapter,
@@ -64,7 +65,10 @@ async function waitForTestDetectionBarrier(): Promise<void> {
  * `authorized` names the WHOLE request the owner confirmed — outcome and
  * immutable intent. Each adapter's authorization gate re-derives its expected
  * card and canonical request hash from that intent (Kimi also uses its
- * observed billing).
+ * observed billing). `quality` is the dark Q4 binding for a Task-Spec route.
+ * Omitting it preserves the existing intent-only authorization and disclosure
+ * bytes. Kimi is deliberately left unauthorized for that staged route because
+ * its stream cannot authenticate canonical Evidence Plan command events.
  *
  * Each adapter is constructed only when its own detection says connected;
  * disconnected adapters would be filtered by `routeTask` anyway, and the
@@ -75,6 +79,7 @@ export async function detectedAdapters(
   dir: string,
   authorized?: TaskIntent,
   probes?: DetectionProbes,
+  quality?: AdapterTaskQualityBinding,
 ): Promise<DetectedAdapters> {
   await waitForTestDetectionBarrier();
   if (mock) return { adapters: [createOfflineDemoAdapter()] };
@@ -82,10 +87,18 @@ export async function detectedAdapters(
   const kimi = await detectKimiExecStatus(dir, probes?.kimi);
   const adapters: TaskAdapter[] = [];
   if (codex.installed && codex.connected) {
-    adapters.push(createCodexExecAdapter(dir, codex, authorized ? authorizeCodexExec(dir, authorized) : undefined));
+    const authorization = authorized
+      ? (quality === undefined
+          ? authorizeCodexExec(dir, authorized)
+          : authorizeCodexExec(dir, authorized, quality))
+      : undefined;
+    adapters.push(createCodexExecAdapter(dir, codex, authorization));
   }
   if (kimi.installed && kimi.connected) {
-    adapters.push(createKimiExecAdapter(dir, kimi, authorized ? authorizeKimiExec(dir, kimi.billing, authorized) : undefined));
+    const authorization = authorized && quality === undefined
+      ? authorizeKimiExec(dir, kimi.billing, authorized)
+      : undefined;
+    adapters.push(createKimiExecAdapter(dir, kimi, authorization));
   }
   return { adapters, status: { codex, kimi } };
 }

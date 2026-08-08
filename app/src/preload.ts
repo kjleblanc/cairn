@@ -17,6 +17,7 @@ const api: CairnApi = {
   taskRoute: (request) => ipcRenderer.invoke("task:route", request),
   taskPreviewDiscard: (dir, previewId) => ipcRenderer.invoke("task:preview-discard", dir, previewId),
   taskRun: (request) => ipcRenderer.invoke("task:run", request),
+  taskReviewAction: (request) => ipcRenderer.invoke("task:review-action", request),
   taskCancel: (dir) => ipcRenderer.invoke("task:cancel", dir),
   taskCurrent: (dir) => ipcRenderer.invoke("task:current", dir),
   taskAcknowledge: (dir) => ipcRenderer.invoke("task:acknowledge", dir),

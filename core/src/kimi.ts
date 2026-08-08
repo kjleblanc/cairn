@@ -518,8 +518,8 @@ export interface KimiExecProcessOptions {
 
 /** On Windows the child may be a cmd.exe shim chain; killing only the shim
  * orphans the real kimi process, so the whole tree goes. */
-function killKimiProcessTree(child: ChildProcess, workspaceRoot: string): void {
-  if (child.pid === undefined) return;
+function killKimiProcessTree(child: ChildProcess, workspaceRoot: string): Promise<boolean> {
+  if (child.pid === undefined) return Promise.resolve(false);
   if (process.platform === "win32") {
     const testLane = process.env.CAIRN_TEST_LANE === "1";
     const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
@@ -527,29 +527,51 @@ function killKimiProcessTree(child: ChildProcess, workspaceRoot: string): void {
     const taskkill = testLane
       ? strictTestLaneWindowsSystemExecutable(workspaceRoot, "taskkill.exe")
       : existsSync(normalTaskkill) ? normalTaskkill : "taskkill";
-    if (!taskkill) {
+    const directFallback = (): false => {
       try { child.kill(); } catch { /* already gone */ }
-      return;
-    }
-    try {
-      const killer = spawn(taskkill, ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-      killer.once("error", () => { try { child.kill(); } catch { /* already gone */ } });
-      killer.unref();
-    } catch {
-      try { child.kill(); } catch { /* already gone */ }
-    }
+      // A direct shim kill cannot prove that its descendants also stopped.
+      return false;
+    };
+    if (!taskkill) return Promise.resolve(directFallback());
+    return new Promise((resolveKill) => {
+      let finished = false;
+      const finishFallback = (): void => {
+        if (finished) return;
+        finished = true;
+        resolveKill(directFallback());
+      };
+      try {
+        const killer = spawn(taskkill, ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        killer.once("error", finishFallback);
+        killer.once("close", (code) => {
+          if (finished) return;
+          if (code !== 0) {
+            finishFallback();
+            return;
+          }
+          finished = true;
+          resolveKill(true);
+        });
+        killer.unref();
+      } catch {
+        finishFallback();
+      }
+    });
   } else {
     // The child leads its own process group (spawned detached on POSIX), so a
     // negative PID SIGKILLs the whole group. If the group send fails, fall
     // back to a direct SIGKILL of the child.
     try {
       process.kill(-child.pid, "SIGKILL");
+      return Promise.resolve(true);
     } catch {
       try {
         child.kill("SIGKILL");
       } catch {
         // Already gone.
       }
+      // A leader-only fallback cannot prove that every descendant stopped.
+      return Promise.resolve(false);
     }
   }
 }
@@ -691,6 +713,7 @@ export function createSystemKimiExecProcess(options?: KimiExecProcessOptions): K
         const absoluteMs = options?.absoluteMs ?? KIMI_EXEC_ABSOLUTE_MS;
         let timedOut: KimiExecTimeoutKind | null = null;
         let cancelled = false;
+        let treeKillOutcome: Promise<boolean> | null = null;
         let forceSettle: NodeJS.Timeout | undefined;
         // If even the tree kill cannot make the child close, settle anyway.
         const armForceSettle = (reject: () => void): NodeJS.Timeout => setTimeout(() => {
@@ -707,7 +730,7 @@ export function createSystemKimiExecProcess(options?: KimiExecProcessOptions): K
         const fireTimeout = (kind: KimiExecTimeoutKind): void => {
           if (settled || timedOut || cancelled) return;
           timedOut = kind;
-          killKimiProcessTree(child, request.cwd);
+          treeKillOutcome = killKimiProcessTree(child, request.cwd);
           // Force-settle: the kill fired but the child never closed, so a live
           // orphan may still be writing — the kill is NOT confirmed.
           forceSettle = armForceSettle(() => rejectRun(new KimiExecTimeoutError(kind, debugPath, false)));
@@ -715,7 +738,7 @@ export function createSystemKimiExecProcess(options?: KimiExecProcessOptions): K
         const onAbort = (): void => {
           if (settled || cancelled || timedOut) return;
           cancelled = true;
-          killKimiProcessTree(child, request.cwd);
+          treeKillOutcome = killKimiProcessTree(child, request.cwd);
           // Force-settle: the kill fired but the child never closed, so a live
           // orphan may still be writing — the kill is NOT confirmed.
           forceSettle = armForceSettle(() => rejectRun(new KimiExecCancelledError(debugPath, false)));
@@ -809,21 +832,28 @@ export function createSystemKimiExecProcess(options?: KimiExecProcessOptions): K
           debugWrite(debugStderrPath, chunk.toString("utf8"));
         });
         child.once("close", (code) => {
-          clearWatchdog();
           if (cancelled) {
             if (settled) return;
-            settled = true;
-            // The child closed after the kill: the kill is confirmed.
-            rejectRun(new KimiExecCancelledError(debugPath, true));
+            void (treeKillOutcome ?? Promise.resolve(false)).then((killConfirmed) => {
+              if (settled) return;
+              clearWatchdog();
+              settled = true;
+              rejectRun(new KimiExecCancelledError(debugPath, killConfirmed));
+            });
             return;
           }
           if (timedOut) {
             if (settled) return;
-            settled = true;
-            // The child closed after the kill: the kill is confirmed.
-            rejectRun(new KimiExecTimeoutError(timedOut, debugPath, true));
+            const timeoutKind = timedOut;
+            void (treeKillOutcome ?? Promise.resolve(false)).then((killConfirmed) => {
+              if (settled) return;
+              clearWatchdog();
+              settled = true;
+              rejectRun(new KimiExecTimeoutError(timeoutKind, debugPath, killConfirmed));
+            });
             return;
           }
+          clearWatchdog();
           if (settled) return;
           if (stdout.trim() && !skippingOversizedLine) {
             applyEvidence(streamJsonEvidence(stdout));

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -13,6 +13,7 @@ import { QuestionCard } from "../components/QuestionCard";
 import { Scene } from "../components/Scene";
 import { TaskCard } from "../components/TaskCard";
 import { TaskIntentList } from "../components/TaskIntentList";
+import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoice } from "../components/TaskReview";
 import { Pill } from "../components/Ui";
 
 /** Tracks one in-flight `send()`. `id` starts out as whatever conversation
@@ -65,166 +66,12 @@ type Dispatch = {
   /** Main's optional display projection from this exact route response. The
    * proposal card's copy is deliberately never promoted into dispatch state. */
   taskSpecPreview: TaskSpecProposalPreviewV1 | null;
+  taskReview: TaskReviewProjectionV1 | null;
   route: RouteResult | null;
   disclosure: WorkerDisclosure | null;
   phase: "confirm" | "running" | "settling";
   error: string | null;
 };
-
-function previewSourceLabel(source: string): string {
-  if (source === "owner outcome") return "what you asked for";
-  if (source === "Cairn default: not-requested") return "Cairn's default because you did not request this setting";
-  const requirement = /^requirement (\d+): (owner-stated|owner-unsure|cairn-chosen)$/u.exec(source);
-  if (!requirement) return source;
-  if (requirement[2] === "owner-stated") return `your requirement ${requirement[1]}`;
-  if (requirement[2] === "owner-unsure") return `something you were unsure about in requirement ${requirement[1]}`;
-  return `a Cairn choice in requirement ${requirement[1]}`;
-}
-
-function PreviewSources({ sources }: { sources: readonly string[] }) {
-  if (sources.length === 0) return null;
-  return <p className="small muted task-spec-preview-source">Source: {sources.map(previewSourceLabel).join("; ")}</p>;
-}
-
-function previewMinutes(milliseconds: number): string {
-  return milliseconds % 60_000 === 0
-    ? `${milliseconds / 60_000} minutes`
-    : `${milliseconds.toLocaleString("en-US")} milliseconds`;
-}
-
-function previewBytes(bytes: number): string {
-  return `${bytes.toLocaleString("en-US")} captured output bytes`;
-}
-
-function previewJudge(judge: TaskSpecProposalPreviewV1["criteria"][number]["judge"]): string {
-  if (judge === "cairn") return "Checked by Cairn";
-  if (judge === "critic") return "Inspected by the independent critic";
-  return "Judged by you";
-}
-
-function previewEvidenceMode(mode: TaskSpecProposalPreviewV1["criteria"][number]["evidence"]["mode"]): string {
-  if (mode === "adapter-attestation") return "the worker's recorded check";
-  if (mode === "artifact-inspection") return "inspection of a captured artifact";
-  if (mode === "owner-observation") return "your observation";
-  return "a frozen comparison";
-}
-
-/** Pure display of main's output-only Task Spec projection. This component has
- * no control, callback, or IPC path: changing its structured-cloned props can
- * only change what this renderer copy shows. */
-export function TaskSpecProposalPreviewView({ preview, heading = "Quality plan preview" }: {
-  preview: TaskSpecProposalPreviewV1;
-  heading?: string;
-}) {
-  const criticMode = preview.critic.mode === "required"
-    ? "Required"
-    : preview.critic.mode === "optional"
-      ? "Optional"
-      : "Off";
-  const budget = preview.callBudget;
-
-  return (
-    <section className="card task-spec-preview" aria-label={heading}>
-      <h2 className="card-title task-spec-preview-heading">{heading}</h2>
-      <TaskIntentList request={preview.request} heading="Request and source" />
-
-      <section className="task-spec-preview-section">
-        <h3>Supported path to protect</h3>
-        <p>{preview.supportedPath.statement}</p>
-        <PreviewSources sources={preview.supportedPath.sources} />
-      </section>
-
-      <section className="task-spec-preview-section">
-        <h3>Required promises</h3>
-        <ul className="task-spec-preview-list">
-          {preview.criteria.map((criterion) => (
-            <li key={criterion.id}>
-              <p><strong>{criterion.id} — required promise</strong></p>
-              <p>{criterion.promise}</p>
-              <p className="small muted">{previewJudge(criterion.judge)}. If this promise fails: {criterion.failure}</p>
-              <p className="small muted">Evidence must show: {criterion.evidence.proves}</p>
-              <p className="small muted">Evidence comes from {previewEvidenceMode(criterion.evidence.mode)}.</p>
-              {criterion.evidence.precondition !== null ? (
-                <p className="small muted">Needed first: {criterion.evidence.precondition}</p>
-              ) : null}
-              <PreviewSources sources={criterion.sources} />
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="task-spec-preview-section">
-        <h3>Preferences</h3>
-        {preview.preferences.length === 0 ? (
-          <p className="small muted">No advisory preferences were added.</p>
-        ) : (
-          <ul className="task-spec-preview-list">
-            {preview.preferences.map((preference) => (
-              <li key={preference.id}>
-                <p><strong>{preference.id} — advisory preference, not a DONE gate</strong></p>
-                <p>{preference.dimension}: {preference.desiredDirection}</p>
-                <PreviewSources sources={preference.sources} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="task-spec-preview-section">
-        <h3>References</h3>
-        {preview.references.length === 0 ? (
-          <p className="small muted">No frozen reference is part of this plan.</p>
-        ) : (
-          <ul className="task-spec-preview-list">
-            {preview.references.map((reference, index) => (
-              <li key={index}>
-                <p><strong>{reference.title}</strong></p>
-                <p className="small muted">Source: {reference.source}</p>
-                <p>Compare only: {reference.dimensions.join("; ")}</p>
-                <p className="small muted">Keep original: {reference.antiCopyBoundary}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="task-spec-preview-section">
-        <h3>Questions still unresolved</h3>
-        {preview.unknowns.length === 0 ? (
-          <p className="small muted">None.</p>
-        ) : (
-          <ul className="task-spec-preview-list">
-            {preview.unknowns.map((unknown, index) => (
-              <li key={index}>
-                <p>{unknown.text}</p>
-                <PreviewSources sources={unknown.sources} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="task-spec-preview-section">
-        <h3>Independent critic</h3>
-        <p><strong>{criticMode}</strong> — {preview.critic.reason}</p>
-        <PreviewSources sources={preview.critic.sources} />
-      </section>
-
-      <section className="task-spec-preview-section">
-        <h3>Whole-run limits</h3>
-        <ul className="task-spec-preview-list">
-          <li>{budget.initialBuilderCalls} initial builder call; at most {budget.maxRepairCalls} repair call.</li>
-          <li>At most {budget.maxCriticAttempts} independent critic attempts and {budget.maxExternalEvidenceCalls} external evidence calls.</li>
-          <li>Each builder or repair call: at most {previewMinutes(budget.maxBuilderElapsedMs)} and {previewBytes(budget.maxBuilderCapturedOutputBytes)}.</li>
-          <li>Each critic attempt: at most {previewMinutes(budget.maxCriticElapsedMs)} and {previewBytes(budget.maxCriticCapturedOutputBytes)}.</li>
-          <li>{budget.enforceableDollarLimitCents === null
-            ? "No enforceable dollar cap is available; each paid call still needs its own approval."
-            : `Enforceable dollar cap: ${budget.enforceableDollarLimitCents} cents.`}</li>
-        </ul>
-      </section>
-    </section>
-  );
-}
 
 type TaskSessionRefreshDetail = { dir: string; session: RunSessionSnapshot | null };
 
@@ -572,6 +419,10 @@ function ResultCardView({ card, dir, onOpenRun }: { card: ResultCard; dir: strin
         </details>
       ) : null}
 
+      {card.taskReview ? (
+        <TaskReviewView review={card.taskReview} heading="Accepted Task Spec" />
+      ) : null}
+
       {card.disposition !== "ERROR" && wroteRecords ? (
         <details className="result-card-claims">
           <summary>
@@ -761,6 +612,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // Names the dispatch a route lookup belongs to, so a slow answer for a
   // panel the owner already replaced can never land on the newer one.
   const dispatchToken = useRef(0);
+  const pendingTaskReviewAction = useRef<{ token: number; actionId: string } | null>(null);
   const streamingRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1599,6 +1451,38 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // request at once, then ask main which adapter would take it and what it
   // would disclose. The panel shows immediately so the press is never
   // silent; the route fills in when it answers.
+  async function applyTaskReviewChoice(actionId: string, action: TaskReviewActionChoice): Promise<void> {
+    const token = dispatchToken.current;
+    const expectedPreviewId = dispatch?.previewId ?? null;
+    if (expectedPreviewId === null || dispatch === null || dispatch.taskReview === null
+      || !dispatch.taskReview.criteria.some((criterion) => criterion.ownerChecks.some((check) => check.action?.actionId === actionId))
+      || pendingTaskReviewAction.current?.token === token) return;
+    const pending = { token, actionId };
+    pendingTaskReviewAction.current = pending;
+    const request = action.kind === "observe"
+      ? { dir, actionId, action: { kind: "observe" as const, decision: action.decision } }
+      : { dir, actionId, action: { kind: "resolve" as const, decision: action.decision } };
+    let response: Awaited<ReturnType<typeof cairn.taskReviewAction>>;
+    try {
+      response = await cairn.taskReviewAction(request);
+    } catch {
+      if (pendingTaskReviewAction.current === pending) pendingTaskReviewAction.current = null;
+      if (dispatchToken.current !== token) return;
+      setDispatch((current) => current === null || current.previewId !== expectedPreviewId ? current : {
+        ...current, error: "Cairn could not apply that owner-check choice. Review the current task again.",
+      });
+      return;
+    }
+    if (pendingTaskReviewAction.current === pending) pendingTaskReviewAction.current = null;
+    if (dispatchToken.current !== token) return;
+    setDispatch((current) => current === null || current.previewId !== expectedPreviewId || current.taskReview === null
+      || !current.taskReview.criteria.some((criterion) => criterion.ownerChecks.some((check) => check.action?.actionId === actionId))
+      ? current
+      : response.ok
+        ? { ...current, taskReview: response.value, error: null }
+        : { ...current, error: response.message });
+  }
+
   function onCardSend(candidate: Extract<ConductorAction, { kind: "task" }>): void {
     if (conversationResettingRef.current) return;
     if (!actionIsCurrent(candidate) || candidate.risks.length > 0) {
@@ -1611,7 +1495,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setError(null);
     setRetryRequest(null);
     setRealCallConfirmed(false);
-    setDispatch({ previewId: null, request: null, context: [], taskSpecPreview: null, route: null, disclosure: null, phase: "confirm", error: null });
+    setDispatch({ previewId: null, request: null, context: [], taskSpecPreview: null, taskReview: null, route: null, disclosure: null, phase: "confirm", error: null });
     void cairn.taskRoute({
       dir,
       source: { kind: "proposal", proposalId: candidate.actionId, conversationId: candidate.conversationId },
@@ -1632,6 +1516,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         request: response.ok ? response.value.request : current.request,
         context: response.ok ? response.value.context : current.context,
         taskSpecPreview: response.ok ? response.value.taskSpecPreview ?? null : current.taskSpecPreview,
+        taskReview: response.ok ? response.value.taskReview ?? null : current.taskReview,
         route: response.ok ? response.value.route : null,
         disclosure: response.ok ? response.value.disclosure ?? null : null,
         error: response.ok ? null : response.message,
@@ -1888,7 +1773,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                     <>
                       <h2 id={dispatchHeadingId} className="card-title dispatch-heading"
                         ref={dispatchHeadingRef} tabIndex={-1}>Start this task</h2>
-                      {dispatch.taskSpecPreview !== null ? (
+                      {dispatch.taskReview !== null ? (
+                        <>
+                          <TaskReviewView review={dispatch.taskReview} heading="Final Task Spec" onAction={(actionId, choice) => void applyTaskReviewChoice(actionId, choice)} />
+                          <p className="small muted dispatch-acceptance">
+                            Starting does not turn a Cairn-chosen value or something you were unsure about into a required promise.
+                            Only rows marked <strong>required promise</strong> are task-specific DONE gates; preferences stay advisory.
+                          </p>
+                        </>
+                      ) : dispatch.taskSpecPreview !== null ? (
                         <>
                           <TaskSpecProposalPreviewView preview={dispatch.taskSpecPreview} heading="Final quality plan" />
                           <p className="small muted dispatch-acceptance">

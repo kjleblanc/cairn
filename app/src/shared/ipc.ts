@@ -1,7 +1,9 @@
 import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 import type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
+import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
 
 export type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
+export type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
 
 export type {
   AccountLabelProvenance,
@@ -77,6 +79,8 @@ export type TaskRoutePreview = {
   /** Optional output-only Quality Plan review. Main remains the sole owner of
    * the branded Task Spec; `task:run` accepts only `previewId`. */
   taskSpecPreview?: TaskSpecProposalPreviewV1;
+  /** Optional output-only pre-seal evidence state for that exact Task Spec. */
+  taskReview?: TaskReviewProjectionV1;
 };
 /** `pushPreview`'s local-only, network-free look at what a push would do:
  * null when the current branch has no upstream configured (there is
@@ -135,6 +139,8 @@ export type RunSessionSnapshot = {
   error: string | null;
   /** Opaque main-owned identity used only to bind local captures to this run. */
   evidenceRunId?: string | null;
+  /** Output-only accepted Task Spec and pre-seal evidence state. */
+  taskReview?: TaskReviewProjectionV1;
 };
 
 /** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
@@ -393,6 +399,7 @@ export interface CairnApi {
   taskRoute(request: TaskRouteRequest): Promise<Result<TaskRoutePreview>>;
   taskPreviewDiscard(dir: string, previewId?: string): Promise<Result<null>>;
   taskRun(request: TaskRunRequest): Promise<Result<SerialRunResult>>;
+  taskReviewAction(request: TaskReviewActionRequest): Promise<Result<TaskReviewProjectionV1>>;
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
   taskAcknowledge(dir: string): Promise<Result<null>>;
@@ -440,6 +447,65 @@ export interface TaskBlock {
   concerns: TaskBlockConcern[];
   notes: string;
   details: string;
+}
+
+export const TASK_SPEC_RESULT_PROJECTION_VERSION = "cairn-task-spec-result-projection/v1" as const;
+
+/**
+ * Durable, data-only projection of Core's branded Task-Spec run record.
+ *
+ * The projection deliberately keeps four speakers/fact classes apart:
+ * required promises and advisory preferences come from the frozen Task Spec;
+ * adapter attestations carry command-hash/exit custody only; `workerClaims`
+ * remains the worker's unverified account; and `envelopeResult` is Main's
+ * separately verified terminal fact. Q4 has no critic/candidate custody, so
+ * `criticReady` is fixed false and no critic/verdict field exists.
+ */
+export interface TaskSpecResultProjectionV1 {
+  version: typeof TASK_SPEC_RESULT_PROJECTION_VERSION;
+  requestSha256: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  requiredPromises: Array<{ id: `c${number}`; promise: string }>;
+  /** Advisory guidance only; these rows never gate DONE. */
+  advisoryPreferences: Array<{
+    id: `p${number}`;
+    dimension: string;
+    desiredDirection: string;
+  }>;
+  /** Main-derived command identity/exit facts; never CriterionResultV1. */
+  adapterAttestations: Array<{
+    version: "cairn-adapter-command-attestation/v1";
+    taskSpecSha256: string;
+    evidencePlanSha256: string;
+    criterionId: `c${number}`;
+    sequence: number;
+    commandSha256: string;
+    exitCode: number;
+  }>;
+  /** Worker assertions only, even when the hash and every id match. */
+  workerClaims: {
+    version: "cairn-task-spec-worker-claims/v1";
+    taskSpecSha256: string;
+    disposition: "DONE" | "STOPPED";
+    summary: string;
+    changes: string[];
+    criteria: Array<{ id: `c${number}`; result: string }>;
+    preferences: Array<{ id: `p${number}`; result: string }>;
+    howToTry: string;
+    limitations: string;
+    milestone: "YES" | "NO" | "UNCLEAR";
+  } | null;
+  /** Main's terminal envelope fact, separate from worker claims and events. */
+  envelopeResult: {
+    version: "cairn-envelope-result/v1";
+    taskNumber: number;
+    requestSha256: string;
+    taskSpecSha256: string;
+    disposition: "DONE" | "STOPPED";
+    stopReason: string | null;
+  };
+  criticReady: false;
 }
 
 /**
@@ -504,6 +570,13 @@ export interface ResultCard {
    * path, never image data, and never included in conductor context.
    */
   evidenceRunId?: string | null;
+  /**
+   * Present only for the staged Task-Spec-bound v4 path. Absence keeps every
+   * legacy/live empty-registry card byte and meaning unchanged.
+   */
+  taskSpecResult?: TaskSpecResultProjectionV1;
+  /** Q5's source-marked Task Spec and pre-seal owner/critic evidence state. */
+  taskReview?: TaskReviewProjectionV1;
 }
 
 /** The two turns owner and Cairn take in the conversation itself. */

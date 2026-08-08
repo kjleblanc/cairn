@@ -9,6 +9,7 @@ const component = renderer(join("components", "EvidenceAlbum.tsx"));
 const questionCard = renderer(join("components", "QuestionCard.tsx"));
 const intentList = renderer(join("components", "TaskIntentList.tsx"));
 const taskCard = renderer(join("components", "TaskCard.tsx"));
+const taskReview = renderer(join("components", "TaskReview.tsx"));
 const chat = renderer(join("screens", "Chat.tsx"));
 const css = renderer("app.css");
 const motion = renderer("motion.css");
@@ -249,8 +250,10 @@ test("stale main refusals reconcile authority and expose no looping retry", () =
 });
 
 test("proposal, final preview, and result reuse the attributed intent list", () => {
-  assert.equal((chat.match(/<TaskIntentList/g) ?? []).length, 3,
-    "Chat owns the reusable Quality Plan view plus final and result instances; TaskCard owns the legacy proposal instance");
+  assert.equal((chat.match(/<TaskIntentList/g) ?? []).length, 2,
+    "Chat keeps only its legacy final-review fallback and result-card intent instance");
+  assert.equal((taskReview.match(/<TaskIntentList/g) ?? []).length, 1,
+    "the one shared Task Review component owns the reusable Quality Plan intent view");
   assert.match(chat, /<TaskIntentList request=\{dispatch\.request\} context=\{dispatch\.context\}/);
   assert.match(chat, /setDispatch\(\{ previewId: null, request: null, context: \[\]/);
   assert.ok(!/setDispatch\(\{[^}]*request: (?:action|candidate)\.request/.test(chat));

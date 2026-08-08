@@ -497,7 +497,14 @@ function requiredRowsInspectable(intent: TaskIntent): boolean {
     && !hasGlobalCriticPower(row.owner.text));
 }
 
-function previewFor(taskSpec: TaskSpecV1): TaskSpecProposalPreviewV1 | null {
+/**
+ * Main-only recomposition of the renderer-safe Task Spec preview.
+ *
+ * Q5 reuses this exact projection when it adds evidence state. Recomputing it
+ * from the branded Task Spec keeps a retained renderer copy from becoming an
+ * input authority merely because its prose happens to match.
+ */
+export function taskSpecProposalPreviewView(taskSpec: TaskSpecV1): TaskSpecProposalPreviewV1 | null {
   const review = taskSpecReviewView(taskSpec);
   if (!review) return null;
   const request = Object.freeze({
@@ -644,7 +651,7 @@ function bundle(intent: TaskIntent, proposal: ConductorQualityProposalV1): Reado
   });
   const taskSpec = bindTaskSpec(intent, candidate);
   if (!taskSpec) return null;
-  const preview = previewFor(taskSpec);
+  const preview = taskSpecProposalPreviewView(taskSpec);
   return preview ? Object.freeze({ taskSpec, preview }) : null;
 }
 
