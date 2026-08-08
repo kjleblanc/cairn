@@ -64,10 +64,12 @@ preserved unmodified. The pre-reset repository state is pinned at git tag
 ## Maintainer lanes
 
 This repository may be worked by a small number of chats at once — three
-lanes by default (contract v0.7.0, "Working in lanes"). Maintainer-facing
+lanes by default (contract v0.8.0, "Working in lanes"). Maintainer-facing
 discipline: lane B lives in a git worktree (convention `.lanes/b`, branch
 `lane/b`), a task number is claimed by committing its brief after checking
-that no brief file already carries the number, `docs/ai-work/LOG.md` carries
+that no file in `docs/ai-work/tasks/` already begins with the number — a
+report counts, and a renumbered task can leave one behind with no brief —
+`docs/ai-work/LOG.md` carries
 `merge=union` in `.gitattributes` so concurrent rows both survive, and
 landing into `main` is serial with a settle check (root `npm test` and app
 typecheck) that runs only when the main tree is between tasks. The app and

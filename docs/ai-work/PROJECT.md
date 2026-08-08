@@ -42,6 +42,6 @@ Working rule: one serial task at a time per lane; a small number of lanes
 under the contract's "Working in lanes" rules. Reviews are optional evidence,
 and real risk pauses only at the concrete action boundary.
 
-Evidence level (contract v0.7.0): **Verified** — this project keeps executable
+Evidence level (contract v0.8.0): **Verified** — this project keeps executable
 checks, written specs and decision docs, and receipts-style reports on top of
 the Core records.

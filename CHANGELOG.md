@@ -4,6 +4,29 @@ The app and the contract share one version number, declared in
 `CONTRACT-TEMPLATE.md` and the three package files. Changes are explicit local
 work; they are never downloaded or activated silently.
 
+## 0.8.0 — a brief's checks can be answered one by one — 2026-08-07
+
+- Gave every check in a task brief a stable id of the form `cN`, and required
+  the report to answer each id and to name any check added during the work as
+  an addition rather than renumbering the brief's. Promised-versus-answered is
+  now checkable; before, a brief's checks and a report's answers were two
+  independently numbered prose lists. The id carries no task number, because
+  renumbering a task rewrites its heading and not its body.
+- Taught `cairn claim` to write those ids into every new brief, so the rule is
+  one the tool follows rather than one an author has to remember.
+- Corrected the task-number rule to state what the code has always done: a
+  number is taken if any file in `docs/ai-work/tasks/` begins with it, not only
+  a brief. A renumbered task can leave a report behind with no brief.
+- Guarded `AGENTS.md` against drifting from the canonical contract. It is the
+  copy this repository runs under and every amendment edits it by hand; nothing
+  compared it to anything. The check ignores the project-facts block and
+  compares the rest.
+- Stopped a run whose change set contains a path under `docs/ai-work/verdicts/`.
+  Such a file was previously returned as a product path and committed inside
+  the worker's own task commit, which would have attributed the owner's
+  judgment to the worker and let a worker plant one.
+- Added no dependency, and changed no other run outcome.
+
 ## 0.7.0 — grounded in selected project files — 2026-08-03
 
 - Added a bounded, deterministic snapshot of selected current contents from
