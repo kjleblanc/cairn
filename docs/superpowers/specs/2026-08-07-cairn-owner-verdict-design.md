@@ -1,11 +1,23 @@
 # The Owner's Verdict — Design
 
-**Status:** proposed 2026-08-07 by Task 203; **revised the same day by Task 204
-after an adversarial review raised 68 findings, of which 39 survived refutation
-— 6 CRITICAL, 20 MAJOR, 13 MINOR.** Sits on top of the shipped evidence work
-(Tasks 173 and 188) and the followups channel (Task 157). Nothing here loosens
-an approval, a verification, or a risk boundary. Nothing here lets the owner's
-judgment move a stone, a disposition, or a milestone.
+**Status:** proposed 2026-08-07 by Task 203; revised the same day by Task 204
+after a first adversarial review raised 68 findings, of which 39 survived
+refutation (6 CRITICAL, 20 MAJOR, 13 MINOR); **revised again by Task 212 after
+a second pass raised 57, of which 22 survived — 2 CRITICAL, 7 MAJOR, 13 MINOR.**
+
+**Round two found that Task 204's headline fix was itself the defect.** Moving
+the committed copy out of `docs/ai-work/tasks/` removed the only hard rejection
+and left the spec asserting a protection that did not exist. Task 212 wrote the
+guard, proved it with a two-arm harness against the real built core, and
+rewrote the paragraph to say what the code does. **Read that as a warning about
+this document's history rather than a boast: two rounds of review, and both
+found a fabricated safety property stated as verified fact.** Nothing here
+should be relied on without running it.
+
+This design sits on top of the shipped evidence work (Tasks 173 and 188) and
+the followups channel (Task 157). Nothing here loosens an approval, a
+verification, or a risk boundary. Nothing here lets the owner's judgment move a
+stone, a disposition, or a milestone.
 
 **What the review changed, so a reader knows which parts were wrong once.** The
 committed copy moved out of `docs/ai-work/tasks/` and gained a no-active-run
@@ -383,12 +395,27 @@ exactly `[brief, report, LOG]` (`:1027-1031`). The "Working in lanes" section of
 `AGENTS.md` says it in words: "An automation is not a lane… it never touches
 task paths."
 
-**A gate matters more than the path.** `commitExactPaths` (`:794-816`) requires
-the *whole* changed set to equal the product paths plus the owned records, and
-`:1315` stops the run if HEAD moved. So **any** new non-ignored file anywhere
-in the tree — under `verdicts/` just as much as under `tasks/` — breaks a run
-in flight. Moving the path alone would not have fixed this.
-`core/test/serial.test.ts:763` already proves the mechanism as a passing test.
+**The path move alone left no protection behind it, and an earlier draft of
+this spec claimed otherwise.** That draft said `commitExactPaths` (`:794-816`)
+requires the whole changed set to equal the product paths plus the owned
+records, and concluded that **any** new non-ignored file anywhere breaks a run
+in flight. **That conclusion was false, and it was asserted as verified code
+behaviour.** `expectedCommitSet` is *derived from* the changed set
+(`:1334-1342`), so the equality holds by construction; `changedTaskPaths`
+returns every other changed path as a **product path**. Moving the verdict copy
+out of `docs/ai-work/tasks/` therefore removed the only hard rejection and put
+nothing in its place. A two-arm harness against the real built core showed the
+two paths behaving oppositely: a worker writing `docs/ai-work/verdicts/197.md`
+mid-run reached **DONE** with that file committed inside
+`Task NNN: complete verified worker task`, while `docs/ai-work/tasks/999-report.md`
+stopped. The draft also cited `core/test/serial.test.ts:763` as proof; that test
+writes a `tasks/` path and proves only the `tasks/` rule.
+
+**Task 212 made the claim true instead of deleting it.** `changedTaskPaths` now
+rejects any path under `docs/ai-work/verdicts/` outright, with a red-first test
+and a control asserting an ordinary path merely containing the word still
+commits. So the verdict tree is genuinely fail-closed — but by a guard that had
+to be written, not by one that was already there.
 
 Therefore:
 
@@ -470,8 +497,9 @@ instead of merely implausible.
 - **Every terminal run enters when its record seals.** DONE jobs carry the
   check rubric. STOPPED jobs carry `rubric: "none"` and a whole-job verdict,
   because whether stopping was right is worth judging and the checks never ran.
-- **No backfill.** The 197 sealed task records do not enter. A queue that ships
-  carrying a 197-item debt is a screen nobody opens. History stays judgeable
+- **No backfill.** Sealed task records do not enter — **206 of them as of
+  2026-08-07 at `9572220`, and climbing while this is written.** A queue that
+  ships carrying a two-hundred-item debt is a screen nobody opens. History stays judgeable
   from the album on demand.
 - **Oldest first**, so nothing rots at the bottom.
 - **Partial reviews are first-class.** Score three checks, leave two at
@@ -565,11 +593,19 @@ format goes first and gets used before anything is built on it.
 Each of these is a test rather than a claim. The first four are trust defects
 if they fail, not bugs.
 
-- **Saving a verdict during a live run cannot seal that run.** Start a run,
-  save a verdict mid-flight, and assert the run still reaches its own honest
-  outcome with HEAD unmoved by the verdict. This is the test the review's
-  CRITICAL demanded, and it is first because `core/test/serial.test.ts:763`
-  already proves the failure it guards against.
+- **A verdict path can never enter a run's commit.** Shipped by Task 212 and
+  asserted in `core/test/serial.test.ts`: a worker writing
+  `docs/ai-work/verdicts/197.md` mid-run closes `MODEL_RESULT_NOT_VERIFIED`
+  with HEAD unmoved, and a control proves an ordinary path merely containing
+  the word still commits. **An earlier wording of this criterion — "the run
+  still reaches its own honest outcome with HEAD unmoved by the verdict" —
+  passed while the file was being laundered into the run's own commit**, which
+  is why it is stated as an exclusion from the commit rather than as an
+  outcome of the run.
+- **Saving a verdict during a live run does not disturb it.** Separate from the
+  guard above: start a run, save a verdict mid-flight through the real verdict
+  path, and assert the run reaches its own outcome and the verdict is recorded
+  once the run settles. This one is still unbuilt and belongs to Plan 2.
 - **A worker cannot author a counted verdict.** A plausible
   `docs/ai-work/verdicts/197.md` written into the project renders as not
   verifiable, leaves the queue count unchanged, and is read by nothing.
