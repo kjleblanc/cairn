@@ -7,6 +7,11 @@ import { setCardMarkerDir } from "./conductor/cardauth.js";
 import { setTurnMarkerDir } from "./conductor/turnauth.js";
 import { setEvidenceMarkerDir } from "./evidence.js";
 import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./ipc.js";
+import {
+  activePendingSerialCandidates,
+  installPendingSerialCandidateRecovery,
+  parkPendingSerialCandidatesForRestart,
+} from "./pendingcandidate.js";
 import { beginQuitDrain } from "./rungate.js";
 import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
 
@@ -27,6 +32,7 @@ if (testUserData) {
 let mainWindow: BrowserWindow | null = null;
 let quitting = false;
 let readyToQuit = false;
+let bootstrapReady = false;
 
 function contractPath(): string {
   return app.isPackaged
@@ -102,6 +108,7 @@ if (process.env.CAIRN_MOCK === undefined) {
     app.quit();
   } else {
     app.on("second-instance", () => {
+      if (!bootstrapReady) return;
       if (mainWindow === null) {
         createWindow();
       } else {
@@ -129,6 +136,25 @@ function bootstrap(): void {
     // Trusted pictures use the same write boundary as card markers, but each
     // run owns a separate bounded record and its own PNG files.
     setEvidenceMarkerDir(app.getPath("userData"));
+    // Pending-run custody is synchronous by design: validate every journal,
+    // install every project gate, and reacquire exact Core locks before even
+    // one task/evidence/push IPC handler can exist. An unsafe profile stays
+    // entirely dark rather than catching the error and continuing.
+    const pendingBoot = installPendingSerialCandidateRecovery(app.getPath("userData"));
+    if (!pendingBoot.journal.ready) {
+      // An unverifiable store is already fail-closed on its own terms: every
+      // journal mutation refuses, no authority can be minted, and every
+      // project's gate reads recovery-required. Quitting here would add
+      // nothing to that and take away everything else — one drifted journal in
+      // one project would leave Cairn permanently unable to start, for every
+      // project, with no way back from inside the app. Say so plainly and open
+      // gated instead, which is what this message already describes.
+      dialog.showErrorBox(
+        "Cairn could not verify pending work",
+        "Cairn kept task, evidence, push, and verdict actions closed because its pending-run journal is missing, changed, or unsafe.",
+      );
+    }
+    bootstrapReady = true;
     registerProjectIpc();
     registerConductorIpc();
     registerBridgeIpc();
@@ -155,9 +181,28 @@ function bootstrap(): void {
   app.on("before-quit", (event) => {
     if (readyToQuit) return;
     const runs = activeTaskRuns();
-    if (runs.dirs.length === 0) return;
+    const pending = activePendingSerialCandidates();
+    if (runs.dirs.length === 0 && pending.length === 0) return;
     event.preventDefault();
     if (quitting) return; // grace already underway; keep blocking, no second dialog
+    const parkAndQuit = (): void => {
+      const parked = parkPendingSerialCandidatesForRestart();
+      if (parked.failed > 0) {
+        quitting = false;
+        dialog.showErrorBox(
+          "Cairn kept the app open",
+          "The pending result could not be matched to its authenticated journal. Cairn left the project gated and did not claim a terminal result.",
+        );
+        return;
+      }
+      readyToQuit = true;
+      app.quit();
+    };
+    if (runs.dirs.length === 0) {
+      quitting = true;
+      parkAndQuit();
+      return;
+    }
     const choice = dialog.showMessageBoxSync({
       type: "warning",
       buttons: ["Stop the task and quit", "Keep running"],
@@ -170,10 +215,12 @@ function bootstrap(): void {
     quitting = true;
     beginQuitDrain();
     runs.cancelAll();
+    // Candidate routing remains production-dark in Q7, so an active task here
+    // is still the legacy one-call path. Preserve its established grace
+    // behavior byte-for-byte; an already-journaled candidate was handled by
+    // parkAndQuit above, and Q10 must replace this grace when it activates a
+    // Builder that can race into pending-candidate state.
     const grace = new Promise((resolve) => setTimeout(resolve, 8_000));
-    void Promise.race([runs.settled(), grace]).then(() => {
-      readyToQuit = true;
-      app.quit();
-    });
+    void Promise.race([runs.settled(), grace]).then(parkAndQuit);
   });
 }

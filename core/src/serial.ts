@@ -14,12 +14,14 @@ import {
   readFileSync,
   readlinkSync,
   readSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeSync,
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { types as nodeTypes } from "node:util";
 import {
   parseTaskSpecWorkerClaims,
   parseWorkerClaims,
@@ -28,35 +30,55 @@ import {
 } from "./claims.js";
 import {
   SERIAL_CANDIDATE_VERSION,
+  SERIAL_CANDIDATE_BUNDLE_VERSION,
+  SERIAL_CANDIDATE_TRANSITION_VERSION,
+  advanceSerialCandidate,
   beginSerialCandidateTerminal,
   captureSerialCandidateBundleAfterRepair,
   captureSerialCandidateIgnoredBoundary,
   captureSerialCandidateBundle,
   completeSerialCandidateTerminal,
   composeSerialCandidate,
+  composeSerialCandidateSealAuthorization,
+  composeSerialCandidateTaskSpecAuthority,
+  composeSerialCandidateTransition,
   composeSerialCandidateRepairEligibility,
   composeSerialRepairInstruction,
   isCurrentSerialCandidate,
   isSerialCandidateSealAuthorization,
   isSerialCandidateTaskSpecAuthority,
+  parkCurrentSerialCandidate,
   serialCandidateBundleSha256,
   serialCandidateGitEnvironmentNameDenied,
   serialCandidateGitEnvironmentSafe,
   serialCandidateLineageIdentity,
+  serialCandidatePendingRepairLineage,
+  serialCandidatePendingTransitionHistory,
   serialCandidateRepairAvailability,
+  serialCandidateReservedRecordClass,
   serialCandidateSha256,
   serialCandidateTaskSpecAuthority,
   serialCandidateWorkspaceStillExact,
+  restoreSerialCandidateBundleForPending,
+  restoreSerialCandidateAfterRepairForPending,
+  restoreSerialCandidateRepairEligibilityForPending,
   type SerialCandidateBundleCaptureV1,
   type SerialCandidateBundleV1,
   type SerialCandidateSealAuthorizationV1,
   type SerialCandidateTaskSpecAuthorityV1,
+  type SerialCandidateTransitionDecisionV1,
   type SerialCandidateV1,
+  type SerialCandidatePendingRepairLineageV1,
   type SerialRepairInstructionV1,
 } from "./candidate.js";
 import { CODEX_EXEC_ADAPTER_ID } from "./codex.js";
 import { KIMI_EXEC_ADAPTER_ID } from "./kimi.js";
-import { taskRequestSha256, taskRequestView, type TaskIntent } from "./intent.js";
+import {
+  taskRequestSha256,
+  taskRequestView,
+  type TaskIntent,
+  type TaskIntentSourceInput,
+} from "./intent.js";
 import {
   ADAPTER_COMMAND_ATTESTATION_VERSION,
   ENVELOPE_RESULT_VERSION,
@@ -76,6 +98,8 @@ import {
   CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
   parseWorkerProcessEventBundle,
   routeTask,
+  isTaskAdapterCandidateStateTestSupport,
+  taskAdapterCandidateWriterSupportBoundTo,
   WorkerBoundaryError,
   WorkerProcessError,
   type AdapterTaskContract,
@@ -87,9 +111,14 @@ import {
   type WorkerRunResult,
 } from "./routing.js";
 import {
+  EVIDENCE_PLAN_CANDIDATE_VERSION,
+  EVIDENCE_PLAN_VERSION,
+  bindInitialEvidencePlan,
   evidencePlanSha256,
   taskSpecReviewView,
   taskSpecSha256,
+  validateTaskSpec,
+  type ContractSectionAuthorityV1,
   type EvidencePlanV1,
   type TaskSpecV1,
 } from "./quality.js";
@@ -116,9 +145,130 @@ export interface SerialCandidateRunOptions {
   adapters: readonly TaskAdapter[];
   adapterId?: string;
   authority: SerialCandidateTaskSpecAuthorityV1;
+  writerIsolation: SerialCandidateWriterIsolationV1;
   events?: SerialRunEvents;
   signal?: AbortSignal;
 }
+
+export const SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION =
+  "cairn-serial-candidate-writer-isolation/v1" as const;
+
+export type SerialCandidateWriterIsolationV1 = Readonly<{
+  version: typeof SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION;
+  adapterId: string;
+  projectRootSha256: string;
+  excludedUserDataRootSha256: string;
+}>;
+
+type CandidateWriterIsolationBinding = Readonly<{
+  adapter: TaskAdapter;
+  projectRootReal: string;
+  excludedUserDataRootReal: string;
+}>;
+
+const candidateWriterIsolationBrand = new WeakSet<object>();
+const candidateWriterIsolationBindings = new WeakMap<object, CandidateWriterIsolationBinding>();
+const candidateStateTestWriterIsolationBrand = new WeakSet<object>();
+const candidateStateTestWriterIsolationBindings = new WeakMap<object, CandidateWriterIsolationBinding>();
+
+export const SERIAL_PENDING_CANDIDATE_CAPSULE_VERSION =
+  "cairn-serial-pending-candidate-capsule/v1" as const;
+
+export type SerialPendingCandidateCapsuleV1 = Readonly<{
+  version: typeof SERIAL_PENDING_CANDIDATE_CAPSULE_VERSION;
+  canonicalBytes: string;
+  capsuleSha256: string;
+}>;
+
+export type SerialPendingCandidateResumeResultV1 =
+  | Readonly<{ status: "resumed"; candidate: SerialCandidateV1 }>
+  | Readonly<{
+      status: "stale";
+      reason:
+        | "INVALID_CAPSULE"
+        | "PROJECT_MISMATCH"
+        | "LIVE_LOCK_UNAVAILABLE"
+        | "WORKSPACE_CHANGED"
+        | "UNSUPPORTED_EVIDENCE_REVISION"
+        | "UNSUPPORTED_ROUND_ONE";
+    }>;
+
+export const SERIAL_CANDIDATE_TERMINAL_PREPARATION_VERSION =
+  "cairn-serial-candidate-terminal-preparation/v1" as const;
+export const SERIAL_CANDIDATE_TERMINAL_RECEIPT_VERSION =
+  "cairn-serial-candidate-terminal-receipt/v1" as const;
+
+export type SerialCandidateTerminalActionV1 = Readonly<{
+  actionId: string;
+  kind: "finalize" | "stop";
+  candidateSha256: string;
+  capsuleSha256: string;
+}>;
+
+export type SerialCandidateTerminalPreparationV1 = Readonly<{
+  version: typeof SERIAL_CANDIDATE_TERMINAL_PREPARATION_VERSION;
+  action: SerialCandidateTerminalActionV1;
+  capsule: SerialPendingCandidateCapsuleV1;
+}>;
+
+export type SerialCandidateTerminalReceiptV1 = Readonly<{
+  version: typeof SERIAL_CANDIDATE_TERMINAL_RECEIPT_VERSION;
+  actionId: string;
+  kind: "finalize" | "stop";
+  disposition: "DONE" | "STOPPED";
+  taskNumber: number;
+  candidateSha256: string;
+  preparedCapsuleSha256: string;
+  reportSha256: string;
+  logSha256: string;
+  commitStatus: "created" | "skipped";
+  commitHash: string | null;
+  terminalReceiptSha256: string;
+}>;
+
+export type SerialCandidateTerminalExecutionV1 = Readonly<{
+  result: SerialCandidateTerminalResult;
+  receipt: SerialCandidateTerminalReceiptV1;
+}>;
+
+export type SerialCandidateTerminalReconcileResultV1 =
+  | Readonly<{
+      status: "resumed";
+      candidate: SerialCandidateV1;
+      preparation: SerialCandidateTerminalPreparationV1;
+    }>
+  | Readonly<{ status: "terminal"; receipt: SerialCandidateTerminalReceiptV1 }>
+  | Readonly<{
+      status: "stale";
+      reason:
+        | "INVALID_PREPARATION"
+        | "PROJECT_MISMATCH"
+        | "LIVE_LOCK_UNAVAILABLE"
+        | "MANUAL_RECOVERY_REQUIRED"
+        | "UNSUPPORTED_EVIDENCE_REVISION"
+        | "UNSUPPORTED_ROUND_ONE";
+    }>;
+
+const SERIAL_PENDING_CANDIDATE_INNER_VERSION =
+  "cairn-serial-pending-candidate-state/v1" as const;
+const SERIAL_PREPARED_CANDIDATE_TERMINAL_INNER_VERSION =
+  "cairn-serial-prepared-candidate-terminal-state/v1" as const;
+const SERIAL_PENDING_CANDIDATE_BYTE_CAP = 4 * 1024 * 1024;
+const SHA256_RE = /^[a-f0-9]{64}$/u;
+const ACTION_UUID_V4_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+
+const exportedPendingCandidateCapsules = new WeakMap<object, Readonly<{
+  canonicalBytes: string;
+  capsuleSha256: string;
+}>>();
+const terminalPreparationBrand = new WeakSet<object>();
+const terminalPreparationBindings = new WeakMap<object, Readonly<{
+  candidate: SerialCandidateV1;
+  plan: PendingTerminalPlanV1;
+  baseCapsule: SerialPendingCandidateCapsuleV1;
+  sealAuthorization: SerialCandidateSealAuthorizationV1 | null;
+}>>();
+const terminalPreparationByCandidate = new WeakMap<object, SerialCandidateTerminalPreparationV1>();
 
 export const SERIAL_TASK_SPEC_AUTHORITY_VERSION = "cairn-serial-task-spec-authority/v1" as const;
 
@@ -216,8 +366,322 @@ function serialCandidateAuthorityFor(
   }
 }
 
-function candidateCapableAdapters(adapters: readonly TaskAdapter[]): readonly TaskAdapter[] {
-  return adapters.filter((adapter) => adapter.descriptor.capabilities.includes("serial-task-candidate"));
+function exactCandidateStateTestWriterSupport(adapter: unknown): adapter is TaskAdapter {
+  try {
+    if (typeof adapter !== "object" || adapter === null) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(adapter, "candidateWriterSupport");
+    if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor)) return false;
+    return isTaskAdapterCandidateStateTestSupport(descriptor.value);
+  } catch {
+    return false;
+  }
+}
+
+function canonicalExistingDirectory(path: unknown): string | null {
+  try {
+    if (typeof path !== "string" || path.length === 0 || path.includes("\0")) return null;
+    const resolved = resolve(path);
+    const input = lstatSync(resolved);
+    if (!input.isDirectory() || input.isSymbolicLink()) return null;
+    const real = realpathSync.native(resolved);
+    const actual = lstatSync(real);
+    return actual.isDirectory() && !actual.isSymbolicLink() ? resolve(real) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rootContains(parent: string, child: string): boolean {
+  const relation = relative(parent, child);
+  return relation === "" || (!isAbsolute(relation) && relation !== ".."
+    && !relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`));
+}
+
+function rootIdentitySha256(rootReal: string): string {
+  return createHash("sha256").update(Buffer.from(rootReal, "utf8")).digest("hex");
+}
+
+function candidateProjectRootIdentitySha256(rootReal: string): string {
+  return createHash("sha256")
+    .update(process.platform === "win32" ? rootReal.toLowerCase() : rootReal, "utf8")
+    .digest("hex");
+}
+
+/**
+ * Mint the candidate writer receipt only after binding one exact adapter to
+ * two existing, canonical, non-overlapping filesystem roots. The receipt is
+ * process-local authority; repeating its frozen fields cannot recreate it.
+ */
+export function composeSerialCandidateWriterIsolation(
+  adapter: unknown,
+  projectRoot: string,
+  excludedUserDataRoot: string,
+): SerialCandidateWriterIsolationV1 | null {
+  try {
+    const projectRootReal = canonicalExistingDirectory(projectRoot);
+    const excludedUserDataRootReal = canonicalExistingDirectory(excludedUserDataRoot);
+    if (!projectRootReal || !excludedUserDataRootReal
+      || rootContains(projectRootReal, excludedUserDataRootReal)
+      || rootContains(excludedUserDataRootReal, projectRootReal)
+      || !taskAdapterCandidateWriterSupportBoundTo(adapter, projectRootReal, excludedUserDataRootReal)
+      || !adapter.descriptor.capabilities.includes("serial-task")
+      || !adapter.descriptor.capabilities.includes("serial-task-candidate")) return null;
+    const receipt = Object.freeze({
+      version: SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION,
+      adapterId: adapter.descriptor.id,
+      projectRootSha256: rootIdentitySha256(projectRootReal),
+      excludedUserDataRootSha256: rootIdentitySha256(excludedUserDataRootReal),
+    }) as SerialCandidateWriterIsolationV1;
+    candidateWriterIsolationBrand.add(receipt);
+    candidateWriterIsolationBindings.set(receipt, Object.freeze({
+      adapter,
+      projectRootReal,
+      excludedUserDataRootReal,
+    }));
+    return receipt;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Source-test-only state harness. This receipt is deliberately held under a
+ * different brand and is rejected by public Q7 preview/run.
+ */
+export function composeSerialCandidateStateTestWriterIsolation(
+  adapter: unknown,
+  projectRoot: string,
+  excludedUserDataRoot: string,
+): SerialCandidateWriterIsolationV1 | null {
+  try {
+    if (!exactCandidateStateTestWriterSupport(adapter)
+      || !adapter.descriptor.capabilities.includes("serial-task")
+      || !adapter.descriptor.capabilities.includes("serial-task-candidate")) return null;
+    const projectRootReal = canonicalExistingDirectory(projectRoot);
+    const excludedUserDataRootReal = canonicalExistingDirectory(excludedUserDataRoot);
+    if (!projectRootReal || !excludedUserDataRootReal
+      || rootContains(projectRootReal, excludedUserDataRootReal)
+      || rootContains(excludedUserDataRootReal, projectRootReal)) return null;
+    const receipt = Object.freeze({
+      version: SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION,
+      adapterId: adapter.descriptor.id,
+      projectRootSha256: rootIdentitySha256(projectRootReal),
+      excludedUserDataRootSha256: rootIdentitySha256(excludedUserDataRootReal),
+    }) as SerialCandidateWriterIsolationV1;
+    candidateStateTestWriterIsolationBrand.add(receipt);
+    candidateStateTestWriterIsolationBindings.set(receipt, Object.freeze({
+      adapter,
+      projectRootReal,
+      excludedUserDataRootReal,
+    }));
+    return receipt;
+  } catch {
+    return null;
+  }
+}
+
+function candidateWriterIsolationBinding(
+  value: unknown,
+  projectRoot?: string,
+): CandidateWriterIsolationBinding | null {
+  try {
+    if (typeof value !== "object" || value === null || !candidateWriterIsolationBrand.has(value)) return null;
+    const receipt = value as SerialCandidateWriterIsolationV1;
+    const binding = candidateWriterIsolationBindings.get(value);
+    if (!binding || !taskAdapterCandidateWriterSupportBoundTo(
+      binding.adapter,
+      binding.projectRootReal,
+      binding.excludedUserDataRootReal,
+    )
+      || receipt.version !== SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION
+      || receipt.adapterId !== binding.adapter.descriptor.id
+      || receipt.projectRootSha256 !== rootIdentitySha256(binding.projectRootReal)
+      || receipt.excludedUserDataRootSha256 !== rootIdentitySha256(binding.excludedUserDataRootReal)) return null;
+    if (canonicalExistingDirectory(binding.projectRootReal) !== binding.projectRootReal
+      || canonicalExistingDirectory(binding.excludedUserDataRootReal) !== binding.excludedUserDataRootReal
+      || rootContains(binding.projectRootReal, binding.excludedUserDataRootReal)
+      || rootContains(binding.excludedUserDataRootReal, binding.projectRootReal)) return null;
+    if (projectRoot !== undefined && canonicalExistingDirectory(projectRoot) !== binding.projectRootReal) return null;
+    return binding;
+  } catch {
+    return null;
+  }
+}
+
+function candidateStateTestWriterIsolationBinding(
+  value: unknown,
+  projectRoot?: string,
+): CandidateWriterIsolationBinding | null {
+  try {
+    if (typeof value !== "object" || value === null || !candidateStateTestWriterIsolationBrand.has(value)) return null;
+    const receipt = value as SerialCandidateWriterIsolationV1;
+    const binding = candidateStateTestWriterIsolationBindings.get(value);
+    if (!binding || !exactCandidateStateTestWriterSupport(binding.adapter)
+      || receipt.version !== SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION
+      || receipt.adapterId !== binding.adapter.descriptor.id
+      || receipt.projectRootSha256 !== rootIdentitySha256(binding.projectRootReal)
+      || receipt.excludedUserDataRootSha256 !== rootIdentitySha256(binding.excludedUserDataRootReal)) return null;
+    if (canonicalExistingDirectory(binding.projectRootReal) !== binding.projectRootReal
+      || canonicalExistingDirectory(binding.excludedUserDataRootReal) !== binding.excludedUserDataRootReal
+      || rootContains(binding.projectRootReal, binding.excludedUserDataRootReal)
+      || rootContains(binding.excludedUserDataRootReal, binding.projectRootReal)) return null;
+    if (projectRoot !== undefined && canonicalExistingDirectory(projectRoot) !== binding.projectRootReal) return null;
+    return binding;
+  } catch {
+    return null;
+  }
+}
+
+function candidateCapableAdapters(
+  adapters: readonly TaskAdapter[],
+  isolation: SerialCandidateWriterIsolationV1,
+  projectRoot?: string,
+  stateTest = false,
+): readonly TaskAdapter[] {
+  const binding = stateTest
+    ? candidateStateTestWriterIsolationBinding(isolation, projectRoot)
+    : candidateWriterIsolationBinding(isolation, projectRoot);
+  if (!binding || !adapters.includes(binding.adapter)) return Object.freeze([]);
+  return adapters.filter((adapter) => adapter === binding.adapter
+    && (stateTest
+      ? exactCandidateStateTestWriterSupport(adapter)
+      : taskAdapterCandidateWriterSupportBoundTo(
+          adapter,
+          binding.projectRootReal,
+          binding.excludedUserDataRootReal,
+        ))
+    && adapter.descriptor.capabilities.includes("serial-task-candidate"));
+}
+
+type PendingJson = null | boolean | number | string | PendingJson[] | { [key: string]: PendingJson };
+
+type PendingDetachState = {
+  nodes: number;
+  ancestors: WeakSet<object>;
+};
+
+/** Detach JSON without invoking accessors, callbacks, proxies, or toJSON. */
+function detachPendingJson(
+  value: unknown,
+  state: PendingDetachState = { nodes: 0, ancestors: new WeakSet<object>() },
+  depth = 0,
+): PendingJson | undefined {
+  try {
+    state.nodes += 1;
+    if (state.nodes > 200_000 || depth > 64) return undefined;
+    if (value === null || typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      return Buffer.from(value, "utf8").toString("utf8") === value ? value : undefined;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) && !Object.is(value, -0) ? value : undefined;
+    }
+    if (typeof value !== "object" || nodeTypes.isProxy(value) || state.ancestors.has(value)) return undefined;
+    state.ancestors.add(value);
+    try {
+      if (Array.isArray(value)) {
+        if (Object.getPrototypeOf(value) !== Array.prototype) return undefined;
+        const descriptors = Object.getOwnPropertyDescriptors(value) as Record<string, PropertyDescriptor>;
+        const length = descriptors.length;
+        if (!length || length.enumerable || length.get || length.set || !("value" in length)
+          || !Number.isSafeInteger(length.value) || length.value < 0 || length.value > 200_000) return undefined;
+        const keys = Reflect.ownKeys(value);
+        if (keys.length !== length.value + 1 || keys.some((key) => typeof key !== "string")) return undefined;
+        const output: PendingJson[] = [];
+        for (let index = 0; index < length.value; index += 1) {
+          const descriptor = descriptors[String(index)];
+          if (!descriptor || !descriptor.enumerable || descriptor.get || descriptor.set || !("value" in descriptor)) return undefined;
+          const detached = detachPendingJson(descriptor.value, state, depth + 1);
+          if (detached === undefined) return undefined;
+          output.push(detached);
+        }
+        return output;
+      }
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) return undefined;
+      const keys = Reflect.ownKeys(value);
+      if (keys.length > 200_000 || keys.some((key) => typeof key !== "string")) return undefined;
+      const descriptors = Object.getOwnPropertyDescriptors(value) as Record<string, PropertyDescriptor>;
+      const output = Object.create(null) as { [key: string]: PendingJson };
+      for (const key of keys as string[]) {
+        const descriptor = descriptors[key];
+        if (!descriptor || !descriptor.enumerable || descriptor.get || descriptor.set || !("value" in descriptor)) return undefined;
+        const detached = detachPendingJson(descriptor.value, state, depth + 1);
+        if (detached === undefined) return undefined;
+        output[key] = detached;
+      }
+      return output;
+    } finally {
+      state.ancestors.delete(value);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function exactPendingKeys(value: unknown, expected: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
+}
+
+function pendingSha256(bytes: string): string {
+  return createHash("sha256").update(Buffer.from(bytes, "utf8")).digest("hex");
+}
+
+function pendingCanonicalBytes(value: unknown): string | null {
+  const detached = detachPendingJson(value);
+  if (detached === undefined) return null;
+  const bytes = JSON.stringify(detached);
+  return typeof bytes === "string" && Buffer.byteLength(bytes, "utf8") <= SERIAL_PENDING_CANDIDATE_BYTE_CAP
+    ? bytes
+    : null;
+}
+
+function parseAnyPendingCapsule(value: unknown): Readonly<{
+  canonicalBytes: string;
+  capsuleSha256: string;
+  inner: Record<string, unknown>;
+}> | null {
+  try {
+    const detached = detachPendingJson(value);
+    if (!exactPendingKeys(detached, ["version", "canonicalBytes", "capsuleSha256"])
+      || detached.version !== SERIAL_PENDING_CANDIDATE_CAPSULE_VERSION
+      || typeof detached.canonicalBytes !== "string"
+      || typeof detached.capsuleSha256 !== "string" || !SHA256_RE.test(detached.capsuleSha256)) return null;
+    const canonicalBytes = detached.canonicalBytes;
+    if (Buffer.byteLength(canonicalBytes, "utf8") > SERIAL_PENDING_CANDIDATE_BYTE_CAP
+      || Buffer.from(canonicalBytes, "utf8").toString("utf8") !== canonicalBytes
+      || pendingSha256(canonicalBytes) !== detached.capsuleSha256) return null;
+    const parsed = JSON.parse(canonicalBytes) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+      || JSON.stringify(parsed) !== canonicalBytes) return null;
+    return Object.freeze({
+      canonicalBytes,
+      capsuleSha256: detached.capsuleSha256,
+      inner: parsed as Record<string, unknown>,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parsePendingCapsule(value: unknown): ReturnType<typeof parseAnyPendingCapsule> {
+  const parsed = parseAnyPendingCapsule(value);
+  return parsed && exactPendingKeys(parsed.inner, [
+    "version", "projectRootReal", "projectRootSha256", "start", "startHeadRef", "contract", "route",
+    "activities", "taskPaths", "protectedPaths", "ownedPaths", "ownedRecordIndexAuthority", "attestations",
+    "attestationsCompleteForDone", "evidence", "taskSpec", "evidencePlan", "round0Bundle", "candidate",
+    "claimsText", "transitionHistory", "repairLineage", "sealableCandidateSha256", "sealableClaimsSha256",
+    "sealableBundleSha256",
+  ]) ? parsed : null;
+}
+
+function stalePendingCandidate(
+  reason: Extract<SerialPendingCandidateResumeResultV1, { status: "stale" }>["reason"],
+): SerialPendingCandidateResumeResultV1 {
+  return Object.freeze({ status: "stale", reason });
 }
 
 export function serialTaskSpecQualityBinding(
@@ -736,10 +1200,17 @@ interface SerialCandidateReportCustody {
     | "unavailable — candidate workspace no longer matches captured bundle";
 }
 
+interface SerialCandidateTerminalActionCustody {
+  actionId: string;
+  kind: "finalize" | "stop";
+  baseCapsuleSha256: string;
+}
+
 function reportWithCandidateCustody(
   report: string,
   disposition: "DONE" | "STOPPED",
   custody: SerialCandidateReportCustody | undefined,
+  terminalAction?: SerialCandidateTerminalActionCustody,
 ): string {
   if (custody === undefined) return report;
   const terminal = `Disposition: **${disposition}**\n`;
@@ -755,6 +1226,11 @@ function reportWithCandidateCustody(
     `- Candidate bundle SHA-256: \`${custody.bundleSha256}\``,
     `- Evidence-state SHA-256: \`${custody.evidenceStateSha256}\``,
     `- Repair eligibility: ${custody.repairEligibility}`,
+    ...(terminalAction ? [
+      `- Terminal action ID: \`${terminalAction.actionId}\``,
+      `- Terminal action kind: ${terminalAction.kind}`,
+      `- Pre-terminal capsule SHA-256: \`${terminalAction.baseCapsuleSha256}\``,
+    ] : []),
     "",
   ].join("\n");
   return `${report.slice(0, -terminal.length)}${block}${terminal}`;
@@ -1190,18 +1666,9 @@ function composeBoundRunRecord(
   });
 }
 
-/**
- * Cairn authors the worker's task records from the parsed claims and its own
- * Git verification (Task 048, the inversion). The worker writes no record; this
- * writes the report (flag "wx" — never overwriting) and appends exactly one
- * log row, then verifies its own writes byte-back exactly as writeClosedRecords
- * does. `filesChanged` is the bounded Git-derived change set (never the claims);
- * on a stop it lists the RETAINED evidence.
- */
-function cairnWorkerRecords(
+function composeCairnWorkerRecordValues(
   root: string,
   contract: AdapterTaskContract,
-  start: GitSnapshot,
   disposition: "DONE" | "STOPPED",
   stopReason: SerialStopReason | null,
   claims: WorkerClaims | null,
@@ -1215,7 +1682,9 @@ function cairnWorkerRecords(
   }>,
   candidateCustody?: SerialCandidateReportCustody,
   candidateFilesChanged?: readonly string[],
-): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
+  terminalAction?: SerialCandidateTerminalActionCustody,
+  recordDate = new Date().toISOString().slice(0, 10),
+): { reportText: string; row: LogRow; composed: ComposedRecordInput } {
   const taskSpecRunRecord = composeBoundRunRecord(
     contract,
     disposition,
@@ -1242,10 +1711,15 @@ function cairnWorkerRecords(
     ...(taskSpecRunRecord ? { taskSpecRunRecord } : {}),
     recordRecovery: recovery?.disclosure ?? null,
   };
-  const report = reportWithCandidateCustody(composeWorkerReport(input), disposition, candidateCustody);
+  const report = reportWithCandidateCustody(
+    composeWorkerReport(input),
+    disposition,
+    candidateCustody,
+    terminalAction,
+  );
   const row: LogRow = {
     task: pad(contract.taskNumber),
-    date: new Date().toISOString().slice(0, 10),
+    date: recordDate,
     lane: "Standard",
     mode: "Applied",
     outcome: disposition,
@@ -1253,6 +1727,55 @@ function cairnWorkerRecords(
     summary: composeWorkerRowSummary(input),
     moved: taskSpecRunRecord?.workerClaims?.milestone ?? claims?.milestone ?? "NO",
   };
+  return { reportText: report, row, composed: input };
+}
+
+/**
+ * Cairn authors the worker's task records from the parsed claims and its own
+ * Git verification (Task 048, the inversion). The worker writes no record; this
+ * writes the report (flag "wx" — never overwriting) and appends exactly one
+ * log row, then verifies its own writes byte-back exactly as writeClosedRecords
+ * does. `filesChanged` is the bounded Git-derived change set (never the claims);
+ * on a stop it lists the RETAINED evidence.
+ */
+function cairnWorkerRecords(
+  root: string,
+  contract: AdapterTaskContract,
+  start: GitSnapshot,
+  disposition: "DONE" | "STOPPED",
+  stopReason: SerialStopReason | null,
+  claims: WorkerClaims | null,
+  protectedValid: boolean,
+  commit: { status: "created" | "skipped"; reason: string } | null,
+  evidence: Record<string, number> | null,
+  recovery?: RecordRecovery,
+  taskSpecEvidence?: Readonly<{
+    claims: TaskSpecWorkerClaims | null;
+    attestations: readonly AdapterCommandAttestationV1[];
+  }>,
+  candidateCustody?: SerialCandidateReportCustody,
+  candidateFilesChanged?: readonly string[],
+  terminalAction?: SerialCandidateTerminalActionCustody,
+  recordDate?: string,
+): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
+  const values = composeCairnWorkerRecordValues(
+    root,
+    contract,
+    disposition,
+    stopReason,
+    claims,
+    protectedValid,
+    commit,
+    evidence,
+    recovery,
+    taskSpecEvidence,
+    candidateCustody,
+    candidateFilesChanged,
+    terminalAction,
+    recordDate,
+  );
+  const report = values.reportText;
+  const row = values.row;
   // The report path is Cairn-owned and normally authored with "wx" so Cairn
   // never overwrites an existing file. Only in the one disclosed case where the
   // owned-records gate found the worker had pre-written this exact path does it
@@ -1307,7 +1830,7 @@ function cairnWorkerRecords(
   const verified = checks.brief && checks.report && checks.log && checks.row;
   // The composed input travels with the records it authored: the card reads the
   // very value this report was rendered from, so the two cannot disagree.
-  return { reportText: report, row, verified, composed: input };
+  return { reportText: report, row, verified, composed: values.composed };
 }
 
 /**
@@ -1447,7 +1970,8 @@ function changedTaskPaths(root: string, contract: AdapterTaskContract): string[]
     const relativePath = relative(root, absolute).replace(/\\/g, "/");
     if (!path || isAbsolute(path) || relativePath.startsWith("../") || isAbsolute(relativePath)) return null;
     if (path.split("/").includes(".git")) return null;
-    if (path.startsWith("docs/ai-work/tasks/") && !owned.has(path)) return null;
+    const reservedRecord = serialCandidateReservedRecordClass(path);
+    if (reservedRecord === "task" && !owned.has(path)) return null;
     // Task 212: a verdict is a record ABOUT a completed run — Cairn's, on the
     // owner's behalf — and no run ever owns one. Without this, a file under
     // `docs/ai-work/verdicts/` was returned as a product path and committed
@@ -1455,7 +1979,7 @@ function changedTaskPaths(root: string, contract: AdapterTaskContract): string[]
     // to the worker and letting a worker plant one. The rejection is flat
     // rather than owned-gated because the owned set is only ever the brief,
     // the report, and the log.
-    if (path.startsWith("docs/ai-work/verdicts/")) return null;
+    if (reservedRecord === "verdict") return null;
   }
   // Cairn now authors the owned records AFTER this scan (Task 048), so they are
   // no longer required to pre-exist in the change set. Every other safety line
@@ -1474,7 +1998,9 @@ function changedCandidateTaskPaths(root: string, contract: AdapterTaskContract):
     const relativePath = relative(root, absolute).replace(/\\/g, "/");
     if (!path || isAbsolute(path) || relativePath.startsWith("../") || isAbsolute(relativePath)) return null;
     if (path.split("/").includes(".git")) return null;
-    if (path.startsWith("docs/ai-work/tasks/") && !owned.has(path)) return null;
+    const reservedRecord = serialCandidateReservedRecordClass(path);
+    if (reservedRecord === "task" && !owned.has(path)) return null;
+    if (reservedRecord === "verdict") return null;
   }
   return [...values].sort();
 }
@@ -1586,30 +2112,11 @@ function candidateChildGitEnvironment(indexPath?: string): NodeJS.ProcessEnv {
   return environment;
 }
 
-/** The shared lock helper predates candidate custody and runs one synchronous
- * `git rev-parse`. Give only that call the exact same scrubbed Git authority,
- * then restore the process environment byte-for-byte before any async work. */
+/** The lock helper now performs its own closed Git-environment validation and
+ * scrub. Keep this candidate wrapper as the explicit pre-call assertion. */
 function acquireCandidateRunLock(root: string): RunLock {
-  const child = candidateChildGitEnvironment();
-  const names = new Set([
-    ...Object.keys(process.env).filter(serialCandidateGitEnvironmentNameDenied),
-    ...Object.keys(child).filter(serialCandidateGitEnvironmentNameDenied),
-  ]);
-  const saved = new Map<string, string | undefined>();
-  for (const name of names) {
-    saved.set(name, process.env[name]);
-    delete process.env[name];
-  }
-  for (const name of names) {
-    const value = child[name];
-    if (value !== undefined) process.env[name] = value;
-  }
-  try {
-    return acquireRunLock(root);
-  } finally {
-    for (const name of names) delete process.env[name];
-    for (const [name, value] of saved) if (value !== undefined) process.env[name] = value;
-  }
+  if (!serialCandidateGitEnvironmentSafe()) throw new Error("UNSAFE_SERIAL_CANDIDATE_GIT_ENVIRONMENT");
+  return acquireRunLock(root);
 }
 
 function candidateGit(root: string, args: string[], options: CandidateGitCommandOptions = {}): string {
@@ -2303,6 +2810,7 @@ function commitCandidateExactPaths(
   bundle: SerialCandidateBundleV1,
   startHeadRef: string,
   ownedRecords: readonly CandidateOwnedRecordBlob[],
+  terminalActionId?: string,
 ): RecordCommit | null {
   if (expected.length === 0) return null;
   const expectedSorted = [...expected].sort();
@@ -2515,7 +3023,7 @@ function commitCandidateExactPaths(
       return null;
     }
 
-    const message = `Task ${pad(taskNumber)}: complete verified worker task`;
+    const message = candidateTerminalCommitMessage(taskNumber, terminalActionId);
     const commit = candidateGit(root, [...noHooks, "commit-tree", tree, "-p", start.head, "-m", message]);
     const preCasChecks = Object.freeze({
       commit: /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commit),
@@ -2552,6 +3060,13 @@ function commitCandidateExactPaths(
       try { rmSync(`${temporaryIndex}.lock`, { force: true }); } catch { /* failed Git child may leave its lock */ }
     }
   }
+}
+
+function candidateTerminalCommitMessage(taskNumber: number, terminalActionId?: string): string {
+  const subject = `Task ${pad(taskNumber)}: complete verified worker task`;
+  return terminalActionId === undefined
+    ? subject
+    : `${subject}\n\nCairn-Terminal-Action: ${terminalActionId}`;
 }
 
 function freezeContract(contract: AdapterTaskContract): AdapterTaskContract {
@@ -2712,6 +3227,8 @@ function replaceDoneRecordsWithStopped(
   candidateCustody?: SerialCandidateReportCustody,
   candidateFilesChanged?: readonly string[],
   candidateProtectedIntact?: boolean,
+  terminalAction?: SerialCandidateTerminalActionCustody,
+  recordDate?: string,
 ): { reportText: string; row: LogRow; verified: boolean } | null {
   const reportPath = paths.report(root, contract.taskNumber);
   const candidateOwnedWrite = candidateCustody !== undefined;
@@ -2752,10 +3269,15 @@ function replaceDoneRecordsWithStopped(
       taskSpecRunRecord,
       recordRecovery: null,
     };
-    stoppedReport = reportWithCandidateCustody(composeWorkerReport(input), "STOPPED", candidateCustody);
+    stoppedReport = reportWithCandidateCustody(
+      composeWorkerReport(input),
+      "STOPPED",
+      candidateCustody,
+      terminalAction,
+    );
     stoppedRow = {
       task: pad(contract.taskNumber),
-      date: new Date().toISOString().slice(0, 10),
+      date: recordDate ?? new Date().toISOString().slice(0, 10),
       lane: "Standard",
       mode: "Applied",
       outcome: "STOPPED",
@@ -2927,6 +3449,1266 @@ function openContextForCandidate(value: unknown): Readonly<{
     || serialCandidateSha256(candidate) !== candidate.candidateSha256
     || serialCandidateBundleSha256(candidate.bundle) !== candidate.bundleSha256) return null;
   return Object.freeze({ candidate, context });
+}
+
+function pendingCandidateProjection(candidate: SerialCandidateV1): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    version: candidate.version,
+    runId: candidate.runId,
+    generation: candidate.generation,
+    taskNumber: candidate.taskNumber,
+    requestSha256: candidate.requestSha256,
+    projectRootSha256: candidate.projectRootSha256,
+    taskSpecSha256: candidate.taskSpecSha256,
+    evidencePlanSha256: candidate.evidencePlanSha256,
+    round: candidate.round,
+    bundleSha256: candidate.bundleSha256,
+    claims: candidate.claims,
+    claimsSha256: candidate.claimsSha256,
+    candidateSha256: candidate.candidateSha256,
+    evidenceStateSha256: candidate.evidenceStateSha256,
+    criticMode: candidate.criticMode,
+    repairEligibility: candidate.repairEligibility,
+    repairUnavailableReason: candidate.repairUnavailableReason,
+    phase: candidate.phase,
+    pendingOwnerReason: candidate.pendingOwnerReason,
+    callsUsed: candidate.callsUsed,
+  });
+}
+
+function pendingContractProjection(contract: QualityBoundAdapterTaskContractV4): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    version: contract.version,
+    taskNumber: contract.taskNumber,
+    requestSha256: contract.requestSha256,
+    supportedOutcome: contract.supportedOutcome,
+    lane: contract.lane,
+    route: contract.route,
+    ownedRecords: contract.ownedRecords,
+    protectedGit: contract.protectedGit,
+    taskSpecSha256: contract.taskSpecSha256,
+    evidencePlanSha256: contract.evidencePlanSha256,
+    checks: contract.checks,
+    envelopeChecks: contract.envelopeChecks,
+    stopConditions: contract.stopConditions,
+  });
+}
+
+function pendingStartProjection(start: GitSnapshot): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    head: start.head,
+    status: start.status,
+    staged: start.staged,
+    logText: start.logText,
+    protectedPaths: Object.freeze([...start.protectedPaths.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([projectRelativePath, state]) => Object.freeze({
+        projectRelativePath,
+        worktree: state.worktree,
+        index: state.index,
+      }))),
+    candidateProtection: start.candidateProtection === true,
+  });
+}
+
+function canonicalClaimsText(claims: TaskSpecWorkerClaims): string {
+  return ["```cairn-claims", JSON.stringify(claims), "```"].join("\n");
+}
+
+function pendingRepairLineageProjection(
+  repair: SerialCandidatePendingRepairLineageV1,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    preRepairCandidate: pendingCandidateProjection(repair.preRepairCandidate),
+    postRepairCandidate: pendingCandidateProjection(repair.postRepairCandidate),
+    preRepairTransitionHistory: repair.preRepairTransitionHistory,
+    repairInstruction: repair.repairInstruction,
+    blockers: repair.blockers,
+    roundOneBundle: repair.roundOneBundle,
+    roundOneCaptureContext: repair.roundOneCaptureContext,
+    claimsText: canonicalClaimsText(repair.postRepairCandidate.claims),
+  });
+}
+
+function pendingCandidateInner(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+  requireExactWorkspace: boolean,
+): Readonly<Record<string, unknown>> | null {
+  if (candidate.lineage.evidencePlan.revision !== 0
+    || !serialCandidateGitEnvironmentSafe()
+    || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)
+    || (requireExactWorkspace && (!candidateWorkspaceStillExact(candidate, context)
+      || !candidateTaskPathSetStillExact(candidate, context)))) return null;
+  const projectRootReal = canonicalExistingDirectory(context.projectRoot);
+  const transitionHistory = serialCandidatePendingTransitionHistory(candidate);
+  const repairLineage = candidate.round === 1
+    ? serialCandidatePendingRepairLineage(candidate)
+    : null;
+  if (!projectRootReal || candidateProjectRootIdentitySha256(projectRootReal) !== candidate.projectRootSha256
+    || transitionHistory === null
+    || (candidate.round === 0) !== (repairLineage === null)) return null;
+  const taskPaths = repairLineage?.roundOneCaptureContext.taskPaths ?? context.taskPaths;
+  return Object.freeze({
+    version: SERIAL_PENDING_CANDIDATE_INNER_VERSION,
+    projectRootReal,
+    projectRootSha256: candidate.projectRootSha256,
+    start: pendingStartProjection(context.start),
+    startHeadRef: context.startHeadRef,
+    contract: pendingContractProjection(context.contract),
+    route: context.route,
+    activities: context.activities,
+    taskPaths,
+    protectedPaths: context.protectedPaths,
+    ownedPaths: context.ownedPaths,
+    ownedRecordIndexAuthority: context.ownedRecordIndexAuthority,
+    attestations: context.attestations,
+    attestationsCompleteForDone: context.attestationsCompleteForDone,
+    evidence: context.evidence,
+    taskSpec: candidate.lineage.taskSpec,
+    evidencePlan: candidate.lineage.evidencePlan,
+    round0Bundle: candidate.lineage.round0Bundle,
+    candidate: pendingCandidateProjection(candidate),
+    claimsText: canonicalClaimsText(context.claims),
+    transitionHistory,
+    repairLineage: repairLineage ? pendingRepairLineageProjection(repairLineage) : null,
+    sealableCandidateSha256: context.sealableCandidateSha256,
+    sealableClaimsSha256: context.sealableClaimsSha256,
+    sealableBundleSha256: context.sealableBundleSha256,
+  });
+}
+
+function pendingCapsuleFromInner(inner: unknown, requirePendingState: boolean): SerialPendingCandidateCapsuleV1 | null {
+  const canonicalBytes = pendingCanonicalBytes(inner);
+  if (!canonicalBytes) return null;
+  const capsule = Object.freeze({
+    version: SERIAL_PENDING_CANDIDATE_CAPSULE_VERSION,
+    canonicalBytes,
+    capsuleSha256: pendingSha256(canonicalBytes),
+  }) as SerialPendingCandidateCapsuleV1;
+  return (requirePendingState ? parsePendingCapsule(capsule) : parseAnyPendingCapsule(capsule)) ? capsule : null;
+}
+
+/**
+ * Export only the current, still-held round-zero candidate and its complete
+ * restart context. This does not release authority; parking is a separate
+ * exact-digest acknowledgement after the caller durably persists the bytes.
+ */
+export function exportSerialCandidatePendingState(
+  value: unknown,
+): SerialPendingCandidateCapsuleV1 | null {
+  const open = openContextForCandidate(value);
+  if (!open) return null;
+  const { candidate, context } = open;
+  try {
+    const inner = pendingCandidateInner(candidate, context, true);
+    const capsule = inner ? pendingCapsuleFromInner(inner, true) : null;
+    if (!capsule) return null;
+    exportedPendingCandidateCapsules.set(candidate, Object.freeze({
+      canonicalBytes: capsule.canonicalBytes,
+      capsuleSha256: capsule.capsuleSha256,
+    }));
+    return capsule;
+  } catch {
+    return null;
+  }
+}
+
+const PENDING_TERMINAL_PLAN_VERSION = "cairn-serial-candidate-terminal-plan/v1" as const;
+
+type PendingTerminalPlanV1 = Readonly<{
+  version: typeof PENDING_TERMINAL_PLAN_VERSION;
+  actionId: string;
+  kind: "finalize" | "stop";
+  disposition: "DONE" | "STOPPED";
+  reason: SerialStopReason | null;
+  candidateSha256: string;
+  baseCapsuleSha256: string;
+  recordDate: string;
+  reportSha256: string;
+  logSha256: string;
+  rowSha256: string;
+  briefSha256: string;
+  commitExpected: boolean;
+  expectedCommitPaths: readonly string[];
+  commitMessage: string | null;
+  sealAuthorization: SerialCandidateSealAuthorizationV1 | null;
+}>;
+
+export type SerialCandidateTerminalPreparationInputV1 =
+  | Readonly<{
+      actionId: string;
+      kind: "finalize";
+      sealAuthorization: SerialCandidateSealAuthorizationV1;
+    }>
+  | Readonly<{ actionId: string; kind: "stop"; reason?: SerialStopReason }>;
+
+function terminalPreparationInput(value: unknown): Readonly<{
+  actionId: string;
+  kind: "finalize" | "stop";
+  reason: SerialStopReason | null;
+  sealAuthorization: SerialCandidateSealAuthorizationV1 | null;
+}> | null {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value) || nodeTypes.isProxy(value)) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(value);
+    if (keys.some((key) => typeof key !== "string")) return null;
+    for (const key of keys as string[]) {
+      const descriptor = descriptors[key];
+      if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return null;
+    }
+    const actionId = descriptors.actionId?.value;
+    const kind = descriptors.kind?.value;
+    if (typeof actionId !== "string" || !ACTION_UUID_V4_RE.test(actionId)
+      || (kind !== "finalize" && kind !== "stop")) return null;
+    if (kind === "finalize") {
+      if ([...(keys as string[])].sort().join("\0") !== "actionId\0kind\0sealAuthorization") return null;
+      const sealAuthorization = descriptors.sealAuthorization?.value;
+      return isSerialCandidateSealAuthorization(sealAuthorization)
+        ? Object.freeze({ actionId, kind, reason: null, sealAuthorization })
+        : null;
+    }
+    const sorted = [...(keys as string[])].sort().join("\0");
+    if (sorted !== "actionId\0kind" && sorted !== "actionId\0kind\0reason") return null;
+    const reason = descriptors.reason?.value ?? "MODEL_RESULT_NOT_VERIFIED";
+    return validCandidateStopReason(reason)
+      ? Object.freeze({ actionId, kind, reason, sealAuthorization: null })
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function terminalActionCustody(plan: Pick<PendingTerminalPlanV1, "actionId" | "kind" | "baseCapsuleSha256">): SerialCandidateTerminalActionCustody {
+  return Object.freeze({
+    actionId: plan.actionId,
+    kind: plan.kind,
+    baseCapsuleSha256: plan.baseCapsuleSha256,
+  });
+}
+
+function terminalRecordPreview(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+  input: NonNullable<ReturnType<typeof terminalPreparationInput>>,
+  baseCapsuleSha256: string,
+  recordDate: string,
+): Readonly<{
+  reportText: string;
+  row: LogRow;
+  composed: ComposedRecordInput;
+  commitExpected: boolean;
+  expectedCommitPaths: readonly string[];
+}> | null {
+  const action = Object.freeze({ actionId: input.actionId, kind: input.kind, baseCapsuleSha256 });
+  if (input.kind === "finalize") {
+    const candidateFilesChanged = candidateScanChangedPaths(context.projectRoot, context.contract.ownedRecords);
+    if (!input.sealAuthorization || !isSerialCandidateSealAuthorization(input.sealAuthorization, candidate)
+      || candidate.round !== 0 || candidate.callsUsed.repair !== 0
+      || candidate.candidateSha256 !== context.sealableCandidateSha256
+      || candidate.claimsSha256 !== context.sealableClaimsSha256
+      || candidate.bundleSha256 !== context.sealableBundleSha256
+      || (context.start.status.length === 0 && context.startHeadRef === null)
+      || !context.attestationsCompleteForDone
+      || composeBoundRunRecord(context.contract, "DONE", null, context.claims, context.attestations) === null
+      || !candidateWorkspaceStillExact(candidate, context)
+      || !candidateTerminalPathsUnaliased(candidate, context)
+      || candidateFilesChanged === null) return null;
+    const reportFilesChanged = candidateReportChangedPaths(candidateFilesChanged);
+    const custody = candidateCustody(context.projectRoot, candidate);
+    const commitExpected = context.start.status.length === 0;
+    const commit: RecordCommit = commitExpected
+      ? { status: "created", reason: "One exact-path commit contains the candidate product changes and terminal records." }
+      : { status: "skipped", reason: "Protected starting work prevented an isolated candidate task commit." };
+    const values = composeCairnWorkerRecordValues(
+      context.projectRoot,
+      context.contract,
+      "DONE",
+      null,
+      null,
+      true,
+      commit,
+      context.evidence,
+      undefined,
+      Object.freeze({ claims: context.claims, attestations: context.attestations }),
+      custody,
+      reportFilesChanged,
+      action,
+      recordDate,
+    );
+    return Object.freeze({
+      ...values,
+      commitExpected,
+      expectedCommitPaths: Object.freeze([...new Set([...context.taskPaths, ...context.contract.ownedRecords])].sort()),
+    });
+  }
+
+  const reason = input.reason;
+  if (!reason || !validCandidateStopReason(reason)
+    || !candidateTerminalPathsUnaliased(candidate, context, true, true)
+    || !candidateMissingRegularProductOwnedStateSafe(candidate, context)) return null;
+  const observation = observeCandidateStop(candidate, context);
+  const recovery = candidateRecordRecovery(candidate, context);
+  const protectedPathsExact = protectedStartingPathsOrNull(context.projectRoot, context.start);
+  if (!observation || recovery === null || protectedPathsExact === null) return null;
+  const headBeforeWrite = candidateGit(context.projectRoot, ["rev-parse", "HEAD"]);
+  const refBeforeWrite = currentSymbolicHead(context.projectRoot);
+  const protectedStarting = protectedPathsExact && headBeforeWrite === context.start.head
+    && refBeforeWrite === context.startHeadRef;
+  const usesOriginalEvidenceGeneration = candidate.round === 0 && candidate.callsUsed.repair === 0
+    && candidate.candidateSha256 === context.sealableCandidateSha256
+    && candidate.claimsSha256 === context.sealableClaimsSha256
+    && candidate.bundleSha256 === context.sealableBundleSha256;
+  const values = composeCairnWorkerRecordValues(
+    context.projectRoot,
+    context.contract,
+    "STOPPED",
+    reason,
+    null,
+    protectedStarting,
+    null,
+    usesOriginalEvidenceGeneration ? context.evidence : null,
+    recovery,
+    Object.freeze({
+      claims: usesOriginalEvidenceGeneration ? context.claims : candidate.claims,
+      attestations: usesOriginalEvidenceGeneration ? context.attestations : Object.freeze([]),
+    }),
+    observation.custody.custody,
+    observation.reportFilesChanged,
+    action,
+    recordDate,
+  );
+  return Object.freeze({
+    ...values,
+    commitExpected: false,
+    expectedCommitPaths: Object.freeze([]),
+  });
+}
+
+function buildTerminalPreparation(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+  input: NonNullable<ReturnType<typeof terminalPreparationInput>>,
+  baseCapsule: SerialPendingCandidateCapsuleV1,
+  baseInner: Record<string, unknown>,
+  recordDate: string,
+): SerialCandidateTerminalPreparationV1 | null {
+  const preview = terminalRecordPreview(candidate, context, input, baseCapsule.capsuleSha256, recordDate);
+  if (!preview) return null;
+  const sealAuthorization = input.kind === "finalize" ? input.sealAuthorization : null;
+  const plan: PendingTerminalPlanV1 = Object.freeze({
+    version: PENDING_TERMINAL_PLAN_VERSION,
+    actionId: input.actionId,
+    kind: input.kind,
+    disposition: input.kind === "finalize" ? "DONE" : "STOPPED",
+    reason: input.reason,
+    candidateSha256: candidate.candidateSha256,
+    baseCapsuleSha256: baseCapsule.capsuleSha256,
+    recordDate,
+    reportSha256: pendingSha256(preview.reportText),
+    logSha256: pendingSha256(context.start.logText + expectedLogLine(preview.row)),
+    rowSha256: pendingSha256(JSON.stringify(preview.row)),
+    briefSha256: pendingSha256(context.contractMarkdown),
+    commitExpected: preview.commitExpected,
+    expectedCommitPaths: preview.expectedCommitPaths,
+    commitMessage: preview.commitExpected
+      ? candidateTerminalCommitMessage(context.contract.taskNumber, input.actionId)
+      : null,
+    sealAuthorization,
+  });
+  const capsule = pendingCapsuleFromInner(Object.freeze({
+    version: SERIAL_PREPARED_CANDIDATE_TERMINAL_INNER_VERSION,
+    pending: baseInner,
+    terminalPlan: plan,
+  }), false);
+  if (!capsule) return null;
+  const action = Object.freeze({
+    actionId: input.actionId,
+    kind: input.kind,
+    candidateSha256: candidate.candidateSha256,
+    capsuleSha256: capsule.capsuleSha256,
+  }) as SerialCandidateTerminalActionV1;
+  const preparation = Object.freeze({
+    version: SERIAL_CANDIDATE_TERMINAL_PREPARATION_VERSION,
+    action,
+    capsule,
+  }) as SerialCandidateTerminalPreparationV1;
+  terminalPreparationBrand.add(preparation);
+  terminalPreparationBindings.set(preparation, Object.freeze({
+    candidate,
+    plan,
+    baseCapsule,
+    sealAuthorization,
+  }));
+  terminalPreparationByCandidate.set(candidate, preparation);
+  return preparation;
+}
+
+/** Compose exact terminal bytes and intent before any terminal workspace write. */
+export function prepareSerialCandidateTerminal(
+  value: unknown,
+  rawInput: SerialCandidateTerminalPreparationInputV1,
+): SerialCandidateTerminalPreparationV1 | null {
+  const open = openContextForCandidate(value);
+  const input = terminalPreparationInput(rawInput);
+  if (!open || !input) return null;
+  const { candidate, context } = open;
+  const existing = terminalPreparationByCandidate.get(candidate);
+  if (existing) {
+    const binding = terminalPreparationBindings.get(existing);
+    return binding && binding.plan.actionId === input.actionId && binding.plan.kind === input.kind
+      && binding.plan.reason === input.reason
+      && (input.kind !== "finalize" || binding.sealAuthorization === input.sealAuthorization)
+      ? existing
+      : null;
+  }
+  try {
+    if (!serialCandidateGitEnvironmentSafe()
+      || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)) return null;
+    let baseCapsule = exportSerialCandidatePendingState(candidate);
+    let parsed = baseCapsule ? parsePendingCapsule(baseCapsule) : null;
+    if ((!baseCapsule || !parsed) && input.kind === "stop") {
+      const inner = pendingCandidateInner(candidate, context, false);
+      baseCapsule = inner ? pendingCapsuleFromInner(inner, true) : null;
+      parsed = baseCapsule ? parsePendingCapsule(baseCapsule) : null;
+    }
+    if (!baseCapsule || !parsed) return null;
+    return buildTerminalPreparation(
+      candidate,
+      context,
+      input,
+      baseCapsule,
+      parsed.inner,
+      new Date().toISOString().slice(0, 10),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Release the live PID lock only after the caller acknowledges exact bytes. */
+export function parkSerialCandidateForRestart(
+  value: unknown,
+  persistedCapsuleSha256: unknown,
+): boolean {
+  const open = openContextForCandidate(value);
+  if (!open || typeof persistedCapsuleSha256 !== "string") return false;
+  const { candidate, context } = open;
+  const exported = exportedPendingCandidateCapsules.get(candidate);
+  const preparation = terminalPreparationByCandidate.get(candidate);
+  const preparationBinding = preparation ? terminalPreparationBindings.get(preparation) : undefined;
+  const preparedExact = preparation !== undefined
+    && preparationBinding?.candidate === candidate
+    && preparation.action.capsuleSha256 === persistedCapsuleSha256
+    && preparation.capsule.capsuleSha256 === persistedCapsuleSha256
+    && pendingSha256(preparation.capsule.canonicalBytes) === persistedCapsuleSha256
+    && terminalPlanStillExact(candidate, context, preparationBinding);
+  const pendingExact = exported !== undefined && exported.capsuleSha256 === persistedCapsuleSha256
+    && pendingSha256(exported.canonicalBytes) === persistedCapsuleSha256;
+  if (!preparedExact && !pendingExact) return false;
+  try {
+    if (!serialCandidateGitEnvironmentSafe()
+      || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)
+      || (pendingExact && (!candidateWorkspaceStillExact(candidate, context)
+        || !candidateTaskPathSetStillExact(candidate, context)))
+      || !parkCurrentSerialCandidate(candidate)) return false;
+    exportedPendingCandidateCapsules.delete(candidate);
+    terminalPreparationByCandidate.delete(candidate);
+    releaseOpenCandidate(candidate.runId, context);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type PendingOwnerSpan = Readonly<{
+  kind: "conversation" | "direct";
+  inputId: string;
+  start: number;
+  end: number;
+  text: string;
+}>;
+
+function pendingOwnerSpans(taskSpec: unknown): readonly PendingOwnerSpan[] | null {
+  try {
+    if (!exactPendingKeys(taskSpec, ["version", "intent", "quality", "callBudget"])) return null;
+    const intent = taskSpec.intent;
+    if (!exactPendingKeys(intent, ["version", "outcome", "requirements", "context"])
+      || !Array.isArray(intent.requirements)) return null;
+    const rows = [intent.outcome, ...intent.requirements];
+    const output: PendingOwnerSpan[] = [];
+    for (const row of rows) {
+      if (!exactPendingKeys(row, ["source", "text", "owner"])) return null;
+      if (row.source === "cairn-chosen") {
+        if (row.owner !== null) return null;
+        continue;
+      }
+      if (row.source !== "owner-stated" && row.source !== "owner-unsure"
+        || !exactPendingKeys(row.owner, ["kind", "inputId", "start", "end", "text"])) return null;
+      const owner = row.owner;
+      if ((owner.kind !== "conversation" && owner.kind !== "direct")
+        || typeof owner.inputId !== "string" || typeof owner.text !== "string"
+        || !Number.isSafeInteger(owner.start) || !Number.isSafeInteger(owner.end)
+        || Object.is(owner.start, -0) || Object.is(owner.end, -0)
+        || (owner.start as number) < 0 || (owner.end as number) <= (owner.start as number)
+        || (owner.end as number) - (owner.start as number) !== owner.text.length) return null;
+      output.push(Object.freeze({
+        kind: owner.kind,
+        inputId: owner.inputId,
+        start: owner.start as number,
+        end: owner.end as number,
+        text: owner.text,
+      }));
+    }
+    return Object.freeze(output);
+  } catch {
+    return null;
+  }
+}
+
+function pendingSourceFiller(texts: readonly string[]): string | null {
+  const joined = texts.join("");
+  for (let code = 0x21; code <= 0xd7ff; code += 1) {
+    const value = String.fromCharCode(code);
+    if (!/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value) && !joined.includes(value)) return value;
+  }
+  return null;
+}
+
+function pendingAuthenticatedSources(taskSpec: unknown): readonly TaskIntentSourceInput[] | null {
+  const spans = pendingOwnerSpans(taskSpec);
+  if (!spans) return null;
+  type Group = {
+    key: string;
+    kind: "conversation" | "direct";
+    inputId: string;
+    spans: PendingOwnerSpan[];
+    text: string;
+    before: Set<string>;
+  };
+  const groups = new Map<string, Group>();
+  for (const span of spans) {
+    const key = `${span.kind}\0${span.inputId}`;
+    const group = groups.get(key) ?? {
+      key,
+      kind: span.kind,
+      inputId: span.inputId,
+      spans: [],
+      text: "",
+      before: new Set<string>(),
+    };
+    group.spans.push(span);
+    groups.set(key, group);
+  }
+  let totalCharacters = 0;
+  for (const group of groups.values()) {
+    if (group.kind === "direct") {
+      const first = group.spans[0];
+      if (!first || group.spans.some((span) => span.start !== 0 || span.end !== span.text.length || span.text !== first.text)) return null;
+      group.text = first.text;
+    } else {
+      const length = Math.max(0, ...group.spans.map((span) => span.end));
+      if (length > 200_000) return null;
+      const filler = pendingSourceFiller(group.spans.map((span) => span.text));
+      if (!filler) return null;
+      const characters = Array.from({ length }, () => filler);
+      const assigned = Array.from({ length }, () => false);
+      for (const span of group.spans) {
+        for (let offset = 0; offset < span.text.length; offset += 1) {
+          const index = span.start + offset;
+          const character = span.text[offset]!;
+          if (assigned[index] && characters[index] !== character) return null;
+          characters[index] = character;
+          assigned[index] = true;
+        }
+      }
+      group.text = characters.join("");
+      if (group.spans.some((span) => group.text.indexOf(span.text) !== span.start)) return null;
+    }
+    totalCharacters += group.text.length;
+    if (totalCharacters > 200_000) return null;
+  }
+  for (const owner of groups.values()) {
+    for (const span of owner.spans) {
+      for (const other of groups.values()) {
+        if (other !== owner && other.text.includes(span.text)) owner.before.add(other.key);
+      }
+    }
+  }
+  const ordered: Group[] = [];
+  const remaining = new Map(groups);
+  while (remaining.size > 0) {
+    const next = [...remaining.values()]
+      .filter((group) => [...group.before].every((key) => !remaining.has(key)))
+      .sort((left, right) => left.key.localeCompare(right.key))[0];
+    if (!next) return null;
+    ordered.push(next);
+    remaining.delete(next.key);
+  }
+  return Object.freeze(ordered.map((group) => Object.freeze({
+    kind: group.kind,
+    inputId: group.inputId,
+    text: group.text,
+  })));
+}
+
+function pendingContractSections(taskSpec: unknown): readonly ContractSectionAuthorityV1[] | null {
+  try {
+    const sections = new Map<string, string>();
+    const stack: unknown[] = [taskSpec];
+    let nodes = 0;
+    while (stack.length > 0) {
+      const value = stack.pop();
+      nodes += 1;
+      if (nodes > 100_000) return null;
+      if (!value || typeof value !== "object") continue;
+      if (Array.isArray(value)) {
+        for (const entry of value) stack.push(entry);
+        continue;
+      }
+      const record = value as Record<string, unknown>;
+      if (record.kind === "contract") {
+        if (typeof record.section !== "string" || typeof record.sha256 !== "string" || !SHA256_RE.test(record.sha256)) return null;
+        const prior = sections.get(record.section);
+        if (prior !== undefined && prior !== record.sha256) return null;
+        sections.set(record.section, record.sha256);
+      }
+      for (const entry of Object.values(record)) stack.push(entry);
+    }
+    return Object.freeze([...sections.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([section, sha256]) => Object.freeze({ section, sha256 })));
+  } catch {
+    return null;
+  }
+}
+
+function pendingStringArray(value: unknown, cap: number, stringCap: number): readonly string[] | null {
+  if (!Array.isArray(value) || value.length > cap
+    || value.some((entry) => typeof entry !== "string" || entry.length > stringCap)) return null;
+  return Object.freeze([...value]) as readonly string[];
+}
+
+function parsePendingStart(value: unknown): GitSnapshot | null {
+  try {
+    if (!exactPendingKeys(value, ["head", "status", "staged", "logText", "protectedPaths", "candidateProtection"])
+      || typeof value.head !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value.head)
+      || typeof value.logText !== "string" || value.candidateProtection !== true) return null;
+    const status = pendingStringArray(value.status, 8192, 2048);
+    const staged = pendingStringArray(value.staged, 8192, 512);
+    if (!status || !staged || !Array.isArray(value.protectedPaths) || value.protectedPaths.length > 4096) return null;
+    const protectedPaths = new Map<string, { worktree: string; index: string }>();
+    let previous: string | null = null;
+    for (const entry of value.protectedPaths) {
+      if (!exactPendingKeys(entry, ["projectRelativePath", "worktree", "index"])
+        || typeof entry.projectRelativePath !== "string" || entry.projectRelativePath.length > 512
+        || typeof entry.worktree !== "string" || entry.worktree.length > 2048
+        || typeof entry.index !== "string" || entry.index.length > 2048
+        || (previous !== null && previous.localeCompare(entry.projectRelativePath) >= 0)) return null;
+      previous = entry.projectRelativePath;
+      protectedPaths.set(entry.projectRelativePath, Object.freeze({ worktree: entry.worktree, index: entry.index }));
+    }
+    return {
+      head: value.head,
+      status: [...status],
+      staged: [...staged],
+      logText: value.logText,
+      protectedPaths,
+      candidateProtection: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parsePendingDescriptor(value: unknown): TaskAdapter["descriptor"] | null {
+  if (!exactPendingKeys(value, ["id", "label", "provider", "model", "connected", "capabilities", "priority"])
+    || typeof value.id !== "string" || !value.id.trim() || value.id.length > 128
+    || typeof value.label !== "string" || !value.label.trim() || value.label.length > 256
+    || typeof value.provider !== "string" || value.provider.length > 256
+    || typeof value.model !== "string" || value.model.length > 256
+    || typeof value.connected !== "boolean"
+    || typeof value.priority !== "number" || !Number.isFinite(value.priority) || Object.is(value.priority, -0)) return null;
+  const capabilities = pendingStringArray(value.capabilities, 32, 128);
+  if (!capabilities || new Set(capabilities).size !== capabilities.length) return null;
+  return Object.freeze({
+    id: value.id,
+    label: value.label,
+    provider: value.provider,
+    model: value.model,
+    connected: value.connected,
+    capabilities,
+    priority: value.priority,
+  });
+}
+
+function parsePendingRoute(value: unknown): Extract<RouteResult, { status: "ready" }> | null {
+  try {
+    if (!exactPendingKeys(value, ["status", "recommended", "candidates", "reason"])
+      || value.status !== "ready" || typeof value.reason !== "string" || value.reason.length > 2048
+      || !Array.isArray(value.candidates) || value.candidates.length !== 1) return null;
+    const recommended = parsePendingDescriptor(value.recommended);
+    const candidate = parsePendingDescriptor(value.candidates[0]);
+    if (!recommended || !candidate || !recommended.connected
+      || !recommended.capabilities.includes("serial-task")
+      || !recommended.capabilities.includes("serial-task-candidate")
+      || JSON.stringify(recommended) !== JSON.stringify(candidate)) return null;
+    return Object.freeze({
+      status: "ready",
+      recommended,
+      candidates: [candidate],
+      reason: value.reason,
+    }) as Extract<RouteResult, { status: "ready" }>;
+  } catch {
+    return null;
+  }
+}
+
+function parsePendingActivities(value: unknown): SerialActivity[] | null {
+  if (!Array.isArray(value) || value.length > 64) return null;
+  const activities: SerialActivity[] = [];
+  for (const entry of value) {
+    if (!exactPendingKeys(entry, ["stage", "state", "detail"])
+      || (entry.stage !== "Route" && entry.stage !== "Run" && entry.stage !== "Check" && entry.stage !== "Result")
+      || (entry.state !== "working" && entry.state !== "done" && entry.state !== "stopped")
+      || typeof entry.detail !== "string" || entry.detail.length > 4096) return null;
+    activities.push(Object.freeze({ stage: entry.stage, state: entry.state, detail: entry.detail }));
+  }
+  return activities;
+}
+
+function exactPendingJson(left: unknown, right: unknown): boolean {
+  const leftBytes = pendingCanonicalBytes(left);
+  const rightBytes = pendingCanonicalBytes(right);
+  return leftBytes !== null && leftBytes === rightBytes;
+}
+
+function parsePendingCandidatePaths(
+  value: unknown,
+  cap: number,
+  allowReservedRecords: boolean,
+): readonly string[] | null {
+  const pathsValue = pendingStringArray(value, cap, 512);
+  if (!pathsValue) return null;
+  const seen = new Set<string>();
+  let previous: string | null = null;
+  for (const path of pathsValue) {
+    const parts = path.split("/");
+    const key = process.platform === "win32" ? path.toLowerCase() : path;
+    if (!path || path.includes("\\") || isAbsolute(path) || parts.some((part) => !part || part === "." || part === "..")
+      || parts.includes(".git") || (!allowReservedRecords && serialCandidateReservedRecordClass(path) !== null)
+      || seen.has(key) || (previous !== null && previous.localeCompare(path) >= 0)) return null;
+    seen.add(key);
+    previous = path;
+  }
+  return pathsValue;
+}
+
+const PENDING_CANDIDATE_KEYS = [
+  "version", "runId", "generation", "taskNumber", "requestSha256", "projectRootSha256",
+  "taskSpecSha256", "evidencePlanSha256", "round", "bundleSha256", "claims", "claimsSha256",
+  "candidateSha256", "evidenceStateSha256", "criticMode", "repairEligibility", "repairUnavailableReason",
+  "phase", "pendingOwnerReason", "callsUsed",
+] as const;
+
+function parsePendingCandidateRecord(value: unknown): Record<string, unknown> | null {
+  if (!exactPendingKeys(value, PENDING_CANDIDATE_KEYS)
+    || value.version !== SERIAL_CANDIDATE_VERSION
+    || typeof value.runId !== "string" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value.runId)
+    || !Number.isSafeInteger(value.generation) || Object.is(value.generation, -0) || (value.generation as number) < 0
+    || !Number.isSafeInteger(value.taskNumber) || Object.is(value.taskNumber, -0) || (value.taskNumber as number) < 1
+    || typeof value.requestSha256 !== "string" || !SHA256_RE.test(value.requestSha256)
+    || typeof value.projectRootSha256 !== "string" || !SHA256_RE.test(value.projectRootSha256)
+    || typeof value.taskSpecSha256 !== "string" || !SHA256_RE.test(value.taskSpecSha256)
+    || typeof value.evidencePlanSha256 !== "string" || !SHA256_RE.test(value.evidencePlanSha256)
+    || (value.round !== 0 && value.round !== 1)
+    || typeof value.bundleSha256 !== "string" || !SHA256_RE.test(value.bundleSha256)
+    || typeof value.claimsSha256 !== "string" || !SHA256_RE.test(value.claimsSha256)
+    || typeof value.candidateSha256 !== "string" || !SHA256_RE.test(value.candidateSha256)
+    || typeof value.evidenceStateSha256 !== "string" || !SHA256_RE.test(value.evidenceStateSha256)
+    || (value.criticMode !== "required" && value.criticMode !== "optional" && value.criticMode !== "off")
+    || (value.repairUnavailableReason !== null && value.repairUnavailableReason !== "IGNORED_WRITE_SET_UNAVAILABLE"
+      && value.repairUnavailableReason !== "REPAIR_SPENT")
+    || (value.phase !== "awaiting-critic" && value.phase !== "awaiting-owner-resolution"
+      && value.phase !== "awaiting-repair" && value.phase !== "ready-to-seal"
+      && value.phase !== "done" && value.phase !== "stopped")
+    || (value.pendingOwnerReason !== null && value.pendingOwnerReason !== "critic-allegation")
+    || !exactPendingKeys(value.callsUsed, ["builder", "repair", "critic", "externalEvidence"])
+    || value.callsUsed.builder !== 1 || (value.callsUsed.repair !== 0 && value.callsUsed.repair !== 1)
+    || !Number.isSafeInteger(value.callsUsed.critic) || (value.callsUsed.critic as number) < 0 || (value.callsUsed.critic as number) > 3
+    || value.callsUsed.externalEvidence !== 0) return null;
+  return value;
+}
+
+function composePendingContract(
+  root: string,
+  persisted: unknown,
+  taskNumber: number,
+  authority: SerialCandidateTaskSpecAuthorityV1,
+  start: GitSnapshot,
+  route: Extract<RouteResult, { status: "ready" }>,
+): QualityBoundAdapterTaskContractV4 | null {
+  try {
+    if (!exactPendingKeys(persisted, [
+      "version", "taskNumber", "requestSha256", "supportedOutcome", "lane", "route", "ownedRecords",
+      "protectedGit", "taskSpecSha256", "evidencePlanSha256", "checks", "envelopeChecks", "stopConditions",
+    ])) return null;
+    const ownedRecords = Object.freeze([
+      rel(root, paths.brief(root, taskNumber)),
+      rel(root, paths.report(root, taskNumber)),
+      rel(root, paths.log(root)),
+    ]);
+    const review = taskSpecReviewView(authority.taskSpec);
+    const requestSha256 = taskRequestSha256(authority.taskSpec.intent);
+    if (!review || !requestSha256) return null;
+    const contract = Object.freeze({
+      version: "cairn-serial-task/v4",
+      taskNumber,
+      intent: authority.taskSpec.intent,
+      requestSha256,
+      supportedOutcome: CANDIDATE_SUPPORTED_OUTCOME,
+      lane: "Standard",
+      route: Object.freeze({
+        adapterId: route.recommended.id,
+        adapterLabel: route.recommended.label,
+        provider: route.recommended.provider,
+        model: route.recommended.model,
+        reason: route.reason,
+      }),
+      ownedRecords,
+      protectedGit: Object.freeze({
+        head: start.head,
+        dirty: start.status.length > 0,
+        staged: start.staged.length > 0,
+      }),
+      taskSpec: authority.taskSpec,
+      taskSpecSha256: authority.taskSpecSha256,
+      taskSpecReview: review,
+      evidencePlan: authority.evidencePlan,
+      evidencePlanSha256: authority.evidencePlanSha256,
+      checks: Object.freeze([]) as readonly [],
+      envelopeChecks: Object.freeze([
+        `Confirm exactly one ${route.recommended.label} Builder returns one completed Task-Spec-bound result.`,
+        "Confirm protected starting work, Cairn-owned records, and the exact Git-visible task path set remain isolated.",
+        "Capture and hash one pre-seal candidate without writing a report, log row, DONE disposition, or commit.",
+      ]),
+      stopConditions: Object.freeze([
+        "The Builder fails, returns an invalid result, omits strict Task-Spec claims, or claims STOPPED.",
+        "Protected work, HEAD, or a Cairn-owned record changes unexpectedly.",
+        "The exact candidate path set cannot be classified and captured losslessly.",
+      ]),
+    }) as QualityBoundAdapterTaskContractV4;
+    return exactPendingJson(pendingContractProjection(contract), persisted) ? contract : null;
+  } catch {
+    return null;
+  }
+}
+
+function pendingTransitionDecisions(value: unknown): readonly SerialCandidateTransitionDecisionV1[] | null {
+  if (!Array.isArray(value) || value.length > 16) return null;
+  const decisions: SerialCandidateTransitionDecisionV1[] = [];
+  for (const decision of value) {
+    if (decision !== "optional-critic-declined" && decision !== "critic-clear" && decision !== "critic-allegation"
+      && decision !== "required-check-failure-confirmed" && decision !== "owner-confirmed"
+      && decision !== "owner-dismissed") return null;
+    decisions.push(decision);
+  }
+  return Object.freeze(decisions);
+}
+
+const PENDING_REPAIR_LINEAGE_KEYS = [
+  "preRepairCandidate", "postRepairCandidate", "preRepairTransitionHistory", "repairInstruction",
+  "blockers", "roundOneBundle", "roundOneCaptureContext", "claimsText",
+] as const;
+
+function parsePendingRepairLineage(value: unknown): Readonly<{
+  value: Record<string, unknown>;
+  preRepairCandidate: Record<string, unknown>;
+  postRepairCandidate: Record<string, unknown>;
+  preRepairTransitionHistory: readonly SerialCandidateTransitionDecisionV1[];
+}> | null {
+  if (!exactPendingKeys(value, PENDING_REPAIR_LINEAGE_KEYS)) return null;
+  const preRepairCandidate = parsePendingCandidateRecord(value.preRepairCandidate);
+  const postRepairCandidate = parsePendingCandidateRecord(value.postRepairCandidate);
+  const preRepairTransitionHistory = pendingTransitionDecisions(value.preRepairTransitionHistory);
+  if (!preRepairCandidate || !postRepairCandidate || !preRepairTransitionHistory
+    || preRepairCandidate.round !== 0 || preRepairCandidate.phase !== "awaiting-repair"
+    || (preRepairCandidate.callsUsed as Record<string, unknown>).repair !== 0
+    || postRepairCandidate.round !== 1
+    || (postRepairCandidate.callsUsed as Record<string, unknown>).repair !== 1
+    || preRepairCandidate.runId !== postRepairCandidate.runId
+    || preRepairCandidate.taskNumber !== postRepairCandidate.taskNumber
+    || preRepairCandidate.requestSha256 !== postRepairCandidate.requestSha256
+    || preRepairCandidate.projectRootSha256 !== postRepairCandidate.projectRootSha256
+    || preRepairCandidate.taskSpecSha256 !== postRepairCandidate.taskSpecSha256
+    || preRepairCandidate.evidencePlanSha256 !== postRepairCandidate.evidencePlanSha256
+    || typeof value.claimsText !== "string" || value.claimsText.length > 262_144) return null;
+  return Object.freeze({
+    value,
+    preRepairCandidate,
+    postRepairCandidate,
+    preRepairTransitionHistory,
+  });
+}
+
+function pendingBundleTaskPaths(value: unknown): readonly string[] | null {
+  if (!exactPendingKeys(value, [
+    "version", "round", "baseHead", "projectRootSha256", "taskSpecSha256", "evidencePlanSha256",
+    "entries", "rawByteLength", "manifestSha256", "bundleSha256",
+  ]) || !Array.isArray(value.entries)) return null;
+  return parsePendingCandidatePaths(value.entries.map((entry) =>
+    exactPendingKeys(entry, [
+      "projectRelativePath", "state", "origin", "executable", "byteLength", "contentSha256",
+      "contentBase64", "gitBlobOid", "gitMode", "baseBlobOid", "baseMode", "indexState",
+      "indexBlobOid", "indexMode", "indexRelation",
+    ]) ? entry.projectRelativePath : null), 100, false);
+}
+
+function pendingInitialEvidenceCandidate(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (!exactPendingKeys(value, [
+    "version", "taskSpecSha256", "revision", "previousPlanSha256", "revisionReasonEvidenceRefs", "procedures",
+  ]) || !Array.isArray(value.procedures)) return null;
+  const procedures: Record<string, unknown>[] = [];
+  for (const entry of value.procedures) {
+    if (!exactPendingKeys(entry, ["criterionId", "kind", "command", "artifactIds"])) return null;
+    let command: unknown = null;
+    if (entry.command !== null) {
+      if (!exactPendingKeys(entry.command, [
+        "executablePath", "executableSha256", "arguments", "fixtureBindings", "cwdRelative", "expectedExitCodes",
+        "timeoutMs", "resultParserMode", "assertion", "text", "sha256",
+      ])) return null;
+      command = {
+        executablePath: entry.command.executablePath,
+        executableSha256: entry.command.executableSha256,
+        arguments: entry.command.arguments,
+        fixtureBindings: entry.command.fixtureBindings,
+        cwdRelative: entry.command.cwdRelative,
+        expectedExitCodes: entry.command.expectedExitCodes,
+        timeoutMs: entry.command.timeoutMs,
+        resultParserMode: entry.command.resultParserMode,
+        assertion: entry.command.assertion,
+      };
+    }
+    procedures.push({
+      criterionId: entry.criterionId,
+      kind: entry.kind,
+      command,
+      artifactIds: entry.artifactIds,
+    });
+  }
+  return Object.freeze({ version: EVIDENCE_PLAN_CANDIDATE_VERSION, procedures: Object.freeze(procedures) });
+}
+
+function projectAlreadyLive(projectRootReal: string, runId: string): boolean {
+  if (openSerialCandidates.has(runId)) return true;
+  for (const active of activeRoots) {
+    if (canonicalExistingDirectory(active) === projectRootReal) return true;
+  }
+  for (const context of openSerialCandidates.values()) {
+    if (canonicalExistingDirectory(context.projectRoot) === projectRootReal) return true;
+  }
+  return false;
+}
+
+/**
+ * Reacquire the process lock and rebuild every ephemeral brand from the
+ * authenticated capsule plus the still-exact workspace. No adapter is
+ * invoked, and no terminal record is written on this path.
+ */
+export function resumeSerialCandidateFromPending(
+  root: string,
+  capsule: unknown,
+  options: { events?: SerialRunEvents } = {},
+): SerialPendingCandidateResumeResultV1 {
+  return resumeSerialCandidateFromPendingInternal(root, capsule, options, false);
+}
+
+function resumeSerialCandidateFromPendingInternal(
+  root: string,
+  capsule: unknown,
+  options: { events?: SerialRunEvents },
+  allowPreparedStopWorkspaceDrift: boolean,
+): SerialPendingCandidateResumeResultV1 {
+  const invalid = (_stage: string): SerialPendingCandidateResumeResultV1 =>
+    stalePendingCandidate("INVALID_CAPSULE");
+  const parsed = parsePendingCapsule(capsule);
+  if (!parsed) return invalid("wrapper");
+  const inner = parsed.inner;
+  if (inner.version !== SERIAL_PENDING_CANDIDATE_INNER_VERSION) return invalid("version");
+  const candidateRecord = parsePendingCandidateRecord(inner.candidate);
+  if (!candidateRecord) return invalid("candidate-record");
+  if (!exactPendingKeys(inner.round0Bundle, [
+    "version", "round", "baseHead", "projectRootSha256", "taskSpecSha256", "evidencePlanSha256",
+    "entries", "rawByteLength", "manifestSha256", "bundleSha256",
+  ]) || inner.round0Bundle.version !== SERIAL_CANDIDATE_BUNDLE_VERSION
+    || inner.round0Bundle.round !== 0) return invalid("round-zero-bundle-shape");
+  const roundOne = candidateRecord.round === 1;
+  const repairLineage = roundOne ? parsePendingRepairLineage(inner.repairLineage) : null;
+  if ((roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 1 || !repairLineage))
+    || (!roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 0
+      || inner.repairLineage !== null))) return invalid("repair-lineage-shape");
+  if (!exactPendingKeys(inner.evidencePlan, [
+    "version", "taskSpecSha256", "revision", "previousPlanSha256", "revisionReasonEvidenceRefs", "procedures",
+  ]) || inner.evidencePlan.version !== EVIDENCE_PLAN_VERSION) return invalid("evidence-plan-shape");
+  if (inner.evidencePlan.revision !== 0) return stalePendingCandidate("UNSUPPORTED_EVIDENCE_REVISION");
+  if (typeof inner.projectRootReal !== "string" || typeof inner.projectRootSha256 !== "string"
+    || !SHA256_RE.test(inner.projectRootSha256)) return invalid("root-shape");
+  const projectRoot = resolve(root);
+  const projectRootReal = canonicalExistingDirectory(projectRoot);
+  if (!projectRootReal || projectRootReal !== inner.projectRootReal
+    || candidateProjectRootIdentitySha256(projectRootReal) !== inner.projectRootSha256
+    || candidateRecord.projectRootSha256 !== inner.projectRootSha256) {
+    return stalePendingCandidate("PROJECT_MISMATCH");
+  }
+  const runId = candidateRecord.runId as string;
+  if (projectAlreadyLive(projectRootReal, runId)) return stalePendingCandidate("LIVE_LOCK_UNAVAILABLE");
+  if (!serialCandidateGitEnvironmentSafe()) return invalid("git-environment");
+
+  activeRoots.add(projectRoot);
+  let lock: RunLock;
+  try {
+    lock = acquireCandidateRunLock(projectRoot);
+  } catch {
+    activeRoots.delete(projectRoot);
+    return stalePendingCandidate("LIVE_LOCK_UNAVAILABLE");
+  }
+  let resumed = false;
+  try {
+    try {
+      assertGoverned(projectRoot, candidateGit);
+    } catch {
+      return stalePendingCandidate("WORKSPACE_CHANGED");
+    }
+    const sources = pendingAuthenticatedSources(inner.taskSpec);
+    const contractSections = pendingContractSections(inner.taskSpec);
+    if (!sources || !contractSections) return invalid("sources");
+    const taskSpec = validateTaskSpec(inner.taskSpec, sources, contractSections);
+    if (!taskSpec || !exactPendingJson(taskSpec, inner.taskSpec)) return invalid("task-spec");
+    const evidenceCandidate = pendingInitialEvidenceCandidate(inner.evidencePlan);
+    if (!evidenceCandidate) return invalid("evidence-plan-candidate");
+    const evidencePlan = bindInitialEvidencePlan(taskSpec, evidenceCandidate);
+    if (!evidencePlan) return invalid("evidence-plan-bind");
+    if (!exactPendingJson(evidencePlan, inner.evidencePlan)) return invalid("evidence-plan-exact");
+    const authority = composeSerialCandidateTaskSpecAuthority(taskSpec, evidencePlan);
+    const specSha256 = taskSpecSha256(taskSpec);
+    const planSha256 = evidencePlanSha256(evidencePlan);
+    if (!authority || !specSha256 || !planSha256
+      || candidateRecord.taskSpecSha256 !== specSha256
+      || candidateRecord.evidencePlanSha256 !== planSha256) return invalid("authority");
+
+    const start = parsePendingStart(inner.start);
+    const route = parsePendingRoute(inner.route);
+    const activities = parsePendingActivities(inner.activities);
+    const taskPaths = parsePendingCandidatePaths(inner.taskPaths, 100, false);
+    const protectedPaths = parsePendingCandidatePaths(inner.protectedPaths, 4096, true);
+    const ownedPaths = parsePendingCandidatePaths(inner.ownedPaths, 16, true);
+    if (!start || !route || !activities || !taskPaths || !protectedPaths || !ownedPaths
+      || (inner.startHeadRef !== null && (typeof inner.startHeadRef !== "string"
+        || !/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._\/-]*$/u.test(inner.startHeadRef)))) {
+      return invalid("context-shapes");
+    }
+    const taskNumber = candidateRecord.taskNumber as number;
+    const expectedOwnedPaths = [
+      rel(projectRoot, paths.brief(projectRoot, taskNumber)),
+      rel(projectRoot, paths.report(projectRoot, taskNumber)),
+      rel(projectRoot, paths.log(projectRoot)),
+    ].sort();
+    if (!sameLines(ownedPaths, expectedOwnedPaths)) return invalid("owned-paths");
+    const contract = composePendingContract(projectRoot, inner.contract, taskNumber, authority, start, route);
+    if (!contract || contract.requestSha256 !== candidateRecord.requestSha256
+      || contract.taskSpecSha256 !== candidateRecord.taskSpecSha256
+      || contract.evidencePlanSha256 !== candidateRecord.evidencePlanSha256) {
+      return invalid("contract");
+    }
+    const contractMarkdown = briefText(contract, false);
+    if (!validEvidence(inner.evidence) || typeof inner.attestationsCompleteForDone !== "boolean"
+      || !Array.isArray(inner.attestations) || inner.attestations.length > 64
+      || typeof inner.claimsText !== "string" || inner.claimsText.length > 262_144) {
+      return invalid("evidence-context");
+    }
+    const evidence = Object.freeze(Object.fromEntries(Object.entries(inner.evidence as Record<string, number>)));
+    const attestations = Object.freeze([...(inner.attestations as AdapterCommandAttestationV1[])]);
+    if (!inner.attestationsCompleteForDone && attestations.length !== 0) return invalid("attestation-completeness");
+    const decisions = pendingTransitionDecisions(inner.transitionHistory);
+    if (!decisions) return invalid("transitions-shape");
+
+    const roundZeroTaskPaths = roundOne ? pendingBundleTaskPaths(inner.round0Bundle) : taskPaths;
+    if (!roundZeroTaskPaths) return invalid("round-zero-task-paths");
+    const captureContext = Object.freeze({
+      round: 0,
+      baseHead: start.head,
+      taskPaths: roundZeroTaskPaths,
+      protectedPaths,
+      ownedPaths,
+    });
+    const capture = roundOne ? null : captureSerialCandidateBundle(projectRoot, authority, captureContext);
+    const capturedExact = capture?.eligible === true && exactPendingJson(capture.bundle, inner.round0Bundle);
+    const bundle = capturedExact && capture?.eligible === true
+      ? capture.bundle
+      : roundOne || allowPreparedStopWorkspaceDrift
+        ? restoreSerialCandidateBundleForPending(projectRoot, authority, inner.round0Bundle, captureContext)
+        : null;
+    if (!bundle || !exactPendingJson(bundle, inner.round0Bundle)) {
+      return stalePendingCandidate("WORKSPACE_CHANGED");
+    }
+    const initialEligibilityRecord = repairLineage
+      ? repairLineage.preRepairCandidate.repairEligibility
+      : candidateRecord.repairEligibility;
+    let repairEligibility: SerialCandidateV1["repairEligibility"] = null;
+    if (initialEligibilityRecord !== null) {
+      const ignoredBoundary = captureSerialCandidateIgnoredBoundary(projectRoot);
+      const restoredEligibility = ignoredBoundary
+        ? composeSerialCandidateRepairEligibility(projectRoot, ignoredBoundary, bundle)
+        : roundOne || allowPreparedStopWorkspaceDrift
+          ? restoreSerialCandidateRepairEligibilityForPending(bundle, initialEligibilityRecord)
+          : null;
+      if (!restoredEligibility || !exactPendingJson(restoredEligibility, initialEligibilityRecord)) {
+        return stalePendingCandidate("WORKSPACE_CHANGED");
+      }
+      repairEligibility = restoredEligibility;
+    }
+    const initial = composeSerialCandidate(authority, {
+      version: SERIAL_CANDIDATE_VERSION,
+      runId,
+      taskNumber,
+      requestSha256: candidateRecord.requestSha256,
+      claimsText: inner.claimsText,
+      bundle,
+      repairEligibility,
+    });
+    if (!initial) return invalid("initial-candidate");
+    if (inner.sealableCandidateSha256 !== initial.candidateSha256
+      || inner.sealableClaimsSha256 !== initial.claimsSha256
+      || inner.sealableBundleSha256 !== initial.bundleSha256) return invalid("sealable-hashes");
+    const replayDecision = (
+      source: SerialCandidateV1,
+      decision: SerialCandidateTransitionDecisionV1,
+    ): SerialCandidateV1 | null => {
+      const transition = composeSerialCandidateTransition(source, {
+        version: "cairn-serial-candidate-transition/v1",
+        runId: source.runId,
+        generation: source.generation,
+        taskNumber: source.taskNumber,
+        projectRootSha256: source.projectRootSha256,
+        round: source.round,
+        taskSpecSha256: source.taskSpecSha256,
+        evidencePlanSha256: source.evidencePlanSha256,
+        candidateSha256: source.candidateSha256,
+        bundleSha256: source.bundleSha256,
+        evidenceStateSha256: source.evidenceStateSha256,
+        decision,
+      });
+      return transition ? advanceSerialCandidate(source, transition) : null;
+    };
+    let candidate = initial;
+    const preRepairDecisions = repairLineage?.preRepairTransitionHistory ?? decisions;
+    if (repairLineage && (preRepairDecisions.length > decisions.length
+      || preRepairDecisions.some((decision, index) => decisions[index] !== decision))) {
+      return invalid("repair-transition-boundary");
+    }
+    for (const decision of preRepairDecisions) {
+      const next = replayDecision(candidate, decision);
+      if (!next) return invalid("transition-replay");
+      candidate = next;
+    }
+    if (repairLineage) {
+      if (!exactPendingJson(pendingCandidateProjection(candidate), repairLineage.preRepairCandidate)) {
+        return invalid("pre-repair-candidate");
+      }
+      const repaired = restoreSerialCandidateAfterRepairForPending(projectRoot, candidate, {
+        repairInstruction: repairLineage.value.repairInstruction,
+        blockers: repairLineage.value.blockers,
+        roundOneBundle: repairLineage.value.roundOneBundle,
+        roundOneCaptureContext: repairLineage.value.roundOneCaptureContext,
+        claimsText: repairLineage.value.claimsText,
+      });
+      if (!repaired
+        || !exactPendingJson(pendingCandidateProjection(repaired), repairLineage.postRepairCandidate)) {
+        return invalid("post-repair-candidate");
+      }
+      candidate = repaired;
+      for (const decision of decisions.slice(preRepairDecisions.length)) {
+        const next = replayDecision(candidate, decision);
+        if (!next) return invalid("post-repair-transition-replay");
+        candidate = next;
+      }
+    }
+    if (!exactPendingJson(pendingCandidateProjection(candidate), candidateRecord)) {
+      return invalid("candidate-projection");
+    }
+    if (repairLineage) {
+      const restoredRepairLineage = serialCandidatePendingRepairLineage(candidate);
+      if (!restoredRepairLineage
+        || !exactPendingJson(pendingRepairLineageProjection(restoredRepairLineage), repairLineage.value)
+        || !sameLines(taskPaths, restoredRepairLineage.roundOneCaptureContext.taskPaths)
+        || !sameLines(protectedPaths, restoredRepairLineage.roundOneCaptureContext.protectedPaths)
+        || !sameLines(ownedPaths, restoredRepairLineage.roundOneCaptureContext.ownedPaths)
+        || start.head !== restoredRepairLineage.roundOneCaptureContext.baseHead) {
+        return invalid("repair-lineage-exact");
+      }
+    }
+    const lineageIdentity = serialCandidateLineageIdentity(candidate);
+    const capturedOwnedRecordIndexAuthority = captureCandidateOwnedRecordIndexAuthority(
+      projectRoot,
+      taskNumber,
+      contract.ownedRecords,
+    );
+    const ownedRecordIndexAuthority = capturedOwnedRecordIndexAuthority
+      && exactPendingJson(capturedOwnedRecordIndexAuthority, inner.ownedRecordIndexAuthority)
+      ? capturedOwnedRecordIndexAuthority
+      : allowPreparedStopWorkspaceDrift
+        ? preparedOwnedAuthority(inner.ownedRecordIndexAuthority)
+        : null;
+    if (!lineageIdentity || !ownedRecordIndexAuthority
+      || !exactPendingJson(ownedRecordIndexAuthority, inner.ownedRecordIndexAuthority)) {
+      return stalePendingCandidate("WORKSPACE_CHANGED");
+    }
+    if (!roundOne && inner.attestationsCompleteForDone
+      && composeBoundRunRecord(contract, "DONE", null, candidate.claims, attestations) === null) {
+      return invalid("attestations");
+    }
+    const context: OpenSerialCandidateContext = {
+      projectRoot,
+      start,
+      startHeadRef: inner.startHeadRef as string | null,
+      contract,
+      contractMarkdown,
+      route,
+      activities,
+      events: options.events,
+      lock,
+      released: false,
+      taskPaths,
+      protectedPaths,
+      ownedPaths,
+      ownedRecordIndexAuthority,
+      claims: initial.claims,
+      attestations,
+      attestationsCompleteForDone: inner.attestationsCompleteForDone,
+      evidence,
+      authority,
+      lineageIdentity,
+      sealableCandidateSha256: initial.candidateSha256,
+      sealableClaimsSha256: initial.claimsSha256,
+      sealableBundleSha256: initial.bundleSha256,
+    };
+    if (!serialCandidateGitEnvironmentSafe()
+      || !candidateGitMetadataSafe(projectRoot, contract.ownedRecords)
+      || (!allowPreparedStopWorkspaceDrift && (!candidateWorkspaceStillExact(candidate, context)
+        || !candidateTaskPathSetStillExact(candidate, context)))
+      || openSerialCandidates.has(runId)) return stalePendingCandidate("WORKSPACE_CHANGED");
+    openSerialCandidates.set(runId, context);
+    resumed = true;
+    return Object.freeze({ status: "resumed", candidate });
+  } catch {
+    return invalid("exception");
+  } finally {
+    if (!resumed) {
+      lock.release();
+      activeRoots.delete(projectRoot);
+    }
+  }
 }
 
 function candidateOwnedRecordTopologySafe(
@@ -3174,6 +4956,10 @@ function candidateWriteOwnedTextNoFollow(
         writeOffset,
       );
     }
+    // Terminal reconciliation treats exact report/LOG bytes as durable
+    // effects. Flush each bound leaf before the next transaction step; a crash
+    // between the two files remains an explicit manual-recovery state.
+    fsyncSync(descriptor);
     const after = fstatSync(descriptor, { bigint: true });
     const namedAfter = lstatSync(path, { bigint: true });
     if (after.dev !== opened.dev || after.ino !== opened.ino || after.nlink !== 1n
@@ -3223,13 +5009,30 @@ function candidateProtectedBoundaryIntact(
   }
 }
 
+function currentCandidateTaskPaths(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+): readonly string[] | null {
+  if (candidate.round === 0) return context.taskPaths;
+  // A terminal token temporarily reserves the lineage, so the public
+  // current-candidate predicate (and therefore the pending-lineage projection)
+  // is intentionally false during the record write. The branded round-one
+  // bundle itself still carries the exact captured path set needed for the
+  // pre/post STOP observation.
+  return candidate.callsUsed.repair === 1
+    ? Object.freeze(candidate.bundle.entries.map((entry) => entry.projectRelativePath))
+    : null;
+}
+
 function candidateProductBundleStillExact(candidate: SerialCandidateV1, context: OpenSerialCandidateContext): boolean {
   try {
     if (!serialCandidateWorkspaceStillExact(context.projectRoot, candidate)) return false;
+    const taskPaths = currentCandidateTaskPaths(candidate, context);
+    if (!taskPaths) return false;
     const capture = captureSerialCandidateBundle(context.projectRoot, context.authority, {
       round: candidate.round,
       baseHead: context.start.head,
-      taskPaths: context.taskPaths,
+      taskPaths,
       protectedPaths: context.protectedPaths,
       ownedPaths: context.ownedPaths,
     });
@@ -3257,7 +5060,12 @@ function candidateWorkspaceStillExact(candidate: SerialCandidateV1, context: Ope
   }
 }
 
-function candidateTaskPathSetStillExact(context: OpenSerialCandidateContext): boolean {
+function candidateTaskPathSetStillExact(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+): boolean {
+  const expectedTaskPaths = currentCandidateTaskPaths(candidate, context);
+  if (!expectedTaskPaths) return false;
   const changed = candidateScanChangedPaths(context.projectRoot, context.contract.ownedRecords);
   if (changed === null) return false;
   const key = (path: string): string => process.platform === "win32" ? path.toLowerCase() : path;
@@ -3267,7 +5075,7 @@ function candidateTaskPathSetStillExact(context: OpenSerialCandidateContext): bo
     const value = key(path);
     return !owned.has(value) && !protectedPaths.has(value);
   });
-  return sameLines(currentTaskPaths, context.taskPaths);
+  return sameLines(currentTaskPaths, expectedTaskPaths);
 }
 
 /** A STOP intentionally leaves candidate product bytes in place, so its record
@@ -3403,7 +5211,7 @@ function candidateTerminalBoundaryIntact(
       head: candidateGit(context.projectRoot, ["rev-parse", "HEAD"]) === context.start.head,
       headRef: currentSymbolicHead(context.projectRoot) === context.startHeadRef,
       protected: protectedStartingPathsOrNull(context.projectRoot, context.start) === true,
-      taskPaths: candidateTaskPathSetStillExact(context),
+      taskPaths: candidateTaskPathSetStillExact(candidate, context),
       bundleBytes: candidateBundleWorktreeBytesStillExact(context.projectRoot, candidate.bundle),
       bundleIndex: candidateBundleIndexStateStillExact(context.projectRoot, candidate.bundle),
       ownedRecords: candidateOwnedRecordsStillExact(context.projectRoot, ownedRecords),
@@ -3434,7 +5242,7 @@ function observeCandidateStopCustody(
   let workspaceExact = false;
   let ignoredExact = false;
   try {
-    workspaceExact = candidateTaskPathSetStillExact(context)
+    workspaceExact = candidateTaskPathSetStillExact(candidate, context)
       && candidateBundleWorktreeBytesStillExact(context.projectRoot, candidate.bundle)
       && candidateBundleIndexStateStillExact(context.projectRoot, candidate.bundle);
     ignoredExact = captureSerialCandidateIgnoredBoundary(context.projectRoot) !== null;
@@ -3479,16 +5287,20 @@ function candidateStopBoundaryIntact(
   try {
     const protectedPathsExactAfterWrite = protectedStartingPathsOrNull(context.projectRoot, context.start);
     const observationAfterWrite = observeCandidateStop(candidate, context);
-    return protectedPathsExactAfterWrite !== null
-      && protectedPathsExactAfterWrite === protectedPathsExactBeforeWrite
-      && observationAfterWrite !== null
-      && sameCandidateStopObservation(observationAfterWrite, observationBeforeWrite)
-      && candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)
-      && candidateOwnedRecordIndexStillExact(context.projectRoot, context.ownedRecordIndexAuthority)
-      && candidateGit(context.projectRoot, ["rev-parse", "HEAD"]) === headBeforeWrite
-      && currentSymbolicHead(context.projectRoot) === refBeforeWrite
-      && candidateOwnedRecordsStillExact(context.projectRoot, candidateOwnedRecordBlobs(context, records))
-      && candidateTerminalPathsUnaliased(candidate, context, false, true);
+    const checks = Object.freeze({
+      protectedReadable: protectedPathsExactAfterWrite !== null,
+      protectedStable: protectedPathsExactAfterWrite === protectedPathsExactBeforeWrite,
+      observationReadable: observationAfterWrite !== null,
+      observationStable: observationAfterWrite !== null
+        && sameCandidateStopObservation(observationAfterWrite, observationBeforeWrite),
+      metadata: candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords),
+      ownedIndex: candidateOwnedRecordIndexStillExact(context.projectRoot, context.ownedRecordIndexAuthority),
+      head: candidateGit(context.projectRoot, ["rev-parse", "HEAD"]) === headBeforeWrite,
+      headRef: currentSymbolicHead(context.projectRoot) === refBeforeWrite,
+      ownedRecords: candidateOwnedRecordsStillExact(context.projectRoot, candidateOwnedRecordBlobs(context, records)),
+      unaliased: candidateTerminalPathsUnaliased(candidate, context, false, true),
+    });
+    return Object.values(checks).every(Boolean);
   } catch {
     return false;
   }
@@ -3556,12 +5368,41 @@ export function previewSerialCandidateRoute(
   intent: TaskIntent,
   authority: SerialCandidateTaskSpecAuthorityV1,
   adapters: readonly TaskAdapter[],
+  writerIsolation: SerialCandidateWriterIsolationV1,
   adapterId?: string,
 ): RouteResult {
   if (!serialCandidateAuthorityFor(intent, authority)) throw new Error("INVALID_SERIAL_CANDIDATE_AUTHORITY");
+  if (authority.evidencePlan.revision !== 0) {
+    throw new Error("UNSUPPORTED_SERIAL_CANDIDATE_EVIDENCE_REVISION");
+  }
+  if (!candidateWriterIsolationBinding(writerIsolation)) {
+    throw new Error("INVALID_SERIAL_CANDIDATE_WRITER_ISOLATION");
+  }
   return routeTask(
     { outcome: intent.outcome.text, capability: "serial-task" },
-    candidateCapableAdapters(adapters),
+    candidateCapableAdapters(adapters, writerIsolation),
+    adapterId,
+  );
+}
+
+/** Core source-test state preview; non-sandbox receipts never enter Q7. */
+export function previewSerialCandidateRouteForStateTest(
+  intent: TaskIntent,
+  authority: SerialCandidateTaskSpecAuthorityV1,
+  adapters: readonly TaskAdapter[],
+  writerIsolation: SerialCandidateWriterIsolationV1,
+  adapterId?: string,
+): RouteResult {
+  if (!serialCandidateAuthorityFor(intent, authority)) throw new Error("INVALID_SERIAL_CANDIDATE_AUTHORITY");
+  if (authority.evidencePlan.revision !== 0) {
+    throw new Error("UNSUPPORTED_SERIAL_CANDIDATE_EVIDENCE_REVISION");
+  }
+  if (!candidateStateTestWriterIsolationBinding(writerIsolation)) {
+    throw new Error("INVALID_SERIAL_CANDIDATE_STATE_TEST_WRITER_ISOLATION");
+  }
+  return routeTask(
+    { outcome: intent.outcome.text, capability: "serial-task" },
+    candidateCapableAdapters(adapters, writerIsolation, undefined, true),
     adapterId,
   );
 }
@@ -3585,17 +5426,44 @@ export async function runSerialTaskToCandidate(
   intent: TaskIntent,
   options: SerialCandidateRunOptions,
 ): Promise<SerialCandidateRunResult> {
+  return runSerialTaskToCandidateInternal(root, intent, options, false);
+}
+
+/** Core source-test state runner; it is intentionally absent from index.ts. */
+export async function runSerialTaskToCandidateForStateTest(
+  root: string,
+  intent: TaskIntent,
+  options: SerialCandidateRunOptions,
+): Promise<SerialCandidateRunResult> {
+  return runSerialTaskToCandidateInternal(root, intent, options, true);
+}
+
+async function runSerialTaskToCandidateInternal(
+  root: string,
+  intent: TaskIntent,
+  options: SerialCandidateRunOptions,
+  stateTest: boolean,
+): Promise<SerialCandidateRunResult> {
   const requestSha256 = taskRequestSha256(intent);
   if (requestSha256 === null) throw new Error("INVALID_TASK_INTENT");
   const authority = serialCandidateAuthorityFor(intent, options.authority);
   if (!authority) throw new Error("INVALID_SERIAL_CANDIDATE_AUTHORITY");
+  if (authority.evidencePlan.revision !== 0) {
+    throw new Error("UNSUPPORTED_SERIAL_CANDIDATE_EVIDENCE_REVISION");
+  }
   const projectRoot = resolve(root);
+  const writerIsolation = stateTest
+    ? candidateStateTestWriterIsolationBinding(options.writerIsolation, projectRoot)
+    : candidateWriterIsolationBinding(options.writerIsolation, projectRoot);
+  if (!writerIsolation || !options.adapters.includes(writerIsolation.adapter)) {
+    throw new Error("INVALID_SERIAL_CANDIDATE_WRITER_ISOLATION");
+  }
   if (activeRoots.has(projectRoot)) throw new Error("SERIAL_RUN_ACTIVE: One task is already running for this project.");
   if (!serialCandidateGitEnvironmentSafe()) throw new Error("UNSAFE_SERIAL_CANDIDATE_GIT_ENVIRONMENT");
   const candidateEnvironmentStart = candidateGitEnvironmentSnapshot();
   assertGoverned(projectRoot, candidateGit);
   const activities: SerialActivity[] = [];
-  const eligibleAdapters = candidateCapableAdapters(options.adapters);
+  const eligibleAdapters = candidateCapableAdapters(options.adapters, options.writerIsolation, projectRoot, stateTest);
   const route = routeTask(
     { outcome: intent.outcome.text, capability: "serial-task" },
     eligibleAdapters,
@@ -3716,6 +5584,12 @@ export async function runSerialTaskToCandidate(
     let adapterValue: unknown;
     try {
       if (serialCandidateAuthorityFor(intent, authority) !== authority) throw new WorkerBoundaryError("INVALID_SERIAL_CANDIDATE_AUTHORITY");
+      const liveIsolation = stateTest
+        ? candidateStateTestWriterIsolationBinding(options.writerIsolation, projectRoot)
+        : candidateWriterIsolationBinding(options.writerIsolation, projectRoot);
+      if (!liveIsolation || liveIsolation.adapter !== chosen) {
+        throw new WorkerBoundaryError("INVALID_SERIAL_CANDIDATE_WRITER_ISOLATION");
+      }
       adapterValue = await chosen.run(freezeContract(contract), options.signal);
     } catch (error) {
       if (!serialCandidateGitEnvironmentSafe()) {
@@ -4667,9 +6541,15 @@ export function captureSerialCandidateAfterRepair(
   }
 }
 
-export function stopSerialCandidate(
+type TerminalExecutionContext = Readonly<{
+  plan: PendingTerminalPlanV1;
+  action: SerialCandidateTerminalActionCustody;
+}>;
+
+function stopSerialCandidateRaw(
   value: unknown,
   reason: SerialStopReason = "MODEL_RESULT_NOT_VERIFIED",
+  terminalExecution?: TerminalExecutionContext,
 ): SerialCandidateTerminalResult | null {
   if (!validCandidateStopReason(reason)) return null;
   const open = openContextForCandidate(value);
@@ -4729,6 +6609,8 @@ export function stopSerialCandidate(
       stopTaskSpecEvidence,
       custody,
       reportFilesChanged,
+      terminalExecution?.action,
+      terminalExecution?.plan.recordDate,
     );
     if (!records.verified) {
       const restored = restoreCandidateLogBeforeThrow(context.projectRoot, context.start);
@@ -4767,6 +6649,8 @@ export function stopSerialCandidate(
         rewriteObservation.custody.custody,
         rewriteReportFiles,
         false,
+        terminalExecution?.action,
+        terminalExecution?.plan.recordDate,
       );
       if (!conservative?.verified || !candidateStopBoundaryIntact(
         candidate,
@@ -4818,9 +6702,10 @@ export function stopSerialCandidate(
   }
 }
 
-export function finalizeSerialCandidate(
+function finalizeSerialCandidateRaw(
   value: unknown,
   sealAuthorization: SerialCandidateSealAuthorizationV1,
+  terminalExecution?: TerminalExecutionContext,
 ): SerialCandidateTerminalResult | null {
   const open = openContextForCandidate(value);
   if (!open) return null;
@@ -4874,6 +6759,8 @@ export function finalizeSerialCandidate(
       stoppedCustody,
       stoppedReportFilesChanged,
       protectedIntact,
+      terminalExecution?.action,
+      terminalExecution?.plan.recordDate,
     );
     if (!stopped?.verified) {
       const restored = restoreCandidateLogBeforeThrow(context.projectRoot, context.start);
@@ -4946,6 +6833,8 @@ export function finalizeSerialCandidate(
         taskSpecEvidence,
         custody,
         reportFilesChanged,
+        terminalExecution?.action,
+        terminalExecution?.plan.recordDate,
       );
       if (!records.verified) return stoppedAfterDoneWrite(records, "RECORD_VERIFICATION_FAILED");
       if (!candidateTerminalBoundaryIntact(candidate, context, records)) {
@@ -4990,6 +6879,8 @@ export function finalizeSerialCandidate(
       taskSpecEvidence,
       custody,
       reportFilesChanged,
+      terminalExecution?.action,
+      terminalExecution?.plan.recordDate,
     );
     if (!records.verified) return stoppedAfterDoneWrite(records, "RECORD_VERIFICATION_FAILED");
     if (!candidateTerminalBoundaryIntact(candidate, context, records)) {
@@ -5007,6 +6898,7 @@ export function finalizeSerialCandidate(
         candidate.bundle,
         context.startHeadRef!,
         ownedRecords,
+        terminalExecution?.plan.actionId,
       );
     } catch {
       commit = null;
@@ -5042,5 +6934,791 @@ export function finalizeSerialCandidate(
     if (!irreversibleDoneCommit) completeSerialCandidateTerminal(token, "STOPPED");
     releaseOpenCandidate(candidate.runId, context);
     throw error;
+  }
+}
+
+function terminalPlanStillExact(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+  binding: NonNullable<ReturnType<typeof terminalPreparationBindings.get>>,
+): boolean {
+  try {
+    const input: NonNullable<ReturnType<typeof terminalPreparationInput>> = binding.plan.kind === "finalize"
+      ? Object.freeze({
+          actionId: binding.plan.actionId,
+          kind: "finalize",
+          reason: null,
+          sealAuthorization: binding.sealAuthorization,
+        }) as NonNullable<ReturnType<typeof terminalPreparationInput>>
+      : Object.freeze({
+          actionId: binding.plan.actionId,
+          kind: "stop",
+          reason: binding.plan.reason,
+          sealAuthorization: null,
+        });
+    const preview = terminalRecordPreview(
+      candidate,
+      context,
+      input,
+      binding.plan.baseCapsuleSha256,
+      binding.plan.recordDate,
+    );
+    return preview !== null
+      && pendingSha256(preview.reportText) === binding.plan.reportSha256
+      && pendingSha256(context.start.logText + expectedLogLine(preview.row)) === binding.plan.logSha256
+      && pendingSha256(JSON.stringify(preview.row)) === binding.plan.rowSha256
+      && pendingSha256(context.contractMarkdown) === binding.plan.briefSha256
+      && preview.commitExpected === binding.plan.commitExpected
+      && sameLines(preview.expectedCommitPaths, binding.plan.expectedCommitPaths);
+  } catch {
+    return false;
+  }
+}
+
+function terminalResultMatchesPreparedPlan(
+  plan: PendingTerminalPlanV1,
+  result: SerialCandidateTerminalResult,
+  logText: string,
+): boolean {
+  try {
+    const expectedCommitStatus = plan.commitExpected ? "created" : "skipped";
+    const resultStatusExact = plan.disposition === "DONE"
+      ? result.status === "done" && result.candidate.phase === "done"
+      : result.status === "stopped" && result.candidate.phase === "stopped";
+    const commitExact = result.commit.status === expectedCommitStatus
+      && (expectedCommitStatus === "created"
+        ? typeof result.commit.hash === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(result.commit.hash)
+        : result.commit.hash === undefined);
+    return resultStatusExact
+      && result.disposition === plan.disposition
+      && pendingSha256(result.reportText) === plan.reportSha256
+      && pendingSha256(logText) === plan.logSha256
+      && pendingSha256(JSON.stringify(result.row)) === plan.rowSha256
+      && commitExact;
+  } catch {
+    return false;
+  }
+}
+
+function composeTerminalReceipt(
+  action: SerialCandidateTerminalActionV1,
+  plan: PendingTerminalPlanV1,
+  result: SerialCandidateTerminalResult,
+  logText: string,
+): SerialCandidateTerminalReceiptV1 | null {
+  try {
+    if (!ACTION_UUID_V4_RE.test(action.actionId)
+      || action.actionId !== plan.actionId || action.kind !== plan.kind
+      || action.candidateSha256 !== plan.candidateSha256
+      || !SHA256_RE.test(action.capsuleSha256)
+      || !terminalResultMatchesPreparedPlan(plan, result, logText)) return null;
+    const withoutSha = Object.freeze({
+      version: SERIAL_CANDIDATE_TERMINAL_RECEIPT_VERSION,
+      actionId: action.actionId,
+      kind: action.kind,
+      disposition: plan.disposition,
+      taskNumber: result.taskNumber,
+      candidateSha256: action.candidateSha256,
+      preparedCapsuleSha256: action.capsuleSha256,
+      reportSha256: plan.reportSha256,
+      logSha256: plan.logSha256,
+      commitStatus: result.commit.status,
+      commitHash: result.commit.hash ?? null,
+    });
+    const bytes = pendingCanonicalBytes(withoutSha);
+    if (!bytes) return null;
+    return Object.freeze({
+      ...withoutSha,
+      terminalReceiptSha256: pendingSha256(bytes),
+    }) as SerialCandidateTerminalReceiptV1;
+  } catch {
+    return null;
+  }
+}
+
+/** Execute only one exact terminal plan whose prepared capsule is durably acknowledged. */
+export function executeSerialCandidateTerminal(
+  value: unknown,
+  preparation: unknown,
+  persistedCapsuleSha256: unknown,
+): SerialCandidateTerminalExecutionV1 | null {
+  if (typeof preparation !== "object" || preparation === null
+    || !terminalPreparationBrand.has(preparation)
+    || typeof persistedCapsuleSha256 !== "string") return null;
+  const binding = terminalPreparationBindings.get(preparation);
+  const prepared = preparation as SerialCandidateTerminalPreparationV1;
+  if (!binding || binding.candidate !== value
+    || terminalPreparationByCandidate.get(binding.candidate) !== preparation
+    || prepared.action.capsuleSha256 !== persistedCapsuleSha256
+    || prepared.capsule.capsuleSha256 !== persistedCapsuleSha256
+    || pendingSha256(prepared.capsule.canonicalBytes) !== persistedCapsuleSha256) return null;
+  const open = openContextForCandidate(value);
+  if (!open || open.candidate !== binding.candidate
+    || !terminalPlanStillExact(open.candidate, open.context, binding)) return null;
+  const startingLogText = open.context.start.logText;
+  const execution = Object.freeze({ plan: binding.plan, action: terminalActionCustody(binding.plan) });
+  const result = binding.plan.kind === "finalize"
+    ? binding.sealAuthorization
+      ? finalizeSerialCandidateRaw(open.candidate, binding.sealAuthorization, execution)
+      : null
+    : binding.plan.reason
+      ? stopSerialCandidateRaw(open.candidate, binding.plan.reason, execution)
+      : null;
+  if (!result) {
+    // A raw null is a refusal, not a failed write: both raw terminals return
+    // null only above their `beginSerialCandidateTerminal` call, so no report,
+    // LOG row, commit, or lock release exists yet. Release this action's
+    // reservation so an owner who corrects the drift the raw path refused —
+    // a product moved onto an owned record, unsafe Git metadata — can still be
+    // given a new terminal action. Leaving it registered would let one benign
+    // refusal wedge the candidate for the rest of the process, because a fresh
+    // `actionId` is rejected while a preparation exists. Authoring twice stays
+    // impossible without this reservation, but not through the phase check:
+    // `mintCandidate` returns a NEW frozen object, so this one keeps its
+    // pre-terminal phase forever. The real barriers are the currency test in
+    // `isCurrentSerialCandidate` (`candidate.ts`), which fails once
+    // `lineage.current` moves on or `terminalReserved`/`parked` is set, and
+    // `context.released` in `openContextForCandidate`.
+    // The `!receipt` path below must NOT do this — it runs after real records
+    // exist on disk.
+    terminalPreparationByCandidate.delete(binding.candidate);
+    terminalPreparationBindings.delete(preparation);
+    return null;
+  }
+  // Raw completion has already byte-verified this exact append before it
+  // releases the live lock. Compose from the retained starting bytes and the
+  // truthful returned row so a post-release observer cannot make Core lose the
+  // receipt for an already-completed terminal effect.
+  const receipt = composeTerminalReceipt(
+    prepared.action,
+    binding.plan,
+    result,
+    startingLogText + expectedLogLine(result.row),
+  );
+  // A raw DONE path may conservatively rewrite itself to STOPPED after a late
+  // mutation. Those honest terminal effects stay on disk, but they are not the
+  // persisted action the caller acknowledged. Never mint closable authority
+  // for a different disposition or different report/LOG bytes; restart
+  // reconciliation will classify the mismatch as manual recovery.
+  if (!receipt) return null;
+  terminalPreparationByCandidate.delete(binding.candidate);
+  terminalPreparationBindings.delete(preparation);
+  return Object.freeze({ result, receipt });
+}
+
+function parsePendingTerminalPlan(value: unknown): PendingTerminalPlanV1 | null {
+  if (!exactPendingKeys(value, [
+    "version", "actionId", "kind", "disposition", "reason", "candidateSha256", "baseCapsuleSha256",
+    "recordDate", "reportSha256", "logSha256", "rowSha256", "briefSha256", "commitExpected",
+    "expectedCommitPaths", "commitMessage", "sealAuthorization",
+  ]) || value.version !== PENDING_TERMINAL_PLAN_VERSION
+    || typeof value.actionId !== "string" || !ACTION_UUID_V4_RE.test(value.actionId)
+    || (value.kind !== "finalize" && value.kind !== "stop")
+    || (value.disposition !== "DONE" && value.disposition !== "STOPPED")
+    || typeof value.candidateSha256 !== "string" || !SHA256_RE.test(value.candidateSha256)
+    || typeof value.baseCapsuleSha256 !== "string" || !SHA256_RE.test(value.baseCapsuleSha256)
+    || typeof value.recordDate !== "string" || !validTerminalRecordDate(value.recordDate)
+    || typeof value.reportSha256 !== "string" || !SHA256_RE.test(value.reportSha256)
+    || typeof value.logSha256 !== "string" || !SHA256_RE.test(value.logSha256)
+    || typeof value.rowSha256 !== "string" || !SHA256_RE.test(value.rowSha256)
+    || typeof value.briefSha256 !== "string" || !SHA256_RE.test(value.briefSha256)
+    || typeof value.commitExpected !== "boolean") return null;
+  const pathsValue = parsePendingCandidatePaths(value.expectedCommitPaths, 128, true);
+  if (!pathsValue) return null;
+  if (value.kind === "finalize") {
+    if (value.disposition !== "DONE" || value.reason !== null || value.sealAuthorization === null
+      || (value.commitExpected ? typeof value.commitMessage !== "string" : value.commitMessage !== null)) return null;
+  } else if (value.disposition !== "STOPPED" || !validCandidateStopReason(value.reason)
+    || value.sealAuthorization !== null || value.commitExpected || value.commitMessage !== null
+    || pathsValue.length !== 0) return null;
+  return Object.freeze({
+    ...value,
+    expectedCommitPaths: pathsValue,
+  }) as PendingTerminalPlanV1;
+}
+
+function validTerminalRecordDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+type ParsedTerminalPreparation = Readonly<{
+  parsed: NonNullable<ReturnType<typeof parseAnyPendingCapsule>>;
+  pendingInner: Record<string, unknown>;
+  baseCapsule: SerialPendingCandidateCapsuleV1;
+  plan: PendingTerminalPlanV1;
+  action: SerialCandidateTerminalActionV1;
+}>;
+
+function parseTerminalPreparation(
+  capsuleValue: unknown,
+  actionValue: unknown,
+): ParsedTerminalPreparation | null {
+  try {
+    const parsed = parseAnyPendingCapsule(capsuleValue);
+    const detachedAction = detachPendingJson(actionValue);
+    if (!parsed || !exactPendingKeys(parsed.inner, ["version", "pending", "terminalPlan"])
+      || parsed.inner.version !== SERIAL_PREPARED_CANDIDATE_TERMINAL_INNER_VERSION
+      || !exactPendingKeys(parsed.inner.pending, [
+        "version", "projectRootReal", "projectRootSha256", "start", "startHeadRef", "contract", "route",
+        "activities", "taskPaths", "protectedPaths", "ownedPaths", "ownedRecordIndexAuthority", "attestations",
+        "attestationsCompleteForDone", "evidence", "taskSpec", "evidencePlan", "round0Bundle", "candidate",
+        "claimsText", "transitionHistory", "repairLineage", "sealableCandidateSha256", "sealableClaimsSha256",
+        "sealableBundleSha256",
+      ]) || parsed.inner.pending.version !== SERIAL_PENDING_CANDIDATE_INNER_VERSION
+      || !exactPendingKeys(detachedAction, ["actionId", "kind", "candidateSha256", "capsuleSha256"])) return null;
+    const plan = parsePendingTerminalPlan(parsed.inner.terminalPlan);
+    if (!plan || typeof detachedAction.actionId !== "string" || detachedAction.actionId !== plan.actionId
+      || detachedAction.kind !== plan.kind
+      || detachedAction.candidateSha256 !== plan.candidateSha256
+      || detachedAction.capsuleSha256 !== parsed.capsuleSha256) return null;
+    const baseCapsule = pendingCapsuleFromInner(parsed.inner.pending, true);
+    if (!baseCapsule || baseCapsule.capsuleSha256 !== plan.baseCapsuleSha256) return null;
+    const pendingCandidate = parsePendingCandidateRecord(parsed.inner.pending.candidate);
+    if (!pendingCandidate || pendingCandidate.candidateSha256 !== plan.candidateSha256) return null;
+    const pendingStart = parsePendingStart(parsed.inner.pending.start);
+    const taskPaths = parsePendingCandidatePaths(parsed.inner.pending.taskPaths, 100, false);
+    const ownedPaths = parsePendingCandidatePaths(parsed.inner.pending.ownedPaths, 16, true);
+    const taskNumber = pendingCandidate.taskNumber;
+    const pendingRoot = parsed.inner.pending.projectRootReal;
+    if (!pendingStart || !taskPaths || !ownedPaths || !Number.isSafeInteger(taskNumber)
+      || typeof pendingRoot !== "string") return null;
+    const expectedOwnedPaths = [
+      rel(pendingRoot, paths.brief(pendingRoot, taskNumber as number)),
+      rel(pendingRoot, paths.report(pendingRoot, taskNumber as number)),
+      rel(pendingRoot, paths.log(pendingRoot)),
+    ].sort();
+    const commitExpected = plan.kind === "finalize" && pendingStart.status.length === 0;
+    const expectedCommitPaths = commitExpected
+      ? [...new Set([...taskPaths, ...ownedPaths])].sort()
+      : [];
+    if (!sameLines(ownedPaths, expectedOwnedPaths)
+      || plan.commitExpected !== commitExpected
+      || !sameLines(plan.expectedCommitPaths, expectedCommitPaths)
+      || plan.commitMessage !== (commitExpected
+        ? candidateTerminalCommitMessage(taskNumber as number, plan.actionId)
+        : null)) return null;
+    const action = Object.freeze({
+      actionId: detachedAction.actionId,
+      kind: detachedAction.kind,
+      candidateSha256: detachedAction.candidateSha256,
+      capsuleSha256: detachedAction.capsuleSha256,
+    }) as SerialCandidateTerminalActionV1;
+    return Object.freeze({ parsed, pendingInner: parsed.inner.pending, baseCapsule, plan, action });
+  } catch {
+    return null;
+  }
+}
+
+function releaseReconciledCandidate(candidate: SerialCandidateV1): void {
+  const open = openContextForCandidate(candidate);
+  if (!open) return;
+  try {
+    parkCurrentSerialCandidate(candidate);
+  } finally {
+    releaseOpenCandidate(candidate.runId, open.context);
+  }
+}
+
+function terminalReconcileStale(
+  reason: Extract<SerialCandidateTerminalReconcileResultV1, { status: "stale" }> ["reason"],
+): SerialCandidateTerminalReconcileResultV1 {
+  return Object.freeze({ status: "stale", reason });
+}
+
+function preparedOwnedAuthority(value: unknown): CandidateOwnedRecordIndexAuthority | null {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  const output: CandidateOwnedRecordIndexAuthority[number][] = [];
+  for (const entry of value) {
+    if (!exactPendingKeys(entry, ["projectRelativePath", "startingEntry", "terminalMode"])
+      || typeof entry.projectRelativePath !== "string"
+      || (entry.terminalMode !== "100644" && entry.terminalMode !== "100755")) return null;
+    let startingEntry: CandidateGitBlobEntry;
+    if (entry.startingEntry === null) startingEntry = null;
+    else {
+      if (!exactPendingKeys(entry.startingEntry, ["oid", "mode"])
+        || typeof entry.startingEntry.oid !== "string"
+        || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(entry.startingEntry.oid)
+        || (entry.startingEntry.mode !== "100644" && entry.startingEntry.mode !== "100755")) return null;
+      startingEntry = Object.freeze({ mode: entry.startingEntry.mode, oid: entry.startingEntry.oid });
+    }
+    output.push(Object.freeze({
+      projectRelativePath: entry.projectRelativePath,
+      startingEntry,
+      terminalMode: entry.terminalMode,
+    }));
+  }
+  return Object.freeze(output);
+}
+
+type AuthenticatedPreparedPendingSemantics = Readonly<{
+  candidate: SerialCandidateV1;
+  bundle: SerialCandidateBundleV1;
+  start: GitSnapshot;
+  ownedRecordIndexAuthority: CandidateOwnedRecordIndexAuthority;
+}>;
+
+/** Rebuild every candidate brand from the prepared capsule without trusting
+ * its terminal plan as a substitute for the original Task Spec/candidate
+ * semantics. This intentionally does not require pre-terminal workspace bytes:
+ * the caller may be classifying an already-completed records/commit effect. */
+function authenticatePreparedPendingSemantics(
+  projectRoot: string,
+  pending: Record<string, unknown>,
+  plan: PendingTerminalPlanV1,
+): AuthenticatedPreparedPendingSemantics | null {
+  try {
+    const invalid = (stage: string): null => {
+      void stage;
+      return null;
+    };
+    const candidateRecord = parsePendingCandidateRecord(pending.candidate);
+    if (!candidateRecord) return invalid("candidate");
+    const roundOne = candidateRecord.round === 1;
+    const repairLineage = roundOne ? parsePendingRepairLineage(pending.repairLineage) : null;
+    if ((roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 1
+      || !repairLineage || plan.kind !== "stop"))
+      || (!roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 0
+        || pending.repairLineage !== null))) return invalid("candidate-repair-lineage");
+    const sources = pendingAuthenticatedSources(pending.taskSpec);
+    const sections = pendingContractSections(pending.taskSpec);
+    if (!sources || !sections) return invalid("sources");
+    const taskSpec = validateTaskSpec(pending.taskSpec, sources, sections);
+    if (!taskSpec || !exactPendingJson(taskSpec, pending.taskSpec)) return invalid("task-spec");
+    const evidenceCandidate = pendingInitialEvidenceCandidate(pending.evidencePlan);
+    const evidencePlan = evidenceCandidate ? bindInitialEvidencePlan(taskSpec, evidenceCandidate) : null;
+    if (!evidencePlan || !exactPendingJson(evidencePlan, pending.evidencePlan)
+      || evidencePlan.revision !== 0) return invalid("evidence-plan");
+    const authority = composeSerialCandidateTaskSpecAuthority(taskSpec, evidencePlan);
+    if (!authority || candidateRecord.taskSpecSha256 !== authority.taskSpecSha256
+      || candidateRecord.evidencePlanSha256 !== authority.evidencePlanSha256) return invalid("authority");
+
+    const start = parsePendingStart(pending.start);
+    const route = parsePendingRoute(pending.route);
+    const activities = parsePendingActivities(pending.activities);
+    const taskPaths = parsePendingCandidatePaths(pending.taskPaths, 100, false);
+    const protectedPaths = parsePendingCandidatePaths(pending.protectedPaths, 4096, true);
+    const ownedPaths = parsePendingCandidatePaths(pending.ownedPaths, 16, true);
+    const taskNumber = candidateRecord.taskNumber;
+    if (!start || !route || !activities || !taskPaths || !protectedPaths || !ownedPaths
+      || !Number.isSafeInteger(taskNumber)
+      || (pending.startHeadRef !== null && (typeof pending.startHeadRef !== "string"
+        || !/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._\/-]*$/u.test(pending.startHeadRef)))) return invalid("context");
+    const expectedOwnedPaths = [
+      rel(projectRoot, paths.brief(projectRoot, taskNumber as number)),
+      rel(projectRoot, paths.report(projectRoot, taskNumber as number)),
+      rel(projectRoot, paths.log(projectRoot)),
+    ].sort();
+    if (!sameLines(ownedPaths, expectedOwnedPaths)) return invalid("owned-paths");
+    const contract = composePendingContract(projectRoot, pending.contract, taskNumber as number, authority, start, route);
+    const contractMarkdown = contract ? briefText(contract, false) : null;
+    if (!contract || !contractMarkdown || pendingSha256(contractMarkdown) !== plan.briefSha256
+      || contract.requestSha256 !== candidateRecord.requestSha256) return invalid("contract");
+    if (!validEvidence(pending.evidence) || typeof pending.attestationsCompleteForDone !== "boolean"
+      || !Array.isArray(pending.attestations) || pending.attestations.length > 64
+      || typeof pending.claimsText !== "string" || pending.claimsText.length > 262_144) return invalid("evidence");
+    const attestations = Object.freeze([...(pending.attestations as AdapterCommandAttestationV1[])]);
+    if (!pending.attestationsCompleteForDone && attestations.length !== 0) return invalid("attestations-shape");
+
+    const roundZeroTaskPaths = roundOne ? pendingBundleTaskPaths(pending.round0Bundle) : taskPaths;
+    if (!roundZeroTaskPaths) return invalid("round-zero-task-paths");
+    const captureContext = Object.freeze({
+      round: 0,
+      baseHead: start.head,
+      taskPaths: roundZeroTaskPaths,
+      protectedPaths,
+      ownedPaths,
+    });
+    const bundle = restoreSerialCandidateBundleForPending(
+      projectRoot,
+      authority,
+      pending.round0Bundle,
+      captureContext,
+    );
+    if (!bundle || !exactPendingJson(bundle, pending.round0Bundle)) return invalid("bundle");
+    const initialEligibilityRecord = repairLineage
+      ? repairLineage.preRepairCandidate.repairEligibility
+      : candidateRecord.repairEligibility;
+    const repairEligibility = initialEligibilityRecord === null
+      ? null
+      : restoreSerialCandidateRepairEligibilityForPending(bundle, initialEligibilityRecord);
+    if (initialEligibilityRecord !== null && !repairEligibility) return invalid("repair-eligibility");
+    const initial = composeSerialCandidate(authority, {
+      version: SERIAL_CANDIDATE_VERSION,
+      runId: candidateRecord.runId,
+      taskNumber,
+      requestSha256: candidateRecord.requestSha256,
+      claimsText: pending.claimsText,
+      bundle,
+      repairEligibility,
+    });
+    if (!initial || pending.sealableCandidateSha256 !== initial.candidateSha256
+      || pending.sealableClaimsSha256 !== initial.claimsSha256
+      || pending.sealableBundleSha256 !== initial.bundleSha256) return invalid("initial");
+    const decisions = pendingTransitionDecisions(pending.transitionHistory);
+    if (!decisions) return invalid("decisions");
+    const replayDecision = (
+      source: SerialCandidateV1,
+      decision: SerialCandidateTransitionDecisionV1,
+    ): SerialCandidateV1 | null => {
+      const transition = composeSerialCandidateTransition(source, {
+        version: SERIAL_CANDIDATE_TRANSITION_VERSION,
+        runId: source.runId,
+        generation: source.generation,
+        taskNumber: source.taskNumber,
+        projectRootSha256: source.projectRootSha256,
+        round: source.round,
+        taskSpecSha256: source.taskSpecSha256,
+        evidencePlanSha256: source.evidencePlanSha256,
+        candidateSha256: source.candidateSha256,
+        bundleSha256: source.bundleSha256,
+        evidenceStateSha256: source.evidenceStateSha256,
+        decision,
+      });
+      return transition ? advanceSerialCandidate(source, transition) : null;
+    };
+    let candidate = initial;
+    const preRepairDecisions = repairLineage?.preRepairTransitionHistory ?? decisions;
+    if (repairLineage && (preRepairDecisions.length > decisions.length
+      || preRepairDecisions.some((decision, index) => decisions[index] !== decision))) {
+      return invalid("repair-transition-boundary");
+    }
+    for (const decision of preRepairDecisions) {
+      const next = replayDecision(candidate, decision);
+      if (!next) return invalid("transition");
+      candidate = next;
+    }
+    if (repairLineage) {
+      if (!exactPendingJson(pendingCandidateProjection(candidate), repairLineage.preRepairCandidate)) {
+        return invalid("pre-repair-candidate");
+      }
+      const repaired = restoreSerialCandidateAfterRepairForPending(projectRoot, candidate, {
+        repairInstruction: repairLineage.value.repairInstruction,
+        blockers: repairLineage.value.blockers,
+        roundOneBundle: repairLineage.value.roundOneBundle,
+        roundOneCaptureContext: repairLineage.value.roundOneCaptureContext,
+        claimsText: repairLineage.value.claimsText,
+      });
+      if (!repaired
+        || !exactPendingJson(pendingCandidateProjection(repaired), repairLineage.postRepairCandidate)) {
+        return invalid("post-repair-candidate");
+      }
+      candidate = repaired;
+      for (const decision of decisions.slice(preRepairDecisions.length)) {
+        const next = replayDecision(candidate, decision);
+        if (!next) return invalid("post-repair-transition");
+        candidate = next;
+      }
+      const restoredRepairLineage = serialCandidatePendingRepairLineage(candidate);
+      if (!restoredRepairLineage
+        || !exactPendingJson(pendingRepairLineageProjection(restoredRepairLineage), repairLineage.value)
+        || !sameLines(taskPaths, restoredRepairLineage.roundOneCaptureContext.taskPaths)
+        || !sameLines(protectedPaths, restoredRepairLineage.roundOneCaptureContext.protectedPaths)
+        || !sameLines(ownedPaths, restoredRepairLineage.roundOneCaptureContext.ownedPaths)
+        || start.head !== restoredRepairLineage.roundOneCaptureContext.baseHead) {
+        return invalid("repair-lineage-exact");
+      }
+    }
+    if (!exactPendingJson(pendingCandidateProjection(candidate), candidateRecord)
+      || candidate.candidateSha256 !== plan.candidateSha256) return invalid("projection");
+    if (plan.kind === "finalize") {
+      if (!pending.attestationsCompleteForDone
+        || composeBoundRunRecord(contract, "DONE", null, candidate.claims, attestations) === null
+        || !composeSerialCandidateSealAuthorization(candidate, plan.sealAuthorization)) return invalid("seal");
+    }
+    const ownedRecordIndexAuthority = preparedOwnedAuthority(pending.ownedRecordIndexAuthority);
+    if (!ownedRecordIndexAuthority
+      || !exactPendingJson(ownedRecordIndexAuthority, pending.ownedRecordIndexAuthority)) return invalid("owned-authority");
+    return Object.freeze({ candidate, bundle: candidate.bundle, start, ownedRecordIndexAuthority });
+  } catch {
+    return null;
+  }
+}
+
+function preparedTerminalWorkspaceExact(
+  root: string,
+  pending: Record<string, unknown>,
+  plan: PendingTerminalPlanV1,
+  reportText: string,
+  logText: string,
+  committedHead: string | null,
+  authenticatedBundle: SerialCandidateBundleV1,
+): boolean {
+  try {
+    const invalid = (stage: string): false => {
+      void stage;
+      return false;
+    };
+    const start = parsePendingStart(pending.start);
+    const taskPaths = parsePendingCandidatePaths(pending.taskPaths, 100, false);
+    const protectedPaths = parsePendingCandidatePaths(pending.protectedPaths, 4096, true);
+    const ownedPaths = parsePendingCandidatePaths(pending.ownedPaths, 16, true);
+    const authority = preparedOwnedAuthority(pending.ownedRecordIndexAuthority);
+    if (!start || !taskPaths || !protectedPaths || !ownedPaths || !authority
+      || !exactPendingKeys(pending.round0Bundle, [
+        "version", "round", "baseHead", "projectRootSha256", "taskSpecSha256", "evidencePlanSha256",
+        "entries", "rawByteLength", "manifestSha256", "bundleSha256",
+      ])) return invalid("shape");
+    const bundle = authenticatedBundle;
+    const taskNumber = (pending.candidate as Record<string, unknown>).taskNumber;
+    if (!Number.isSafeInteger(taskNumber)) return invalid("task-number");
+    const briefPath = paths.brief(root, taskNumber as number);
+    const reportPath = paths.report(root, taskNumber as number);
+    const logPath = paths.log(root);
+    const briefTextValue = candidateOwnedTextNoFollow(briefPath);
+    if (briefTextValue === null || pendingSha256(briefTextValue) !== plan.briefSha256
+      || pendingSha256(reportText) !== plan.reportSha256 || pendingSha256(logText) !== plan.logSha256
+      || !candidateGitMetadataSafe(root, ownedPaths)) return invalid("owned-bytes-or-metadata");
+    const changed = candidateScanChangedPaths(root, ownedPaths);
+    if (changed === null) return invalid("changed-paths");
+    if (committedHead === null) {
+      const key = (path: string): string => process.platform === "win32" ? path.toLowerCase() : path;
+      const owned = new Set(ownedPaths.map(key));
+      const protectedSet = new Set(protectedPaths.map(key));
+      const currentTaskPaths = changed.filter((path) => !owned.has(key(path)) && !protectedSet.has(key(path)));
+      const checks = Object.freeze({
+        taskPaths: sameLines(currentTaskPaths, taskPaths),
+        head: candidateGit(root, ["rev-parse", "HEAD"]) === start.head,
+        headRef: currentSymbolicHead(root) === pending.startHeadRef,
+        protected: protectedStartingPathsOrNull(root, start) === true,
+        bundleWorktree: candidateBundleWorktreeBytesStillExact(root, bundle),
+        bundleIndex: candidateBundleIndexStateStillExact(root, bundle),
+        ownedIndex: candidateOwnedRecordIndexStillExact(root, authority),
+      });
+      return Object.values(checks).every(Boolean) || invalid("records-only-checks");
+    }
+    if (changed.length !== 0 || !plan.commitExpected
+      || currentSymbolicHead(root) !== pending.startHeadRef
+      || !candidateBundleWorktreeBytesStillExact(root, bundle)
+      || !candidateBundleMatchesHead(root, committedHead, bundle)
+      || !candidateBundleMatchesIndex(root, bundle)) return false;
+    const ownedTexts = new Map<string, string>([
+      [rel(root, briefPath), briefTextValue],
+      [rel(root, reportPath), reportText],
+      [rel(root, logPath), logText],
+    ]);
+    const expectedBlobs = new Map<string, CandidateExpectedBlob>();
+    for (const row of authority) {
+      const text = ownedTexts.get(row.projectRelativePath);
+      if (text === undefined) return false;
+      const oid = candidateGit(root, [
+        ...CANDIDATE_NEUTRAL_RESERVED_FILTERS,
+        "hash-object",
+        `--path=${row.projectRelativePath}`,
+        "--stdin",
+      ], { input: Buffer.from(text, "utf8") });
+      expectedBlobs.set(row.projectRelativePath, Object.freeze({ mode: row.terminalMode, oid }));
+    }
+    return candidateExpectedBlobsMatchTree(root, committedHead, expectedBlobs)
+      && candidateExpectedBlobsMatchIndex(root, expectedBlobs);
+  } catch {
+    return false;
+  }
+}
+
+function recoveredTerminalReceipt(
+  action: SerialCandidateTerminalActionV1,
+  plan: PendingTerminalPlanV1,
+  taskNumber: number,
+  commitStatus: "created" | "skipped",
+  commitHash: string | null,
+): SerialCandidateTerminalReceiptV1 | null {
+  const withoutSha = Object.freeze({
+    version: SERIAL_CANDIDATE_TERMINAL_RECEIPT_VERSION,
+    actionId: action.actionId,
+    kind: action.kind,
+    disposition: plan.disposition,
+    taskNumber,
+    candidateSha256: action.candidateSha256,
+    preparedCapsuleSha256: action.capsuleSha256,
+    reportSha256: plan.reportSha256,
+    logSha256: plan.logSha256,
+    commitStatus,
+    commitHash,
+  });
+  const bytes = pendingCanonicalBytes(withoutSha);
+  return bytes ? Object.freeze({
+    ...withoutSha,
+    terminalReceiptSha256: pendingSha256(bytes),
+  }) as SerialCandidateTerminalReceiptV1 : null;
+}
+
+/** Read-only terminal restart classifier. It never finishes a partial write. */
+export function reconcileSerialCandidateTerminalFromPending(
+  root: string,
+  capsule: unknown,
+  action: unknown,
+  options: { events?: SerialRunEvents } = {},
+): SerialCandidateTerminalReconcileResultV1 {
+  const prepared = parseTerminalPreparation(capsule, action);
+  if (!prepared) return terminalReconcileStale("INVALID_PREPARATION");
+  const projectRoot = resolve(root);
+  const projectRootReal = canonicalExistingDirectory(projectRoot);
+  if (!projectRootReal || prepared.pendingInner.projectRootReal !== projectRootReal
+    || candidateProjectRootIdentitySha256(projectRootReal) !== prepared.pendingInner.projectRootSha256) {
+    return terminalReconcileStale("PROJECT_MISMATCH");
+  }
+  const preparedCandidateRecord = parsePendingCandidateRecord(prepared.pendingInner.candidate);
+  if (!preparedCandidateRecord) {
+    return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+  }
+  let exactTerminalRecordsPresent = false;
+  try {
+    const taskNumber = preparedCandidateRecord.taskNumber as number;
+    const report = candidateOwnedTextNoFollow(paths.report(projectRoot, taskNumber));
+    const log = candidateOwnedTextNoFollow(paths.log(projectRoot));
+    exactTerminalRecordsPresent = report !== null && log !== null
+      && pendingSha256(report) === prepared.plan.reportSha256
+      && pendingSha256(log) === prepared.plan.logSha256;
+  } catch { /* the locked classifier below will conservatively require manual recovery */ }
+  const resumed: SerialPendingCandidateResumeResultV1 = exactTerminalRecordsPresent
+    ? Object.freeze({ status: "stale", reason: "WORKSPACE_CHANGED" })
+    : resumeSerialCandidateFromPendingInternal(
+        projectRoot,
+        prepared.baseCapsule,
+        options,
+        prepared.plan.kind === "stop",
+      );
+  if (resumed.status === "resumed") {
+    try {
+      const sealAuthorization = prepared.plan.kind === "finalize"
+        ? composeSerialCandidateSealAuthorization(resumed.candidate, prepared.plan.sealAuthorization)
+        : null;
+      const input: NonNullable<ReturnType<typeof terminalPreparationInput>> = prepared.plan.kind === "finalize"
+        ? Object.freeze({
+            actionId: prepared.plan.actionId,
+            kind: "finalize",
+            reason: null,
+            sealAuthorization,
+          }) as NonNullable<ReturnType<typeof terminalPreparationInput>>
+        : Object.freeze({
+            actionId: prepared.plan.actionId,
+            kind: "stop",
+            reason: prepared.plan.reason,
+            sealAuthorization: null,
+          });
+      const open = openContextForCandidate(resumed.candidate);
+      const rehydrated = open && (prepared.plan.kind !== "finalize" || sealAuthorization)
+        ? buildTerminalPreparation(
+            resumed.candidate,
+            open.context,
+            input,
+            prepared.baseCapsule,
+            prepared.pendingInner,
+            prepared.plan.recordDate,
+          )
+        : null;
+      if (rehydrated && rehydrated.capsule.canonicalBytes === prepared.parsed.canonicalBytes
+        && rehydrated.capsule.capsuleSha256 === prepared.parsed.capsuleSha256) {
+        return Object.freeze({ status: "resumed", candidate: resumed.candidate, preparation: rehydrated });
+      }
+    } catch {
+      // Every failed rehydration path below releases the freshly acquired
+      // candidate context and its PID lock before returning a manual gate.
+    }
+    try {
+      releaseReconciledCandidate(resumed.candidate);
+    } catch { /* releaseOpenCandidate is idempotent; the manual gate remains */ }
+    return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+  }
+  if (resumed.reason === "PROJECT_MISMATCH") return terminalReconcileStale("PROJECT_MISMATCH");
+  if (resumed.reason === "LIVE_LOCK_UNAVAILABLE") return terminalReconcileStale("LIVE_LOCK_UNAVAILABLE");
+  if (resumed.reason === "UNSUPPORTED_ROUND_ONE") return terminalReconcileStale("UNSUPPORTED_ROUND_ONE");
+  if (resumed.reason === "UNSUPPORTED_EVIDENCE_REVISION") return terminalReconcileStale("UNSUPPORTED_EVIDENCE_REVISION");
+
+  if (projectAlreadyLive(projectRootReal, preparedCandidateRecord.runId as string)) {
+    return terminalReconcileStale("LIVE_LOCK_UNAVAILABLE");
+  }
+  activeRoots.add(projectRoot);
+  let lock: RunLock;
+  try {
+    lock = acquireCandidateRunLock(projectRoot);
+  } catch {
+    activeRoots.delete(projectRoot);
+    return terminalReconcileStale("LIVE_LOCK_UNAVAILABLE");
+  }
+  try {
+    const authenticated = authenticatePreparedPendingSemantics(
+      projectRoot,
+      prepared.pendingInner,
+      prepared.plan,
+    );
+    if (!authenticated) return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+    const candidateRecord = preparedCandidateRecord;
+    const start = authenticated.start;
+    const taskNumber = candidateRecord?.taskNumber;
+    if (!candidateRecord || !start || !Number.isSafeInteger(taskNumber)) {
+      return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+    }
+    const report = candidateOwnedTextNoFollow(paths.report(projectRoot, taskNumber as number));
+    const log = candidateOwnedTextNoFollow(paths.log(projectRoot));
+    if (report === null || log === null
+      || pendingSha256(report) !== prepared.plan.reportSha256
+      || pendingSha256(log) !== prepared.plan.logSha256) {
+      return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+    }
+    const head = candidateGit(projectRoot, ["rev-parse", "HEAD"]);
+    if (!prepared.plan.commitExpected) {
+      if (!preparedTerminalWorkspaceExact(
+        projectRoot,
+        prepared.pendingInner,
+        prepared.plan,
+        report,
+        log,
+        null,
+        authenticated.bundle,
+      )) {
+        return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+      }
+      const receipt = recoveredTerminalReceipt(
+        prepared.action,
+        prepared.plan,
+        taskNumber as number,
+        "skipped",
+        null,
+      );
+      return receipt
+        ? Object.freeze({ status: "terminal", receipt })
+        : terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+    }
+    const indexLockRaw = candidateGit(projectRoot, ["rev-parse", "--git-path", "index.lock"]);
+    const indexLockPath = isAbsolute(indexLockRaw) ? resolve(indexLockRaw) : resolve(projectRoot, indexLockRaw);
+    if (existsSync(indexLockPath) || head === start.head
+      || candidateGit(projectRoot, ["log", "-1", "--format=%B", head]) !== prepared.plan.commitMessage) {
+      return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+    }
+    const parents = candidateGit(projectRoot, ["rev-list", "--parents", "-n", "1", head]).split(" ");
+    const changed = candidateGitZ(projectRoot, [
+      "diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", start.head, head, "--",
+    ]).sort();
+    if (parents.length !== 2 || parents[0] !== head || parents[1] !== start.head
+      || !sameLines(changed, prepared.plan.expectedCommitPaths)
+      || !preparedTerminalWorkspaceExact(
+        projectRoot,
+        prepared.pendingInner,
+        prepared.plan,
+        report,
+        log,
+        head,
+        authenticated.bundle,
+      )) {
+      return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+    }
+    const receipt = recoveredTerminalReceipt(
+      prepared.action,
+      prepared.plan,
+      taskNumber as number,
+      "created",
+      head,
+    );
+    return receipt
+      ? Object.freeze({ status: "terminal", receipt })
+      : terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+  } catch {
+    return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+  } finally {
+    lock.release();
+    activeRoots.delete(projectRoot);
   }
 }

@@ -48,7 +48,15 @@ import {
 } from "./evidence.js";
 import { captureBeforeWorkerStage, captureTerminalStage, type StageCaptureWindow } from "./evidencecapture.js";
 import { logError, plainMessage } from "./log.js";
-import { clearRunning, isQuitDraining, isTaskRunning, markRunning, runningDirs, runRefusal } from "./rungate.js";
+import {
+  clearRunning,
+  isQuitDraining,
+  isTaskRunning,
+  markRunning,
+  pendingTaskStartRefusal,
+  runningDirs,
+  runRefusal,
+} from "./rungate.js";
 import { runtimeWorkerIdentity } from "./workeridentity.js";
 import { composeDirectTaskSpecProposal } from "./conductor/qualityproposal.js";
 import { criticActivationStatus } from "./criticactivation.js";
@@ -252,6 +260,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const key = canonicalProjectKey(dir);
       const refusal = runRefusal(isTaskRunning(dir) || starting.has(key), isQuitDraining());
       if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
+      const pendingRefusal = pendingTaskStartRefusal(dir);
+      if (pendingRefusal) return { ok: false, message: pendingRefusal } satisfies Result<never>;
       const generation = nextGeneration(key);
 
       let intent: TaskIntent | null = null;
@@ -277,6 +287,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       }
 
       const detected = await detectedAdapters(mock, dir);
+      const postDetectionPendingRefusal = pendingTaskStartRefusal(dir);
+      if (postDetectionPendingRefusal) {
+        if (routeGenerations.get(key) === generation) nextGeneration(key);
+        return { ok: false, message: postDetectionPendingRefusal } satisfies Result<never>;
+      }
       if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
       if (source.kind === "proposal") {
         const current = currentTaskProposal(dir, source.conversationId, source.proposalId);
@@ -411,6 +426,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     }
     const refusal = runRefusal(isTaskRunning(dir) || starting.has(key), isQuitDraining());
     if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
+    const pendingRefusal = pendingTaskStartRefusal(dir);
+    if (pendingRefusal) return { ok: false, message: pendingRefusal } satisfies Result<never>;
 
     // Acquire this canonical-project gate before adapter detection's first
     // await. Exactly one invocation can reach the consume boundary.
@@ -466,6 +483,8 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     if (isQuitDraining()) {
       return refuseBeforeAcceptance(runRefusal(false, true) ?? "QUIT_IN_PROGRESS");
     }
+    const postDetectionPendingRefusal = pendingTaskStartRefusal(dir);
+    if (postDetectionPendingRefusal) return refuseBeforeAcceptance(postDetectionPendingRefusal);
     if (pending.source.kind === "proposal") {
       let current: ReturnType<typeof currentTaskProposal>;
       try {

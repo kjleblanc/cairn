@@ -23,6 +23,9 @@ import {
   evidenceRunRecordPath,
   finalizeEvidenceRun,
   isMainAdapterCommandEvidenceReduction,
+  parsePendingEvidenceRunState,
+  pendingEvidenceRunState,
+  pendingEvidenceRunStillExact,
   readEvidenceAlbum,
   readEvidenceImage,
   recordEvidenceCapture,
@@ -384,6 +387,79 @@ function fixture(): { root: string; profile: string; cleanup(): void } {
     },
   };
 }
+
+test("pending evidence custody stores only an exact unfinalized digest projection", () => {
+  const fx = fixture();
+  try {
+    const runId = "10101010-1010-4010-8010-101010101010";
+    const empty = pendingEvidenceRunState(fx.root, runId);
+    assert.ok(empty);
+    assert.equal(empty.recordSha256, null);
+    assert.deepEqual(empty.captures, []);
+    assert.equal(pendingEvidenceRunStillExact(fx.root, structuredClone(empty)), true);
+
+    recordEvidenceCapture({
+      root: fx.root,
+      runId,
+      boundary: "worker-not-started",
+      png: png(640, 480, 19),
+      width: 640,
+      height: 480,
+      createdAt: "2026-08-08T10:00:00.000Z",
+    });
+    const captured = pendingEvidenceRunState(fx.root, runId);
+    assert.ok(captured);
+    assert.match(captured.recordSha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.deepEqual(captured.captures.map((row) => row.boundary), ["worker-not-started"]);
+    assert.equal(pendingEvidenceRunStillExact(fx.root, structuredClone(captured)), true);
+    assert.equal(JSON.stringify(captured).includes(fx.root), false);
+    assert.equal(JSON.stringify(captured).includes(fx.profile), false);
+    assert.equal(JSON.stringify(captured).includes(png(640, 480, 19).toString("base64")), false);
+
+    const recordPath = evidenceRunRecordPath(fx.root, runId);
+    writeFileSync(recordPath, `${readFileSync(recordPath, "utf8")} `, "utf8");
+    assert.equal(pendingEvidenceRunStillExact(fx.root, captured), false, "record byte drift invalidates the checkpoint");
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test("pending evidence parsing rejects forgery, hostile objects, or finalized evidence", () => {
+  const fx = fixture();
+  try {
+    const runId = "20202020-2020-4020-8020-202020202020";
+    recordEvidenceCapture({
+      root: fx.root,
+      runId,
+      boundary: "worker-not-started",
+      png: png(),
+      width: 1320,
+      height: 820,
+    });
+    const state = pendingEvidenceRunState(fx.root, runId);
+    assert.ok(state);
+    assert.equal(parsePendingEvidenceRunState({ ...state, stateSha256: "0".repeat(64) }), null);
+    assert.equal(parsePendingEvidenceRunState({ ...state, authority: "renderer" }), null);
+    assert.equal(parsePendingEvidenceRunState(new Proxy(structuredClone(state), {})), null);
+    let invoked = false;
+    const accessor = { ...structuredClone(state) } as Record<string, unknown>;
+    Object.defineProperty(accessor, "runId", { enumerable: true, get() { invoked = true; return runId; } });
+    assert.equal(parsePendingEvidenceRunState(accessor), null);
+    assert.equal(invoked, false);
+
+    writeFileSync(join(dirname(evidenceRunRecordPath(fx.root, runId)), "orphan.png"), png());
+    assert.equal(pendingEvidenceRunState(fx.root, runId), null, "unknown evidence files fail the exact-tree checkpoint");
+    rmSync(join(dirname(evidenceRunRecordPath(fx.root, runId)), "orphan.png"));
+    finalizeEvidenceRun(fx.root, runId, {
+      taskNumber: 215,
+      title: "Pending evidence became terminal",
+      disposition: "DONE",
+    });
+    assert.equal(pendingEvidenceRunState(fx.root, runId), null, "a terminal evidence record is not pending authority");
+  } finally {
+    fx.cleanup();
+  }
+});
 
 test("a main-owned before and terminal capture become one trusted run-bound pair outside the project", () => {
   const fx = fixture();

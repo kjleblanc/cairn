@@ -1,9 +1,8 @@
 export * from "./codex.js";
 // Candidate creation and the raw terminal reservation token stay internal to
 // Core's serial runner. Package consumers receive only the staged lifecycle
-// decisions plus serial.ts's `finalizeSerialCandidate` / `stopSerialCandidate`
-// terminal boundary; they cannot reserve or complete a runner-held terminal
-// transaction behind that boundary.
+// decisions plus serial.ts's prepared terminal transaction; they cannot
+// reserve or complete a runner-held terminal token behind that boundary.
 export {
   SERIAL_CANDIDATE_BUNDLE_LIMITS,
   SERIAL_CANDIDATE_BUNDLE_VERSION,
@@ -46,6 +45,85 @@ export * from "./files.js";
 export * from "./intent.js";
 export * from "./kimi.js";
 export * from "./quality.js";
-export * from "./routing.js";
-export * from "./serial.js";
+export {
+  CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+  NODE_PERMISSION_MODEL_CANDIDATE_TEST_PROGRAM_VERSION,
+  OPAQUE_PROVIDER_COMMAND_EVENT_REPRESENTATION,
+  TASK_ADAPTER_CANDIDATE_WRITER_SUPPORT_VERSION,
+  WORKER_COMMAND_PROCESS_EVENT_CAP,
+  WorkerBoundaryError,
+  WorkerProcessError,
+  composeNodePermissionModelCandidateAdapterForTest,
+  createOfflineDemoAdapter,
+  parseWorkerProcessEventBundle,
+  routeTask,
+  type AdapterDescriptor,
+  type AdapterTaskContract,
+  type AdapterTaskQualityBinding,
+  type LegacyAdapterTaskContractV3,
+  type LegacyWorkerRunResultV2,
+  type NodePermissionModelCandidateOperationV1,
+  type NodePermissionModelCandidateTestAdapterInputV1,
+  type NodePermissionModelCandidateTestProgramV1,
+  type QualityBoundAdapterTaskContractV4,
+  type QualityBoundWorkerRunResultV3,
+  type RouteRequest,
+  type RouteResult,
+  type TaskAdapter,
+  type TaskAdapterCandidateWriterSupport,
+  type TaskAdapterQualitySupport,
+  type WorkerCommandEventRepresentation,
+  type WorkerCommandProcessEvent,
+  type WorkerDisclosure,
+  type WorkerFailureKind,
+  type WorkerProcessEventBundle,
+  type WorkerRunResult,
+} from "./routing.js";
+// Q7's stable package seam. Serial exports are explicit so Core's deliberately
+// unsafe source-test state harness cannot become a package capability.
+export {
+  SERIAL_CANDIDATE_WRITER_ISOLATION_VERSION,
+  SERIAL_CANDIDATE_TERMINAL_PREPARATION_VERSION,
+  SERIAL_CANDIDATE_TERMINAL_RECEIPT_VERSION,
+  SERIAL_PENDING_CANDIDATE_CAPSULE_VERSION,
+  composeSerialCandidateWriterIsolation,
+  executeSerialCandidateTerminal,
+  exportSerialCandidatePendingState,
+  parkSerialCandidateForRestart,
+  prepareSerialCandidateTerminal,
+  reconcileSerialCandidateTerminalFromPending,
+  resumeSerialCandidateFromPending,
+  type SerialCandidateTerminalActionV1,
+  type SerialCandidateTerminalExecutionV1,
+  type SerialCandidateTerminalPreparationInputV1,
+  type SerialCandidateTerminalPreparationV1,
+  type SerialCandidateTerminalReceiptV1,
+  type SerialCandidateTerminalReconcileResultV1,
+  type SerialCandidateWriterIsolationV1,
+  type SerialPendingCandidateCapsuleV1,
+  type SerialPendingCandidateResumeResultV1,
+} from "./serial.js";
+export {
+  SERIAL_TASK_SPEC_AUTHORITY_VERSION,
+  authorizeSerialCandidateRepair,
+  captureSerialCandidateAfterRepair,
+  composeSerialTaskSpecAuthority,
+  previewSerialCandidateRoute,
+  previewSerialRoute,
+  previewTaskSpecSerialRoute,
+  runSerialTask,
+  runSerialTaskToCandidate,
+  serialTaskSpecQualityBinding,
+  type RecordCommit,
+  type SerialActivity,
+  type SerialCandidateRunOptions,
+  type SerialCandidateRunResult,
+  type SerialCandidateTerminalResult,
+  type SerialRunEvents,
+  type SerialRunOptions,
+  type SerialRunResult,
+  type SerialStage,
+  type SerialStopReason,
+  type SerialTaskSpecAuthorityV1,
+} from "./serial.js";
 export * from "./steps.js";

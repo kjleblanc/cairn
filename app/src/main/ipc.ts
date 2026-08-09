@@ -25,7 +25,7 @@ import * as conductorService from "./conductor/service.js";
 import { emitBridgeSync } from "./bridge/hub.js";
 import { phoneBridgePairBegin, phoneBridgeRevokeDevice, phoneBridgeState } from "./bridge/runtime.js";
 import { logError, plainMessage } from "./log.js";
-import { pushExecute, pushPreview, pushRefusal } from "./push.js";
+import { pendingPushRefusal, pushExecute, pushPreview, pushRefusal } from "./push.js";
 import { runCheckup } from "./checkup.js";
 import { forgetProject, recentEntries, touchProject } from "./registry.js";
 import { currentTaskSession } from "./tasks.js";
@@ -224,6 +224,8 @@ export function registerProjectIpc(): void {
   // itself rather than trusting its one well-behaved caller: `pushRefusal`
   // decides, locally and with no network, and nothing runs until it says so.
   ipcMain.handle("push:execute", (_e, dir: string, preview: PushPreview): PushResult => {
+    const pending = pendingPushRefusal(dir);
+    if (pending !== null) return pending;
     const refusal = pushRefusal(dir, preview);
     if (refusal !== null) {
       // The refused target stays OFF the screen — those strings came from

@@ -24,6 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { types } from "node:util";
 import type {
   EvidenceAlbum,
   EvidenceAlbumEntry,
@@ -239,6 +240,31 @@ export type FinalizeEvidenceRunInput = {
   disposition: "DONE" | "STOPPED" | "ERROR";
   completedAt?: string;
 };
+
+export const PENDING_EVIDENCE_RUN_STATE_VERSION = "cairn-pending-evidence-run-state/v1" as const;
+
+/**
+ * Secret-free restart binding for one still-unfinalized local evidence run.
+ * Image bytes remain in the existing evidence store; the pending-run journal
+ * retains only this bounded digest projection and verifies it again on boot.
+ */
+export type PendingEvidenceRunStateV1 = Readonly<{
+  version: typeof PENDING_EVIDENCE_RUN_STATE_VERSION;
+  projectHash: string;
+  runId: string;
+  revision: 0;
+  recordSha256: string | null;
+  recordBytes: number;
+  captures: readonly Readonly<{
+    id: string;
+    boundary: EvidenceBoundary;
+    sha256: string;
+    bytes: number;
+    width: number;
+    height: number;
+  }>[];
+  stateSha256: string;
+}>;
 
 let markerDir: string | null = null;
 
@@ -480,6 +506,200 @@ function saveRecord(root: string, record: EvidenceRunRecord): void {
   const directory = runDirectory(root, record.runId, true);
   if (directory === null) throw new Error("EVIDENCE_STORE_UNAVAILABLE");
   atomicWriteText(join(directory, "record.json"), `${JSON.stringify(record, null, 2)}\n`);
+}
+
+function exactDataRecord(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || types.isProxy(value)) return null;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== keys.length || ownKeys.some((key) => typeof key !== "string" || !keys.includes(key))) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const output: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    if (!descriptor || descriptor.get || descriptor.set || !("value" in descriptor) || !descriptor.enumerable) return null;
+    output[key] = descriptor.value;
+  }
+  return output;
+}
+
+function pendingEvidenceCanonical(
+  value: Omit<PendingEvidenceRunStateV1, "stateSha256">,
+): string {
+  return JSON.stringify({
+    version: value.version,
+    projectHash: value.projectHash,
+    runId: value.runId,
+    revision: value.revision,
+    recordSha256: value.recordSha256,
+    recordBytes: value.recordBytes,
+    captures: value.captures.map((capture) => ({
+      id: capture.id,
+      boundary: capture.boundary,
+      sha256: capture.sha256,
+      bytes: capture.bytes,
+      width: capture.width,
+      height: capture.height,
+    })),
+  });
+}
+
+/** Strictly detaches the data-only evidence checkpoint stored in a journal. */
+export function parsePendingEvidenceRunState(value: unknown): PendingEvidenceRunStateV1 | null {
+  try {
+    const record = exactDataRecord(value, [
+      "version", "projectHash", "runId", "revision", "recordSha256", "recordBytes", "captures", "stateSha256",
+    ]);
+    if (!record || record.version !== PENDING_EVIDENCE_RUN_STATE_VERSION
+      || typeof record.projectHash !== "string" || !SHA256.test(record.projectHash)
+      || typeof record.runId !== "string" || !UUID.test(record.runId) || record.runId !== record.runId.toLowerCase()
+      || record.revision !== 0
+      || (record.recordSha256 !== null && (typeof record.recordSha256 !== "string" || !SHA256.test(record.recordSha256)))
+      || !Number.isSafeInteger(record.recordBytes) || Number(record.recordBytes) < 0 || Number(record.recordBytes) > MAX_RECORD_BYTES
+      || !Array.isArray(record.captures) || types.isProxy(record.captures)
+      || record.captures.length > MAX_CAPTURES_PER_RUN
+      || typeof record.stateSha256 !== "string" || !SHA256.test(record.stateSha256)) return null;
+    if ((record.recordSha256 === null) !== (record.recordBytes === 0)) return null;
+
+    const captures: Array<PendingEvidenceRunStateV1["captures"][number]> = [];
+    const ids = new Set<string>();
+    for (let index = 0; index < record.captures.length; index += 1) {
+      if (!Object.hasOwn(record.captures, index)) return null;
+      const capture = exactDataRecord(record.captures[index], ["id", "boundary", "sha256", "bytes", "width", "height"]);
+      if (!capture || typeof capture.id !== "string" || !UUID.test(capture.id) || capture.id !== capture.id.toLowerCase()
+        || ids.has(capture.id) || !isBoundary(capture.boundary)
+        || typeof capture.sha256 !== "string" || !SHA256.test(capture.sha256)
+        || !Number.isSafeInteger(capture.bytes) || Number(capture.bytes) < 24 || Number(capture.bytes) > MAX_IMAGE_BYTES
+        || !Number.isSafeInteger(capture.width) || Number(capture.width) < 1 || Number(capture.width) > 8192
+        || !Number.isSafeInteger(capture.height) || Number(capture.height) < 1 || Number(capture.height) > 8192) return null;
+      ids.add(capture.id);
+      captures.push(Object.freeze({
+        id: capture.id,
+        boundary: capture.boundary,
+        sha256: capture.sha256,
+        bytes: Number(capture.bytes),
+        width: Number(capture.width),
+        height: Number(capture.height),
+      }));
+    }
+    if (record.recordSha256 === null && captures.length !== 0) return null;
+    const withoutDigest = Object.freeze({
+      version: PENDING_EVIDENCE_RUN_STATE_VERSION,
+      projectHash: record.projectHash,
+      runId: record.runId,
+      revision: 0 as const,
+      recordSha256: record.recordSha256,
+      recordBytes: Number(record.recordBytes),
+      captures: Object.freeze(captures),
+    });
+    if (sha256(pendingEvidenceCanonical(withoutDigest)) !== record.stateSha256) return null;
+    return Object.freeze({ ...withoutDigest, stateSha256: record.stateSha256 });
+  } catch {
+    return null;
+  }
+}
+
+function exactRunEntryNames(directory: string): readonly string[] | null {
+  let handle: ReturnType<typeof opendirSync> | null = null;
+  try {
+    handle = opendirSync(directory);
+    const names: string[] = [];
+    for (;;) {
+      const entry = handle.readSync();
+      if (entry === null) break;
+      names.push(entry.name);
+      if (names.length > MAX_CAPTURES_PER_RUN + 1) return null;
+    }
+    return Object.freeze(names.sort());
+  } catch {
+    return null;
+  } finally {
+    try { handle?.closeSync(); } catch { /* an unreadable directory is rejected by the caller */ }
+  }
+}
+
+/**
+ * Captures one exact, unfinalized evidence revision for pending-run custody.
+ * Unknown/orphan files, malformed records, finalized runs, and changed PNG
+ * bytes all fail closed. No image bytes enter the returned value.
+ */
+export function pendingEvidenceRunState(root: string, runId: string): PendingEvidenceRunStateV1 | null {
+  try {
+    if (!UUID.test(runId) || runId !== runId.toLowerCase()) return null;
+    const expectedProjectHash = projectHash(root);
+    const directory = runDirectory(root, runId, false);
+    let recordSha256: string | null = null;
+    let recordBytes = 0;
+    const captures: Array<PendingEvidenceRunStateV1["captures"][number]> = [];
+
+    if (directory !== null) {
+      const names = exactRunEntryNames(directory);
+      if (names === null) return null;
+      const recordPath = join(directory, "record.json");
+      if (!names.includes("record.json")) {
+        if (names.length !== 0) return null;
+      } else {
+        const bytes = readBoundedRegularFile(directory, recordPath, 2, MAX_RECORD_BYTES);
+        if (bytes === null) return null;
+        const record = parseRecord(JSON.parse(bytes.toString("utf8")), expectedProjectHash, runId);
+        if (record.completedAt !== null || record.disposition !== null || record.taskNumber !== null) return null;
+        const expectedNames = ["record.json", ...record.captures.map((capture) => capture.file)].sort();
+        if (names.length !== expectedNames.length || names.some((name, index) => name !== expectedNames[index])) return null;
+        for (const capture of record.captures) {
+          if (capture.id !== capture.id.toLowerCase()) return null;
+          const verified = readPngFile(directory, join(directory, capture.file), capture);
+          if (verified === null) return null;
+          captures.push(Object.freeze({
+            id: capture.id,
+            boundary: capture.boundary,
+            sha256: capture.sha256,
+            bytes: capture.bytes,
+            width: capture.width,
+            height: capture.height,
+          }));
+        }
+        const namesAfter = exactRunEntryNames(directory);
+        const recordAfter = readBoundedRegularFile(directory, recordPath, 2, MAX_RECORD_BYTES);
+        if (namesAfter === null || namesAfter.length !== expectedNames.length
+          || namesAfter.some((name, index) => name !== expectedNames[index])
+          || recordAfter === null || !recordAfter.equals(bytes)
+          || record.captures.some((capture) => readPngFile(directory, join(directory, capture.file), capture) === null)) {
+          return null;
+        }
+        recordSha256 = sha256(bytes);
+        recordBytes = bytes.length;
+      }
+    }
+
+    const withoutDigest = Object.freeze({
+      version: PENDING_EVIDENCE_RUN_STATE_VERSION,
+      projectHash: expectedProjectHash,
+      runId,
+      revision: 0 as const,
+      recordSha256,
+      recordBytes,
+      captures: Object.freeze(captures),
+    });
+    return Object.freeze({
+      ...withoutDigest,
+      stateSha256: sha256(pendingEvidenceCanonical(withoutDigest)),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Re-read the profile evidence store; structural journal clones gain no authority. */
+export function pendingEvidenceRunStillExact(root: string, value: unknown): boolean {
+  try {
+    const expected = parsePendingEvidenceRunState(value);
+    if (expected === null || expected.projectHash !== projectHash(root)) return false;
+    const current = pendingEvidenceRunState(root, expected.runId);
+    return current !== null && current.stateSha256 === expected.stateSha256;
+  } catch {
+    return false;
+  }
 }
 
 type ReadPngResult = { bytes: Buffer; width: number; height: number; sha256: string };

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import type { PushPreview, PushResult } from "../shared/ipc.js";
+import { pendingRunRefusal } from "./pendingrun.js";
 
 /**
  * One raw git invocation's result — the seam Task 10's unit tests inject to
@@ -9,6 +10,13 @@ import type { PushPreview, PushResult } from "../shared/ipc.js";
  */
 export type ExecResult = { status: number; stdout: string; stderr: string };
 export type ExecFn = (args: string[]) => ExecResult;
+
+/** Main-owned pending-result refusal in the existing PushResult envelope.
+ * Callers receive no pending state, hash, or authority object. */
+export function pendingPushRefusal(dir: string): PushResult | null {
+  const message = pendingRunRefusal(dir);
+  return message === null ? null : { ok: false, kind: "refused", message };
+}
 
 /** `GIT_TERMINAL_PROMPT=0` on every invocation so a credential prompt can
  * never hang a run — the same idiom `core/src/serial.ts`'s `git()` helper
@@ -31,6 +39,7 @@ function realExec(dir: string): ExecFn {
  * upstream configured (`@{u}` fails) — nothing to preview, nothing to push.
  */
 export function pushPreview(dir: string, exec: ExecFn = realExec(dir)): PushPreview | null {
+  if (pendingPushRefusal(dir) !== null) return null;
   const upstream = exec(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
   if (upstream.status !== 0) return null;
 
@@ -213,6 +222,8 @@ function summarizeSuccess(stderr: string): string {
  * working tree has done since.
  */
 export function pushExecute(dir: string, preview: PushPreview, exec: ExecFn = realExec(dir)): PushResult {
+  const pending = pendingPushRefusal(dir);
+  if (pending !== null) return pending;
   const result = exec(["push", preview.remote, `${preview.head}:refs/heads/${preview.branch}`]);
 
   if (result.status === 0) {

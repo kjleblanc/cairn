@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pushExecute, pushPreview, pushRefusal, pushTargetIsWellFormed, remoteIsConfigured } from "../src/main/push.js";
+import { pendingPushRefusal, pushExecute, pushPreview, pushRefusal, pushTargetIsWellFormed, remoteIsConfigured } from "../src/main/push.js";
+import { _resetPendingRunsForTests, installPendingRunStore } from "../src/main/pendingrun.js";
 import type { PushPreview, PushResult } from "../src/shared/ipc.js";
 
 function git(root: string, args: string[]): string {
@@ -75,6 +76,34 @@ test("pushPreview returns null when the branch has no upstream configured", () =
   git(dir, ["commit", "-q", "--allow-empty", "-m", "solo commit"]);
 
   assert.equal(pushPreview(dir), null);
+});
+
+test("a canonical pending-run recovery gate makes preview dark and independently refuses execute before git", () => {
+  const dir = freshDir("cairn-push-pending-");
+  const preview = previewOf("origin", "main", "abc1234");
+  let calls = 0;
+  const exec = (_args: string[]) => {
+    calls += 1;
+    return { status: 0, stdout: "origin\n", stderr: "" };
+  };
+
+  _resetPendingRunsForTests();
+  try {
+    const boot = installPendingRunStore(join(dir, "missing-profile"));
+    assert.equal(boot.recoveryRequired, true);
+
+    assert.equal(pushPreview(dir, exec), null);
+    assert.equal(calls, 0, "a pending preview must perform no local git read");
+
+    const direct = pushExecute(dir, preview, exec);
+    assert.equal(direct.ok, false);
+    assert.equal((direct as { kind: string }).kind, "refused");
+    assert.match((direct as { message: string }).message, /^PENDING_RUN_ACTIVE:/);
+    assert.deepEqual(direct, pendingPushRefusal(dir));
+    assert.equal(calls, 0, "direct execute must recheck and perform no push");
+  } finally {
+    _resetPendingRunsForTests();
+  }
 });
 
 test("pushPreview's subject list can be shorter than its ahead count", () => {

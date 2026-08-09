@@ -3,6 +3,8 @@
  * and `conductor/service.ts` (the send gate) need to read/write the same
  * running-set, and neither should import from the other. */
 
+import { pendingRunRefusal } from "./pendingrun.js";
+
 const running = new Set<string>();
 let quitDraining = false;
 
@@ -46,6 +48,25 @@ export function runRefusal(alreadyRunning: boolean, quitDraining: boolean): stri
   if (quitDraining) return "QUIT_IN_PROGRESS: Cairn is stopping the current task and quitting. Start the next task after relaunch.";
   if (alreadyRunning) return "SERIAL_RUN_ACTIVE: One task is already running for this project.";
   return null;
+}
+
+/** Main's read-only pending-result gate for both route preview and task start.
+ * The pending-run module alone decides whether the project is blocked and
+ * owns the fixed refusal bytes; this seam deliberately cannot create, alter,
+ * or clear that authority. */
+export function pendingTaskStartRefusal(projectRoot: string): string | null {
+  return pendingRunRefusal(projectRoot);
+}
+
+/** Main-only seam for the two filesystem boundaries that will eventually
+ * copy an owner-resolved verdict into task records. Both the write and its
+ * commit must ask independently, so a pending result appearing between them
+ * cannot be published. This is intentionally not exposed over IPC. */
+export function pendingVerdictCopyRefusal(
+  projectRoot: string,
+  _boundary: "write" | "commit",
+): string | null {
+  return pendingRunRefusal(projectRoot);
 }
 
 export function _resetForTests(): void {

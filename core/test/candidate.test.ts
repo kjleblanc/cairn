@@ -28,9 +28,11 @@ import {
   isSerialRepairInstruction,
   isSerialCandidateTaskSpecAuthority,
   replaceSerialCandidateAfterRepair,
+  restoreSerialCandidateAfterRepairForPending,
   serialCandidateBundleSha256,
   serialCandidateGitEnvironmentSafe,
   serialCandidateLineageIdentity,
+  serialCandidatePendingRepairLineage,
   serialCandidateRepairAvailability,
   serialCandidateSha256,
   serialCandidateWorkspaceStillExact,
@@ -333,7 +335,7 @@ test("candidate authority accepts every critic mode but rejects structural clone
   }
 });
 
-test("the package exposes only serial finalize and stop as terminal candidate writers", async () => {
+test("the package exposes only the prepared serial terminal transaction as a candidate writer", async () => {
   assert.equal(Object.hasOwn(publicCore, "beginSerialCandidateTerminal"), false);
   assert.equal(Object.hasOwn(publicCore, "completeSerialCandidateTerminal"), false);
   assert.equal(Object.hasOwn(publicCore, "composeSerialCandidate"), false);
@@ -342,8 +344,11 @@ test("the package exposes only serial finalize and stop as terminal candidate wr
   assert.equal(Object.hasOwn(publicCore, "composeSerialRepairInstruction"), false);
   assert.equal(typeof publicCore.authorizeSerialCandidateRepair, "function");
   assert.equal(typeof publicCore.captureSerialCandidateAfterRepair, "function");
-  assert.equal(typeof publicCore.finalizeSerialCandidate, "function");
-  assert.equal(typeof publicCore.stopSerialCandidate, "function");
+  assert.equal(Object.hasOwn(publicCore, "finalizeSerialCandidate"), false);
+  assert.equal(Object.hasOwn(publicCore, "stopSerialCandidate"), false);
+  assert.equal(typeof publicCore.prepareSerialCandidateTerminal, "function");
+  assert.equal(typeof publicCore.executeSerialCandidateTerminal, "function");
+  assert.equal(typeof publicCore.reconcileSerialCandidateTerminalFromPending, "function");
   const forbiddenCandidateSubpath: string = "@cairn/core/dist/src/candidate.js";
   await assert.rejects(
     import(forbiddenCandidateSubpath),
@@ -1039,6 +1044,68 @@ test("one branded repair replacement preserves round zero and mints a fresh roun
     assert.equal(advanceSerialCandidate(dismissed, transition(dismissed, "critic-allegation")), null,
       "a sealed-path candidate cannot consume an undeclared fourth-style critic turn");
   }
+});
+
+test("pending repair restoration recomputes the exact instruction and round-one bundle brands", () => {
+  const fixture = awaitingRepair("required");
+  const roundOne = captureRoundOne(fixture, "restart-visible round one\n");
+  const repairedClaims = claimsText(fixture.authority.taskSpecSha256, "Restarted repair is complete.");
+  const replacement = replaceSerialCandidateAfterRepair(
+    fixture.candidate,
+    fixture.instruction,
+    roundOne,
+    repairedClaims,
+  );
+  assert.ok(replacement);
+  const custody = serialCandidatePendingRepairLineage(replacement);
+  assert.ok(custody);
+  assert.equal(custody.preRepairCandidate, fixture.candidate);
+  assert.equal(custody.postRepairCandidate, replacement);
+  assert.deepEqual(custody.preRepairTransitionHistory, ["critic-allegation", "owner-confirmed"]);
+  assert.equal(custody.repairInstruction.repairInstructionSha256, fixture.instruction.repairInstructionSha256);
+  assert.equal(custody.roundOneBundle, roundOne);
+  assert.deepEqual(custody.roundOneCaptureContext.taskPaths, ["visible.txt"]);
+
+  const initial = composeSerialCandidate(fixture.authority, {
+    version: SERIAL_CANDIDATE_VERSION,
+    runId: fixture.candidate.runId,
+    taskNumber: fixture.candidate.taskNumber,
+    requestSha256: fixture.candidate.requestSha256,
+    claimsText: claimsText(fixture.authority.taskSpecSha256),
+    bundle: fixture.bundle,
+    repairEligibility: fixture.candidate.lineage.ignoredWriteEligibility,
+  });
+  assert.ok(initial);
+  const alleged = advanceSerialCandidate(initial, transition(initial, "critic-allegation"));
+  assert.ok(alleged);
+  const preRepair = advanceSerialCandidate(alleged, transition(alleged, "owner-confirmed"));
+  assert.ok(preRepair);
+  const raw = {
+    repairInstruction: structuredClone(custody.repairInstruction),
+    blockers: structuredClone(custody.blockers),
+    roundOneBundle: structuredClone(custody.roundOneBundle),
+    roundOneCaptureContext: structuredClone(custody.roundOneCaptureContext),
+    claimsText: repairedClaims,
+  };
+  const restored = restoreSerialCandidateAfterRepairForPending(fixture.root, preRepair, raw);
+  assert.ok(restored);
+  assert.equal(restored.candidateSha256, replacement.candidateSha256);
+  assert.equal(restored.evidenceStateSha256, replacement.evidenceStateSha256);
+  assert.deepEqual(restored.callsUsed, replacement.callsUsed);
+  assert.equal(serialCandidatePendingRepairLineage(restored)?.preRepairCandidate, preRepair);
+
+  const separate = awaitingRepair("required");
+  assert.equal(restoreSerialCandidateAfterRepairForPending(separate.root, separate.candidate, raw), null,
+    "a different root/candidate cannot borrow the structural repair lineage");
+  const badInstruction = {
+    ...structuredClone(raw),
+    repairInstruction: {
+      ...structuredClone(raw.repairInstruction),
+      instruction: `${raw.repairInstruction.instruction}\nforged`,
+    },
+  };
+  const fresh = awaitingRepair("required");
+  assert.equal(restoreSerialCandidateAfterRepairForPending(fresh.root, fresh.candidate, badInstruction), null);
 });
 
 test("round-one capture cannot hide a repair artifact by relabeling it protected or Cairn-owned", () => {

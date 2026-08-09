@@ -211,6 +211,28 @@ export type SerialRepairInstructionV1 = Readonly<{
   repairInstructionSha256: Sha256;
 }>;
 
+export type SerialCandidatePendingRepairBlockerV1 = Readonly<{
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  artifactIds: readonly string[];
+}>;
+
+export type SerialCandidatePendingRepairLineageV1 = Readonly<{
+  preRepairCandidate: SerialCandidateV1;
+  postRepairCandidate: SerialCandidateV1;
+  preRepairTransitionHistory: readonly SerialCandidateTransitionDecisionV1[];
+  repairInstruction: SerialRepairInstructionV1;
+  blockers: readonly SerialCandidatePendingRepairBlockerV1[];
+  roundOneBundle: SerialCandidateBundleV1;
+  roundOneCaptureContext: Readonly<{
+    round: 1;
+    baseHead: string;
+    taskPaths: readonly string[];
+    protectedPaths: readonly string[];
+    ownedPaths: readonly string[];
+  }>;
+}>;
+
 export type SerialCandidateSealAuthorizationV1 = Readonly<{
   version: typeof SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION;
   runId: string;
@@ -253,6 +275,8 @@ type CandidateLineage = {
   identity: object;
   current: SerialCandidateV1;
   terminalReserved: boolean;
+  parked: boolean;
+  transitionHistory: SerialCandidateTransitionDecisionV1[];
 };
 
 const candidateBindings = new WeakMap<object, Readonly<{
@@ -278,6 +302,8 @@ const repairBundleBindings = new WeakMap<object, Readonly<{
   instruction: SerialRepairInstructionV1;
 }>>();
 const repairCaptureByInstruction = new WeakMap<object, SerialCandidateBundleV1>();
+const repairBlockersByInstruction = new WeakMap<object, readonly SerialCandidatePendingRepairBlockerV1[]>();
+const pendingRepairLineageByLineage = new WeakMap<object, SerialCandidatePendingRepairLineageV1>();
 const sealAuthorizationBindings = new WeakMap<object, SerialCandidateV1>();
 const terminalTokenBindings = new WeakMap<object, Readonly<{
   candidate: SerialCandidateV1;
@@ -558,9 +584,17 @@ function safePathArray(value: unknown, cap: number): readonly string[] | null {
   return sameStrings(output, sorted) ? Object.freeze(output) : null;
 }
 
+/** Core-internal record classification shared with the serial candidate gate. */
+export function serialCandidateReservedRecordClass(path: string): "task" | "verdict" | null {
+  const normalized = path.toLowerCase();
+  if (normalized.startsWith("docs/ai-work/tasks/")) return "task";
+  if (normalized.startsWith("docs/ai-work/verdicts/")) return "verdict";
+  return null;
+}
+
 function pathClass(path: string): "safe" | "generated" | "sensitive" | "binary" | "unsafe" {
   const parts = path.toLowerCase().split("/");
-  if (path.startsWith("docs/ai-work/tasks/")) return "unsafe";
+  if (serialCandidateReservedRecordClass(path) !== null) return "unsafe";
   if (parts.some((part) => GENERATED_PARTS.has(part))) return "generated";
   const name = parts.at(-1) ?? "";
   if (parts.some((part) => CREDENTIAL_DIRS.has(part)
@@ -1153,6 +1187,186 @@ export function serialCandidateBundleSha256(value: unknown): string | null {
 }
 
 /**
+ * Core-internal restart helper. This is deliberately not root-exported: it
+ * restores only a canonically authenticated pending bundle and cannot capture
+ * or bless new caller-selected workspace bytes.
+ */
+export function restoreSerialCandidateBundleForPending(
+  root: string,
+  authorityValue: unknown,
+  rawBundle: unknown,
+  rawContext: unknown,
+): SerialCandidateBundleV1 | null {
+  try {
+    if (!isSerialCandidateTaskSpecAuthority(authorityValue)
+      || typeof root !== "string" || root.length === 0
+      || !serialCandidateGitEnvironmentSafe()) return null;
+    const authority = authorityValue;
+    const bundleRecord = inspectRecord(rawBundle, [
+      "version", "round", "baseHead", "projectRootSha256", "taskSpecSha256", "evidencePlanSha256",
+      "entries", "rawByteLength", "manifestSha256", "bundleSha256",
+    ]);
+    const context = inspectRecord(rawContext, ["round", "baseHead", "taskPaths", "protectedPaths", "ownedPaths"]);
+    if (!bundleRecord || !context || bundleRecord.version !== SERIAL_CANDIDATE_BUNDLE_VERSION
+      || (bundleRecord.round !== 0 && bundleRecord.round !== 1)
+      || context.round !== bundleRecord.round
+      || typeof bundleRecord.baseHead !== "string" || !GIT_OID_RE.test(bundleRecord.baseHead)
+      || context.baseHead !== bundleRecord.baseHead
+      || bundleRecord.taskSpecSha256 !== authority.taskSpecSha256
+      || bundleRecord.evidencePlanSha256 !== authority.evidencePlanSha256
+      || safeSha(bundleRecord.projectRootSha256) === null
+      || safeSha(bundleRecord.manifestSha256) === null
+      || safeSha(bundleRecord.bundleSha256) === null
+      || !Number.isSafeInteger(bundleRecord.rawByteLength) || Object.is(bundleRecord.rawByteLength, -0)
+      || (bundleRecord.rawByteLength as number) < 0
+      || (bundleRecord.rawByteLength as number) > SERIAL_CANDIDATE_BUNDLE_LIMITS.totalBytes) return null;
+    const rootReal = canonicalProjectRoot(root);
+    if (!rootReal || bundleRecord.projectRootSha256 !== projectRootSha256(rootReal)) return null;
+    const taskPaths = safePathArray(context.taskPaths, SERIAL_CANDIDATE_BUNDLE_LIMITS.paths);
+    const protectedPaths = safePathArray(context.protectedPaths, SERIAL_CANDIDATE_BUNDLE_LIMITS.protectedPaths);
+    const ownedPaths = safePathArray(context.ownedPaths, SERIAL_CANDIDATE_BUNDLE_LIMITS.ownedPaths);
+    if (!taskPaths || !protectedPaths || !ownedPaths) return null;
+    const protectedSet = new Set(protectedPaths.map(pathComparisonKey));
+    const ownedSet = new Set(ownedPaths.map(pathComparisonKey));
+    if (taskPaths.some((path) => protectedSet.has(pathComparisonKey(path))
+      || ownedSet.has(pathComparisonKey(path)))) return null;
+
+    const rawEntries = inspectArray(bundleRecord.entries, SERIAL_CANDIDATE_BUNDLE_LIMITS.paths);
+    if (!rawEntries || rawEntries.length !== taskPaths.length) return null;
+    const entries: SerialCandidateBundleEntryV1[] = [];
+    let rawByteLength = 0;
+    for (let index = 0; index < rawEntries.length; index += 1) {
+      const record = inspectRecord(rawEntries[index], [
+        "projectRelativePath", "state", "origin", "executable", "byteLength", "contentSha256",
+        "contentBase64", "gitBlobOid", "gitMode", "baseBlobOid", "baseMode", "indexState",
+        "indexBlobOid", "indexMode", "indexRelation",
+      ]);
+      const projectRelativePath = record ? normalizedProjectPath(record.projectRelativePath) : null;
+      if (!record || !projectRelativePath || projectRelativePath !== taskPaths[index]
+        || (record.state !== "regular-file" && record.state !== "deleted")
+        || (record.origin !== "tracked" && record.origin !== "untracked")
+        || typeof record.executable !== "boolean"
+        || !Number.isSafeInteger(record.byteLength) || Object.is(record.byteLength, -0)
+        || (record.byteLength as number) < 0
+        || (record.byteLength as number) > SERIAL_CANDIDATE_BUNDLE_LIMITS.bytesPerFile
+        || (record.indexState !== "present" && record.indexState !== "absent")
+        || (record.indexRelation !== "base" && record.indexRelation !== "product")) return null;
+      const gitMode = record.gitMode === "100644" || record.gitMode === "100755" ? record.gitMode : null;
+      const baseMode = record.baseMode === "100644" || record.baseMode === "100755" ? record.baseMode : null;
+      const indexMode = record.indexMode === "100644" || record.indexMode === "100755" ? record.indexMode : null;
+      const gitBlobOid = typeof record.gitBlobOid === "string" && GIT_OID_RE.test(record.gitBlobOid)
+        ? record.gitBlobOid : null;
+      const baseBlobOid = typeof record.baseBlobOid === "string" && GIT_OID_RE.test(record.baseBlobOid)
+        ? record.baseBlobOid : null;
+      const indexBlobOid = typeof record.indexBlobOid === "string" && GIT_OID_RE.test(record.indexBlobOid)
+        ? record.indexBlobOid : null;
+      if ((record.baseBlobOid === null) !== (record.baseMode === null)
+        || (record.baseBlobOid !== null && (!baseBlobOid || !baseMode))
+        || (record.indexBlobOid === null) !== (record.indexMode === null)
+        || (record.indexState === "absent" && (record.indexBlobOid !== null || record.indexMode !== null))
+        || (record.indexState === "present" && (!indexBlobOid || !indexMode))) return null;
+      if (record.state === "deleted") {
+        if (record.origin !== "tracked" || record.byteLength !== 0
+          || record.contentSha256 !== null || record.contentBase64 !== null
+          || record.gitBlobOid !== null || record.gitMode !== null
+          || !baseBlobOid || !baseMode) return null;
+      } else {
+        if (record.origin === "tracked" ? (!baseBlobOid || !baseMode) : (record.baseBlobOid !== null || record.baseMode !== null)
+          || typeof record.contentBase64 !== "string" || safeSha(record.contentSha256) === null
+          || !gitBlobOid || !gitMode) return null;
+        const contentBase64 = record.contentBase64 as string;
+        const bytes = Buffer.from(contentBase64, "base64");
+        if (bytes.toString("base64") !== contentBase64
+          || bytes.length !== record.byteLength || sha256(bytes) !== record.contentSha256) return null;
+        rawByteLength += bytes.length;
+        if (rawByteLength > SERIAL_CANDIDATE_BUNDLE_LIMITS.totalBytes) return null;
+      }
+      entries.push(deepFreeze({
+        projectRelativePath,
+        state: record.state,
+        origin: record.origin,
+        executable: record.executable,
+        byteLength: record.byteLength,
+        contentSha256: record.contentSha256,
+        contentBase64: record.contentBase64,
+        gitBlobOid: record.gitBlobOid,
+        gitMode: record.gitMode,
+        baseBlobOid: record.baseBlobOid,
+        baseMode: record.baseMode,
+        indexState: record.indexState,
+        indexBlobOid: record.indexBlobOid,
+        indexMode: record.indexMode,
+        indexRelation: record.indexRelation,
+      }) as SerialCandidateBundleEntryV1);
+    }
+    if (rawByteLength !== bundleRecord.rawByteLength) return null;
+    const manifestSha256 = sha256(canonicalArray(entries.map(canonicalEntryMetadata)));
+    const withoutBundleSha = deepFreeze({
+      version: SERIAL_CANDIDATE_BUNDLE_VERSION,
+      round: bundleRecord.round as CandidateRound,
+      baseHead: bundleRecord.baseHead,
+      projectRootSha256: bundleRecord.projectRootSha256,
+      taskSpecSha256: bundleRecord.taskSpecSha256,
+      evidencePlanSha256: bundleRecord.evidencePlanSha256,
+      entries: Object.freeze(entries),
+      rawByteLength,
+      manifestSha256,
+    });
+    if (manifestSha256 !== bundleRecord.manifestSha256
+      || sha256(canonicalBundle(withoutBundleSha)) !== bundleRecord.bundleSha256) return null;
+    const bundle = deepFreeze({
+      ...withoutBundleSha,
+      bundleSha256: bundleRecord.bundleSha256,
+    }) as SerialCandidateBundleV1;
+    bundleBrand.add(bundle);
+    bundleBindings.set(bundle, authority);
+    bundleCaptureBindings.set(bundle, Object.freeze({
+      rootReal,
+      round: bundle.round,
+      baseHead: bundle.baseHead,
+      taskPaths,
+      protectedPaths,
+      ownedPaths,
+    }));
+    return bundle;
+  } catch {
+    return null;
+  }
+}
+
+/** Core-internal companion for authenticated pending-candidate restoration. */
+export function restoreSerialCandidateRepairEligibilityForPending(
+  bundleValue: unknown,
+  rawEligibility: unknown,
+): SerialCandidateRepairEligibilityV1 | null {
+  if (!isSerialCandidateBundle(bundleValue)) return null;
+  const record = inspectRecord(rawEligibility, [
+    "version", "projectRootSha256", "bundleSha256", "ignoredTree", "repairEligibilitySha256",
+  ]);
+  if (!record || record.version !== SERIAL_CANDIDATE_REPAIR_ELIGIBILITY_VERSION
+    || record.projectRootSha256 !== bundleValue.projectRootSha256
+    || record.bundleSha256 !== bundleValue.bundleSha256
+    || record.ignoredTree !== "unchanged-empty" || safeSha(record.repairEligibilitySha256) === null) return null;
+  const expectedSha = sha256(canonicalObject([
+    ["version", quote(SERIAL_CANDIDATE_REPAIR_ELIGIBILITY_VERSION)],
+    ["projectRootSha256", quote(bundleValue.projectRootSha256)],
+    ["bundleSha256", quote(bundleValue.bundleSha256)],
+    ["ignoredTree", quote("unchanged-empty")],
+  ]));
+  if (record.repairEligibilitySha256 !== expectedSha) return null;
+  const eligibility = Object.freeze({
+    version: SERIAL_CANDIDATE_REPAIR_ELIGIBILITY_VERSION,
+    projectRootSha256: bundleValue.projectRootSha256,
+    bundleSha256: bundleValue.bundleSha256,
+    ignoredTree: "unchanged-empty" as const,
+    repairEligibilitySha256: expectedSha,
+  }) as SerialCandidateRepairEligibilityV1;
+  repairEligibilityBrand.add(eligibility);
+  repairEligibilityBindings.set(eligibility, bundleValue);
+  return eligibility;
+}
+
+/**
  * Re-capture the exact current product set from the private context that
  * created its bundle. This is the freshness check used immediately before a
  * repair instruction or terminal write; callers cannot redefine protected or
@@ -1233,6 +1447,8 @@ function mintCandidate(
     identity: Object.freeze(Object.create(null)) as object,
     current: candidate,
     terminalReserved: false,
+    parked: false,
+    transitionHistory: [],
   };
   actualLineage.current = candidate;
   candidateBrand.add(candidate);
@@ -1314,6 +1530,7 @@ export function isCurrentSerialCandidate(value: unknown): value is SerialCandida
   const binding = candidateBindings.get(value);
   const candidate = value as SerialCandidateV1;
   return binding !== undefined && binding.lineage.current === value && !binding.lineage.terminalReserved
+    && !binding.lineage.parked
     && isSerialCandidateTaskSpecAuthority(binding.authority) && isSerialCandidateBundle(candidate.bundle)
     && candidate.lineage.taskSpec === binding.authority.taskSpec
     && candidate.lineage.taskSpecSha256 === binding.authority.taskSpecSha256
@@ -1355,6 +1572,23 @@ export function serialCandidateRepairAvailability(
 export function serialCandidateLineageIdentity(value: unknown): object | null {
   if (typeof value !== "object" || value === null || !candidateBrand.has(value)) return null;
   return candidateBindings.get(value)?.lineage.identity ?? null;
+}
+
+/** Core-internal suspension seam. It irrevocably invalidates this live lineage. */
+export function parkCurrentSerialCandidate(value: unknown): boolean {
+  if (!isCurrentSerialCandidate(value)) return false;
+  const binding = candidateBindings.get(value)!;
+  binding.lineage.parked = true;
+  return true;
+}
+
+/** Core-internal replay input; never a brand mint and deliberately not root-exported. */
+export function serialCandidatePendingTransitionHistory(
+  value: unknown,
+): readonly SerialCandidateTransitionDecisionV1[] | null {
+  if (!isCurrentSerialCandidate(value)) return null;
+  const history = candidateBindings.get(value)!.lineage.transitionHistory;
+  return Object.freeze([...history]);
 }
 
 export function serialCandidateTaskSpecAuthority(value: unknown): SerialCandidateTaskSpecAuthorityV1 | null {
@@ -1459,20 +1693,20 @@ export function advanceSerialCandidate(candidate: unknown, raw: unknown): Serial
     pendingOwnerReason,
     callsUsed: Object.freeze({ ...candidate.callsUsed, critic: criticCalls }),
   });
+  binding.lineage.transitionHistory.push(record.decision);
   spentTransitions.add(raw);
   transitionBindings.delete(raw);
   return next;
 }
 
-function parseBlockers(value: unknown, candidate: SerialCandidateV1): ReadonlyArray<Readonly<{
-  criterionId: `c${number}`;
-  failureConditionId: string;
-  artifactIds: readonly string[];
-}>> | null {
+function parseBlockers(
+  value: unknown,
+  candidate: SerialCandidateV1,
+): readonly SerialCandidatePendingRepairBlockerV1[] | null {
   const rows = inspectArray(value, candidateBrand.has(candidate) ? candidateBindings.get(candidate)!.authority.taskSpec.quality.acceptanceChecks.length : 0);
   if (!rows || rows.length === 0) return null;
   const authority = candidateBindings.get(candidate)!.authority;
-  const output: Array<Readonly<{ criterionId: `c${number}`; failureConditionId: string; artifactIds: readonly string[] }>> = [];
+  const output: SerialCandidatePendingRepairBlockerV1[] = [];
   const seen = new Set<string>();
   for (const item of rows) {
     const row = inspectRecord(item, ["criterionId", "failureConditionId", "artifactIds"]);
@@ -1497,18 +1731,10 @@ function parseBlockers(value: unknown, candidate: SerialCandidateV1): ReadonlyAr
   return Object.freeze(output.sort((left, right) => order.get(left.criterionId)! - order.get(right.criterionId)!));
 }
 
-export function composeSerialRepairInstruction(root: string, candidate: unknown, raw: unknown): SerialRepairInstructionV1 | null {
-  if (!serialCandidateGitEnvironmentSafe() || !serialCandidateRepairWorkspaceStillExact(root, candidate)
-    || !isCurrentSerialCandidate(candidate)
-    || candidate.phase !== "awaiting-repair" || candidate.round !== 0
-    || candidate.callsUsed.repair !== 0 || candidate.repairEligibility === null || repairByCandidate.has(candidate)) return null;
-  const record = inspectRecord(raw, [
-    "version", "runId", "generation", "taskNumber", "projectRootSha256", "round", "taskSpecSha256",
-    "evidencePlanSha256", "candidateSha256", "bundleSha256", "evidenceStateSha256", "blockers",
-  ]);
-  if (!record || record.version !== SERIAL_REPAIR_INSTRUCTION_VERSION || !transitionBinding({ ...record, version: SERIAL_CANDIDATE_TRANSITION_VERSION }, candidate)) return null;
-  const blockers = parseBlockers(record.blockers, candidate);
-  if (!blockers) return null;
+function mintSerialRepairInstruction(
+  candidate: SerialCandidateV1,
+  blockers: readonly SerialCandidatePendingRepairBlockerV1[],
+): SerialRepairInstructionV1 {
   const authority = candidateBindings.get(candidate)!.authority;
   const lines = [
     "Apply one bounded repair to the frozen Task Spec. Do not add, remove, weaken, or reinterpret any cN or pN row.",
@@ -1538,13 +1764,55 @@ export function composeSerialRepairInstruction(root: string, candidate: unknown,
     artifactIds,
     instruction: lines.join("\n"),
   }) as Omit<SerialRepairInstructionV1, "repairInstructionSha256">;
-  const instruction = deepFreeze({
+  return deepFreeze({
     ...withoutSha,
     repairInstructionSha256: sha256(canonicalRepairInstruction(withoutSha)),
   }) as SerialRepairInstructionV1;
+}
+
+function sameRepairInstruction(left: SerialRepairInstructionV1, right: unknown): boolean {
+  const record = inspectRecord(right, [
+    "version", "runId", "generation", "round", "taskSpecSha256", "evidencePlanSha256",
+    "candidateSha256", "bundleSha256", "evidenceStateSha256", "criterionIds", "artifactIds",
+    "instruction", "repairInstructionSha256",
+  ]);
+  if (!record) return false;
+  const criterionIds = inspectArray(record.criterionIds, 100);
+  const artifactIds = inspectArray(record.artifactIds, 800);
+  return record.version === left.version
+    && record.runId === left.runId
+    && Object.is(record.generation, left.generation)
+    && record.round === left.round
+    && record.taskSpecSha256 === left.taskSpecSha256
+    && record.evidencePlanSha256 === left.evidencePlanSha256
+    && record.candidateSha256 === left.candidateSha256
+    && record.bundleSha256 === left.bundleSha256
+    && record.evidenceStateSha256 === left.evidenceStateSha256
+    && criterionIds !== null && criterionIds.every((value) => typeof value === "string")
+    && sameStrings(criterionIds as string[], left.criterionIds)
+    && artifactIds !== null && artifactIds.every((value) => typeof value === "string")
+    && sameStrings(artifactIds as string[], left.artifactIds)
+    && record.instruction === left.instruction
+    && record.repairInstructionSha256 === left.repairInstructionSha256;
+}
+
+export function composeSerialRepairInstruction(root: string, candidate: unknown, raw: unknown): SerialRepairInstructionV1 | null {
+  if (!serialCandidateGitEnvironmentSafe() || !serialCandidateRepairWorkspaceStillExact(root, candidate)
+    || !isCurrentSerialCandidate(candidate)
+    || candidate.phase !== "awaiting-repair" || candidate.round !== 0
+    || candidate.callsUsed.repair !== 0 || candidate.repairEligibility === null || repairByCandidate.has(candidate)) return null;
+  const record = inspectRecord(raw, [
+    "version", "runId", "generation", "taskNumber", "projectRootSha256", "round", "taskSpecSha256",
+    "evidencePlanSha256", "candidateSha256", "bundleSha256", "evidenceStateSha256", "blockers",
+  ]);
+  if (!record || record.version !== SERIAL_REPAIR_INSTRUCTION_VERSION || !transitionBinding({ ...record, version: SERIAL_CANDIDATE_TRANSITION_VERSION }, candidate)) return null;
+  const blockers = parseBlockers(record.blockers, candidate);
+  if (!blockers) return null;
+  const instruction = mintSerialRepairInstruction(candidate, blockers);
   repairByCandidate.add(candidate);
   repairInstructionBrand.add(instruction);
   repairInstructionBindings.set(instruction, candidate);
+  repairBlockersByInstruction.set(instruction, blockers);
   return instruction;
 }
 
@@ -1625,9 +1893,12 @@ export function replaceSerialCandidateAfterRepair(
     || !isSerialCandidateBundle(roundOneBundle) || roundOneBundle.round !== 1
     || typeof claimsText !== "string") return null;
   const repairBundleBinding = repairBundleBindings.get(roundOneBundle);
+  const repairBlockers = repairBlockersByInstruction.get(repairInstruction as object);
+  const roundOneCapture = bundleCaptureBindings.get(roundOneBundle as object);
   if (!repairBundleBinding || repairBundleBinding.candidate !== candidate
     || repairBundleBinding.instruction !== repairInstruction
-    || repairCaptureByInstruction.get(repairInstruction) !== roundOneBundle) return null;
+    || repairCaptureByInstruction.get(repairInstruction) !== roundOneBundle
+    || !repairBlockers || !roundOneCapture || roundOneCapture.round !== 1) return null;
   const binding = candidateBindings.get(candidate)!;
   const authority = binding.authority;
   if (bundleBindings.get(roundOneBundle) !== authority
@@ -1692,11 +1963,104 @@ export function replaceSerialCandidateAfterRepair(
     pendingOwnerReason: null,
     callsUsed: Object.freeze({ builder: 1, repair: 1, critic: candidate.callsUsed.critic, externalEvidence: 0 }),
   });
+  const roundOneCaptureContext = deepFreeze({
+    round: 1 as const,
+    baseHead: roundOneCapture.baseHead,
+    taskPaths: Object.freeze([...roundOneCapture.taskPaths]),
+    protectedPaths: Object.freeze([...roundOneCapture.protectedPaths]),
+    ownedPaths: Object.freeze([...roundOneCapture.ownedPaths]),
+  });
+  pendingRepairLineageByLineage.set(binding.lineage, Object.freeze({
+    preRepairCandidate: candidate,
+    postRepairCandidate: replacement,
+    preRepairTransitionHistory: Object.freeze([...binding.lineage.transitionHistory]),
+    repairInstruction,
+    blockers: repairBlockers,
+    roundOneBundle,
+    roundOneCaptureContext,
+  }));
   spentRepairInstructions.add(repairInstruction);
   repairInstructionBindings.delete(repairInstruction);
   repairBundleBindings.delete(roundOneBundle);
   repairCaptureByInstruction.delete(repairInstruction);
   return replacement;
+}
+
+/** Core-internal restart projection. It exposes only process-branded repair
+ * custody already bound to this exact lineage and is deliberately not
+ * exported from the package root. */
+export function serialCandidatePendingRepairLineage(
+  value: unknown,
+): SerialCandidatePendingRepairLineageV1 | null {
+  if (!isCurrentSerialCandidate(value) || value.round !== 1 || value.callsUsed.repair !== 1) return null;
+  const binding = candidateBindings.get(value)!;
+  const repair = pendingRepairLineageByLineage.get(binding.lineage);
+  if (!repair || repair.preRepairCandidate.runId !== value.runId
+    || repair.preRepairCandidate.round !== 0 || repair.preRepairCandidate.callsUsed.repair !== 0
+    || repair.postRepairCandidate.round !== 1 || repair.postRepairCandidate.callsUsed.repair !== 1
+    || repair.roundOneBundle !== repair.postRepairCandidate.bundle
+    || repair.repairInstruction.candidateSha256 !== repair.preRepairCandidate.candidateSha256
+    || repair.repairInstruction.repairInstructionSha256.length !== 64) return null;
+  return repair;
+}
+
+/** Core-internal restart mint. The live repair authorization path intentionally
+ * requires round-zero workspace bytes; restart cannot, because the workspace
+ * now contains the already-captured round-one bytes. This helper instead
+ * recomputes the exact instruction from frozen cN authority, restores the
+ * canonical bundle under its original root/path context, and lets the normal
+ * one-use replacement mint re-derive every candidate hash and counter. */
+export function restoreSerialCandidateAfterRepairForPending(
+  root: string,
+  preRepairCandidateValue: unknown,
+  raw: unknown,
+): SerialCandidateV1 | null {
+  try {
+    if (!isCurrentSerialCandidate(preRepairCandidateValue)
+      || preRepairCandidateValue.round !== 0
+      || preRepairCandidateValue.callsUsed.repair !== 0
+      || preRepairCandidateValue.phase !== "awaiting-repair") return null;
+    const candidate = preRepairCandidateValue;
+    const record = inspectRecord(raw, [
+      "repairInstruction", "blockers", "roundOneBundle", "roundOneCaptureContext", "claimsText",
+    ]);
+    if (!record || typeof record.claimsText !== "string" || record.claimsText.length > 262_144) return null;
+    const blockers = parseBlockers(record.blockers, candidate);
+    if (!blockers) return null;
+    const instruction = mintSerialRepairInstruction(candidate, blockers);
+    if (!sameRepairInstruction(instruction, record.repairInstruction)) return null;
+    const capture = inspectRecord(record.roundOneCaptureContext, [
+      "round", "baseHead", "taskPaths", "protectedPaths", "ownedPaths",
+    ]);
+    const roundZeroCapture = bundleCaptureBindings.get(candidate.lineage.round0Bundle);
+    if (!capture || capture.round !== 1 || !roundZeroCapture
+      || capture.baseHead !== roundZeroCapture.baseHead) return null;
+    const roundOneBundle = restoreSerialCandidateBundleForPending(
+      root,
+      candidateBindings.get(candidate)!.authority,
+      record.roundOneBundle,
+      capture,
+    );
+    const restoredCapture = roundOneBundle ? bundleCaptureBindings.get(roundOneBundle) : null;
+    if (!roundOneBundle || !restoredCapture || restoredCapture.round !== 1
+      || restoredCapture.rootReal !== roundZeroCapture.rootReal
+      || !sameStrings(restoredCapture.protectedPaths, roundZeroCapture.protectedPaths)
+      || !sameStrings(restoredCapture.ownedPaths, roundZeroCapture.ownedPaths)) return null;
+    repairByCandidate.add(candidate);
+    repairInstructionBrand.add(instruction);
+    repairInstructionBindings.set(instruction, candidate);
+    repairBlockersByInstruction.set(instruction, blockers);
+    repairBundleBindings.set(roundOneBundle, Object.freeze({ candidate, instruction }));
+    repairCaptureByInstruction.set(instruction, roundOneBundle);
+    return replaceSerialCandidateAfterRepair(
+      candidate,
+      instruction,
+      roundOneBundle,
+      record.claimsText,
+    );
+  } catch {
+    return null;
+  }
 }
 
 /**
