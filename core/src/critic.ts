@@ -26,6 +26,19 @@ export const NATIVE_BOUNDARY_RESULT_VERSION = "cairn-native-boundary-result/v1" 
 export const CRITIC_POLICY_AUTHORITY_CONTEXT_VERSION = "cairn-critic-policy-authority-context/v1" as const;
 export const CRITIC_POLICY_RESULT_VERSION = "cairn-critic-policy-result/v1" as const;
 export const CRITIC_POLICY_VERSION = "cairn-critic-policy/v1" as const;
+export const CRITIC_CALL_AUTHORIZATION_VERSION = "cairn-critic-call-authorization/v1" as const;
+export const CRITIC_CALL_PURPOSE = "critic-assessment" as const;
+/** A route must state that the provider applies no server-side tools. Cairn
+ * cannot verify a provider's internals, so this is the route's declaration —
+ * but an approval that never asked could not even be contradicted later. */
+export const CRITIC_CALL_SERVER_SIDE_TOOLS = "none" as const;
+
+export const CRITIC_CALL_LIMITS = Object.freeze({
+  /** Decision Q6's ten-minute per-critic-call ceiling. */
+  timeoutMs: 600_000,
+  baseUrlCharacters: 512,
+  modelCharacters: 256,
+} as const);
 
 export const CRITIC_SYSTEM_PROMPT = [
   "You are Cairn's independent, tool-free critic.",
@@ -208,6 +221,43 @@ export type CriticRequestV1 = Readonly<{
   schemas: typeof CRITIC_SCHEMAS_V1;
   toolPolicy: "none";
   generation: typeof CRITIC_GENERATION_V1;
+}>;
+
+export type CriticCallSelectedFileV1 = Readonly<{
+  projectRelativePath: string;
+  sha256: string;
+  characters: number;
+}>;
+
+export type CriticCallAuthorizationV1 = Readonly<{
+  version: typeof CRITIC_CALL_AUTHORIZATION_VERSION;
+  runId: string;
+  candidateRound: 0 | 1;
+  callAttempt: 1 | 2 | 3;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  packetSha256: string;
+  requestSha256: string;
+  candidateSha256: string;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  resolvedModel: string;
+  resolvedModelRevision: string;
+  connectionConsentVersion: string;
+  transportRevision: string;
+  serializer: string;
+  toolPolicy: "none";
+  generation: typeof CRITIC_GENERATION_V1;
+  criticPromptSha256: string;
+  policySha256: string;
+  selection: readonly CriticCallSelectedFileV1[];
+  timeoutMs: number;
+  maxOutputCharacters: number;
+  purpose: typeof CRITIC_CALL_PURPOSE;
+  billingBasis: string;
+  serverSideTools: typeof CRITIC_CALL_SERVER_SIDE_TOOLS;
+  routeRequestFingerprintSha256: string;
 }>;
 
 export type CriticFindingV1 = Readonly<{
@@ -436,6 +486,11 @@ type InspectedRecord = Readonly<Record<string, unknown>>;
 
 const SHA256_RE = /^[0-9a-f]{64}$/u;
 const MACHINE_ID_RE = /^[a-z][a-z0-9._:-]{0,127}$/u;
+const CRITIC_CALL_TOKEN_RE = /^[a-z][a-z0-9._:-]{0,63}(?:\/[a-z0-9._:-]{1,63}){0,3}$/u;
+// The same three rules app/src/main/criticactivation.ts applies to a model id.
+const CRITIC_CALL_MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._/:@+-]*$/u;
+const CRITIC_CALL_DRIVE_PATH_RE = /^[A-Za-z]:\//u;
+const CRITIC_CALL_DANGEROUS_SCHEME_RE = /^(?:data|file|ftp|https?|javascript):/iu;
 const CRITERION_ID_RE = /^(c|p)([1-9][0-9]*)$/u;
 const FINDING_ID_RE = /^f([1-9][0-9]*)$/u;
 const UNSCOPED_ID_RE = /^u([1-9][0-9]*)$/u;
@@ -503,6 +558,62 @@ function safeText(value: unknown, cap: number = QUALITY_LIMITS.ordinaryTextChara
     }
   }
   return value;
+}
+
+/** Owner-facing prose that lands in a recorded, hashed fact. One line, no
+ * control characters, no path or scheme shapes: a secret pasted here would be
+ * carried into the canonical bytes and the digest. */
+function criticCallProse(value: unknown): string | null {
+  const text = safeText(value, CRITIC_LIMITS.providerTextCharacters);
+  return text === null || /[\r\n\t]/u.test(text) || CRITIC_CALL_DRIVE_PATH_RE.test(text)
+    || CRITIC_CALL_DANGEROUS_SCHEME_RE.test(text)
+    ? null
+    : text;
+}
+
+/** Cairn's own versioned identifiers — `openai-compatible/v1` — so the slash
+ * a version string carries is allowed where a machine id would refuse it. */
+function criticCallToken(value: unknown): string | null {
+  return typeof value === "string" && CRITIC_CALL_TOKEN_RE.test(value) ? value : null;
+}
+
+/** An exact https origin and path. A credential in the URL, a query, or a
+ * fragment is refused rather than carried into an approved, recorded fact. */
+function criticCallBaseUrl(value: unknown): string | null {
+  const text = safeText(value, CRITIC_CALL_LIMITS.baseUrlCharacters);
+  if (text === null) return null;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "https:" || url.username !== "" || url.password !== ""
+      || url.search !== "" || url.hash !== "" || url.href !== text) return null;
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A model id, under the same rules `app/src/main/criticactivation.ts` already
+ * applies to this concept: an id shape, no drive path, no dangerous scheme,
+ * and no `auto` in any `/`, `@`, or `:` segment. `resolvedModel` is copied
+ * straight onto the wire, so a kernel that only bounded its length would let a
+ * `userData` path, a `file:` URL, or `anthropic/auto` become an approved,
+ * recorded, transmitted fact.
+ */
+function criticCallModel(value: unknown): string | null {
+  const text = safeText(value, CRITIC_CALL_LIMITS.modelCharacters);
+  if (text === null || !CRITIC_CALL_MODEL_ID_RE.test(text)
+    || CRITIC_CALL_DRIVE_PATH_RE.test(text) || CRITIC_CALL_DANGEROUS_SCHEME_RE.test(text)) return null;
+  return text.toLowerCase().split(/[/@:]/u).includes("auto") ? null : text;
+}
+
+/** A provider-reported revision. `auto` and `unresolved` are placeholders, not
+ * revisions, and a revision is a token rather than free prose. */
+function criticCallRevision(value: unknown): string | null {
+  const text = safeText(value, CRITIC_LIMITS.providerTextCharacters);
+  return text === null || !CRITIC_CALL_MODEL_ID_RE.test(text) || /^(?:auto|unresolved)$/iu.test(text)
+    ? null
+    : text;
 }
 
 function safeSha(value: unknown): string | null {
@@ -641,6 +752,8 @@ const requestBindings = new WeakMap<object, Readonly<{
   projectHash: string;
   connectionConsentVersion: string;
 }>>();
+const callAuthorizationBrands = new WeakSet<object>();
+const callAuthorizationBindings = new WeakMap<object, CriticRequestV1>();
 const policyAuthorityContextBindings = new WeakMap<object, Readonly<{
   taskSpec: TaskSpecV1;
   evidencePlan: EvidencePlanV1;
@@ -1129,6 +1242,209 @@ export function canonicalCriticRequest(value: unknown): string | null {
 export function criticRequestSha256(value: unknown): string | null {
   const canonical = canonicalCriticRequest(value);
   return canonical === null ? null : sha256Utf8(canonical);
+}
+
+/**
+ * One approvable critic call.
+ *
+ * `CriticRequestV1` says what the critic is asked. This says which call the
+ * owner approved: the exact route, model, consent, transport, caps, purpose,
+ * attempt, and every file the packet already carries. Its digest is the
+ * `routeRequestFingerprintSha256` a later assessment custody record cites, so
+ * "what came back" can be checked against "what was approved".
+ *
+ * The selection is copied from the authenticated request, never from the
+ * caller, so nothing outside Core can widen an approved call.
+ */
+export function composeCriticCallAuthorization(
+  request: unknown,
+  rawRoute: unknown,
+): CriticCallAuthorizationV1 | null {
+  if (typeof request !== "object" || request === null || !requestBrands.has(request)) return null;
+  const typedRequest = request as CriticRequestV1;
+  const binding = requestBindings.get(request);
+  const route = inspectRecord(rawRoute, [
+    "runId", "candidateRound", "callAttempt", "provider", "baseUrl", "model", "resolvedModel",
+    "resolvedModelRevision", "connectionConsentVersion", "transportRevision", "serializer",
+    "timeoutMs", "maxOutputCharacters", "purpose", "billingBasis", "serverSideTools",
+  ]);
+  if (binding === undefined || route === null) return null;
+
+  // The bounds are the frozen Task Spec's, not this module's opinion.
+  const budget = binding.taskSpec.callBudget;
+  const runId = safeUuid(route.runId);
+  const provider = criticCallToken(route.provider);
+  const transportRevision = criticCallToken(route.transportRevision);
+  const serializer = criticCallToken(route.serializer);
+  const resolvedModelRevision = criticCallRevision(route.resolvedModelRevision);
+  const baseUrl = criticCallBaseUrl(route.baseUrl);
+  const model = criticCallModel(route.model);
+  const resolvedModel = criticCallModel(route.resolvedModel);
+  const billingBasis = criticCallProse(route.billingBasis);
+  if (runId === null || provider === null || transportRevision === null || serializer === null
+    || resolvedModelRevision === null || baseUrl === null || model === null || resolvedModel === null
+    || billingBasis === null || route.purpose !== CRITIC_CALL_PURPOSE
+    || route.serverSideTools !== CRITIC_CALL_SERVER_SIDE_TOOLS
+    || route.connectionConsentVersion !== binding.connectionConsentVersion
+    || (!Object.is(route.candidateRound, 0) && !Object.is(route.candidateRound, 1))
+    || !Number.isSafeInteger(route.callAttempt) || (route.callAttempt as number) < 1
+    || (route.callAttempt as number) > budget.maxCriticAttempts
+    || !Number.isSafeInteger(route.timeoutMs) || (route.timeoutMs as number) <= 0
+    || (route.timeoutMs as number) > budget.maxCriticElapsedMs
+    || route.maxOutputCharacters !== CRITIC_LIMITS.rawOutputCharacters) return null;
+
+  // The selected files come from the authenticated packet. Their caps were
+  // already enforced when the packet was authorized; re-check them here so a
+  // future packet change cannot silently widen an approved call.
+  const selection: CriticCallSelectedFileV1[] = [];
+  let selectedCharacters = 0;
+  for (const row of typedRequest.packet.selectedTrackedText) {
+    // UTF-16 units, the unit the packet's own cap counted. Counting code
+    // points here would make this backstop strictly weaker than the cap it
+    // exists to back up, and would under-report astral text.
+    const characters = row.content.length;
+    selectedCharacters += characters;
+    if (selection.length >= QUALITY_LIMITS.selectedArtifacts
+      || characters > QUALITY_LIMITS.selectedArtifactCharacters
+      || selectedCharacters > QUALITY_LIMITS.selectedContentCharacters
+      || sha256Utf8(row.content) !== row.sha256) return null;
+    selection.push(Object.freeze({
+      projectRelativePath: row.projectRelativePath,
+      sha256: row.sha256,
+      characters,
+    }));
+  }
+
+  const values = Object.freeze({
+    version: CRITIC_CALL_AUTHORIZATION_VERSION,
+    runId,
+    candidateRound: route.candidateRound as 0 | 1,
+    callAttempt: route.callAttempt as 1 | 2 | 3,
+    taskSpecSha256: binding.taskSpecSha256,
+    evidencePlanSha256: binding.evidencePlanSha256,
+    packetSha256: binding.packetSha256,
+    requestSha256: binding.requestSha256,
+    candidateSha256: typedRequest.packet.candidateSha256,
+    provider,
+    baseUrl,
+    model,
+    resolvedModel,
+    resolvedModelRevision,
+    connectionConsentVersion: binding.connectionConsentVersion,
+    transportRevision,
+    serializer,
+    toolPolicy: "none",
+    generation: typedRequest.generation,
+    criticPromptSha256: CRITIC_SYSTEM_PROMPT_SHA256,
+    policySha256: CRITIC_POLICY_SHA256,
+    selection: Object.freeze(selection),
+    timeoutMs: route.timeoutMs as number,
+    maxOutputCharacters: CRITIC_LIMITS.rawOutputCharacters,
+    purpose: CRITIC_CALL_PURPOSE,
+    billingBasis,
+    serverSideTools: CRITIC_CALL_SERVER_SIDE_TOOLS,
+    routeRequestFingerprintSha256: "",
+  }) as unknown as CriticCallAuthorizationV1;
+
+  const authorization = Object.freeze({
+    ...values,
+    routeRequestFingerprintSha256: sha256Utf8(canonicalAuthorizationValue(values)),
+  }) as CriticCallAuthorizationV1;
+  callAuthorizationBrands.add(authorization);
+  callAuthorizationBindings.set(authorization, typedRequest);
+  return authorization;
+}
+
+function canonicalAuthorizationValue(value: CriticCallAuthorizationV1): string {
+  return objectCanonical([
+    ["version", quote(value.version)],
+    ["runId", quote(value.runId)],
+    ["candidateRound", String(value.candidateRound)],
+    ["callAttempt", String(value.callAttempt)],
+    ["taskSpecSha256", quote(value.taskSpecSha256)],
+    ["evidencePlanSha256", quote(value.evidencePlanSha256)],
+    ["packetSha256", quote(value.packetSha256)],
+    ["requestSha256", quote(value.requestSha256)],
+    ["candidateSha256", quote(value.candidateSha256)],
+    ["provider", quote(value.provider)],
+    ["baseUrl", quote(value.baseUrl)],
+    ["model", quote(value.model)],
+    ["resolvedModel", quote(value.resolvedModel)],
+    ["resolvedModelRevision", quote(value.resolvedModelRevision)],
+    ["connectionConsentVersion", quote(value.connectionConsentVersion)],
+    ["transportRevision", quote(value.transportRevision)],
+    ["serializer", quote(value.serializer)],
+    ["toolPolicy", quote(value.toolPolicy)],
+    ["generation", objectCanonical([
+      ["temperature", String(value.generation.temperature)],
+      ["topP", String(value.generation.topP)],
+      ["maxOutputTokens", String(value.generation.maxOutputTokens)],
+    ])],
+    ["criticPromptSha256", quote(value.criticPromptSha256)],
+    ["policySha256", quote(value.policySha256)],
+    ["selection", arrayCanonical(value.selection.map((row) => objectCanonical([
+      ["projectRelativePath", quote(row.projectRelativePath)],
+      ["sha256", quote(row.sha256)],
+      ["characters", String(row.characters)],
+    ])))],
+    ["timeoutMs", String(value.timeoutMs)],
+    ["maxOutputCharacters", String(value.maxOutputCharacters)],
+    ["purpose", quote(value.purpose)],
+    ["billingBasis", quote(value.billingBasis)],
+    ["serverSideTools", quote(value.serverSideTools)],
+  ]);
+}
+
+export function canonicalCriticCallAuthorization(value: unknown): string | null {
+  return typeof value === "object" && value !== null && callAuthorizationBrands.has(value)
+    ? canonicalAuthorizationValue(value as CriticCallAuthorizationV1)
+    : null;
+}
+
+export function criticCallAuthorizationSha256(value: unknown): string | null {
+  const canonical = canonicalCriticCallAuthorization(value);
+  return canonical === null ? null : sha256Utf8(canonical);
+}
+
+/**
+ * Core composes the body so a transport never has to. There is exactly one
+ * system message and one packet message, explicit generation parameters, and
+ * no tool surface of any spelling.
+ */
+export function criticCallRequestBody(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || !callAuthorizationBrands.has(value)) return null;
+  const authorization = value as CriticCallAuthorizationV1;
+  const request = callAuthorizationBindings.get(value);
+  const packet = request === undefined ? null : canonicalCriticPacket(request.packet);
+  if (packet === null) return null;
+  return objectCanonical([
+    ["model", quote(authorization.resolvedModel)],
+    ["messages", arrayCanonical([
+      objectCanonical([["role", quote("system")], ["content", quote(CRITIC_SYSTEM_PROMPT)]]),
+      objectCanonical([["role", quote("user")], ["content", quote(packet)]]),
+    ])],
+    ["temperature", String(authorization.generation.temperature)],
+    ["top_p", String(authorization.generation.topP)],
+    ["max_tokens", String(authorization.generation.maxOutputTokens)],
+    ["stream", "false"],
+  ]);
+}
+
+export function criticCallRequestBodyAuthorized(authorization: unknown, body: unknown): boolean {
+  const approved = criticCallRequestBody(authorization);
+  return approved !== null && typeof body === "string" && body === approved;
+}
+
+/**
+ * Spend the one send this authorization permits. A retry is a new approval
+ * with its own attempt number, not a second use of this one, so a transport
+ * that is interrupted and re-entered cannot quietly bill the owner twice.
+ */
+export function consumeCriticCallAuthorization(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !callAuthorizationBrands.has(value)) return false;
+  if (!callAuthorizationBindings.has(value)) return false;
+  callAuthorizationBindings.delete(value);
+  return true;
 }
 
 function parseEvidenceRefs(value: unknown, artifactIds: ReadonlySet<string>): readonly string[] | null {
