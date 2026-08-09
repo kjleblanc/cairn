@@ -10,7 +10,7 @@ import {
   type ChatTurnMessage,
   type SlotWithKey,
 } from "../src/main/conductor/client.js";
-import { createOpenAICompatibleTransport } from "../src/main/conductor/transports/openai-compatible.js";
+import { createOpenAICompatibleTransport, ownerMessageFor } from "../src/main/conductor/transports/openai-compatible.js";
 import {
   ConductorHttpError,
   ConductorTransportError,
@@ -255,6 +255,41 @@ test("redirect boundaries, missing body, and cancel failure keep one redacted er
     );
     assert.deepEqual(events, []);
     if (status !== 304) assert.equal(canceled, true);
+  }
+});
+
+test("the transport calls fetch as a function, not as a method of anything", async () => {
+  // A `fetch` that brand-checks its receiver — the browser's, and any
+  // WebIDL-wrapped or proxied implementation — throws when called as a method.
+  // Node's own global ignores `this`, so only a test can hold this line.
+  let receiver: unknown = "not-observed";
+  const strict = function (this: unknown) {
+    receiver = this;
+    if (this !== undefined) throw new TypeError("Illegal invocation");
+    return Promise.resolve(sseResponse(["data: [DONE]\n\n"]));
+  } as unknown as typeof fetch;
+
+  const events = await collectTransport(createOpenAICompatibleTransport(CONNECTION, strict), { messages: [] });
+
+  assert.equal(receiver, undefined, "fetch must see no receiver");
+  assert.deepEqual(events, [{ kind: "done" }]);
+});
+
+test("a 2xx with no body stays one redacted error rather than a raw crash", async () => {
+  // The shared primitive refuses every redirect and every non-2xx status; this
+  // is the one status/body pair that reaches the stream's own check, and it
+  // must not become an unredacted TypeError from getReader().
+  for (const status of [200, 204, 205]) {
+    const fake: typeof fetch = async () => new Response(null, { status });
+    await assert.rejects(
+      collectTransport(createOpenAICompatibleTransport(CONNECTION, fake), { messages: [] }),
+      (error: unknown) => {
+        assert.ok(error instanceof ConductorHttpError, `status ${status}`);
+        assert.equal(error.status, status);
+        assert.equal(error.ownerMessage, ownerMessageFor(status));
+        return true;
+      },
+    );
   }
 });
 

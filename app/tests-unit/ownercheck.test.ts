@@ -10,8 +10,10 @@ import {
   bindTaskSpec,
   composeCriticAssessment,
   composeCriticAssessmentCustody,
+  composeCriticCallAuthorization,
   composeCriticPacketAuthorityContext,
   composeCriticRequest,
+  consumeCriticCallAuthorization,
   criticPacketSha256,
   criticRequestSha256,
   evidencePlanSha256,
@@ -40,7 +42,6 @@ import { parseTaskReviewProjection } from "../src/shared/task-review.js";
 const DIR = process.cwd();
 const RUN_ID = "22222222-2222-4222-8222-222222222222";
 const CANDIDATE_SHA = "b".repeat(64);
-const ROUTE_SHA = "c".repeat(64);
 const CONSENT_VERSION = "consent-v1";
 
 function sha256(value: string): string {
@@ -275,16 +276,31 @@ function assessmentBundle(): { spec: TaskSpecV1; plan: EvidencePlanV1; assessmen
     largestGapId: "f1",
   }, request);
   assert.ok(output);
+  // Custody is the approved call plus a timestamp, so the fixture composes the
+  // approval and copies it rather than inventing route facts.
+  const authorization = composeCriticCallAuthorization(request, {
+    runId: RUN_ID, candidateRound: 0, callAttempt: 1, provider: "fake-provider",
+    baseUrl: "https://fake-provider.invalid/v1", model: "fake/critic", resolvedModel: "fake/critic",
+    resolvedModelRevision: "fake-critic-2026-08-07", connectionConsentVersion: CONSENT_VERSION,
+    transportRevision: "openai-compatible/v1", serializer: "cairn-critic-body/v1",
+    timeoutMs: 600_000, maxOutputCharacters: 262_144, purpose: "critic-assessment",
+    serverSideTools: "none", billingBasis: "Billed by the connected provider at its published rate.",
+  });
+  assert.ok(authorization);
+  // Custody may only be recorded for an approval that was actually spent,
+  // which is what a send does.
+  assert.equal(consumeCriticCallAuthorization(authorization), true);
   const rawCustody = {
     version: "cairn-critic-assessment-custody/v1", runId: RUN_ID, candidateRound: 0, callAttempt: 1,
     taskSpecSha256: request.packet.taskSpecSha256, evidencePlanSha256: request.packet.evidencePlanSha256,
     packetSha256: criticPacketSha256(request.packet), requestSha256: criticRequestSha256(request),
-    candidateSha256: CANDIDATE_SHA, provider: "fake-provider", model: "fake-critic",
-    resolvedModelRevision: "fake-critic-2026-08-07", connectionConsentVersion: CONSENT_VERSION,
-    routeRequestFingerprintSha256: ROUTE_SHA, criticPromptSha256: sha256(request.systemPrompt),
+    candidateSha256: CANDIDATE_SHA, provider: authorization.provider, model: authorization.resolvedModel,
+    resolvedModelRevision: authorization.resolvedModelRevision, connectionConsentVersion: CONSENT_VERSION,
+    routeRequestFingerprintSha256: authorization.routeRequestFingerprintSha256,
+    criticPromptSha256: sha256(request.systemPrompt),
     policySha256: request.policySha256, createdAt: "2026-08-07T18:00:00.000Z",
   };
-  const custody = composeCriticAssessmentCustody(request, rawCustody);
+  const custody = composeCriticAssessmentCustody(request, rawCustody, authorization);
   assert.ok(custody);
   const assessment = composeCriticAssessment(request, output, custody);
   assert.ok(assessment);

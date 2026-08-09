@@ -27,8 +27,10 @@ import {
   canonicalCriticPacket,
   canonicalCriticRequest,
   composeCriticAssessment,
+  CRITIC_CALL_BODY_SERIALIZER,
   composeCriticAssessmentCustody,
   composeCriticCallAuthorization,
+  criticCallAuthorizationCoversRequest,
   composeCriticPacketAuthorityContext,
   composeCriticPolicyAuthorityContext,
   composeCriticRequest,
@@ -499,32 +501,88 @@ function criticOutput(
   };
 }
 
-function rawCustody(request: any, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+const CRITIC_LIMITS_RAW_OUTPUT = 262_144;
+
+const CRITIC_ROUTE = Object.freeze({
+  runId: RUN_ID,
+  candidateRound: 0,
+  callAttempt: 1,
+  provider: "openrouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  model: "anthropic/claude-opus-5",
+  resolvedModel: "anthropic/claude-opus-5",
+  resolvedModelRevision: "2026-05-01",
+  connectionConsentVersion: CONSENT_VERSION,
+  transportRevision: "openai-compatible/v1",
+  serializer: "cairn-critic-body/v1",
+  timeoutMs: 600_000,
+  maxOutputCharacters: 262_144,
+  purpose: "critic-assessment",
+  serverSideTools: "none",
+  billingBasis: "Billed by the connected provider at its published rate; no dollar cap can be enforced.",
+});
+
+function route(overrides: Record<string, unknown> = {}) {
+  return { ...CRITIC_ROUTE, ...overrides };
+}
+
+function approval(request: any, overrides: Record<string, unknown> = {}) {
+  const value = composeCriticCallAuthorization(request, route(overrides));
+  assert.ok(value, "the fixture route must authorize one call");
+  return value;
+}
+
+/** Custody may only be composed for an approval that was actually spent, which
+ * is what a send does. Fixtures therefore spend before they record. */
+function spentApproval(request: any, overrides: Record<string, unknown> = {}) {
+  const value = approval(request, overrides);
+  assert.equal(consumeCriticCallAuthorization(value), true, "the fixture approval must spend once");
+  return value;
+}
+
+/** Custody is the authorization plus a timestamp: every other field is copied
+ * from the approved call, because that is exactly what Core now requires. */
+function rawCustodyFrom(approved: any, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     version: "cairn-critic-assessment-custody/v1",
-    runId: RUN_ID,
-    candidateRound: 0,
-    callAttempt: 1,
-    taskSpecSha256: request.packet.taskSpecSha256,
-    evidencePlanSha256: request.packet.evidencePlanSha256,
-    packetSha256: criticPacketSha256(request.packet),
-    requestSha256: criticRequestSha256(request),
-    candidateSha256: request.packet.candidateSha256,
-    provider: "fake-provider",
-    model: "fake-critic",
-    resolvedModelRevision: "fake-critic-2026-08-07",
-    connectionConsentVersion: CONSENT_VERSION,
-    routeRequestFingerprintSha256: ROUTE_SHA,
-    criticPromptSha256: sha256(request.systemPrompt),
-    policySha256: request.policySha256,
+    runId: approved.runId,
+    candidateRound: approved.candidateRound,
+    callAttempt: approved.callAttempt,
+    taskSpecSha256: approved.taskSpecSha256,
+    evidencePlanSha256: approved.evidencePlanSha256,
+    packetSha256: approved.packetSha256,
+    requestSha256: approved.requestSha256,
+    candidateSha256: approved.candidateSha256,
+    provider: approved.provider,
+    model: approved.resolvedModel,
+    resolvedModelRevision: approved.resolvedModelRevision,
+    connectionConsentVersion: approved.connectionConsentVersion,
+    routeRequestFingerprintSha256: approved.routeRequestFingerprintSha256,
+    criticPromptSha256: approved.criticPromptSha256,
+    policySha256: approved.policySha256,
     createdAt: "2026-08-07T18:00:00.000Z",
     ...overrides,
   };
 }
 
+function rawCustody(request: any, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return rawCustodyFrom(approval(request), overrides);
+}
+
 function custody(request: any, overrides: Record<string, unknown> = {}) {
-  const value = composeCriticAssessmentCustody(request, rawCustody(request, overrides));
+  const approved = spentApproval(request);
+  const value = composeCriticAssessmentCustody(request, rawCustodyFrom(approved, overrides), approved);
   assert.ok(value);
+  return value;
+}
+
+/** Custody built from a deliberately different approved call, so a test can
+ * prove a route fact reaches the assessment digest through the authorization
+ * rather than by being handed to custody directly. */
+function custodyForRoute(request: any, routeOverrides: Record<string, unknown>) {
+  const approved = spentApproval(request, routeOverrides);
+  const value = composeCriticAssessmentCustody(request, rawCustodyFrom(approved), approved);
+  assert.ok(value, JSON.stringify(routeOverrides));
   return value;
 }
 
@@ -990,8 +1048,9 @@ test("critic assessment: main alone adds exact custody and canonical hashes bind
   const raw = criticOutput(request);
   const parsed = parseCriticOutput(raw, request);
   assert.ok(parsed);
-  const rawExactCustody = rawCustody(request);
-  const exactCustody = composeCriticAssessmentCustody(request, rawExactCustody);
+  const exactApproval = spentApproval(request);
+  const rawExactCustody = rawCustodyFrom(exactApproval);
+  const exactCustody = composeCriticAssessmentCustody(request, rawExactCustody, exactApproval);
   assert.ok(exactCustody);
   assert.ok(Object.isFrozen(exactCustody));
   assert.equal(
@@ -1019,36 +1078,59 @@ test("critic assessment: main alone adds exact custody and canonical hashes bind
   for (const forbidden of ["\"pass\"", "\"fail\"", "\"blocks\"", "disposition", "ownerVerdict", "dispatch", "\"edit\""]) {
     assert.equal(assessmentText.includes(forbidden), false, forbidden);
   }
-  for (const field of [
-    "runId",
-    "candidateRound",
-    "callAttempt",
-    "taskSpecSha256",
-    "packetSha256",
-    "requestSha256",
-    "candidateSha256",
-    "provider",
-    "model",
-    "resolvedModelRevision",
-    "connectionConsentVersion",
-    "routeRequestFingerprintSha256",
-    "criticPromptSha256",
-    "policySha256",
-    "createdAt",
-  ]) assert.match(assessmentText, new RegExp(`\\"${field}\\"`));
+  // Naming the key is not binding the value: a canonicalizer that emitted
+  // `"provider":""`, or read `provider` where `model` belongs, would satisfy a
+  // key-presence check and still lose the fact. Pin the VALUES.
+  for (const [field, value] of [
+    ["runId", exactCustody.runId],
+    ["candidateRound", 0],
+    ["callAttempt", 1],
+    ["taskSpecSha256", exactCustody.taskSpecSha256],
+    ["packetSha256", exactCustody.packetSha256],
+    ["requestSha256", exactCustody.requestSha256],
+    ["candidateSha256", exactCustody.candidateSha256],
+    ["provider", exactApproval.provider],
+    ["model", exactApproval.resolvedModel],
+    ["resolvedModelRevision", exactApproval.resolvedModelRevision],
+    ["connectionConsentVersion", exactCustody.connectionConsentVersion],
+    ["routeRequestFingerprintSha256", exactApproval.routeRequestFingerprintSha256],
+    ["criticPromptSha256", exactCustody.criticPromptSha256],
+    ["policySha256", exactCustody.policySha256],
+    ["createdAt", exactCustody.createdAt],
+  ] as const) {
+    const pinned = `${JSON.stringify(field)}:${JSON.stringify(value)}`;
+    assert.ok(assessmentText.includes(pinned), `the assessment digest must carry ${pinned}`);
+  }
 
-  const variants: Record<string, unknown>[] = [
+  // `model` must be the model that answered, not the one configured. The
+  // fixture route sets both to the same id, so only a split route can tell
+  // which source the canonicalizer reads.
+  const splitApproval = spentApproval(request, {
+    model: "anthropic/claude-opus-5",
+    resolvedModel: "anthropic/claude-opus-5-2026-05-01",
+  });
+  const splitCustody = composeCriticAssessmentCustody(request, rawCustodyFrom(splitApproval), splitApproval);
+  assert.ok(splitCustody);
+  const splitText = canonicalCriticAssessment(composeCriticAssessment(request, parsed, splitCustody))!;
+  assert.ok(splitText.includes(`"model":${JSON.stringify(splitApproval.resolvedModel)}`), "the assessment names what answered");
+  assert.equal(splitText.includes(`"model":${JSON.stringify(splitApproval.model)}`), false, "not what was configured");
+
+  // `createdAt` is the only custody field a caller still supplies. Every other
+  // route fact must reach the assessment digest through an approved call.
+  const stamped = composeCriticAssessment(request, parsed, custody(request, { createdAt: "2026-08-07T18:02:00.000Z" }));
+  assert.ok(stamped);
+  assert.notEqual(criticAssessmentSha256(stamped), criticAssessmentSha256(fromParsed));
+
+  const routeVariants: Record<string, unknown>[] = [
     { runId: OTHER_RUN_ID },
     { candidateRound: 1 },
     { callAttempt: 2 },
     { provider: "other-provider" },
-    { model: "other-model" },
-    { resolvedModelRevision: "other-model-2026-08-07" },
-    { routeRequestFingerprintSha256: "e".repeat(64) },
-    { createdAt: "2026-08-07T18:02:00.000Z" },
+    { resolvedModel: "other/model" },
+    { resolvedModelRevision: "2026-06-01" },
   ];
-  for (const variant of variants) {
-    const assessment = composeCriticAssessment(request, parsed, custody(request, variant));
+  for (const variant of routeVariants) {
+    const assessment = composeCriticAssessment(request, parsed, custodyForRoute(request, variant));
     assert.ok(assessment, JSON.stringify(variant));
     assert.notEqual(criticAssessmentSha256(assessment), criticAssessmentSha256(fromParsed));
   }
@@ -1065,10 +1147,23 @@ test("critic assessment: main alone adds exact custody and canonical hashes bind
     { candidateRound: -0 },
     { candidateRound: 2 },
     { callAttempt: 4 },
+    // These six were accepted on trust until Task 217. Custody may no longer
+    // name a provider, model, revision, run, round, attempt, or fingerprint
+    // the approved call did not carry.
+    { runId: OTHER_RUN_ID },
+    { candidateRound: 1 },
+    { callAttempt: 2 },
+    { provider: "other-provider" },
+    { model: "other-model" },
+    { resolvedModelRevision: "other-model-2026-08-07" },
+    { routeRequestFingerprintSha256: "e".repeat(64) },
   ];
   for (const variant of rejected) {
+    // A SPENT approval, so each row is refused by the drift it names and not
+    // by the unspent-approval rule.
+    const approved = spentApproval(request);
     assert.equal(
-      composeCriticAssessmentCustody(request, rawCustody(request, variant)),
+      composeCriticAssessmentCustody(request, rawCustodyFrom(approved, variant), approved),
       null,
       JSON.stringify(variant),
     );
@@ -1077,8 +1172,9 @@ test("critic assessment: main alone adds exact custody and canonical hashes bind
   const fromClone = composeCriticAssessment(request, clone(parsed), custody(request));
   assert.ok(fromClone, "an object clone is deliberately treated as raw model output and reparsed");
   assert.equal(canonicalCriticAssessment(fromClone), canonicalCriticAssessment(fromParsed));
+  const extraKeyApproval = spentApproval(request);
   assert.equal(
-    composeCriticAssessmentCustody(request, { ...rawCustody(request), blocks: true }),
+    composeCriticAssessmentCustody(request, { ...rawCustodyFrom(extraKeyApproval), blocks: true }, extraKeyApproval),
     null,
   );
 });
@@ -2288,31 +2384,6 @@ test("critic fixtures: every checked-in synthetic case stays bounded, parse-boun
   }
 });
 
-const CRITIC_LIMITS_RAW_OUTPUT = 262_144;
-
-const CRITIC_ROUTE = Object.freeze({
-  runId: RUN_ID,
-  candidateRound: 0,
-  callAttempt: 1,
-  provider: "openrouter",
-  baseUrl: "https://openrouter.ai/api/v1",
-  model: "anthropic/claude-opus-5",
-  resolvedModel: "anthropic/claude-opus-5",
-  resolvedModelRevision: "2026-05-01",
-  connectionConsentVersion: CONSENT_VERSION,
-  transportRevision: "openai-compatible/v1",
-  serializer: "cairn-critic-body/v1",
-  timeoutMs: 600_000,
-  maxOutputCharacters: 262_144,
-  purpose: "critic-assessment",
-  serverSideTools: "none",
-  billingBasis: "Billed by the connected provider at its published rate; no dollar cap can be enforced.",
-});
-
-function route(overrides: Record<string, unknown> = {}) {
-  return { ...CRITIC_ROUTE, ...overrides };
-}
-
 test("critic call: an authenticated request and exact route facts mint one hash-bound authorization", () => {
   const { request } = requestBundle();
   const authorization = composeCriticCallAuthorization(request, route());
@@ -2499,7 +2570,6 @@ test("critic call: the fingerprint binds every route fact the authorization name
     ["resolvedModel", { resolvedModel: "anthropic/claude-sonnet-5" }],
     ["resolvedModelRevision", { resolvedModelRevision: "2026-06-01" }],
     ["transportRevision", { transportRevision: "openai-compatible/v2" }],
-    ["serializer", { serializer: "cairn-critic-body/v2" }],
     ["timeoutMs", { timeoutMs: 599_000 }],
     ["billingBasis", { billingBasis: "Billed per token by the connected provider." }],
   ] as const) {
@@ -2526,6 +2596,139 @@ test("critic call: the fingerprint binds every route fact the authorization name
     assert.ok(canonical.includes(`"${key}"`), `the digest preimage must name ${key}`);
   }
   assert.equal(canonical.includes("routeRequestFingerprintSha256"), false, "the digest is not inside its own preimage");
+});
+
+test("critic call: an authorization may not name a body format Core does not emit", () => {
+  const { request } = requestBundle();
+  const authorization = composeCriticCallAuthorization(request, route());
+  assert.ok(authorization);
+  assert.equal(authorization.serializer, CRITIC_CALL_BODY_SERIALIZER);
+
+  // `serializer` names the bytes criticCallRequestBody actually produces. A
+  // route that claimed another format would describe a body nobody ever sent,
+  // so it is pinned rather than merely recorded.
+  for (const claimed of [
+    "cairn-critic-body/v2",
+    "openai-chat/v1",
+    "",
+    " cairn-critic-body/v1",
+    "CAIRN-CRITIC-BODY/V1",
+    null,
+    undefined,
+  ]) {
+    assert.equal(composeCriticCallAuthorization(request, route({ serializer: claimed })), null, String(claimed));
+  }
+});
+
+test("critic call: custody cannot name a route the approved call did not carry", () => {
+  const { request } = requestBundle();
+  const authorization = spentApproval(request);
+
+  // The control. Its value is that the refusals below are refused by the drift
+  // they name and not by a broken fixture; the bindings themselves are proven
+  // by those refusals, not by re-reading the fields custody copied.
+  assert.ok(
+    composeCriticAssessmentCustody(request, rawCustodyFrom(authorization), authorization),
+    "custody built from the approved call is accepted",
+  );
+
+  // Task 216 left provider, model, resolved revision, and the fingerprint
+  // accepted from the caller. Each is now bound to the approved call.
+  for (const [label, override] of [
+    ["a substituted provider", { provider: "attacker-provider" }],
+    ["a substituted model", { model: "anthropic/claude-sonnet-5" }],
+    ["a substituted revision", { resolvedModelRevision: "2026-06-01" }],
+    ["a substituted fingerprint", { routeRequestFingerprintSha256: "a".repeat(64) }],
+    ["another run", { runId: OTHER_RUN_ID }],
+    ["another round", { candidateRound: 1 }],
+    ["another attempt", { callAttempt: 2 }],
+  ] as const) {
+    assert.equal(composeCriticAssessmentCustody(request, rawCustodyFrom(authorization, override), authorization), null, label);
+  }
+
+  // The authorization itself must be genuine and must belong to this request.
+  const raw = rawCustodyFrom(authorization);
+  assert.equal(composeCriticAssessmentCustody(request, raw, { ...authorization }), null, "a spread copy authorizes nothing");
+  assert.equal(composeCriticAssessmentCustody(request, raw, clone(authorization)), null, "nor does a clone");
+  assert.equal(composeCriticAssessmentCustody(request, raw, null), null);
+  assert.equal(composeCriticAssessmentCustody(request, raw, undefined), null);
+  const other = requestBundle("optional");
+  assert.equal(
+    composeCriticAssessmentCustody(request, raw, spentApproval(other.request)),
+    null,
+    "an approval for another request is not custody for this one",
+  );
+
+  // Custody records what answered, so it carries the resolved model rather
+  // than the configured one. A route where the two differ proves which.
+  const split = spentApproval(request, { model: "anthropic/claude-opus-5", resolvedModel: "anthropic/claude-opus-5-2026-05-01" });
+  assert.notEqual(split.model, split.resolvedModel);
+  assert.ok(composeCriticAssessmentCustody(request, rawCustodyFrom(split), split));
+  assert.equal(
+    composeCriticAssessmentCustody(request, rawCustodyFrom(split, { model: split.model }), split),
+    null,
+    "the configured model is not what answered",
+  );
+
+  // An approval that was never spent describes a call nobody made, and one
+  // that was spent still identifies the call that was made — custody is
+  // composed after the send, so it must survive it.
+  const unspent = approval(request, { callAttempt: 3 });
+  assert.equal(
+    composeCriticAssessmentCustody(request, rawCustodyFrom(unspent), unspent),
+    null,
+    "an unspent approval is not evidence that anything answered",
+  );
+  assert.equal(consumeCriticCallAuthorization(unspent), true);
+  assert.ok(
+    composeCriticAssessmentCustody(request, rawCustodyFrom(unspent), unspent),
+    "a spent approval still identifies the call that was made",
+  );
+});
+
+test("critic call: the pre-send pairing check matches the rule custody applies after", () => {
+  const { request } = requestBundle();
+  const other = requestBundle("optional");
+  const authorization = approval(request);
+
+  assert.equal(criticCallAuthorizationCoversRequest(authorization, request), true);
+  assert.equal(criticCallAuthorizationCoversRequest(authorization, other.request), false, "another request is not covered");
+  assert.equal(criticCallAuthorizationCoversRequest(authorization, { ...request }), false, "nor is a copy of this one");
+  assert.equal(criticCallAuthorizationCoversRequest(authorization, clone(request)), false);
+  assert.equal(criticCallAuthorizationCoversRequest({ ...authorization }, request), false, "a lookalike covers nothing");
+  assert.equal(criticCallAuthorizationCoversRequest(clone(authorization), request), false);
+  for (const empty of [null, undefined, 0, "", []]) {
+    assert.equal(criticCallAuthorizationCoversRequest(authorization, empty), false, String(empty));
+    assert.equal(criticCallAuthorizationCoversRequest(empty, request), false, String(empty));
+  }
+
+  // A transport checks the pairing before it spends and sends; custody applies
+  // the same rule afterwards. The check must therefore survive the spend, or a
+  // mismatch could only ever be discovered after the owner had been billed.
+  assert.equal(consumeCriticCallAuthorization(authorization), true);
+  assert.equal(criticCallAuthorizationCoversRequest(authorization, request), true, "and it survives the send");
+  assert.equal(criticCallRequestBody(authorization), null, "even though the body no longer composes");
+});
+
+test("critic call: the two routeRequestFingerprintSha256 meanings stay distinct", () => {
+  const { request } = requestBundle();
+  const base = approval(request);
+  const perAttempt = approval(request, { callAttempt: 2 });
+
+  // Custody means the per-call authorization digest. It moves with the attempt,
+  // which is exactly what a stable calibrated activation identity must not do —
+  // so the App's criticactivation.ts value can never be a valid custody value
+  // for two different attempts over the same route.
+  assert.notEqual(perAttempt.routeRequestFingerprintSha256, base.routeRequestFingerprintSha256);
+  assert.equal(
+    composeCriticAssessmentCustody(
+      request,
+      rawCustody(request, { routeRequestFingerprintSha256: perAttempt.routeRequestFingerprintSha256 }),
+      base,
+    ),
+    null,
+    "another attempt's digest is not this call's custody",
+  );
 });
 
 test("critic call: a route that admits server-side tools refuses", () => {

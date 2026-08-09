@@ -22,6 +22,54 @@ export function buildRequestBody(model: string, messages: readonly ConductorTran
   return { model, messages, stream: true, stream_options: { include_usage: true } };
 }
 
+/**
+ * The one place Cairn issues an OpenAI-compatible completion request.
+ *
+ * The conversation transport below and the one-shot critic transport in
+ * `app/src/main/critictransport.ts` share it deliberately: the endpoint
+ * derivation, the header set, the manual-redirect refusal, and the redacted
+ * error mapping are a single implementation, so a second caller cannot drift
+ * away from the redirect guarantee by copying it. Callers supply their own
+ * serialized body; this function never composes one.
+ */
+export async function postChatCompletions(input: {
+  readonly baseUrl: string;
+  readonly apiKey: string;
+  readonly body: string;
+  readonly signal?: AbortSignal;
+  readonly fetchImpl: typeof fetch;
+}): Promise<Response> {
+  // Called as a bare function, never as `input.fetchImpl(...)`: a method call
+  // would pass `input` as the receiver, and a `fetch` that brand-checks its
+  // receiver would throw where the previous inline call did not.
+  const { baseUrl, apiKey, body, signal, fetchImpl } = input;
+  const base = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const response = await fetchImpl(new URL("chat/completions", base).toString(), {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+    body,
+    redirect: "manual",
+    signal,
+  });
+  if (response.status >= 300 && response.status < 400) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      /* releasing the body must not mask the redacted redirect error */
+    }
+    throw new ConductorHttpError(response.status, REDIRECT_OWNER_MESSAGE);
+  }
+  if (!response.ok) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      /* releasing the body must not mask the real error */
+    }
+    throw new ConductorHttpError(response.status, ownerMessageFor(response.status));
+  }
+  return response;
+}
+
 function toEvent(payload: string): ConductorTransportStreamEvent | null {
   let value: unknown;
   try {
@@ -50,28 +98,16 @@ async function* streamOpenAICompatible(
   request: ConductorTransportRequest,
   fetchImpl: typeof fetch,
 ): AsyncGenerator<ConductorTransportStreamEvent> {
-  const base = connection.baseUrl.endsWith("/") ? connection.baseUrl : `${connection.baseUrl}/`;
-  const response = await fetchImpl(new URL("chat/completions", base).toString(), {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${connection.apiKey}` },
+  const response = await postChatCompletions({
+    baseUrl: connection.baseUrl,
+    apiKey: connection.apiKey,
     body: JSON.stringify(buildRequestBody(connection.model, request.messages)),
-    redirect: "manual",
     signal: request.signal,
+    fetchImpl,
   });
-  if (response.status >= 300 && response.status < 400) {
-    try {
-      await response.body?.cancel();
-    } catch {
-      /* releasing the body must not mask the redacted redirect error */
-    }
-    throw new ConductorHttpError(response.status, REDIRECT_OWNER_MESSAGE);
-  }
-  if (!response.ok || !response.body) {
-    try {
-      await response.body?.cancel();
-    } catch {
-      /* releasing the body must not mask the real error */
-    }
+  // A 2xx with no body is stream-specific: the shared primitive has already
+  // refused every redirect and every non-2xx status above.
+  if (!response.body) {
     throw new ConductorHttpError(response.status, ownerMessageFor(response.status));
   }
   const reader = response.body.getReader();

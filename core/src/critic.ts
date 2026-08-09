@@ -28,6 +28,10 @@ export const CRITIC_POLICY_RESULT_VERSION = "cairn-critic-policy-result/v1" as c
 export const CRITIC_POLICY_VERSION = "cairn-critic-policy/v1" as const;
 export const CRITIC_CALL_AUTHORIZATION_VERSION = "cairn-critic-call-authorization/v1" as const;
 export const CRITIC_CALL_PURPOSE = "critic-assessment" as const;
+/** The name of the body format `criticCallRequestBody` actually emits. A route
+ * may not claim some other serializer: an authorization that named a format
+ * Core does not produce would describe bytes nobody ever sent. */
+export const CRITIC_CALL_BODY_SERIALIZER = "cairn-critic-body/v1" as const;
 /** A route must state that the provider applies no server-side tools. Cairn
  * cannot verify a provider's internals, so this is the route's declaration —
  * but an approval that never asked could not even be contradicted later. */
@@ -753,7 +757,11 @@ const requestBindings = new WeakMap<object, Readonly<{
   connectionConsentVersion: string;
 }>>();
 const callAuthorizationBrands = new WeakSet<object>();
+/** Consumed by the one send this authorization permits. */
 const callAuthorizationBindings = new WeakMap<object, CriticRequestV1>();
+/** Never consumed. Custody is recorded *after* the send, so it must still be
+ * able to name the request an already-spent approval was minted from. */
+const callAuthorizationRequests = new WeakMap<object, CriticRequestV1>();
 const policyAuthorityContextBindings = new WeakMap<object, Readonly<{
   taskSpec: TaskSpecV1;
   evidencePlan: EvidencePlanV1;
@@ -1275,7 +1283,7 @@ export function composeCriticCallAuthorization(
   const runId = safeUuid(route.runId);
   const provider = criticCallToken(route.provider);
   const transportRevision = criticCallToken(route.transportRevision);
-  const serializer = criticCallToken(route.serializer);
+  const serializer = route.serializer === CRITIC_CALL_BODY_SERIALIZER ? CRITIC_CALL_BODY_SERIALIZER : null;
   const resolvedModelRevision = criticCallRevision(route.resolvedModelRevision);
   const baseUrl = criticCallBaseUrl(route.baseUrl);
   const model = criticCallModel(route.model);
@@ -1352,6 +1360,7 @@ export function composeCriticCallAuthorization(
   }) as CriticCallAuthorizationV1;
   callAuthorizationBrands.add(authorization);
   callAuthorizationBindings.set(authorization, typedRequest);
+  callAuthorizationRequests.set(authorization, typedRequest);
   return authorization;
 }
 
@@ -1445,6 +1454,18 @@ export function consumeCriticCallAuthorization(value: unknown): boolean {
   if (!callAuthorizationBindings.has(value)) return false;
   callAuthorizationBindings.delete(value);
   return true;
+}
+
+/**
+ * True only when this exact branded request is the one the authorization was
+ * minted from. A transport must be able to check the pairing *before* it
+ * spends the approval and sends; `composeCriticAssessmentCustody` applies the
+ * same rule afterwards, so a mismatch cannot be discovered only after billing.
+ * Unlike the send, this survives consumption.
+ */
+export function criticCallAuthorizationCoversRequest(authorization: unknown, request: unknown): boolean {
+  if (typeof authorization !== "object" || authorization === null || !callAuthorizationBrands.has(authorization)) return false;
+  return typeof request === "object" && request !== null && callAuthorizationRequests.get(authorization) === request;
 }
 
 function parseEvidenceRefs(value: unknown, artifactIds: ReadonlySet<string>): readonly string[] | null {
@@ -1758,19 +1779,56 @@ function parseAssessmentCustody(value: unknown): CriticAssessmentCustodyV1 | nul
 }
 
 /**
- * Main trust-boundary mint. It binds detached provider/route/time custody to
- * one exact branded request. A plain object or structural clone has no
- * authority. Q8's transport must be the sole production caller.
+ * Main trust-boundary mint. It binds detached time custody to one exact branded
+ * request and one exact approved call. A plain object or structural clone has
+ * no authority. Q8's transport must be the sole production caller.
+ *
+ * Custody is the authorization plus a timestamp. Every route fact — provider,
+ * the model that answered, its revision, the run, round, attempt, and the
+ * route/request fingerprint — is checked against the approval rather than
+ * accepted from the caller, so a record cannot claim a call nobody approved.
+ * `createdAt` is the only field a caller still supplies.
+ *
+ * `routeRequestFingerprintSha256` therefore means one thing here: the per-call
+ * authorization digest from `composeCriticCallAuthorization`. The App's
+ * `criticactivation.ts` uses the same field name for a stable *route* identity
+ * that must not vary by run or attempt; that value is not custody and is
+ * refused as such.
+ *
+ * The approval must also already be **spent**. Custody records what answered;
+ * an approval that was never consumed describes a call nobody made, and
+ * without this an unsent approval could mint an assessment. Core can prove the
+ * approval was spent, not that a socket was opened — but the transport spends
+ * only immediately before it issues the request.
  */
 export function composeCriticAssessmentCustody(
   request: unknown,
   rawCustody: unknown,
+  authorization: unknown,
 ): CriticAssessmentCustodyV1 | null {
   if (typeof request !== "object" || request === null || !requestBrands.has(request)) return null;
   const typedRequest = request as CriticRequestV1;
   const binding = requestBindings.get(request);
   const custody = parseAssessmentCustody(rawCustody);
   if (binding === undefined || custody === null) return null;
+  if (typeof authorization !== "object" || authorization === null
+    || !callAuthorizationBrands.has(authorization)
+    || callAuthorizationRequests.get(authorization) !== typedRequest
+    || callAuthorizationBindings.has(authorization)) return null;
+  const approved = authorization as CriticCallAuthorizationV1;
+  if (custody.runId !== approved.runId || !Object.is(custody.candidateRound, approved.candidateRound)
+    || custody.callAttempt !== approved.callAttempt
+    || custody.taskSpecSha256 !== approved.taskSpecSha256
+    || custody.evidencePlanSha256 !== approved.evidencePlanSha256
+    || custody.packetSha256 !== approved.packetSha256 || custody.requestSha256 !== approved.requestSha256
+    || custody.candidateSha256 !== approved.candidateSha256
+    || custody.provider !== approved.provider
+    || custody.model !== approved.resolvedModel
+    || custody.resolvedModelRevision !== approved.resolvedModelRevision
+    || custody.connectionConsentVersion !== approved.connectionConsentVersion
+    || custody.routeRequestFingerprintSha256 !== approved.routeRequestFingerprintSha256
+    || custody.criticPromptSha256 !== approved.criticPromptSha256
+    || custody.policySha256 !== approved.policySha256) return null;
   if (custody.taskSpecSha256 !== binding.taskSpecSha256 || custody.evidencePlanSha256 !== binding.evidencePlanSha256
     || custody.packetSha256 !== binding.packetSha256 || custody.requestSha256 !== binding.requestSha256
     || custody.candidateSha256 !== typedRequest.packet.candidateSha256
