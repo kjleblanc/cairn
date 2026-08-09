@@ -26,6 +26,7 @@ import type {
   TaskRouteSource,
   TaskRunRequest,
   TaskReviewProjectionV1,
+  CriticCallDecisionV1,
 } from "../shared/ipc.js";
 import { parseTaskReviewActionRequest } from "../shared/task-review.js";
 import type { TaskSpecProposalPreviewV1 } from "../shared/quality-preview.js";
@@ -38,6 +39,12 @@ import {
 } from "./conductor/service.js";
 import { isConversationId } from "./conductor/conversation-id.js";
 import { canonicalProjectKey } from "./conductor/turnauth.js";
+import {
+  clearCriticCallApprovalByKey,
+  decideCriticCall,
+  type CriticCallDecisionRefusal,
+} from "./criticapproval.js";
+import { parseCriticCallDecisionRequest } from "../shared/critic-call-parse.js";
 import {
   discardUnfinalizedEvidenceRun,
   finalizeEvidenceRun,
@@ -84,6 +91,15 @@ const PREVIEW_STALE = "TASK_PREVIEW_STALE: That dispatch review is no longer cur
 const PROPOSAL_STALE = "TASK_PROPOSAL_STALE: That proposed task is no longer current.";
 const PROPOSAL_RISKS = "TASK_PROPOSAL_HAS_RISKS: Resolve or set aside every current risk before reviewing dispatch.";
 const ROUTE_CHANGED = "TASK_ROUTE_CHANGED: The selected worker changed while you were deciding. Nothing was started.";
+/** One sentence per closed refusal. Three of the four leave the approval
+ * standing, so none of them may tell the owner the call is gone. */
+const CRITIC_CALL_REFUSAL_MESSAGES: Readonly<Record<CriticCallDecisionRefusal, string>> = Object.freeze({
+  CRITIC_CALL_DECISION_MALFORMED: "CRITIC_CALL_INVALID: Cairn refused a malformed critic-call decision. The call is still waiting.",
+  CRITIC_CALL_DECISION_UNKNOWN_APPROVAL: "CRITIC_CALL_STALE: That critic call is no longer waiting for a decision.",
+  CRITIC_CALL_DECISION_ECHO_MISMATCH: "CRITIC_CALL_MISMATCH: Cairn could not confirm you were looking at this exact call, so nothing was decided. The call is still waiting.",
+  CRITIC_CALL_DECISION_ACTION_NOT_OFFERED: "CRITIC_CALL_NOT_OFFERED: That choice is not one this call offers. The call is still waiting.",
+});
+
 const REAL_CALL_NOT_AUTHORIZED = "REAL_MODEL_CALL_NOT_AUTHORIZED: Confirm the displayed provider, model, project, data scope, and quota before starting.";
 
 /** Q3 cannot name an exact calibrated critic route yet. This deliberate null
@@ -209,6 +225,11 @@ function nextGeneration(key: string): number {
   const review = reviewAuthorities.get(key);
   if (review !== undefined) invalidateTaskReviewAuthority(review);
   reviewAuthorities.delete(key);
+  // A pending critic approval belongs to the run that opened it. Without this
+  // it would outlive a cancelled or replaced run and stay approvable against a
+  // world that has moved, pinning its request — and every selected file's
+  // content — for the life of the process.
+  clearCriticCallApprovalByKey(key);
   return generation;
 }
 
@@ -391,6 +412,41 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     } catch (error) {
       logError("task:review-action", error);
       return { ok: false, message: "TASK_REVIEW_STALE: That owner check is no longer current." };
+    }
+  });
+
+  /**
+   * Decide the one pending Independent-critic call.
+   *
+   * The reply is output only: it says what was decided and nothing a renderer
+   * could use as authority for a call. The grant an approval produces stays in
+   * main, and in this stage nothing consumes it.
+   */
+  ipcMain.handle("critic:call-decide", (_event, unsafeRequest: unknown): Result<CriticCallDecisionV1> => {
+    const request = parseCriticCallDecisionRequest(unsafeRequest);
+    if (request === null) {
+      return { ok: false, message: "CRITIC_CALL_INVALID: Cairn refused a malformed critic-call decision." };
+    }
+    try {
+      // The same project check every other task authority performs before it
+      // touches anything.
+      projectStatus(request.dir);
+      // A project Cairn has gated for pending-run recovery may not have a
+      // paid call approved against it, exactly as task start and push may not
+      // proceed. Without this the critic surface would be the one authority
+      // that ignores Task 215's gate.
+      const gated = pendingTaskStartRefusal(request.dir);
+      if (gated !== null) return { ok: false, message: gated };
+      const outcome = decideCriticCall(request);
+      if (!outcome.ok) return { ok: false, message: CRITIC_CALL_REFUSAL_MESSAGES[outcome.code] };
+      // Only a decision that succeeded spends the approval, so only then does
+      // the snapshot stop advertising a card.
+      const session = sessions.get(request.dir);
+      if (session?.criticCall !== undefined) delete session.criticCall;
+      return { ok: true, value: outcome.decision };
+    } catch (error) {
+      logError("critic:call-decide", error);
+      return { ok: false, message: "CRITIC_CALL_STALE: That critic call is no longer waiting for a decision." };
     }
   });
 

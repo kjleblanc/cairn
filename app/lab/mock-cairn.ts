@@ -35,6 +35,12 @@ import type {
   UpdateInfo,
 } from "../src/shared/ipc";
 import type { ProjectStatus, SerialActivity, SerialRunResult } from "@cairn/core";
+import {
+  CRITIC_CALL_ACTIONS_BY_MODE,
+  CRITIC_CALL_NOT_SENT,
+  CRITIC_CALL_PURPOSE_TEXT,
+  type CriticCallDisclosureV1,
+} from "../src/shared/critic-call";
 
 export type LabScenario = "idle" | "thinking" | "running" | "done" | "stopped";
 
@@ -198,6 +204,7 @@ function setScenario(next: LabScenario): void {
       phase: "running",
       result: null,
       error: null,
+      criticCall: LAB_CRITIC_CALL,
     };
     emitTask({ dir: DIR, activity });
   } else {
@@ -207,6 +214,48 @@ function setScenario(next: LabScenario): void {
   // Poke the screens that poll: the town refreshes off task activity.
   emitTask({ dir: DIR, activity: { stage: "Result", state: "done", detail: `lab scenario: ${next}` } });
 }
+
+
+/**
+ * A stand-in Independent-critic card, so the lab can actually render the
+ * approval surface. The lab is a dev-only Vite entry (`npm run lab`) and ships
+ * in no build, so this puts no test-only seam in the product — and it is the
+ * only way to look at this card before stage 4 drives it.
+ */
+const LAB_CRITIC_CALL: CriticCallDisclosureV1 = Object.freeze({
+  version: "cairn-critic-call-disclosure/v1",
+  approvalId: "9f1c7a52-3c1e-4f0a-9d21-7b6a4c8e5d30",
+  mode: "required",
+  attempt: 1,
+  attemptCap: 3,
+  provider: "openrouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  configuredModel: "anthropic/claude-opus-5",
+  resolvedModel: "anthropic/claude-opus-5",
+  resolvedModelRevision: "2026-05-01",
+  connectionConsentVersion: "consent-v1",
+  routeRequestFingerprintSha256: "4f3c2b1a".repeat(8),
+  purpose: CRITIC_CALL_PURPOSE_TEXT,
+  notSent: CRITIC_CALL_NOT_SENT,
+  selection: Object.freeze([
+    Object.freeze({ path: "src/renderer/app.css", sha256: "a1".repeat(32), characters: 7_412 }),
+    Object.freeze({ path: "src/renderer/screens/Workspace.tsx", sha256: "b2".repeat(32), characters: 3_180 }),
+    Object.freeze({ path: "docs/ai-work/PROJECT.md", sha256: "c3".repeat(32), characters: 1_904 }),
+  ]),
+  selectedFiles: 3,
+  selectedCharacters: 12_496,
+  planMetadata: Object.freeze({
+    checks: 4, preferences: 1, references: 1, evidenceItems: 2, priorFindings: 0, comparisonTrials: 1,
+  }),
+  totalRequestCharacters: 31_208,
+  fileCap: 8,
+  perFileCharacterCap: 8_000,
+  totalCharacterCap: 32_000,
+  timeoutMs: 600_000,
+  maxOutputCharacters: 262_144,
+  billingBasis: "Billed by the connected provider at its published rate; no dollar cap can be enforced.",
+  actions: CRITIC_CALL_ACTIONS_BY_MODE.required,
+});
 
 declare global {
   interface Window {
@@ -268,6 +317,7 @@ const mock: CairnApi = {
   taskRun: (_request: TaskRunRequest): Promise<Result<SerialRunResult>> =>
     soon(nope("the lab never runs tasks — pose DONE or STOPPED from the lab panel")),
   taskReviewAction: (_request) => soon(nope("the lab has no authenticated candidate review")),
+  criticCallDecide: (_request) => soon(nope("the lab has no approved critic call")),
   taskCancel: (_dir: string) => soon(ok(null)),
   taskCurrent: (_dir: string) => soon(world.session),
   taskAcknowledge: (_dir: string) => soon(ok(null)),

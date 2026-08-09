@@ -2351,3 +2351,45 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
 }
+
+/* The Independent-critic call card. It states what one paid critic call would
+   send before the owner approves it, so every fact stays legible and the file
+   list never collapses into prose. */
+.critic-call {
+  margin: 12px 0 0; padding: 11px 0 2px 12px;
+  border-left: 2px solid var(--garden-cyan); min-width: 0;
+}
+.critic-call-title {
+  margin: 0 0 8px; color: var(--lantern-ink);
+  font-size: .86rem; font-weight: 650; letter-spacing: .01em;
+}
+.critic-call-route {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  gap: 0; min-width: 0; margin: 0 0 8px;
+  border-top: 1px solid rgb(246 236 225 / 12%);
+}
+.critic-call-route > div {
+  display: grid; grid-template-columns: minmax(96px, .28fr) minmax(0, 1fr);
+  gap: 8px 12px; min-width: 0; padding: 7px 0;
+  border-bottom: 1px solid rgb(246 236 225 / 9%);
+}
+.critic-call-route dt {
+  margin: 0; color: var(--lantern-soft); font-size: .75rem; letter-spacing: .025em;
+}
+.critic-call-route dd { margin: 0; min-width: 0; color: var(--lantern-ink); overflow-wrap: anywhere; }
+.critic-call-fingerprint { font-size: .7rem; color: var(--lantern-soft); }
+.critic-call-sends, .critic-call-notsent, .critic-call-purpose,
+.critic-call-limit, .critic-call-billing, .critic-call-empty {
+  margin: 0; padding: 8px 0; line-height: 1.45; overflow-wrap: anywhere;
+  border-bottom: 1px solid rgb(246 236 225 / 9%);
+}
+.critic-call-sends strong, .critic-call-notsent strong,
+.critic-call-limit strong, .critic-call-billing strong { color: var(--garden-cyan); }
+.critic-call-files { margin: 0; padding: 6px 0 8px; list-style: none; }
+.critic-call-files li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline; gap: 10px; min-width: 0; padding: 3px 0;
+}
+.critic-call-file { min-width: 0; overflow-wrap: anywhere; color: var(--lantern-ink); font-size: .76rem; }
+.critic-call-count, .critic-call-hash { color: var(--lantern-soft); font-size: .72rem; white-space: nowrap; }
+.critic-call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }

@@ -1,9 +1,18 @@
 import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 import type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
 import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
+import type { CriticCallDecisionRequest, CriticCallDecisionV1, CriticCallDisclosureV1 } from "./critic-call.js";
 
 export type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
 export type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
+export type {
+  CriticCallActionV1,
+  CriticCallDecisionRequest,
+  CriticCallDecisionV1,
+  CriticCallDisclosureV1,
+  CriticCallModeV1,
+  CriticCallSelectedFileViewV1,
+} from "./critic-call.js";
 
 export type {
   AccountLabelProvenance,
@@ -81,6 +90,10 @@ export type TaskRoutePreview = {
   taskSpecPreview?: TaskSpecProposalPreviewV1;
   /** Optional output-only pre-seal evidence state for that exact Task Spec. */
   taskReview?: TaskReviewProjectionV1;
+  /** Optional output-only Independent-critic card for one approved call. Main
+   * composes it from the approval alone; it is absent until an orchestrator
+   * exists to ask, and it is never authority for a call. */
+  criticCall?: CriticCallDisclosureV1;
 };
 /** `pushPreview`'s local-only, network-free look at what a push would do:
  * null when the current branch has no upstream configured (there is
@@ -141,6 +154,8 @@ export type RunSessionSnapshot = {
   evidenceRunId?: string | null;
   /** Output-only accepted Task Spec and pre-seal evidence state. */
   taskReview?: TaskReviewProjectionV1;
+  /** Output-only Independent-critic card for the one call awaiting a decision. */
+  criticCall?: CriticCallDisclosureV1;
 };
 
 /** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
@@ -400,6 +415,9 @@ export interface CairnApi {
   taskPreviewDiscard(dir: string, previewId?: string): Promise<Result<null>>;
   taskRun(request: TaskRunRequest): Promise<Result<SerialRunResult>>;
   taskReviewAction(request: TaskReviewActionRequest): Promise<Result<TaskReviewProjectionV1>>;
+  /** Decide the one pending critic call. Output only: the reply says what was
+   * decided, never anything a renderer could use as authority for a call. */
+  criticCallDecide(request: CriticCallDecisionRequest): Promise<Result<CriticCallDecisionV1>>;
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
   taskAcknowledge(dir: string): Promise<Result<null>>;

@@ -149,7 +149,7 @@ export function provenance() {
   };
 }
 
-export function bundle() {
+export function bundle(overrides: { path?: string } = {}) {
   const spec = taskSpec();
   const plan = evidencePlan(spec);
   const packetAuthority = composeCriticPacketAuthorityContext(spec, plan, {
@@ -161,7 +161,7 @@ export function bundle() {
     candidateSha256: CANDIDATE_SHA,
     selectedTrackedText: [{
       id: "artifact-output",
-      projectRelativePath: "src/result.ts",
+      projectRelativePath: overrides.path ?? "src/result.ts",
       sha256: sha256("export const result = 'built';"),
       content: "export const result = 'built';",
       truncated: false,

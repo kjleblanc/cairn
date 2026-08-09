@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
-import type { RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
+import type {
+  CriticCallActionV1,
+  CriticCallDisclosureV1,
+  RunSessionSnapshot,
+  TaskReviewProjectionV1,
+  TaskSpecProposalPreviewV1,
+} from "../../shared/ipc";
 import { cairn } from "../api";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { DisclosureConfirm } from "../components/DisclosureConfirm";
 import { ModelRoute } from "../components/ModelRoute";
 import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoice } from "../components/TaskReview";
+import { CriticCallCard } from "../components/CriticCall";
 import { Card, ErrorCard, Pill } from "../components/Ui";
 
 type Phase = "entry" | "route" | "running" | "result";
@@ -26,6 +33,8 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   const [requestContext, setRequestContext] = useState<readonly string[]>([]);
   const [taskSpecPreview, setTaskSpecPreview] = useState<TaskSpecProposalPreviewV1 | null>(null);
   const [taskReview, setTaskReview] = useState<TaskReviewProjectionV1 | null>(null);
+  const [criticCall, setCriticCall] = useState<CriticCallDisclosureV1 | null>(null);
+  const [criticCallBusy, setCriticCallBusy] = useState(false);
   const [disclosure, setDisclosure] = useState<WorkerDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
   const [activities, setActivities] = useState<SerialActivity[]>([]);
@@ -54,6 +63,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
     setOutcome(session.outcome);
     setRequestView(session.request ?? null);
     setTaskReview(session.taskReview ?? null);
+    setCriticCall(session.criticCall ?? null);
     setSessionWorker(session.worker);
     setActivities(session.activities);
     if (session.phase === "running") setPhase("running");
@@ -165,9 +175,45 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
     }
   }
 
+  /**
+   * The renderer chooses only a press that the card itself offered, and echoes
+   * the card it was shown. Main re-derives that card before it decides, so a
+   * stale card here approves nothing.
+   */
+  async function decideCriticCall(call: CriticCallDisclosureV1, action: CriticCallActionV1): Promise<void> {
+    const generation = routeGeneration.current;
+    if (criticCallBusy || !call.actions.includes(action)) return;
+    setCriticCallBusy(true);
+    try {
+      const response = await cairn.criticCallDecide({
+        dir,
+        approvalId: call.approvalId,
+        action,
+        disclosure: call,
+      });
+      if (routeGeneration.current !== generation) return;
+      // A refusal leaves the approval standing in main — only a decision that
+      // succeeded spends it — so the card must stay on screen and pressable.
+      // Clearing it here would strand a live approval the owner cannot reach.
+      if (!response.ok) { setError(response.message); return; }
+      setError(null);
+      setCriticCall(null);
+    } catch {
+      if (routeGeneration.current !== generation) return;
+      setError("Cairn could not record that critic-call decision. Review the current task again.");
+    } finally {
+      // Unconditional: a session refresh bumps the generation while the IPC is
+      // in flight, and a guarded reset would leave both controls disabled with
+      // no way out — including "Stop this task" on a required critic.
+      setCriticCallBusy(false);
+    }
+  }
+
   function tryAnother() {
     routeGeneration.current += 1;
     pendingReviewAction.current = null;
+    setCriticCall(null);
+    setCriticCallBusy(false);
     void cairn.taskPreviewDiscard(dir, previewId ?? undefined);
     void cairn.taskAcknowledge(dir);
     setPhase("entry"); setOutcome(""); setPreviewId(null); setRequestView(null); setRequestContext([]); setTaskSpecPreview(null); setTaskReview(null); setRoute(null); setDisclosure(null); setResult(null); setActivities([]); setError(null); setRealCallConfirmed(false); setSessionWorker(false);
@@ -260,6 +306,13 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
         </>
       ) : null}
 
+      {criticCall && (phase === "route" || phase === "running") ? (
+        <CriticCallCard
+          call={criticCall}
+          busy={criticCallBusy}
+          onDecide={(action) => void decideCriticCall(criticCall, action)}
+        />
+      ) : null}
       {phase === "running" && taskReview ? <TaskReviewView review={taskReview} heading="Accepted Task Spec" /> : null}
       {phase === "running" ? (
         <Card title="route → run → check → result">

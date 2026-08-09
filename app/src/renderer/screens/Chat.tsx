@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -14,6 +14,7 @@ import { Scene } from "../components/Scene";
 import { TaskCard } from "../components/TaskCard";
 import { TaskIntentList } from "../components/TaskIntentList";
 import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoice } from "../components/TaskReview";
+import { CriticCallCard } from "../components/CriticCall";
 import { Pill } from "../components/Ui";
 
 /** Tracks one in-flight `send()`. `id` starts out as whatever conversation
@@ -67,6 +68,10 @@ type Dispatch = {
    * proposal card's copy is deliberately never promoted into dispatch state. */
   taskSpecPreview: TaskSpecProposalPreviewV1 | null;
   taskReview: TaskReviewProjectionV1 | null;
+  /** Main's Independent-critic card for the one call awaiting a decision.
+   * Output only: pressing sends back the id and this exact card, and main
+   * re-derives it before deciding. */
+  criticCall: CriticCallDisclosureV1 | null;
   route: RouteResult | null;
   disclosure: WorkerDisclosure | null;
   phase: "confirm" | "running" | "settling";
@@ -587,6 +592,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // mount snapshot may only merge history into that state, never replace it.
   const conversationVersionRef = useRef(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
+  const [criticCallBusy, setCriticCallBusy] = useState(false);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const dispatchHeadingId = useId();
   // The run this project has, if any: the same main-process session the run
@@ -1450,7 +1456,48 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // "Send to dispatch": open the confirmation panel for BOTH parts of the
   // request at once, then ask main which adapter would take it and what it
   // would disclose. The panel shows immediately so the press is never
-  // silent; the route fills in when it answers.
+  /**
+   * The renderer presses only what the card offered and echoes the card it was
+   * shown. Main re-derives that card before deciding, so a card this panel has
+   * been holding while something changed approves nothing.
+   *
+   * The token is the same guard the other dispatch actions use: a second
+   * dispatch opened meanwhile owns the panel now.
+   */
+  async function decideCriticCall(call: CriticCallDisclosureV1, action: CriticCallActionV1): Promise<void> {
+    const token = dispatchToken.current;
+    if (criticCallBusy || !call.actions.includes(action)) return;
+    setCriticCallBusy(true);
+    try {
+      const response = await cairn.criticCallDecide({
+        dir,
+        approvalId: call.approvalId,
+        action,
+        disclosure: call,
+      });
+      if (dispatchToken.current !== token) return;
+      if (response.ok) setSession((current) => current === null ? null : { ...current, criticCall: undefined });
+      setDispatch((current) => current === null ? null : {
+        ...current,
+        // A refusal leaves the approval standing in main, so the card stays
+        // pressable here; only a decision that succeeded removes it.
+        criticCall: response.ok ? null : current.criticCall,
+        error: response.ok ? current.error : response.message,
+      });
+    } catch {
+      if (dispatchToken.current !== token) return;
+      setDispatch((current) => current === null ? null : {
+        ...current,
+        error: "Cairn could not record that critic-call decision.",
+      });
+    } finally {
+      // Unconditional, for the same reason as the run screen: a cancel or a
+      // second dispatch bumps the token, and a guarded reset would disable the
+      // card permanently for the life of the window.
+      setCriticCallBusy(false);
+    }
+  }
+
   async function applyTaskReviewChoice(actionId: string, action: TaskReviewActionChoice): Promise<void> {
     const token = dispatchToken.current;
     const expectedPreviewId = dispatch?.previewId ?? null;
@@ -1495,7 +1542,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setError(null);
     setRetryRequest(null);
     setRealCallConfirmed(false);
-    setDispatch({ previewId: null, request: null, context: [], taskSpecPreview: null, taskReview: null, route: null, disclosure: null, phase: "confirm", error: null });
+    setDispatch({ previewId: null, request: null, context: [], taskSpecPreview: null, taskReview: null, criticCall: null, route: null, disclosure: null, phase: "confirm", error: null });
     void cairn.taskRoute({
       dir,
       source: { kind: "proposal", proposalId: candidate.actionId, conversationId: candidate.conversationId },
@@ -1517,6 +1564,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         context: response.ok ? response.value.context : current.context,
         taskSpecPreview: response.ok ? response.value.taskSpecPreview ?? null : current.taskSpecPreview,
         taskReview: response.ok ? response.value.taskReview ?? null : current.taskReview,
+        criticCall: response.ok ? response.value.criticCall ?? null : null,
         route: response.ok ? response.value.route : null,
         disclosure: response.ok ? response.value.disclosure ?? null : null,
         error: response.ok ? null : response.message,
@@ -1768,7 +1816,19 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   aria-labelledby={dispatch.phase === "confirm" ? dispatchHeadingId : undefined}
                   aria-label={dispatch.phase === "running" ? "Task handoff" : undefined}>
                   {dispatch.phase === "running" ? (
-                    <p className="small muted dispatch-running" role="status">Cairn is working on this. Its notes are saved in your project's docs/ai-work folder.</p>
+                    <>
+                      <p className="small muted dispatch-running" role="status">Cairn is working on this. Its notes are saved in your project's docs/ai-work folder.</p>
+                      {/* A critic call is asked for mid-run, so the live card
+                          comes from the session rather than the pre-start
+                          route preview. */}
+                      {session?.criticCall ? (
+                        <CriticCallCard
+                          call={session.criticCall}
+                          busy={criticCallBusy}
+                          onDecide={(action) => void decideCriticCall(session.criticCall!, action)}
+                        />
+                      ) : null}
+                    </>
                   ) : (
                     <>
                       <h2 id={dispatchHeadingId} className="card-title dispatch-heading"
@@ -1798,6 +1858,13 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                             Separate risk, data-sharing, cost, and provider approvals still use their own controls below.
                           </p>
                         </>
+                      ) : null}
+                      {dispatch.criticCall !== null ? (
+                        <CriticCallCard
+                          call={dispatch.criticCall}
+                          busy={criticCallBusy}
+                          onDecide={(action) => void decideCriticCall(dispatch.criticCall!, action)}
+                        />
                       ) : null}
                       {dispatch.error ? <p className="dispatch-error">{dispatch.error}</p> : null}
                       {dispatchRoute === null && !dispatch.error ? <p className="small muted dispatch-routing">Choosing who will do the work…</p> : null}
