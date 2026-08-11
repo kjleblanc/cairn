@@ -19,6 +19,14 @@ const api: CairnApi = {
   taskRun: (request) => ipcRenderer.invoke("task:run", request),
   taskReviewAction: (request) => ipcRenderer.invoke("task:review-action", request),
   criticCallDecide: (request) => ipcRenderer.invoke("critic:call-decide", request),
+  criticCalibrationOpen: (request) => ipcRenderer.invoke("critic:calibration-open", request),
+  criticCalibrationCurrent: (dir) => ipcRenderer.invoke("critic:calibration-current", dir),
+  criticCalibrationCancel: (dir) => ipcRenderer.invoke("critic:calibration-cancel", dir),
+  onCriticCalibrationChanged: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("critic:calibration-changed", listener);
+    return () => ipcRenderer.removeListener("critic:calibration-changed", listener);
+  },
   taskCancel: (dir) => ipcRenderer.invoke("task:cancel", dir),
   taskCurrent: (dir) => ipcRenderer.invoke("task:current", dir),
   taskAcknowledge: (dir) => ipcRenderer.invoke("task:acknowledge", dir),

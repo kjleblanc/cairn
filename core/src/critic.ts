@@ -203,6 +203,40 @@ export type CriticPacketAuthorityContextV1 = Readonly<{
   comparisonTrials: readonly CriticComparisonTrialV1[];
 }>;
 
+/**
+ * Calibration text is compiled application data, not a selected project file.
+ * Keep that authority distinct so a synthetic caller never has to manufacture
+ * Git, filesystem, project-containment, or owner-consent facts merely to use
+ * the same packet and request composers.
+ */
+export const CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION =
+  "cairn-critic-synthetic-packet-authority-context/v1" as const;
+export const CRITIC_SYNTHETIC_SELECTION_VERSION = "cairn-critic-synthetic-selection/v1" as const;
+
+export type CriticSyntheticSelectedTextAuthorityV1 = Readonly<{
+  id: string;
+  syntheticPath: string;
+  sha256: string;
+  content: string;
+  truncated: boolean;
+}>;
+
+export type CriticSyntheticPacketAuthorityContextV1 = Readonly<{
+  version: typeof CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION;
+  selectionVersion: typeof CRITIC_SYNTHETIC_SELECTION_VERSION;
+  manifestSha256: string;
+  fixtureId: string;
+  syntheticScopeSha256: string;
+  connectionConsentVersion: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  selectedSyntheticText: readonly CriticSyntheticSelectedTextAuthorityV1[];
+  checkEvidence: readonly CriticCheckEvidenceV1[];
+  priorConfirmedFindings: readonly CriticPriorConfirmedFindingV1[];
+  comparisonTrials: readonly CriticComparisonTrialV1[];
+}>;
+
 export type CriticPacketV1 = Readonly<{
   version: typeof CRITIC_PACKET_VERSION;
   taskSpecSha256: string;
@@ -1151,6 +1185,128 @@ export function composeCriticPacketAuthorityContext(
   return authority;
 }
 
+/**
+ * Main trust-boundary mint for preregistered, compiled calibration text.
+ *
+ * This deliberately does not accept or produce `provenance`: no Git,
+ * filesystem, project-containment, or consent statement is true of an
+ * in-memory fixture. Shape alone still is not request authority; only this
+ * exact branded return value can be passed to `composeCriticRequest`.
+ */
+export function composeCriticSyntheticPacketAuthorityContext(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  rawAuthority: unknown,
+): CriticSyntheticPacketAuthorityContextV1 | null {
+  const taskSha = taskSpecSha256(taskSpec);
+  const planSha = evidencePlanSha256(evidencePlan);
+  if (taskSha === null || planSha === null) return null;
+  const spec = taskSpec as TaskSpecV1;
+  const plan = evidencePlan as EvidencePlanV1;
+  if (plan.taskSpecSha256 !== taskSha || spec.quality.critic.mode === "off") return null;
+  const projection = criticTaskSpecProjection(spec);
+  const context = inspectRecord(rawAuthority, [
+    "version", "selectionVersion", "manifestSha256", "fixtureId", "syntheticScopeSha256", "connectionConsentVersion",
+    "taskSpecSha256", "evidencePlanSha256", "candidateSha256", "selectedSyntheticText", "checkEvidence",
+    "priorConfirmedFindings", "comparisonTrials",
+  ]);
+  if (projection === null || context === null
+    || context.version !== CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+    || context.selectionVersion !== CRITIC_SYNTHETIC_SELECTION_VERSION) return null;
+  const manifestSha256 = safeSha(context.manifestSha256);
+  const fixtureId = typeof context.fixtureId === "string" && /^C\d{2}$/u.test(context.fixtureId)
+    ? context.fixtureId
+    : null;
+  const syntheticScopeSha256 = safeSha(context.syntheticScopeSha256);
+  const connectionConsentVersion = safeMachineId(context.connectionConsentVersion);
+  const candidateSha256 = safeSha(context.candidateSha256);
+  if (manifestSha256 === null || fixtureId === null
+    || syntheticScopeSha256 === null || connectionConsentVersion === null
+    || context.taskSpecSha256 !== taskSha || context.evidencePlanSha256 !== planSha
+    || candidateSha256 === null) return null;
+
+  const selectedInput = inspectArray(context.selectedSyntheticText, QUALITY_LIMITS.selectedArtifacts);
+  if (selectedInput === null) return null;
+  const selectedSyntheticText: CriticSyntheticSelectedTextAuthorityV1[] = [];
+  const selectedIds = new Set<string>();
+  const selectedPaths = new Set<string>();
+  let selectedCharacters = 0;
+  for (const item of selectedInput) {
+    const row = inspectRecord(item, ["id", "syntheticPath", "sha256", "content", "truncated"]);
+    if (row === null) return null;
+    const id = safeMachineId(row.id);
+    const syntheticPath = safeProjectRelativePath(row.syntheticPath);
+    const sha256 = safeSha(row.sha256);
+    const content = safeText(row.content, QUALITY_LIMITS.selectedArtifactCharacters, true);
+    if (id === null || syntheticPath === null || !syntheticPath.startsWith(`synthetic-calibration/${fixtureId}/`)
+      || sha256 === null || content === null || typeof row.truncated !== "boolean"
+      || selectedIds.has(id) || selectedPaths.has(syntheticPath) || sha256Utf8(content) !== sha256) return null;
+    selectedCharacters += content.length;
+    if (selectedCharacters > QUALITY_LIMITS.selectedContentCharacters) return null;
+    selectedIds.add(id);
+    selectedPaths.add(syntheticPath);
+    selectedSyntheticText.push(Object.freeze({ id, syntheticPath, sha256, content, truncated: row.truncated }));
+  }
+
+  const criterionIds = new Set(projection.criteria.map((criterion) => criterion.id));
+  const checksInput = inspectArray(context.checkEvidence, CRITIC_LIMITS.packetCheckEvidence);
+  if (checksInput === null) return null;
+  const checkEvidence: CriticCheckEvidenceV1[] = [];
+  const allArtifactIds = new Set(selectedIds);
+  for (const item of checksInput) {
+    const parsed = parseCheckEvidence(item, criterionIds, selectedIds);
+    if (parsed === null || allArtifactIds.has(parsed.id)) return null;
+    allArtifactIds.add(parsed.id);
+    checkEvidence.push(parsed);
+  }
+
+  const priorInput = inspectArray(context.priorConfirmedFindings, CRITIC_LIMITS.priorConfirmedFindings);
+  if (priorInput === null || priorInput.length !== 0) return null;
+  const priorConfirmedFindings: CriticPriorConfirmedFindingV1[] = [];
+
+  const projectedRows = new Map<string, CriticProjectedCriterionV1 | CriticTaskSpecProjectionV1["preferences"][number]>([
+    ...projection.criteria.map((row) => [row.id, row] as const),
+    ...projection.preferences.map((row) => [row.id, row] as const),
+  ]);
+  const trialsInput = inspectArray(context.comparisonTrials, CRITIC_LIMITS.comparisonTrials);
+  if (trialsInput === null) return null;
+  const comparisonTrials: CriticComparisonTrialV1[] = [];
+  const trialIds = new Set<string>();
+  const trialCriteria = new Set<string>();
+  for (const item of trialsInput) {
+    const parsed = parseComparisonTrial(item, projectedRows, selectedIds);
+    if (parsed === null || trialIds.has(parsed.comparisonId) || trialCriteria.has(parsed.criterionId)) return null;
+    const frozenReference = projection.references.find((reference) => reference.id === parsed.referenceId);
+    const referenceArtifact = selectedSyntheticText.find((artifact) => artifact.id === parsed.referenceArtifactId);
+    if (frozenReference === undefined || referenceArtifact === undefined
+      || referenceArtifact.sha256 !== frozenReference.snapshotSha256) return null;
+    trialIds.add(parsed.comparisonId);
+    trialCriteria.add(parsed.criterionId);
+    comparisonTrials.push(parsed);
+  }
+  for (const row of projectedRows.values()) {
+    if (row.comparison !== null && !trialCriteria.has(row.id)) return null;
+  }
+
+  const authority = deepFreeze({
+    version: CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION,
+    selectionVersion: CRITIC_SYNTHETIC_SELECTION_VERSION,
+    manifestSha256,
+    fixtureId,
+    syntheticScopeSha256,
+    connectionConsentVersion,
+    taskSpecSha256: taskSha,
+    evidencePlanSha256: planSha,
+    candidateSha256,
+    selectedSyntheticText,
+    checkEvidence,
+    priorConfirmedFindings,
+    comparisonTrials,
+  }) as CriticSyntheticPacketAuthorityContextV1;
+  packetAuthorityContextBindings.set(authority, Object.freeze({ taskSpec: spec, evidencePlan: plan }));
+  return authority;
+}
+
 export function composeCriticRequest(
   taskSpec: unknown,
   evidencePlan: unknown,
@@ -1165,17 +1321,25 @@ export function composeCriticRequest(
     || typeof authenticatedPacketContext !== "object" || authenticatedPacketContext === null) return null;
   const authorityBinding = packetAuthorityContextBindings.get(authenticatedPacketContext);
   if (authorityBinding === undefined || authorityBinding.taskSpec !== spec || authorityBinding.evidencePlan !== plan) return null;
-  const context = authenticatedPacketContext as CriticPacketAuthorityContextV1;
+  const context = authenticatedPacketContext as CriticPacketAuthorityContextV1 | CriticSyntheticPacketAuthorityContextV1;
   if (context.taskSpecSha256 !== taskSha || context.evidencePlanSha256 !== planSha) return null;
   const projection = criticTaskSpecProjection(spec);
   if (projection === null) return null;
-  const selectedTrackedText: CriticSelectedTrackedTextV1[] = context.selectedTrackedText.map((row) => Object.freeze({
-    id: row.id,
-    projectRelativePath: row.projectRelativePath,
-    sha256: row.sha256,
-    content: row.content,
-    truncated: row.truncated,
-  }));
+  const selectedTrackedText: CriticSelectedTrackedTextV1[] = context.version === CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+    ? context.selectedSyntheticText.map((row) => Object.freeze({
+        id: row.id,
+        projectRelativePath: row.syntheticPath,
+        sha256: row.sha256,
+        content: row.content,
+        truncated: row.truncated,
+      }))
+    : context.selectedTrackedText.map((row) => Object.freeze({
+        id: row.id,
+        projectRelativePath: row.projectRelativePath,
+        sha256: row.sha256,
+        content: row.content,
+        truncated: row.truncated,
+      }));
   const checkEvidence = [...context.checkEvidence];
   const priorConfirmedFindings = [...context.priorConfirmedFindings];
   const comparisonTrials = [...context.comparisonTrials];
@@ -1216,7 +1380,9 @@ export function composeCriticRequest(
     evidencePlanSha256: planSha,
     packetSha256,
     requestSha256,
-    projectHash: context.projectHash,
+    projectHash: context.version === CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+      ? context.syntheticScopeSha256
+      : context.projectHash,
     connectionConsentVersion: context.connectionConsentVersion,
   }));
   return request;

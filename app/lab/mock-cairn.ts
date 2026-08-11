@@ -37,6 +37,7 @@ import type {
 import type { ProjectStatus, SerialActivity, SerialRunResult } from "@cairn/core";
 import {
   CRITIC_CALL_ACTIONS_BY_MODE,
+  CRITIC_CALL_CREDENTIAL_TEXT,
   CRITIC_CALL_NOT_SENT,
   CRITIC_CALL_PURPOSE_TEXT,
   type CriticCallDisclosureV1,
@@ -225,6 +226,7 @@ function setScenario(next: LabScenario): void {
 const LAB_CRITIC_CALL: CriticCallDisclosureV1 = Object.freeze({
   version: "cairn-critic-call-disclosure/v1",
   approvalId: "9f1c7a52-3c1e-4f0a-9d21-7b6a4c8e5d30",
+  callKind: "provider",
   mode: "required",
   attempt: 1,
   attemptCap: 3,
@@ -237,6 +239,7 @@ const LAB_CRITIC_CALL: CriticCallDisclosureV1 = Object.freeze({
   routeRequestFingerprintSha256: "4f3c2b1a".repeat(8),
   purpose: CRITIC_CALL_PURPOSE_TEXT,
   notSent: CRITIC_CALL_NOT_SENT,
+  credentialText: CRITIC_CALL_CREDENTIAL_TEXT,
   selection: Object.freeze([
     Object.freeze({ path: "src/renderer/app.css", sha256: "a1".repeat(32), characters: 7_412 }),
     Object.freeze({ path: "src/renderer/screens/Workspace.tsx", sha256: "b2".repeat(32), characters: 3_180 }),
@@ -244,9 +247,10 @@ const LAB_CRITIC_CALL: CriticCallDisclosureV1 = Object.freeze({
   ]),
   selectedFiles: 3,
   selectedCharacters: 12_496,
-  planMetadata: Object.freeze({
+      planMetadata: Object.freeze({
     checks: 4, preferences: 1, references: 1, evidenceItems: 2, priorFindings: 0, comparisonTrials: 1,
-  }),
+      }),
+      calibration: null,
   totalRequestCharacters: 31_208,
   fileCap: 8,
   perFileCharacterCap: 8_000,
@@ -318,6 +322,10 @@ const mock: CairnApi = {
     soon(nope("the lab never runs tasks — pose DONE or STOPPED from the lab panel")),
   taskReviewAction: (_request) => soon(nope("the lab has no authenticated candidate review")),
   criticCallDecide: (_request) => soon(nope("the lab has no approved critic call")),
+  criticCalibrationOpen: (_request) => soon(nope("the lab has no calibration transport")),
+  criticCalibrationCurrent: (_dir: string) => soon(null),
+  criticCalibrationCancel: (_dir: string) => soon(nope("the lab has no calibration call")),
+  onCriticCalibrationChanged: () => () => {},
   taskCancel: (_dir: string) => soon(ok(null)),
   taskCurrent: (_dir: string) => soon(world.session),
   taskAcknowledge: (_dir: string) => soon(ok(null)),

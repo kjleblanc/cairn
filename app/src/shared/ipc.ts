@@ -33,6 +33,25 @@ export type {
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 export type Preflight = { mock: boolean; mode: "offline-demo" | "connection-required" };
 export type ProjectActivity = "idle" | "thinking" | "working" | "complete";
+
+/** The only renderer-shaped input Q8's calibration seam accepts. Main
+ * re-parses this closed tuple and derives every packet/request byte itself. */
+export type CriticCalibrationOpenRequestV1 = Readonly<{
+  dir: string;
+  fixtureId: string;
+  fixtureSha256: string;
+}>;
+
+/** Output-only view of one synthetic call waiting in Main. It carries the
+ * same Task 218 card both run surfaces already know how to render. */
+export type CriticCalibrationSnapshotV1 = Readonly<{
+  version: "cairn-critic-calibration-snapshot/v1";
+  fixtureId: string;
+  fixtureSha256: string;
+  requestSha256: string;
+  status: "awaiting-approval";
+  disclosure: CriticCallDisclosureV1;
+}>;
 export type ProjectTaskState = "running" | "unfinished" | "done" | "stopped";
 export type ProjectTaskSummary = {
   id: string;
@@ -418,6 +437,12 @@ export interface CairnApi {
   /** Decide the one pending critic call. Output only: the reply says what was
    * decided, never anything a renderer could use as authority for a call. */
   criticCallDecide(request: CriticCallDecisionRequest): Promise<Result<CriticCallDecisionV1>>;
+  /** Guarded Q8 seam. Normal production has no injected fake and refuses the
+   * open before any card or profile write exists. */
+  criticCalibrationOpen(request: CriticCalibrationOpenRequestV1): Promise<Result<CriticCalibrationSnapshotV1>>;
+  criticCalibrationCurrent(dir: string): Promise<CriticCalibrationSnapshotV1 | null>;
+  criticCalibrationCancel(dir: string): Promise<Result<"cancelled" | "cancelling">>;
+  onCriticCalibrationChanged(cb: () => void): () => void;
   taskCancel(dir: string): Promise<Result<null>>;
   taskCurrent(dir: string): Promise<RunSessionSnapshot | null>;
   taskAcknowledge(dir: string): Promise<Result<null>>;

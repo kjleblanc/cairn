@@ -1,5 +1,4 @@
 import type { CriticCallActionV1, CriticCallDisclosureV1 } from "../../shared/critic-call";
-import { CRITIC_CALL_CREDENTIAL_TEXT } from "../../shared/critic-call";
 
 /**
  * What the owner reads before one Independent-critic call.
@@ -46,7 +45,9 @@ export function CriticCallCard({ call, busy = false, onDecide }: {
   return (
     <section className="critic-call" aria-label="Independent critic call">
       <h3 className="critic-call-title">
-        Independent critic — paid call {count(call.attempt)} of at most {count(call.attemptCap)}
+        {call.calibration === null
+          ? <>Independent critic — paid call {count(call.attempt)} of at most {count(call.attemptCap)}</>
+          : <>Independent critic — synthetic calibration {call.calibration.fixtureId}, fixture {count(call.calibration.fixtureIndex)} of {count(call.calibration.fixtureCount)}</>}
       </h3>
 
       <dl className="critic-call-route">
@@ -65,13 +66,41 @@ export function CriticCallCard({ call, busy = false, onDecide }: {
         <div><dt>Call fingerprint</dt><dd className="mono critic-call-fingerprint">{call.routeRequestFingerprintSha256}</dd></div>
       </dl>
 
+      {call.calibration === null ? null : (
+        <section className="critic-call-calibration" aria-label="Preregistered calibration identity">
+          <p><strong>Preregistered manifest</strong> <span className="mono">{call.calibration.manifestSha256}</span></p>
+          <dl>
+            <div><dt>Fixture hash</dt><dd className="mono">{call.calibration.fixtureSha256}</dd></div>
+            <div><dt>Packet hash</dt><dd className="mono">{call.calibration.packetSha256}</dd></div>
+            <div><dt>Request hash</dt><dd className="mono">{call.calibration.requestSha256}</dd></div>
+            <div><dt>Request-body hash</dt><dd className="mono">{call.calibration.requestBodySha256}</dd></div>
+          </dl>
+          <details>
+            <summary>Inspect the exact synthetic text</summary>
+            {call.calibration.text.map((row) => (
+              <article key={row.path}>
+                <h4 className="mono">{row.path}</h4>
+                <pre>{row.content}</pre>
+              </article>
+            ))}
+          </details>
+        </section>
+      )}
+
       <p className="critic-call-sends">
-        <strong>Sends {count(call.selectedFiles)} of at most {count(call.fileCap)} tracked text files</strong>
+        <strong>
+          Sends {count(call.selectedFiles)} of at most {count(call.fileCap)}
+          {call.callKind === "synthetic-calibration" ? " preregistered synthetic text fixtures" : " tracked text files"}
+        </strong>
         {" — "}{count(call.selectedCharacters)} of at most {count(call.totalCharacterCap)} characters,
         and no more than {count(call.perFileCharacterCap)} from any one file.
       </p>
       {call.selectedFiles === 0 ? (
-        <p className="critic-call-empty">No file contents are included in this call.</p>
+        <p className="critic-call-empty">
+          {call.callKind === "synthetic-calibration"
+            ? "No synthetic fixture text is included in this call."
+            : "No file contents are included in this call."}
+        </p>
       ) : (
         <ul className="critic-call-files">
           {call.selection.map((file) => (
@@ -97,7 +126,7 @@ export function CriticCallCard({ call, busy = false, onDecide }: {
       <p className="critic-call-notsent">
         <strong>Not sent:</strong> {call.notSent.join(", ")}.
       </p>
-      <p className="critic-call-key">{CRITIC_CALL_CREDENTIAL_TEXT}</p>
+      <p className="critic-call-key">{call.credentialText}</p>
       <p className="critic-call-purpose">{call.purpose}</p>
       <p className="critic-call-limit">
         <strong>Limit:</strong> one request, {duration(call.timeoutMs)},

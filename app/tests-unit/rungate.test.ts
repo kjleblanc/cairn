@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   beginQuitDrain,
   isQuitDraining,
@@ -15,6 +15,7 @@ import {
   runRefusal,
   _resetForTests,
 } from "../src/main/rungate.js";
+import { canonicalProjectKey } from "../src/main/conductor/turnauth.js";
 import { _resetPendingRunsForTests, installPendingRunStore } from "../src/main/pendingrun.js";
 
 test("the running set and the quit drain gate one refusal decision", () => {
@@ -28,6 +29,26 @@ test("the running set and the quit drain gate one refusal decision", () => {
   beginQuitDrain();
   assert.equal(isQuitDraining(), true);
   assert.match(runRefusal(false, true) ?? "", /QUIT_IN_PROGRESS/);
+});
+
+test("the running set collapses project aliases to one canonical runtime identity", () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-rungate-alias-"));
+  const alias = `${project}${sep}.`;
+  _resetForTests();
+  try {
+    markRunning(alias);
+    markRunning(project);
+    assert.equal(isTaskRunning(project), true);
+    assert.equal(isTaskRunning(alias), true);
+    assert.deepEqual(runningDirs(), [canonicalProjectKey(project)]);
+
+    clearRunning(alias);
+    assert.equal(isTaskRunning(project), false);
+    assert.deepEqual(runningDirs(), []);
+  } finally {
+    _resetForTests();
+    rmSync(project, { recursive: true, force: true });
+  }
 });
 
 test("task start and both verdict-copy boundaries read the same Main-owned pending refusal", () => {

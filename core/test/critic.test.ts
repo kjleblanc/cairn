@@ -32,6 +32,7 @@ import {
   composeCriticCallAuthorization,
   criticCallAuthorizationCoversRequest,
   composeCriticPacketAuthorityContext,
+  composeCriticSyntheticPacketAuthorityContext,
   composeCriticPolicyAuthorityContext,
   composeCriticRequest,
   criticAssessmentSha256,
@@ -886,6 +887,53 @@ test("critic request: strict selector provenance and consent caps fail closed be
   const sparse = clone(valid) as any;
   delete sparse.selectedTrackedText[1];
   assert.equal(composeCriticPacketAuthorityContext(spec, plan, sparse), null);
+});
+
+test("critic request: compiled synthetic authority is branded without claiming Git or filesystem provenance", () => {
+  const spec = taskSpec();
+  const plan = evidencePlan(spec);
+  const trackedRaw = rawPacketContext(spec, plan) as any;
+  const trackedAuthority = composeCriticPacketAuthorityContext(spec, plan, trackedRaw);
+  assert.ok(trackedAuthority);
+  const trackedRequest = composeCriticRequest(spec, plan, trackedAuthority);
+  assert.ok(trackedRequest);
+
+  const syntheticRaw: any = {
+    version: "cairn-critic-synthetic-packet-authority-context/v1",
+    selectionVersion: "cairn-critic-synthetic-selection/v1",
+    manifestSha256: "d".repeat(64),
+    fixtureId: "C04",
+    syntheticScopeSha256: "e".repeat(64),
+    connectionConsentVersion: CONSENT_VERSION,
+    taskSpecSha256: taskSpecSha256(spec),
+    evidencePlanSha256: evidencePlanSha256(plan),
+    candidateSha256: trackedRaw.candidateSha256,
+    selectedSyntheticText: trackedRaw.selectedTrackedText.map((row: any) => ({
+      id: row.id,
+      syntheticPath: `synthetic-calibration/C04/${row.projectRelativePath.replaceAll("/", "-")}`,
+      sha256: row.sha256,
+      content: row.content,
+      truncated: row.truncated,
+    })),
+    checkEvidence: trackedRaw.checkEvidence,
+    priorConfirmedFindings: [],
+    comparisonTrials: trackedRaw.comparisonTrials,
+  };
+  const syntheticAuthority = composeCriticSyntheticPacketAuthorityContext(spec, plan, syntheticRaw);
+  assert.ok(syntheticAuthority);
+  assert.equal("provenance" in syntheticAuthority.selectedSyntheticText[0]!, false);
+  assert.equal("gitTracked" in syntheticAuthority.selectedSyntheticText[0]!, false);
+  const syntheticRequest = composeCriticRequest(spec, plan, syntheticAuthority);
+  assert.ok(syntheticRequest);
+  assert.equal(syntheticRequest.packet.selectedTrackedText[0]?.projectRelativePath.startsWith("synthetic-calibration/C04/"), true);
+  assert.equal(composeCriticRequest(spec, plan, clone(syntheticAuthority)), null, "a structural clone is not authority");
+
+  const falseProjectClaim = clone(syntheticRaw) as any;
+  falseProjectClaim.selectedSyntheticText[0].provenance = { gitTracked: true };
+  assert.equal(composeCriticSyntheticPacketAuthorityContext(spec, plan, falseProjectClaim), null);
+  const wrongFixture = clone(syntheticRaw) as any;
+  wrongFixture.fixtureId = "C05";
+  assert.equal(composeCriticSyntheticPacketAuthorityContext(spec, plan, wrongFixture), null);
 });
 
 test("critic output: exact declared rows parse from object or JSON, detach, and deeply freeze", () => {

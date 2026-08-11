@@ -593,6 +593,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const conversationVersionRef = useRef(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
   const [criticCallBusy, setCriticCallBusy] = useState(false);
+  const [calibrationCall, setCalibrationCall] = useState<CriticCallDisclosureV1 | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const dispatchHeadingId = useId();
   // The run this project has, if any: the same main-process session the run
@@ -871,7 +872,12 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   }, [status?.connected, dir, setConvId, applyAction, reconcileAction]);
 
   const refreshSession = useCallback(async () => {
-    setSession(await cairn.taskCurrent(dir));
+    const [current, calibration] = await Promise.all([
+      cairn.taskCurrent(dir),
+      cairn.criticCalibrationCurrent(dir),
+    ]);
+    setSession(current);
+    setCalibrationCall(calibration?.disclosure ?? null);
   }, [dir]);
 
   // On mount, so a reload — or arriving from anywhere else — reattaches to a
@@ -881,6 +887,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     if (event.dir !== dir) return;
     void refreshSession();
   }), [dir, refreshSession]);
+  useEffect(() => cairn.onCriticCalibrationChanged(() => {
+    void cairn.criticCalibrationCurrent(dir)
+      .then((calibration) => setCalibrationCall(calibration?.disclosure ?? null));
+  }), [dir]);
   useEffect(() => {
     const onRefresh = (event: Event) => {
       const detail = taskSessionRefreshDetail(event);
@@ -1476,7 +1486,13 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         disclosure: call,
       });
       if (dispatchToken.current !== token) return;
-      if (response.ok) setSession((current) => current === null ? null : { ...current, criticCall: undefined });
+      if (response.ok) {
+        setError(null);
+        setSession((current) => current === null ? null : { ...current, criticCall: undefined });
+        setCalibrationCall(null);
+      } else {
+        setError(response.message);
+      }
       setDispatch((current) => current === null ? null : {
         ...current,
         // A refusal leaves the approval standing in main, so the card stays
@@ -1486,6 +1502,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       });
     } catch {
       if (dispatchToken.current !== token) return;
+      setError("Cairn could not record that critic-call decision.");
       setDispatch((current) => current === null ? null : {
         ...current,
         error: "Cairn could not record that critic-call decision.",
@@ -1712,6 +1729,13 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         </div>
 
         {status === null ? <p className="muted">Getting ready…</p> : null}
+        {calibrationCall ? (
+          <CriticCallCard
+            call={calibrationCall}
+            busy={criticCallBusy}
+            onDecide={(action) => void decideCriticCall(calibrationCall, action)}
+          />
+        ) : null}
         {status && !status.connected ? <ConnectCard status={status} onConnected={() => void refreshStatus()} /> : null}
 
         {status?.connected ? (

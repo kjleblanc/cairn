@@ -8,6 +8,8 @@ export const CRITIC_CALL_DECISION_VERSION = "cairn-critic-call-decision/v1" as c
  */
 export const CRITIC_CALL_PURPOSE_TEXT =
   "Independent inspection against the promises below. It cannot read or edit the project, or declare DONE.";
+export const CRITIC_CALL_SYNTHETIC_PURPOSE_TEXT =
+  "Independent inspection of the preregistered synthetic fixture identified on this card. It cannot read or edit the project, or declare DONE.";
 /** What the critic never receives. Every entry is about the packet the model
  * reads. The provider key is deliberately NOT in this list: it is sent, as the
  * header that signs the request, and saying otherwise on an approval screen
@@ -24,6 +26,34 @@ export const CRITIC_CALL_NOT_SENT = Object.freeze([
  * is all it does. */
 export const CRITIC_CALL_CREDENTIAL_TEXT =
   "Your saved provider key signs this one request to the provider you connected. It is never part of what the critic reads, and Cairn never records it.";
+
+export const CRITIC_CALL_SYNTHETIC_NOT_SENT = Object.freeze([
+  "tools of any kind",
+  "project files or project content",
+  "images or other binary files",
+  "links",
+  "generated or dependency areas",
+] as const);
+
+export const CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT =
+  "No saved provider key is used. This synthetic calibration call can reach only the injected in-process fake, and nothing is billed.";
+
+export type CriticCallKindV1 = "provider" | "synthetic-calibration";
+
+export const CRITIC_CALL_NOT_SENT_BY_KIND: Readonly<Record<CriticCallKindV1, readonly string[]>> = Object.freeze({
+  provider: CRITIC_CALL_NOT_SENT,
+  "synthetic-calibration": CRITIC_CALL_SYNTHETIC_NOT_SENT,
+});
+
+export const CRITIC_CALL_CREDENTIAL_TEXT_BY_KIND: Readonly<Record<CriticCallKindV1, string>> = Object.freeze({
+  provider: CRITIC_CALL_CREDENTIAL_TEXT,
+  "synthetic-calibration": CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT,
+});
+
+export const CRITIC_CALL_PURPOSE_BY_KIND: Readonly<Record<CriticCallKindV1, string>> = Object.freeze({
+  provider: CRITIC_CALL_PURPOSE_TEXT,
+  "synthetic-calibration": CRITIC_CALL_SYNTHETIC_PURPOSE_TEXT,
+});
 
 /** The consent this call runs under, restated where the owner can see it. */
 export const CRITIC_CALL_FILE_CAP = 8;
@@ -68,6 +98,18 @@ export type CriticCallPlanMetadataV1 = Readonly<{
   comparisonTrials: number;
 }>;
 
+export type CriticCallCalibrationViewV1 = Readonly<{
+  manifestSha256: string;
+  fixtureId: string;
+  fixtureIndex: number;
+  fixtureCount: number;
+  fixtureSha256: string;
+  packetSha256: string;
+  requestSha256: string;
+  requestBodySha256: string;
+  text: readonly Readonly<{ path: string; sha256: string; content: string }>[];
+}>;
+
 export const PLAN_METADATA_KEYS = Object.freeze([
   "checks", "preferences", "references", "evidenceItems", "priorFindings", "comparisonTrials",
 ] as const);
@@ -99,6 +141,7 @@ export type CriticCallDisclosureV1 = Readonly<{
   version: typeof CRITIC_CALL_DISCLOSURE_VERSION;
   /** Opaque, one-use, main-owned. The only thing a decision may name. */
   approvalId: string;
+  callKind: CriticCallKindV1;
   mode: CriticCallModeV1;
   attempt: number;
   attemptCap: number;
@@ -109,13 +152,17 @@ export type CriticCallDisclosureV1 = Readonly<{
   resolvedModelRevision: string;
   connectionConsentVersion: string;
   routeRequestFingerprintSha256: string;
-  purpose: typeof CRITIC_CALL_PURPOSE_TEXT;
+  purpose: string;
   notSent: readonly string[];
+  credentialText: string;
   selection: readonly CriticCallSelectedFileViewV1[];
   selectedFiles: number;
   selectedCharacters: number;
   /** What the request carries besides file contents. */
   planMetadata: CriticCallPlanMetadataV1;
+  /** Present only on the exact inert synthetic route. It lets the owner match
+   * this card to the preregistered schedule and inspect every sent text byte. */
+  calibration: CriticCallCalibrationViewV1 | null;
   /** The exact size of the whole canonical request, file contents included. */
   totalRequestCharacters: number;
   fileCap: number;
@@ -149,12 +196,18 @@ export type CriticCallDecisionV1 = Readonly<{
  */
 export function canonicalCriticCallDisclosure(value: CriticCallDisclosureV1): string {
   return JSON.stringify([
-    value.version, value.approvalId, value.mode, value.attempt, value.attemptCap, value.provider,
+    value.version, value.approvalId, value.callKind, value.mode, value.attempt, value.attemptCap, value.provider,
     value.baseUrl, value.configuredModel, value.resolvedModel, value.resolvedModelRevision,
     value.connectionConsentVersion, value.routeRequestFingerprintSha256, value.purpose,
-    [...value.notSent], value.selection.map((row) => [row.path, row.sha256, row.characters]),
+    [...value.notSent], value.credentialText, value.selection.map((row) => [row.path, row.sha256, row.characters]),
     value.selectedFiles, value.selectedCharacters,
     PLAN_METADATA_KEYS.map((key) => value.planMetadata[key]),
+    value.calibration === null ? null : [
+      value.calibration.manifestSha256, value.calibration.fixtureId, value.calibration.fixtureIndex,
+      value.calibration.fixtureCount, value.calibration.fixtureSha256, value.calibration.packetSha256,
+      value.calibration.requestSha256, value.calibration.requestBodySha256,
+      value.calibration.text.map((row) => [row.path, row.sha256, row.content]),
+    ],
     value.totalRequestCharacters,
     value.fileCap, value.perFileCharacterCap,
     value.totalCharacterCap, value.timeoutMs, value.maxOutputCharacters, value.billingBasis,

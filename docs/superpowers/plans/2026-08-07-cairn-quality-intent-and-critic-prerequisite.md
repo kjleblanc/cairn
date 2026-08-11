@@ -428,7 +428,7 @@ or any competing authority consults renderer state instead of the journal gate.
 
 ## Task Q8 — Add the packet-only critic and approval surface, fake-only
 
-> **Status (2026-08-09): landing as four serial tasks, three done.** By owner
+> **Status (2026-08-11): landed as four serial tasks, all done.** By owner
 > decision Q8 was too large for one task — as written it spans Core types, a
 > transport, a calibration orchestrator, shared IPC, preload, both renderer
 > screens, and Electron journeys. It lands as:
@@ -441,17 +441,16 @@ or any competing authority consults renderer state instead of the journal gate.
 > - **Stage 3 — Task 218 (`79a5c73`): DONE.** The owner-facing Independent-critic
 >   card, its one-use approval, and both run surfaces. Still dark: nothing
 >   composes a card.
-> - **Stage 4 — not started.** The calibration-only orchestrator, which is what
->   finally drives the card, plus the fake-only Electron journeys deferred from
->   stage 3 because nothing could make the card appear without a test-only
->   production seam. Those journeys need the single-tenant app token and the
->   owner out of Cairn.
+> - **Stage 4 — Task 219: DONE.** The calibration-only orchestrator now drives
+>   the card only from preregistered synthetic fixtures and a separately branded
+>   injected fake. The owner-cleared Electron journey proves exact packet bytes,
+>   approve, decline, stale refusal, cancellation, close-drain and restart while
+>   both single-tenant app tokens are held.
 >
-> **Precondition stage 4 must honour:** four of the five "not sent" claims on the
-> approval card rest on provenance booleans a caller supplies. Core checks their
-> shape, not their truth, and the selector that would make them true does not
-> exist yet. Driving the card with an unverified selector turns those sentences
-> into untruths on an approval screen.
+> **Stage 4 precondition resolved:** compiled synthetic authority carries no Git,
+> filesystem, project-containment or project-consent claims. Main's closed
+> selector verifies each immutable synthetic row and its hash before Core can
+> compose the request; the synthetic card names that distinct source honestly.
 
 **Visible outcome:** after a fake candidate, the desktop shows a separate
 Independent critic disclosure. An injected fake transport receives exactly one

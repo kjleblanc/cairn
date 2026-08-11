@@ -54,6 +54,89 @@ test("route and run ask the canonical gate before authority is created and again
   assert.match(run.slice(runGates[1], run.indexOf("consumeCurrentTaskProposal")), /refuseBeforeAcceptance\(postDetectionPendingRefusal\)/);
 });
 
+test("synthetic calibration and ordinary tasks remain mutually exclusive across awaits", () => {
+  const taskActivity = between(tasks, "function anyTaskRunningOrStarting", "function clearSyntheticCalibrationDisclosure");
+  assert.match(taskActivity, /runningDirs\(\)\.length > 0 \|\| starting\.size > 0/,
+    "calibration observes ordinary task activity across every canonical project");
+
+  const route = between(tasks, 'ipcMain.handle("task:route"', 'ipcMain.handle("task:review-action"');
+  const routeCalibrationGates = indexesOf(route, "criticCalibration?.hasActive()");
+  assert.equal(routeCalibrationGates.length, 2, "route checks the app-wide calibration lifecycle twice");
+  assert.ok(routeCalibrationGates[0] < route.indexOf("const generation = nextGeneration(key)"));
+  assert.ok(routeCalibrationGates[0] < route.indexOf("await detectedAdapters"));
+  assert.ok(routeCalibrationGates[1] > route.indexOf("await detectedAdapters"));
+  assert.ok(routeCalibrationGates[1] < route.indexOf("previews.set(key, pending)"));
+  assert.match(
+    route.slice(routeCalibrationGates[1], route.indexOf("const postDetectionPendingRefusal")),
+    /nextGeneration\(key\)/,
+    "a calibration opened during detection retires that route generation",
+  );
+
+  const run = between(tasks, 'ipcMain.handle("task:run"', 'ipcMain.handle("task:cancel"');
+  const runCalibrationGates = indexesOf(run, "criticCalibration?.hasActive()");
+  assert.equal(runCalibrationGates.length, 2, "run checks the app-wide calibration lifecycle twice");
+  assert.ok(runCalibrationGates[0] < run.indexOf("starting.add(key)"));
+  assert.ok(runCalibrationGates[0] < run.indexOf("detected = await detectedAdapters"));
+  assert.ok(runCalibrationGates[1] > run.indexOf("detected = await detectedAdapters"));
+  assert.match(
+    run.slice(runCalibrationGates[1], run.indexOf("if (previews.get(key) !== pending")),
+    /refuseBeforeAcceptance\(CRITIC_CALIBRATION_ACTIVE\)/,
+    "a calibration appearing during detection retires the reviewed task authority without starting it",
+  );
+
+  const decide = between(tasks, 'ipcMain.handle("critic:call-decide"', 'ipcMain.handle("critic:calibration-open"');
+  const calibrationBranch = decide.indexOf("if (criticCalibration?.hasPending(key))");
+  const taskGate = decide.indexOf("anyTaskRunningOrStarting()", calibrationBranch);
+  const send = decide.indexOf("await criticCalibration.decide(request)", calibrationBranch);
+  assert.ok(calibrationBranch >= 0 && taskGate > calibrationBranch && taskGate < send,
+    "a calibration approval cannot be consumed while any ordinary task is running or starting");
+  assert.ok(decide.indexOf("clearSyntheticCalibrationDisclosure(key)", send) > send,
+    "the mirrored disclosure clears after a terminal calibration decision");
+
+  const open = between(tasks, 'ipcMain.handle("critic:calibration-open"', 'ipcMain.handle("critic:calibration-current"');
+  assert.ok(open.indexOf("anyTaskRunningOrStarting()") < open.indexOf("criticCalibration.open(request)"));
+  assert.match(open, /const session = sessions\.get\(key\);[\s\S]*session\.criticCall = opened\.value\.disclosure/,
+    "an existing canonical run snapshot mirrors the synthetic disclosure");
+
+  const cancel = between(tasks, 'ipcMain.handle("critic:calibration-cancel"', 'ipcMain.handle("task:preview-discard"');
+  assert.ok(cancel.indexOf("const key = canonicalProjectKey(dir)") < cancel.indexOf("criticCalibration.cancel(dir)"));
+  assert.ok(cancel.indexOf("clearSyntheticCalibrationDisclosure(key)") > cancel.indexOf("criticCalibration.cancel(dir)"));
+  const failedCancel = cancel.slice(cancel.indexOf("if (!cancelled.ok)"), cancel.indexOf("return { ok: true"));
+  assert.match(failedCancel, /if \(!criticCalibration\.hasActive\(key\)\)[\s\S]*clearSyntheticCalibrationDisclosure\(key\)/,
+    "a persistence failure that consumed cancellation must not leave a stale mirrored card");
+
+  const clearProjection = between(tasks, "function clearSyntheticCalibrationDisclosure", "function sameDisclosure");
+  assert.match(clearProjection, /criticCall\?\.callKind === "synthetic-calibration"/,
+    "a late calibration terminal callback cannot erase a newer provider disclosure");
+});
+
+test("task runtime maps and alias-facing handlers use the canonical project key", () => {
+  assert.doesNotMatch(tasks, /(?:controllers|settlements)\.(?:get|set|delete)\(dir\)/,
+    "controller and settlement maps must never use a renderer-supplied path spelling");
+  assert.doesNotMatch(tasks, /(?:markRunning|clearRunning|isTaskRunning)\(dir\)/,
+    "task runtime gates must use the already-derived canonical key");
+
+  const run = between(tasks, 'ipcMain.handle("task:run"', 'ipcMain.handle("task:cancel"');
+  for (const expected of [
+    "markRunning(key)",
+    "controllers.set(key, controller)",
+    "settlements.set(key, run)",
+    "clearRunning(key)",
+    "controllers.delete(key)",
+    "settlements.delete(key)",
+  ]) {
+    assert.ok(run.includes(expected), `accepted task runtime must use ${expected}`);
+  }
+
+  const cancel = between(tasks, 'ipcMain.handle("task:cancel"', 'ipcMain.handle("task:current"');
+  assert.match(cancel, /controllers\.get\(canonicalProjectKey\(dir\)\)/,
+    "an alias cancellation must reach the canonical controller");
+  const acknowledge = between(tasks, 'ipcMain.handle("task:acknowledge"', 'ipcMain.handle("evidence:album"');
+  assert.match(acknowledge, /const key = canonicalProjectKey\(dir\)/);
+  assert.match(acknowledge, /!isTaskRunning\(key\)/,
+    "acknowledgement must consult the same canonical running identity as the session map");
+});
+
 test("preview, IPC execute, and direct execute all refuse before their first git boundary", () => {
   const preview = between(push, "export function pushPreview", "export function remoteIsConfigured");
   assert.ok(preview.indexOf("pendingPushRefusal(dir)") < preview.indexOf('exec(["rev-parse"'));

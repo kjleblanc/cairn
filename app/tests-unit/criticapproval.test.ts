@@ -2,15 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { TASK_CALL_BUDGET_V1, canonicalCriticPacket, consumeCriticCallAuthorization } from "@cairn/core";
+import { TASK_CALL_BUDGET_V1, canonicalCriticPacket, consumeCriticCallAuthorization, criticCallRequestBody } from "@cairn/core";
 import {
   clearCriticCallApproval,
+  clearProviderCriticCallApprovalByKey,
   currentCriticCallApproval,
   decideCriticCall,
   openCriticCallApproval,
+  openSyntheticCriticCallApproval,
   pendingCriticCallApprovalCount,
   takeCriticCallAuthorization,
 } from "../src/main/criticapproval.js";
+import { canonicalProjectKey } from "../src/main/conductor/turnauth.js";
 import {
   CRITIC_CALL_FILE_CAP,
   CRITIC_CALL_NOT_SENT,
@@ -18,10 +21,11 @@ import {
   CRITIC_CALL_PURPOSE_TEXT,
   CRITIC_CALL_TOTAL_CHARACTER_CAP,
   canonicalCriticCallDisclosure,
+  type CriticCallCalibrationViewV1,
   type CriticCallDisclosureV1,
 } from "../src/shared/critic-call.js";
 import { parseCriticCallDecisionRequest, parseCriticCallDisclosure } from "../src/shared/critic-call-parse.js";
-import { approved, bundle, route } from "./critic-call-fixture.js";
+import { approved, bundle, route, sha256 } from "./critic-call-fixture.js";
 
 const DIR = process.cwd();
 
@@ -169,6 +173,45 @@ test("c1: only a branded approved call composes a card", () => {
   assert.equal(currentCriticCallApproval(DIR), null);
 });
 
+test("c1: a live provider authorization cannot be labelled as synthetic calibration", () => {
+  clearCriticCallApproval(DIR);
+  const { request } = bundle();
+  const authorization = approved(request);
+  const rows = (request as {
+    packet: { selectedTrackedText: readonly { projectRelativePath: string; sha256: string; content: string }[] };
+  }).packet.selectedTrackedText;
+  const body = criticCallRequestBody(authorization);
+  assert.ok(body);
+  const calibration: CriticCallCalibrationViewV1 = Object.freeze({
+    manifestSha256: "a".repeat(64),
+    fixtureId: "C01",
+    fixtureIndex: 1,
+    fixtureCount: 12,
+    fixtureSha256: "b".repeat(64),
+    packetSha256: authorization.packetSha256,
+    requestSha256: authorization.requestSha256,
+    requestBodySha256: sha256(body),
+    text: Object.freeze(rows.map((row) => Object.freeze({
+      path: row.projectRelativePath,
+      sha256: row.sha256,
+      content: row.content,
+    }))),
+  });
+
+  assert.equal(
+    openSyntheticCriticCallApproval({ dir: DIR, request, authorization, calibration }),
+    null,
+    "exact request-bound disclosure data cannot put fake/no-key wording over a live route",
+  );
+  assert.equal(currentCriticCallApproval(DIR), null);
+
+  const provider = openCriticCallApproval({ dir: DIR, request, authorization, mode: "required" });
+  assert.ok(provider, "the refusal must be about the route label, not a malformed authorization fixture");
+  assert.equal(provider.callKind, "provider");
+  assert.equal(provider.calibration, null);
+  clearCriticCallApproval(DIR);
+});
+
 test("c2: one approval decides once, and a decline consumes it too", () => {
   clearCriticCallApproval(DIR);
   const first = open("required");
@@ -297,8 +340,30 @@ test("c2: one approved call can be carded once, and the gate and lifecycle are w
   assert.ok(handler.includes("projectStatus(request.dir)"), "the same project check its neighbours make");
 
   const generation = tasks.slice(tasks.indexOf("function nextGeneration("), tasks.indexOf("function invalidateProjectPreview("));
-  assert.ok(generation.includes("clearCriticCallApprovalByKey(key)"),
-    "a replaced or cancelled run must not leave an approvable card behind");
+  assert.ok(generation.includes("clearProviderCriticCallApprovalByKey(key)"),
+    "a replaced or cancelled task generation must not leave its provider card behind");
+  assert.ok(!generation.includes("clearCriticCallApprovalByKey(key)"),
+    "task preview cleanup must not erase an independently owned synthetic calibration card");
+});
+
+test("c2: task-generation cleanup can retire only provider cards", () => {
+  clearCriticCallApproval(DIR);
+  const key = canonicalProjectKey(DIR);
+
+  const provider = open("required").disclosure;
+  assert.ok(provider);
+  assert.equal(provider.callKind, "provider");
+  clearProviderCriticCallApprovalByKey(key);
+  assert.equal(currentCriticCallApproval(DIR), null, "the task-owned provider card is retired");
+
+  const approvalSource = readFileSync(join(__dirname, "..", "..", "src", "main", "criticapproval.ts"), "utf8");
+  const helper = approvalSource.slice(
+    approvalSource.indexOf("export function clearProviderCriticCallApprovalByKey"),
+    approvalSource.indexOf("/** A read-only diagnostic", approvalSource.indexOf("export function clearProviderCriticCallApprovalByKey")),
+  );
+  assert.match(helper, /pending\.get\(key\)\?\.disclosure\.callKind === "provider"/);
+  assert.equal(helper.match(/pending\.delete\(key\)/gu)?.length, 1,
+    "the helper has no unconditional delete path that could erase synthetic calibration");
 });
 
 test("c1: a card Cairn could not decide is never issued", () => {
@@ -545,8 +610,10 @@ test("c5: the IPC boundary returns a decision and never the grant", () => {
   assert.equal(handler.includes("outcome.grant"), false, "a grant must never cross IPC");
   assert.equal(handler.includes("takeCriticCallAuthorization"), false);
 
-  // Exactly one channel, and the preload exposes exactly one key for it.
-  assert.equal(tasks.match(/ipcMain\.handle\("critic:/gu)?.length, 1);
+  // Exactly one decision channel. Q8 stage 4 adds three guarded synthetic
+  // lifecycle channels, but none is a second route for a decision or grant.
+  assert.equal(tasks.match(/ipcMain\.handle\("critic:call-decide"/gu)?.length, 1);
+  assert.equal(tasks.match(/ipcMain\.handle\("critic:calibration-(?:open|current|cancel)"/gu)?.length, 3);
   const preload = readFileSync(join(__dirname, "..", "..", "src", "preload.ts"), "utf8");
   assert.equal(preload.match(/critic:call-decide/gu)?.length, 1);
   assert.match(preload, /criticCallDecide: \(request\) => ipcRenderer\.invoke\("critic:call-decide", request\)/u);

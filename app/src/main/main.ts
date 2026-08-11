@@ -14,6 +14,8 @@ import {
 } from "./pendingcandidate.js";
 import { beginQuitDrain } from "./rungate.js";
 import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
+import { createCriticCalibrationOrchestrator } from "./criticcalibration.js";
+import { createCriticCalibrationE2eFake } from "./criticcalibrationfake.js";
 
 if (started) app.quit();
 
@@ -27,6 +29,23 @@ if (testUserData) {
     throw new Error("CAIRN_TEST_USER_DATA requires CAIRN_E2E=1.");
   }
   app.setPath("userData", path.resolve(testUserData));
+}
+
+// Q8's only desktop entrance is a positively marked fake inside an isolated
+// Playwright profile. A partial or stray marker fails at boot rather than
+// creating a store in the owner's profile or installing a transport in normal
+// production. Q10 must add live calibration separately; it may not reuse this.
+const calibrationE2eRequested = process.env.CAIRN_TEST_CRITIC_CALIBRATION === "1";
+const calibrationE2eMode = process.env.CAIRN_TEST_CRITIC_CALIBRATION_MODE ?? "respond";
+if (process.env.CAIRN_TEST_CRITIC_CALIBRATION !== undefined && !calibrationE2eRequested) {
+  throw new Error("CAIRN_TEST_CRITIC_CALIBRATION must be exactly 1 when present.");
+}
+if (calibrationE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "1"
+  || !testUserData || !process.env.CAIRN_OPEN)) {
+  throw new Error("Critic calibration E2E requires CAIRN_E2E=1, CAIRN_MOCK=1, CAIRN_TEST_USER_DATA, and CAIRN_OPEN.");
+}
+if (calibrationE2eRequested && calibrationE2eMode !== "respond" && calibrationE2eMode !== "hold") {
+  throw new Error("CAIRN_TEST_CRITIC_CALIBRATION_MODE must be respond or hold.");
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -123,6 +142,12 @@ if (process.env.CAIRN_MOCK === undefined) {
 }
 
 function bootstrap(): void {
+  // The calibration service exists only in the guarded E2E process, but an
+  // approved send still owns an asynchronous transport and a durable
+  // `sending` record. Keep the instance where the quit handler can drain that
+  // work; an unapproved card deliberately remains memory-only across close.
+  let criticCalibration: ReturnType<typeof createCriticCalibrationOrchestrator> | null = null;
+
   app.whenReady().then(() => {
     setContractPath(contractPath());
     // Result-card authorship markers live beside the stored connection, in the
@@ -158,7 +183,17 @@ function bootstrap(): void {
     registerProjectIpc();
     registerConductorIpc();
     registerBridgeIpc();
-    registerTaskIpc(() => mainWindow);
+    criticCalibration = calibrationE2eRequested
+      ? createCriticCalibrationOrchestrator({
+          profileRoot: app.getPath("userData"),
+          projectRoot: process.env.CAIRN_OPEN as string,
+          transport: createCriticCalibrationE2eFake({
+            profileRoot: app.getPath("userData"),
+            holdUntilCancelled: calibrationE2eMode === "hold",
+          }),
+        })
+      : null;
+    registerTaskIpc(() => mainWindow, criticCalibration);
     // The phone bridge (Task 143): one LAN listener serving the owner's
     // paired phone. It starts with the app and stops at quit; if it cannot
     // start (no home-network address, ports in use) the settings surface
@@ -182,7 +217,8 @@ function bootstrap(): void {
     if (readyToQuit) return;
     const runs = activeTaskRuns();
     const pending = activePendingSerialCandidates();
-    if (runs.dirs.length === 0 && pending.length === 0) return;
+    const calibrationInFlight = criticCalibration?.hasInFlightSend() === true;
+    if (runs.dirs.length === 0 && pending.length === 0 && !calibrationInFlight) return;
     event.preventDefault();
     if (quitting) return; // grace already underway; keep blocking, no second dialog
     const parkAndQuit = (): void => {
@@ -198,9 +234,26 @@ function bootstrap(): void {
       readyToQuit = true;
       app.quit();
     };
+
+    const drainCalibration = (): Promise<void> | null => {
+      if (!calibrationInFlight || criticCalibration === null) return null;
+      criticCalibration.cancelAll();
+      return criticCalibration.settled();
+    };
+    const settleThenQuit = (settlement: Promise<unknown>): void => {
+      const grace = new Promise((resolve) => setTimeout(resolve, 8_000));
+      void Promise.race([settlement, grace]).then(parkAndQuit);
+    };
+
     if (runs.dirs.length === 0) {
       quitting = true;
-      parkAndQuit();
+      const calibrationSettlement = drainCalibration();
+      if (calibrationSettlement === null) {
+        parkAndQuit();
+      } else {
+        beginQuitDrain();
+        settleThenQuit(Promise.allSettled([calibrationSettlement]));
+      }
       return;
     }
     const choice = dialog.showMessageBoxSync({
@@ -215,12 +268,15 @@ function bootstrap(): void {
     quitting = true;
     beginQuitDrain();
     runs.cancelAll();
+    const calibrationSettlement = drainCalibration();
     // Candidate routing remains production-dark in Q7, so an active task here
     // is still the legacy one-call path. Preserve its established grace
     // behavior byte-for-byte; an already-journaled candidate was handled by
     // parkAndQuit above, and Q10 must replace this grace when it activates a
     // Builder that can race into pending-candidate state.
-    const grace = new Promise((resolve) => setTimeout(resolve, 8_000));
-    void Promise.race([runs.settled(), grace]).then(parkAndQuit);
+    const settlement = calibrationSettlement === null
+      ? runs.settled()
+      : Promise.allSettled([runs.settled(), calibrationSettlement]);
+    settleThenQuit(settlement);
   });
 }

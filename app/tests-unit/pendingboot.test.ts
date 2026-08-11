@@ -15,7 +15,7 @@ test("pending recovery is installed before every IPC, bridge, or window boundary
     "registerProjectIpc()",
     "registerConductorIpc()",
     "registerBridgeIpc()",
-    "registerTaskIpc(() => mainWindow)",
+    "registerTaskIpc(() => mainWindow, criticCalibration)",
     "void startPhoneBridge()",
     "createWindow();",
   ]) {
@@ -32,9 +32,14 @@ test("quit parks exact pending locks while preserving the dark legacy task grace
   assert.ok(beforeQuit.includes("activePendingSerialCandidates()"));
   assert.ok(beforeQuit.includes("parkPendingSerialCandidatesForRestart()"));
   assert.ok(beforeQuit.indexOf("parkPendingSerialCandidatesForRestart()") < beforeQuit.lastIndexOf("app.quit()"));
+  assert.ok(beforeQuit.includes("hasInFlightSend()"), "an approved calibration send must participate in quit gating");
+  assert.ok(beforeQuit.includes("criticCalibration.cancelAll()"), "quit must abort an in-flight calibration send");
+  assert.ok(beforeQuit.includes("criticCalibration.settled()"), "quit must await calibration's terminal record");
+  assert.match(beforeQuit, /if \(runs\.dirs\.length === 0 && pending\.length === 0 && !calibrationInFlight\) return;/u);
   assert.ok(beforeQuit.includes("Promise.race"));
   assert.ok(beforeQuit.includes("8_000"));
-  assert.match(beforeQuit, /Promise\.race\(\[runs\.settled\(\), grace\]\)\.then\(parkAndQuit\)/);
+  assert.match(beforeQuit, /Promise\.allSettled\(\[runs\.settled\(\), calibrationSettlement\]\)/u);
+  assert.match(beforeQuit, /settleThenQuit\(Promise\.allSettled\(\[calibrationSettlement\]\)\)/u);
 });
 
 test("an unverifiable pending store gates every project instead of refusing to start", () => {

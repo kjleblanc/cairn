@@ -10,6 +10,8 @@ import {
   CRITIC_CALL_TIMEOUT_MS_CAP,
   CRITIC_CALL_CREDENTIAL_TEXT,
   CRITIC_CALL_NOT_SENT,
+  CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT,
+  CRITIC_CALL_SYNTHETIC_NOT_SENT,
 } from "../src/shared/critic-call.js";
 
 const renderer = (...parts: string[]) =>
@@ -37,7 +39,11 @@ function lastRule(selector: string): string {
 const cardCode = card.split("\n").filter((line) => !/^\s*(?:\/\/|\*|\/\*)/u.test(line)).join("\n");
 
 test("c1: the card shows every fact the owner is promised, from main's card alone", () => {
-  assert.match(cardCode, /Independent critic — paid call \{count\(call\.attempt\)\} of at most \{count\(call\.attemptCap\)\}/u);
+  assert.match(cardCode, /call\.callKind === "synthetic-calibration"/u);
+  assert.match(cardCode, /call\.calibration === null/u);
+  assert.match(cardCode, /synthetic calibration \{call\.calibration\.fixtureId\}/u);
+  assert.match(cardCode, /\{count\(call\.attempt\)\} of at most \{count\(call\.attemptCap\)\}/u);
+  assert.match(cardCode, /fixture \{count\(call\.calibration\.fixtureIndex\)\} of \{count\(call\.calibration\.fixtureCount\)\}/u);
 
   for (const field of [
     "call.provider", "call.baseUrl", "call.configuredModel", "call.resolvedModel",
@@ -63,6 +69,11 @@ test("c1: the card shows every fact the owner is promised, from main's card alon
   assert.match(cardCode, /count\(file\.characters\)/u);
   assert.match(cardCode, /\{file\.sha256\}/u);
   assert.doesNotMatch(cardCode, /sha256\.slice/u, "the hash must not be truncated");
+  for (const field of ["manifestSha256", "fixtureSha256", "packetSha256", "requestSha256", "requestBodySha256"]) {
+    assert.ok(cardCode.includes(`call.calibration.${field}`), `synthetic cards must show ${field}`);
+  }
+  assert.match(cardCode, /call\.calibration\.text\.map/u);
+  assert.match(cardCode, /Inspect the exact synthetic text/u);
 });
 
 test("c1: numbers and durations cannot vary by locale or be rounded away", () => {
@@ -162,9 +173,9 @@ test("c5: the parser's bounds are the same numbers main composes from", () => {
   }
 });
 
-test("c1: the card component carries no wording of its own about what is sent", () => {
+test("c1: the card component carries no route-specific provenance or credential wording of its own", () => {
   assert.match(cardCode, /call\.notSent\.join/u);
-  for (const item of CRITIC_CALL_NOT_SENT) {
+  for (const item of [...CRITIC_CALL_NOT_SENT, ...CRITIC_CALL_SYNTHETIC_NOT_SENT]) {
     assert.equal(card.includes(item), false, `"${item}" must come from main, not from the component`);
   }
   assert.equal(card.includes("cannot read or edit the project"), false, "the purpose sentence is main's");
@@ -172,9 +183,11 @@ test("c1: the card component carries no wording of its own about what is sent", 
   // The credential sentence is a shared constant, not renderer prose, and it
   // does not claim the key is withheld — it is sent, as the header that signs
   // the request.
-  assert.match(cardCode, /\{CRITIC_CALL_CREDENTIAL_TEXT\}/u);
+  assert.match(cardCode, /\{call\.credentialText\}/u);
   assert.equal(card.includes(CRITIC_CALL_CREDENTIAL_TEXT), false);
+  assert.equal(card.includes(CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT), false);
   assert.equal([...CRITIC_CALL_NOT_SENT].some((item) => /key/u.test(item)), false,
     "the provider key must not be listed as something that is not sent");
   assert.match(CRITIC_CALL_CREDENTIAL_TEXT, /signs this one request/u);
+  assert.match(CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT, /No saved provider key is used/u);
 });

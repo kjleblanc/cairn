@@ -4,20 +4,21 @@
  * running-set, and neither should import from the other. */
 
 import { pendingRunRefusal } from "./pendingrun.js";
+import { canonicalProjectKey } from "./conductor/turnauth.js";
 
 const running = new Set<string>();
 let quitDraining = false;
 
 export function markRunning(dir: string): void {
-  running.add(dir);
+  running.add(canonicalProjectKey(dir));
 }
 
 export function clearRunning(dir: string): void {
-  running.delete(dir);
+  running.delete(canonicalProjectKey(dir));
 }
 
 export function isTaskRunning(dir: string): boolean {
-  return running.has(dir);
+  return running.has(canonicalProjectKey(dir));
 }
 
 export function runningDirs(): string[] {

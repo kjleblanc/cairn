@@ -40,11 +40,15 @@ import {
 import { isConversationId } from "./conductor/conversation-id.js";
 import { canonicalProjectKey } from "./conductor/turnauth.js";
 import {
-  clearCriticCallApprovalByKey,
+  clearProviderCriticCallApprovalByKey,
   decideCriticCall,
   type CriticCallDecisionRefusal,
 } from "./criticapproval.js";
 import { parseCriticCallDecisionRequest } from "../shared/critic-call-parse.js";
+import {
+  parseCriticCalibrationOpenRequest,
+  type CriticCalibrationOrchestrator,
+} from "./criticcalibration.js";
 import {
   discardUnfinalizedEvidenceRun,
   finalizeEvidenceRun,
@@ -91,6 +95,8 @@ const PREVIEW_STALE = "TASK_PREVIEW_STALE: That dispatch review is no longer cur
 const PROPOSAL_STALE = "TASK_PROPOSAL_STALE: That proposed task is no longer current.";
 const PROPOSAL_RISKS = "TASK_PROPOSAL_HAS_RISKS: Resolve or set aside every current risk before reviewing dispatch.";
 const ROUTE_CHANGED = "TASK_ROUTE_CHANGED: The selected worker changed while you were deciding. Nothing was started.";
+const CRITIC_CALIBRATION_ACTIVE = "CRITIC_CALIBRATION_ACTIVE: Finish or cancel the synthetic calibration call before reviewing or starting a task.";
+const CRITIC_CALIBRATION_TASK_ACTIVE = "CRITIC_CALIBRATION_TASK_ACTIVE: Wait for the current task to finish, or cancel it, before using calibration.";
 /** One sentence per closed refusal. Three of the four leave the approval
  * standing, so none of them may tell the owner the call is gone. */
 const CRITIC_CALL_REFUSAL_MESSAGES: Readonly<Record<CriticCallDecisionRefusal, string>> = Object.freeze({
@@ -128,7 +134,7 @@ type PendingPreview = Readonly<{
 /** Read-only runtime projection for workspace and IPC assembly. IPC callers
  * receive a structured clone; main-process callers must treat it as immutable. */
 export function currentTaskSession(dir: string): RunSessionSnapshot | null {
-  return sessions.get(dir) ?? null;
+  try { return sessions.get(canonicalProjectKey(dir)) ?? null; } catch { return null; }
 }
 
 /** Quit protection: name live runs, cancel them, and await their fail-closed close. */
@@ -142,6 +148,18 @@ export function activeTaskRuns(): { dirs: string[]; cancelAll(): void; settled()
       await Promise.allSettled([...settlements.values()]);
     },
   };
+}
+
+function anyTaskRunningOrStarting(): boolean {
+  return runningDirs().length > 0 || starting.size > 0;
+}
+
+/** A calibration disclosure may be mirrored onto an older retained session,
+ * but it remains calibration-owned. Clear only that synthetic projection so a
+ * future provider card cannot be erased by a late terminal callback. */
+function clearSyntheticCalibrationDisclosure(key: string): void {
+  const session = sessions.get(key);
+  if (session?.criticCall?.callKind === "synthetic-calibration") delete session.criticCall;
 }
 
 function sameDisclosure(actual: WorkerDisclosure | undefined, expected: WorkerDisclosure): boolean {
@@ -225,11 +243,10 @@ function nextGeneration(key: string): number {
   const review = reviewAuthorities.get(key);
   if (review !== undefined) invalidateTaskReviewAuthority(review);
   reviewAuthorities.delete(key);
-  // A pending critic approval belongs to the run that opened it. Without this
-  // it would outlive a cancelled or replaced run and stay approvable against a
-  // world that has moved, pinning its request — and every selected file's
-  // content — for the life of the process.
-  clearCriticCallApprovalByKey(key);
+  // A provider critic approval belongs to the task generation that opened it.
+  // Synthetic calibration has a separate lifecycle and must survive unrelated
+  // preview replacement or cancellation.
+  clearProviderCriticCallApprovalByKey(key);
   return generation;
 }
 
@@ -265,7 +282,10 @@ function evidenceTitle(outcome: string): string {
   return outcome.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
-export function registerTaskIpc(win: () => BrowserWindow | null): void {
+export function registerTaskIpc(
+  win: () => BrowserWindow | null,
+  criticCalibration: CriticCalibrationOrchestrator | null = null,
+): void {
   const mock = process.env.CAIRN_MOCK === "1";
 
   unsubscribeProposalChanges?.();
@@ -279,8 +299,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       const status = projectStatus(dir);
       if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. Migrate it safely before starting another task.");
       const key = canonicalProjectKey(dir);
-      const refusal = runRefusal(isTaskRunning(dir) || starting.has(key), isQuitDraining());
+      const refusal = runRefusal(isTaskRunning(key) || starting.has(key), isQuitDraining());
       if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
+      if (criticCalibration?.hasActive()) {
+        return { ok: false, message: CRITIC_CALIBRATION_ACTIVE } satisfies Result<never>;
+      }
       const pendingRefusal = pendingTaskStartRefusal(dir);
       if (pendingRefusal) return { ok: false, message: pendingRefusal } satisfies Result<never>;
       const generation = nextGeneration(key);
@@ -308,6 +331,10 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       }
 
       const detected = await detectedAdapters(mock, dir);
+      if (criticCalibration?.hasActive()) {
+        if (routeGenerations.get(key) === generation) nextGeneration(key);
+        return { ok: false, message: CRITIC_CALIBRATION_ACTIVE } satisfies Result<never>;
+      }
       const postDetectionPendingRefusal = pendingTaskStartRefusal(dir);
       if (postDetectionPendingRefusal) {
         if (routeGenerations.get(key) === generation) nextGeneration(key);
@@ -406,7 +433,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       if (pending?.taskReviewAuthority === authority) {
         previews.set(key, Object.freeze({ ...pending, taskReview: projection }));
       }
-      const session = sessions.get(request.dir);
+      const session = sessions.get(key);
       if (session?.taskReview !== undefined) session.taskReview = projection;
       return { ok: true, value: projection };
     } catch (error) {
@@ -420,9 +447,10 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
    *
    * The reply is output only: it says what was decided and nothing a renderer
    * could use as authority for a call. The grant an approval produces stays in
-   * main, and in this stage nothing consumes it.
+   * main; only the guarded calibration branch below can hand it to the injected
+   * fake sender.
    */
-  ipcMain.handle("critic:call-decide", (_event, unsafeRequest: unknown): Result<CriticCallDecisionV1> => {
+  ipcMain.handle("critic:call-decide", async (_event, unsafeRequest: unknown): Promise<Result<CriticCallDecisionV1>> => {
     const request = parseCriticCallDecisionRequest(unsafeRequest);
     if (request === null) {
       return { ok: false, message: "CRITIC_CALL_INVALID: Cairn refused a malformed critic-call decision." };
@@ -431,22 +459,104 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       // The same project check every other task authority performs before it
       // touches anything.
       projectStatus(request.dir);
+      const key = canonicalProjectKey(request.dir);
       // A project Cairn has gated for pending-run recovery may not have a
       // paid call approved against it, exactly as task start and push may not
       // proceed. Without this the critic surface would be the one authority
       // that ignores Task 215's gate.
       const gated = pendingTaskStartRefusal(request.dir);
       if (gated !== null) return { ok: false, message: gated };
+      if (criticCalibration?.hasPending(key)) {
+        if (anyTaskRunningOrStarting()) {
+          return { ok: false, message: CRITIC_CALIBRATION_TASK_ACTIVE };
+        }
+        const calibrated = await criticCalibration.decide(request).finally(() => {
+          if (!criticCalibration.hasActive(key)) clearSyntheticCalibrationDisclosure(key);
+        });
+        if (!calibrated.ok) {
+          if (calibrated.consumed === true) win()?.webContents.send("critic:calibration-changed");
+          const refusal = calibrated.code as CriticCallDecisionRefusal;
+          const knownRefusal = Object.prototype.hasOwnProperty.call(CRITIC_CALL_REFUSAL_MESSAGES, refusal);
+          return {
+            ok: false,
+            message: knownRefusal
+              ? CRITIC_CALL_REFUSAL_MESSAGES[refusal]
+              : `${calibrated.code}: Cairn could not complete that synthetic calibration decision.`,
+          };
+        }
+        win()?.webContents.send("critic:calibration-changed");
+        return { ok: true, value: calibrated.value.decision };
+      }
       const outcome = decideCriticCall(request);
       if (!outcome.ok) return { ok: false, message: CRITIC_CALL_REFUSAL_MESSAGES[outcome.code] };
       // Only a decision that succeeded spends the approval, so only then does
       // the snapshot stop advertising a card.
-      const session = sessions.get(request.dir);
+      const session = sessions.get(key);
       if (session?.criticCall !== undefined) delete session.criticCall;
       return { ok: true, value: outcome.decision };
     } catch (error) {
       logError("critic:call-decide", error);
       return { ok: false, message: "CRITIC_CALL_STALE: That critic call is no longer waiting for a decision." };
+    }
+  });
+
+  ipcMain.handle("critic:calibration-open", (_event, unsafeRequest: unknown) => {
+    const request = parseCriticCalibrationOpenRequest(unsafeRequest);
+    if (request === null) {
+      return { ok: false, message: "CRITIC_CALIBRATION_INPUT_INVALID: Cairn refused a malformed synthetic fixture choice." } satisfies Result<never>;
+    }
+    if (criticCalibration === null) {
+      return { ok: false, message: "CRITIC_CALIBRATION_UNAVAILABLE: No guarded injected fake is installed." } satisfies Result<never>;
+    }
+    try {
+      projectStatus(request.dir);
+      const key = canonicalProjectKey(request.dir);
+      if (anyTaskRunningOrStarting()) {
+        return { ok: false, message: CRITIC_CALIBRATION_TASK_ACTIVE } satisfies Result<never>;
+      }
+      const gated = pendingTaskStartRefusal(request.dir);
+      if (gated !== null) return { ok: false, message: gated } satisfies Result<never>;
+      const opened = criticCalibration.open(request);
+      if (!opened.ok) return { ok: false, message: `${opened.code}: Cairn did not open a synthetic calibration call.` } satisfies Result<never>;
+      const session = sessions.get(key);
+      if (session !== undefined) session.criticCall = opened.value.disclosure;
+      win()?.webContents.send("critic:calibration-changed");
+      return { ok: true, value: opened.value };
+    } catch (error) {
+      logError("critic:calibration-open", error);
+      return { ok: false, message: "CRITIC_CALIBRATION_INPUT_INVALID: Cairn could not bind that fixture to this project." } satisfies Result<never>;
+    }
+  });
+
+  ipcMain.handle("critic:calibration-current", (_event, dir: unknown) => {
+    if (typeof dir !== "string" || dir.length === 0 || dir.length > 32_767 || criticCalibration === null) return null;
+    try {
+      projectStatus(dir);
+      return criticCalibration.current(dir);
+    } catch { return null; }
+  });
+
+  ipcMain.handle("critic:calibration-cancel", (_event, dir: unknown): Result<"cancelled" | "cancelling"> => {
+    if (typeof dir !== "string" || dir.length === 0 || dir.length > 32_767 || criticCalibration === null) {
+      return { ok: false, message: "CRITIC_CALIBRATION_CALL_NOT_PENDING: No synthetic calibration call is waiting." };
+    }
+    try {
+      projectStatus(dir);
+      const key = canonicalProjectKey(dir);
+      const cancelled = criticCalibration.cancel(dir);
+      if (!cancelled.ok) {
+        if (!criticCalibration.hasActive(key)) {
+          clearSyntheticCalibrationDisclosure(key);
+          win()?.webContents.send("critic:calibration-changed");
+        }
+        return { ok: false, message: `${cancelled.code}: Cairn could not cancel that synthetic calibration call.` };
+      }
+      clearSyntheticCalibrationDisclosure(key);
+      win()?.webContents.send("critic:calibration-changed");
+      return { ok: true, value: cancelled.value.status };
+    } catch (error) {
+      logError("critic:calibration-cancel", error);
+      return { ok: false, message: "CRITIC_CALIBRATION_CALL_NOT_PENDING: No synthetic calibration call is waiting." };
     }
   });
 
@@ -480,8 +590,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       logError("task:run", error);
       return { ok: false, message: plainMessage(error) } satisfies Result<never>;
     }
-    const refusal = runRefusal(isTaskRunning(dir) || starting.has(key), isQuitDraining());
+    const refusal = runRefusal(isTaskRunning(key) || starting.has(key), isQuitDraining());
     if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
+    if (criticCalibration?.hasActive()) {
+      return { ok: false, message: CRITIC_CALIBRATION_ACTIVE } satisfies Result<never>;
+    }
     const pendingRefusal = pendingTaskStartRefusal(dir);
     if (pendingRefusal) return { ok: false, message: pendingRefusal } satisfies Result<never>;
 
@@ -533,6 +646,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       return refuseBeforeAcceptance(plainMessage(error));
     }
 
+    if (criticCalibration?.hasActive()) return refuseBeforeAcceptance(CRITIC_CALIBRATION_ACTIVE);
     if (previews.get(key) !== pending || routeGenerations.get(key) !== pending.generation || !pendingReviewIsCurrent(key, pending)) {
       return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
     }
@@ -647,11 +761,11 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
     let evidenceWindow: StageCaptureWindow | null;
     try {
       controller = new AbortController();
-      markRunning(dir);
-      controllers.set(dir, controller);
+      markRunning(key);
+      controllers.set(key, controller);
       evidenceRunId = routedWorker ? randomUUID() : null;
       evidenceWindow = evidenceRunId === null ? null : win();
-      sessions.set(dir, {
+      sessions.set(key, {
         dir,
         outcome,
         acceptedPreviewId: previewId,
@@ -669,12 +783,12 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       });
     } catch (error) {
       starting.delete(key);
-      clearRunning(dir);
-      controllers.delete(dir);
+      clearRunning(key);
+      controllers.delete(key);
       logError("task:run accepted setup", error);
       const message = plainMessage(error);
       try {
-        sessions.set(dir, {
+        sessions.set(key, {
           dir, outcome, acceptedPreviewId: previewId, request: pending.request, adapterId: routedAdapterId, conversationId,
           worker: routedWorker, startedAt: new Date().toISOString(), activities: [],
           phase: "closed", result: null, error: message, evidenceRunId: null,
@@ -726,7 +840,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           logError("task:run evidence finalize", error);
         }
       }
-      const session = sessions.get(dir);
+      const session = sessions.get(key);
       if (session) session.evidenceRunId = cardEvidenceRunId;
     };
 
@@ -741,7 +855,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
           signal: controller.signal,
           events: {
             onActivity: (activity) => {
-              sessions.get(dir)?.activities.push(activity);
+              sessions.get(key)?.activities.push(activity);
               const payload: TaskActivityEvent = { dir, activity };
               win()?.webContents.send("task:activity", payload);
             },
@@ -750,7 +864,7 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         const safeValue = value.status === "connection-required" && detected.status
           ? { ...value, route: { ...value.route, reason: connectionRequiredReason(detected.status) } }
           : value;
-        const session = sessions.get(dir);
+        const session = sessions.get(key);
         if (session) { session.phase = "closed"; session.result = safeValue; }
         if (safeValue.status === "connection-required") {
           // A readiness close did no work, so remove only this valid,
@@ -778,18 +892,18 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
         // keeps this session's request view for the later ERROR surface, but it
         // never resurrects either one-time authority.
         logError("task:run", error);
-        const session = sessions.get(dir);
+        const session = sessions.get(key);
         if (session) { session.phase = "closed"; session.error = plainMessage(error); }
         await finishEvidence("error", "ERROR", null);
         return { ok: false, message: plainMessage(error) };
       } finally {
         starting.delete(key);
-        clearRunning(dir);
-        controllers.delete(dir);
-        settlements.delete(dir);
+        clearRunning(key);
+        controllers.delete(key);
+        settlements.delete(key);
       }
     })();
-    settlements.set(dir, run);
+    settlements.set(key, run);
     acceptedRunOwnsGate = true;
     // The envelope speaks the result, for EVERY terminal state — a verified
     // DONE, an honest STOPPED, a connection-required close, and a run that
@@ -824,10 +938,10 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
       // owns cleanup, its own catch/finally remains authoritative.
       if (!acceptedRunOwnsGate) {
         invalidateMatchedPreview?.();
-        clearRunning(dir);
-        controllers.delete(dir);
-        settlements.delete(dir);
-        const session = sessions.get(dir);
+        clearRunning(key);
+        controllers.delete(key);
+        settlements.delete(key);
+        const session = sessions.get(key);
         if (session?.phase === "running") {
           session.phase = "closed";
           session.error = plainMessage(error);
@@ -841,21 +955,30 @@ export function registerTaskIpc(win: () => BrowserWindow | null): void {
   });
 
   ipcMain.handle("task:cancel", (_event, dir: string): Result<null> => {
-    const controller = controllers.get(dir);
-    if (!controller) return { ok: false, message: "No task is running for this project." };
-    controller.abort();
-    return { ok: true, value: null };
+    try {
+      const controller = controllers.get(canonicalProjectKey(dir));
+      if (!controller) return { ok: false, message: "No task is running for this project." };
+      controller.abort();
+      return { ok: true, value: null };
+    } catch {
+      return { ok: false, message: "No task is running for this project." };
+    }
   });
 
-  ipcMain.handle("task:current", (_event, dir: string): RunSessionSnapshot | null => sessions.get(dir) ?? null);
+  ipcMain.handle("task:current", (_event, dir: string): RunSessionSnapshot | null => currentTaskSession(dir));
 
   ipcMain.handle("task:acknowledge", (_event, dir: string): Result<null> => {
-    const session = sessions.get(dir);
-    // A closed session becomes visible just before terminal capture. Keep its
-    // run identity until that bounded settlement finishes; an eager click on
-    // "Return" cannot erase the proof between capture's two identity checks.
-    if (session && session.phase === "closed" && !isTaskRunning(dir)) sessions.delete(dir);
-    return { ok: true, value: null };
+    try {
+      const key = canonicalProjectKey(dir);
+      const session = sessions.get(key);
+      // A closed session becomes visible just before terminal capture. Keep its
+      // run identity until that bounded settlement finishes; an eager click on
+      // "Return" cannot erase the proof between capture's two identity checks.
+      if (session && session.phase === "closed" && !isTaskRunning(key)) sessions.delete(key);
+      return { ok: true, value: null };
+    } catch {
+      return { ok: false, message: "That project session is no longer available." };
+    }
   });
 
   ipcMain.handle("evidence:album", (

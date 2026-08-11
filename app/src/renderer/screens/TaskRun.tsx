@@ -34,6 +34,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   const [taskSpecPreview, setTaskSpecPreview] = useState<TaskSpecProposalPreviewV1 | null>(null);
   const [taskReview, setTaskReview] = useState<TaskReviewProjectionV1 | null>(null);
   const [criticCall, setCriticCall] = useState<CriticCallDisclosureV1 | null>(null);
+  const [calibrationCall, setCalibrationCall] = useState<CriticCallDisclosureV1 | null>(null);
   const [criticCallBusy, setCriticCallBusy] = useState(false);
   const [disclosure, setDisclosure] = useState<WorkerDisclosure | null>(null);
   const [result, setResult] = useState<SerialRunResult | null>(null);
@@ -81,10 +82,20 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
   }, []);
 
   const refresh = useCallback(async () => {
-    applySession(await cairn.taskCurrent(dir));
+    const [session, calibration] = await Promise.all([
+      cairn.taskCurrent(dir),
+      cairn.criticCalibrationCurrent(dir),
+    ]);
+    applySession(session);
+    setCalibrationCall(calibration?.disclosure ?? null);
   }, [applySession, dir]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => cairn.onCriticCalibrationChanged(() => {
+    void cairn.criticCalibrationCurrent(dir)
+      .then((calibration) => setCalibrationCall(calibration?.disclosure ?? null));
+  }), [dir]);
 
   useEffect(() => cairn.onTaskActivity((event) => {
     if (event.dir !== dir) return;
@@ -198,6 +209,7 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
       if (!response.ok) { setError(response.message); return; }
       setError(null);
       setCriticCall(null);
+      setCalibrationCall(null);
     } catch {
       if (routeGeneration.current !== generation) return;
       setError("Cairn could not record that critic-call decision. Review the current task again.");
@@ -306,11 +318,11 @@ export function TaskRun({ dir, demoAvailable, onBack }: {
         </>
       ) : null}
 
-      {criticCall && (phase === "route" || phase === "running") ? (
+      {calibrationCall || (criticCall && (phase === "route" || phase === "running")) ? (
         <CriticCallCard
-          call={criticCall}
+          call={calibrationCall ?? criticCall!}
           busy={criticCallBusy}
-          onDecide={(action) => void decideCriticCall(criticCall, action)}
+          onDecide={(action) => void decideCriticCall(calibrationCall ?? criticCall!, action)}
         />
       ) : null}
       {phase === "running" && taskReview ? <TaskReviewView review={taskReview} heading="Accepted Task Spec" /> : null}
