@@ -14,6 +14,13 @@ product runtime changes.
 **Plan 1 of 4** for
 `docs/superpowers/specs/2026-08-07-cairn-owner-verdict-design.md`.
 
+**Status: EXECUTED as Task 205** (2026-08-07), landing contract v0.8.0. Its
+four tasks became four commits under that one task number. Task 212 later added
+the `cairn.html` version guard this plan's Task A should arguably have carried,
+after a second review found the page could advertise a version its own embedded
+contract contradicted. **Plans 2–4 are unwritten and blocked** by Task 207's
+Prerequisite Q; see `docs/ai-work/HANDOFF-owner-verdict.md`.
+
 **Revised by Task 204** after an adversarial review. The first version's Task A
 was built on a false premise — it claimed `app/resources/contract.md` ships
 unguarded, when that file and `core/assets/contract.md` are **gitignored build
