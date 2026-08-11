@@ -428,6 +428,31 @@ or any competing authority consults renderer state instead of the journal gate.
 
 ## Task Q8 — Add the packet-only critic and approval surface, fake-only
 
+> **Status (2026-08-09): landing as four serial tasks, three done.** By owner
+> decision Q8 was too large for one task — as written it spans Core types, a
+> transport, a calibration orchestrator, shared IPC, preload, both renderer
+> screens, and Electron journeys. It lands as:
+>
+> - **Stage 1 — Task 216 (`c1b0023`): DONE.** Core's `CriticCallAuthorizationV1`:
+>   which call is approved, and the body it authorizes.
+> - **Stage 2 — Task 217 (`dd622da`): DONE.** `app/src/main/critictransport.ts`:
+>   the one-shot tool-free send, bound to one authorization and spent before it
+>   leaves.
+> - **Stage 3 — Task 218 (`79a5c73`): DONE.** The owner-facing Independent-critic
+>   card, its one-use approval, and both run surfaces. Still dark: nothing
+>   composes a card.
+> - **Stage 4 — not started.** The calibration-only orchestrator, which is what
+>   finally drives the card, plus the fake-only Electron journeys deferred from
+>   stage 3 because nothing could make the card appear without a test-only
+>   production seam. Those journeys need the single-tenant app token and the
+>   owner out of Cairn.
+>
+> **Precondition stage 4 must honour:** four of the five "not sent" claims on the
+> approval card rest on provenance booleans a caller supplies. Core checks their
+> shape, not their truth, and the selector that would make them true does not
+> exist yet. Driving the card with an unverified selector turns those sentences
+> into untruths on an approval screen.
+
 **Visible outcome:** after a fake candidate, the desktop shows a separate
 Independent critic disclosure. An injected fake transport receives exactly one
 canonical request with no tool schema. Required/optional/off and decline follow
