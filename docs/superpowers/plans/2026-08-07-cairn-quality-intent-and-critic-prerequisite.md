@@ -613,6 +613,18 @@ or a model can move the rubric between rounds.
 
 ## Task Q10 — Run the preregistered calibration and activate only on a pass
 
+> **Status (2026-08-12): STOPPED as Task 221 before any provider call.** A
+> read-only implementation audit found that an activation literal would enable
+> only the Task Spec prompt/preview surfaces. Ordinary task start still drops
+> the accepted Task Spec into the legacy terminal runner; only the guarded Q9
+> fixture starts the durable candidate/critic lifecycle. Production adapters
+> have no candidate-writer authority, and normal Main has no Evidence Plan or
+> production packet-selection path. Closing those seams requires a separately
+> reviewed production-route prerequisite rather than changing Q9's synthetic
+> authority inside this calibration task. The activation registry remains
+> empty. No credential, provider, network, paid call, or external write was
+> used.
+
 **Visible outcome:** the owner sees real evidence that the selected critic
 abstains on uncertainty, ignores prompt injection, resists order bias in the
 declared fixture set, surfaces planted frozen-condition failures for confirmation,
