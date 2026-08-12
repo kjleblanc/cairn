@@ -625,6 +625,23 @@ or a model can move the rubric between rounds.
 > empty. No credential, provider, network, paid call, or external write was
 > used.
 
+> **Follow-up prerequisite status (2026-08-12): STOPPED as Task 222 before
+> implementation.** The separately authorized production-route prerequisite
+> reached two of its own fail-closed boundaries during its first slice. The
+> current Codex `workspace-write` launch is not causally proved to confine
+> writes to the canonical project and exclude `userData` and implicit
+> temporary writable roots on every intended production platform.
+> Independently, normal Task Specs require exact adapter-command attestations,
+> while Codex deliberately exposes
+> only opaque provider command events and Main has no trusted pre-dispatch
+> verifier vocabulary from which it can author the required Evidence Plan.
+> Treating model-chosen commands as later evidence would manufacture authority.
+> No application or Core source changed; activation remains empty. Before a
+> third attempt, the owner must separately decide the intended-platform scope
+> and the owner-visible verification semantics and qualifying task vocabulary;
+> only then can AI-owned launcher and verifier-harness implementation begin.
+> No credential, provider, network, paid call, or external write was used.
+
 **Visible outcome:** the owner sees real evidence that the selected critic
 abstains on uncertainty, ignores prompt injection, resists order bias in the
 declared fixture set, surfaces planted frozen-condition failures for confirmation,
