@@ -534,6 +534,15 @@ be disclosed, or a live transport is needed to prove the fake route.
 
 ## Task Q9 — Add one separately approved repair and final critic round
 
+> **Status (2026-08-12): DONE as Task 220.** The fake-only guarded lifecycle
+> now admits only an authenticated owner-confirmed original blocker, permits
+> one separately approved repair, re-evaluates the frozen original checks, and
+> permits only the frozen mode's separately approved final critic/retry path.
+> HMAC-authenticated restart custody preserves both rounds, counters, owner and
+> critic decisions, the one narrow Evidence Plan revision, and exactly-once
+> terminal delivery. The owner-cleared Electron matrix passed all 17 journeys
+> under both app tokens. Activation remains empty; Q10 and Plan 2 are unstarted.
+
 **Visible outcome:** one confirmed required-check blocker may lead to one
 owner-approved Builder repair and, when the frozen mode requires/offers it, one
 separately approved final critic. Advisory notes never offer or start repair.

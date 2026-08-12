@@ -194,11 +194,28 @@ let currentProjectRoot: string | null = null;
 let currentProjectRendererRoot: string | null = null;
 let currentProjectExpectation: ReturnType<typeof keystore.captureProjectExpectation> = null;
 
+type CurrentProjectChangedListener = (dir: string) => void;
+const currentProjectChangedListeners = new Set<CurrentProjectChangedListener>();
+
 export function noteCurrentProject(dir: string): void {
   const selection = keystore.captureProjectSelection(dir);
   currentProjectRendererRoot = dir;
   currentProjectRoot = selection?.canonicalRoot ?? dir;
   currentProjectExpectation = selection?.expectation ?? null;
+  for (const listener of [...currentProjectChangedListeners]) {
+    try {
+      listener(dir);
+    } catch (error) {
+      logError("conductor:current-project-listener", error);
+    }
+  }
+}
+
+/** Main-only wakeup for work whose authority depends on the renderer having
+ * selected and revalidated its project. */
+export function onCurrentProjectChanged(listener: CurrentProjectChangedListener): () => void {
+  currentProjectChangedListeners.add(listener);
+  return () => currentProjectChangedListeners.delete(listener);
 }
 
 function selectedProjectExpectation(dir: string): NonNullable<typeof currentProjectExpectation> | null {
@@ -1037,48 +1054,70 @@ export function send(
  *   dialog has just told the owner that the call already made is already paid
  *   for; starting another one after that is not a thing this may do.
  */
+export type CommentaryPreparation =
+  | Readonly<{ status: "defer-project-unselected" }>
+  | Readonly<{ status: "skip" }>
+  | Readonly<{ status: "ready"; start: () => void }>;
+
+/** Decide synchronously whether the result-card commentary is authorized.
+ * A caller may durably claim the one attempt between this check and `start`;
+ * it must then invoke `start` immediately without yielding. */
+export function prepareCommentary(
+  dir: string,
+  conversationId: string,
+  card: ResultCard,
+  onDelta: (delta: ConductorDelta) => void,
+): CommentaryPreparation {
+  if (!isConversationId(conversationId)) return Object.freeze({ status: "skip" });
+  const projectExpectation = selectedProjectExpectation(dir);
+  if (currentProjectRoot === null || projectExpectation === null) {
+    return Object.freeze({ status: "defer-project-unselected" });
+  }
+  const projectDir = currentProjectRoot;
+  const key = actionKey(projectDir);
+  const loadedConnection = keystore.readConnection(projectDir, projectExpectation);
+  if (loadedConnection.kind !== "ready") return Object.freeze({ status: "skip" });
+  const conn = loadedConnection.value;
+  if (!hasCurrentConsent(conn) || !conn.projectAuthorized) return Object.freeze({ status: "skip" });
+  if (controllers.has(key)) return Object.freeze({ status: "skip" });
+  if (taskRunningForProject(projectDir)) return Object.freeze({ status: "skip" });
+  if (isQuitDraining()) return Object.freeze({ status: "skip" });
+  // The instruction says "the card above", so the card has to really be there.
+  // `readTurns` DROPS an envelope line whose card fails its guard, and a card
+  // the conversation cannot read back is a card the model cannot see: better
+  // silence than a comment on a run that is not in front of it.
+  const posted = readTurns(projectDir, conversationId).at(-1);
+  if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) {
+    return Object.freeze({ status: "skip" });
+  }
+  const eventDir = currentProjectRendererRoot ?? projectDir;
+  let started = false;
+  return Object.freeze({
+    status: "ready" as const,
+    start() {
+      if (started) return;
+      started = true;
+      const controller = new AbortController();
+      controllers.set(key, {
+        controller,
+        kind: "commentary",
+        conversationId,
+        startedAt: new Date().toISOString(),
+        text: "",
+      });
+      void streamTurn(projectDir, conversationId, conn, controller, onDelta, "commentary", eventDir);
+    },
+  });
+}
+
 export function commentary(
   dir: string,
   conversationId: string,
   card: ResultCard,
   onDelta: (delta: ConductorDelta) => void,
 ): void {
-  if (!isConversationId(conversationId)) return;
-  const projectExpectation = selectedProjectExpectation(dir);
-  if (currentProjectRoot === null || projectExpectation === null) return;
-  const projectDir = currentProjectRoot;
-  const key = actionKey(projectDir);
-  const loadedConnection = keystore.readConnection(projectDir, projectExpectation);
-  if (loadedConnection.kind !== "ready") return;
-  const conn = loadedConnection.value;
-  if (!hasCurrentConsent(conn) || !conn.projectAuthorized) return;
-  if (controllers.has(key)) return;
-  if (taskRunningForProject(projectDir)) return;
-  if (isQuitDraining()) return;
-  // The instruction says "the card above", so the card has to really be there.
-  // `readTurns` DROPS an envelope line whose card fails its guard, and a card
-  // the conversation cannot read back is a card the model cannot see: better
-  // silence than a comment on a run that is not in front of it.
-  const posted = readTurns(projectDir, conversationId).at(-1);
-  if (!posted || posted.role !== "envelope" || JSON.stringify(posted.card) !== JSON.stringify(card)) return;
-
-  const controller = new AbortController();
-  controllers.set(key, {
-    controller,
-    kind: "commentary",
-    conversationId,
-    startedAt: new Date().toISOString(),
-    text: "",
-  });
-  void streamTurn(
-    projectDir,
-    conversationId,
-    conn,
-    controller,
-    onDelta,
-    "commentary",
-    currentProjectRendererRoot ?? projectDir,
-  );
+  const prepared = prepareCommentary(dir, conversationId, card, onDelta);
+  if (prepared.status === "ready") prepared.start();
 }
 
 function replyContextMessage(context: OwnerReplyContext): ConductorTransportMessage {

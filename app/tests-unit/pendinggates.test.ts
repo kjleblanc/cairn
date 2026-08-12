@@ -54,6 +54,20 @@ test("route and run ask the canonical gate before authority is created and again
   assert.match(run.slice(runGates[1], run.indexOf("consumeCurrentTaskProposal")), /refuseBeforeAcceptance\(postDetectionPendingRefusal\)/);
 });
 
+test("task route and start preserve the app-wide one-dispatched-task mutex", () => {
+  const taskActivity = between(tasks, "function anyTaskRunningOrStarting", "function clearSyntheticCalibrationDisclosure");
+  assert.match(taskActivity, /runningDirs\(\)\.length > 0 \|\| starting\.size > 0/);
+  assert.match(taskActivity, /function taskRunningOrStartingOutside/);
+
+  const route = between(tasks, 'ipcMain.handle("task:route"', 'ipcMain.handle("task:review-action"');
+  assert.ok(route.indexOf("runRefusal(anyTaskRunningOrStarting()") < route.indexOf("const generation = nextGeneration(key)"));
+  assert.ok(route.lastIndexOf("runRefusal(anyTaskRunningOrStarting()") > route.indexOf("await detectedAdapters"));
+
+  const run = between(tasks, 'ipcMain.handle("task:run"', 'ipcMain.handle("task:cancel"');
+  assert.ok(run.indexOf("runRefusal(anyTaskRunningOrStarting()") < run.indexOf("starting.add(key)"));
+  assert.ok(run.indexOf("runRefusal(taskRunningOrStartingOutside(key)") > run.indexOf("await detectedAdapters"));
+});
+
 test("synthetic calibration and ordinary tasks remain mutually exclusive across awaits", () => {
   const taskActivity = between(tasks, "function anyTaskRunningOrStarting", "function clearSyntheticCalibrationDisclosure");
   assert.match(taskActivity, /runningDirs\(\)\.length > 0 \|\| starting\.size > 0/,
@@ -76,8 +90,10 @@ test("synthetic calibration and ordinary tasks remain mutually exclusive across 
   const runCalibrationGates = indexesOf(run, "criticCalibration?.hasActive()");
   assert.equal(runCalibrationGates.length, 2, "run checks the app-wide calibration lifecycle twice");
   assert.ok(runCalibrationGates[0] < run.indexOf("starting.add(key)"));
-  assert.ok(runCalibrationGates[0] < run.indexOf("detected = await detectedAdapters"));
-  assert.ok(runCalibrationGates[1] > run.indexOf("detected = await detectedAdapters"));
+  const detection = run.indexOf("let detected:");
+  assert.ok(runCalibrationGates[0] < detection);
+  assert.ok(runCalibrationGates[1] > detection,
+    "the second gate follows either ordinary adapter detection or the synchronous guarded Q9 selection");
   assert.match(
     run.slice(runCalibrationGates[1], run.indexOf("if (previews.get(key) !== pending")),
     /refuseBeforeAcceptance\(CRITIC_CALIBRATION_ACTIVE\)/,
@@ -129,6 +145,10 @@ test("task runtime maps and alias-facing handlers use the canonical project key"
   }
 
   const cancel = between(tasks, 'ipcMain.handle("task:cancel"', 'ipcMain.handle("task:current"');
+  assert.ok(cancel.indexOf("const q9 = currentQ9QualityLoop(dir)") < cancel.indexOf("cancelQ9QualityLoop(dir)"),
+    "cancellation must identify a retained Q9 loop before attempting its lifecycle transition");
+  assert.ok(cancel.indexOf("Q9_RECOVERY_REQUIRED") < cancel.indexOf("controllers.get(canonicalProjectKey(dir))"),
+    "a refused Q9 cancellation must return an honest recovery error instead of falling through to its retained controller");
   assert.match(cancel, /controllers\.get\(canonicalProjectKey\(dir\)\)/,
     "an alias cancellation must reach the canonical controller");
   const acknowledge = between(tasks, 'ipcMain.handle("task:acknowledge"', 'ipcMain.handle("evidence:album"');

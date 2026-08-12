@@ -5,12 +5,17 @@ import { join } from "node:path";
 import { TASK_CALL_BUDGET_V1, canonicalCriticPacket, consumeCriticCallAuthorization, criticCallRequestBody } from "@cairn/core";
 import {
   clearCriticCallApproval,
+  clearCriticCallApprovalIfCurrent,
   clearProviderCriticCallApprovalByKey,
+  commitCriticCallDecision,
   currentCriticCallApproval,
   decideCriticCall,
   openCriticCallApproval,
   openSyntheticCriticCallApproval,
+  openSyntheticTaskCriticCallApproval,
   pendingCriticCallApprovalCount,
+  preflightCriticCallDecision,
+  SYNTHETIC_TASK_CRITIC_ROUTE_V1,
   takeCriticCallAuthorization,
 } from "../src/main/criticapproval.js";
 import { canonicalProjectKey } from "../src/main/conductor/turnauth.js";
@@ -19,6 +24,9 @@ import {
   CRITIC_CALL_NOT_SENT,
   CRITIC_CALL_PER_FILE_CHARACTER_CAP,
   CRITIC_CALL_PURPOSE_TEXT,
+  CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT,
+  CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT,
+  CRITIC_CALL_SYNTHETIC_TASK_PURPOSE_TEXT,
   CRITIC_CALL_TOTAL_CHARACTER_CAP,
   canonicalCriticCallDisclosure,
   type CriticCallCalibrationViewV1,
@@ -42,6 +50,20 @@ function open(mode: "required" | "optional" | "off" = "required", overrides: Rec
 
 function decide(disclosure: CriticCallDisclosureV1, action: "approve" | "stop-task" | "continue-without-critic") {
   return decideCriticCall({ dir: DIR, approvalId: disclosure.approvalId, action, disclosure });
+}
+
+function syntheticTask(round: 0 | 1, attempt: 1 | 2 | 3, mode: "required" | "optional" = "required") {
+  const { request } = bundle({
+    connectionConsentVersion: SYNTHETIC_TASK_CRITIC_ROUTE_V1.connectionConsentVersion,
+    candidateSha256: "e".repeat(64),
+  });
+  const authorization = approved(request, {
+    ...SYNTHETIC_TASK_CRITIC_ROUTE_V1,
+    candidateRound: round,
+    callAttempt: attempt,
+  });
+  const disclosure = openSyntheticTaskCriticCallApproval({ dir: DIR, request, authorization, mode });
+  return { request, authorization, disclosure };
 }
 
 test("c1: the card states exactly the approved call, and nothing the consent forbids", () => {
@@ -163,14 +185,15 @@ test("c1: only a branded approved call composes a card", () => {
     "a spent call composes no card",
   );
 
-  // A refused open must not leave an earlier card standing: a caller that
-  // believes it has no card would still have an approvable one.
+  // A malformed or competing open cannot destroy the genuine card the owner
+  // is already looking at.
   const first = openCriticCallApproval({ dir: DIR, request, authorization: approved(request, route({ callAttempt: 2 })), mode: "required" });
   assert.ok(first);
   assert.equal(pendingCriticCallApprovalCount(), 1);
   assert.equal(openCriticCallApproval({ dir: DIR, request, authorization: null, mode: "required" }), null);
-  assert.equal(pendingCriticCallApprovalCount(), 0, "a refused open drops the earlier card");
-  assert.equal(currentCriticCallApproval(DIR), null);
+  assert.equal(pendingCriticCallApprovalCount(), 1, "a refused open preserves the earlier card");
+  assert.equal(currentCriticCallApproval(DIR), first);
+  clearCriticCallApproval(DIR);
 });
 
 test("c1: a live provider authorization cannot be labelled as synthetic calibration", () => {
@@ -209,7 +232,175 @@ test("c1: a live provider authorization cannot be labelled as synthetic calibrat
   assert.ok(provider, "the refusal must be about the route label, not a malformed authorization fixture");
   assert.equal(provider.callKind, "provider");
   assert.equal(provider.calibration, null);
+  assert.equal(provider.syntheticTask, null);
   clearCriticCallApproval(DIR);
+});
+
+test("c1: the synthetic task card derives every identity for rounds 0/1 and attempts 1..3", () => {
+  clearCriticCallApproval(DIR);
+  for (const round of [0, 1] as const) {
+    for (const attempt of [1, 2, 3] as const) {
+      const mode = attempt % 2 === 0 ? "optional" as const : "required" as const;
+      const { authorization, disclosure } = syntheticTask(round, attempt, mode);
+      assert.ok(disclosure);
+      const body = criticCallRequestBody(authorization);
+      assert.ok(body);
+
+      assert.equal(disclosure.callKind, "synthetic-task");
+      assert.equal(disclosure.calibration, null);
+      assert.deepEqual(disclosure.syntheticTask, {
+        runId: authorization.runId,
+        candidateSha256: authorization.candidateSha256,
+        round: authorization.candidateRound,
+        packetSha256: authorization.packetSha256,
+        requestSha256: authorization.requestSha256,
+        requestBodySha256: sha256(body),
+      });
+      assert.equal(disclosure.attempt, attempt);
+      assert.equal(disclosure.attemptCap, TASK_CALL_BUDGET_V1.maxCriticAttempts);
+      assert.equal(disclosure.mode, mode);
+      assert.equal(disclosure.purpose, CRITIC_CALL_SYNTHETIC_TASK_PURPOSE_TEXT);
+      assert.deepEqual([...disclosure.notSent], [...CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT]);
+      assert.equal(disclosure.credentialText, CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT);
+      assert.deepEqual(
+        {
+          provider: disclosure.provider,
+          baseUrl: disclosure.baseUrl,
+          model: disclosure.configuredModel,
+          resolvedModel: disclosure.resolvedModel,
+          resolvedModelRevision: disclosure.resolvedModelRevision,
+          connectionConsentVersion: disclosure.connectionConsentVersion,
+          transportRevision: authorization.transportRevision,
+          serializer: authorization.serializer,
+          serverSideTools: authorization.serverSideTools,
+          timeoutMs: disclosure.timeoutMs,
+          maxOutputCharacters: disclosure.maxOutputCharacters,
+          purpose: authorization.purpose,
+          billingBasis: disclosure.billingBasis,
+        },
+        SYNTHETIC_TASK_CRITIC_ROUTE_V1,
+      );
+      assert.ok(parseCriticCallDisclosure(clone(disclosure)), "the exact synthetic task card must round-trip");
+      clearCriticCallApproval(DIR);
+    }
+  }
+});
+
+test("c1: live-provider and synthetic-task wording cannot be swapped", () => {
+  clearCriticCallApproval(DIR);
+  const live = bundle();
+  const liveAuthorization = approved(live.request);
+  assert.equal(
+    openSyntheticTaskCriticCallApproval({
+      dir: DIR, request: live.request, authorization: liveAuthorization, mode: "required",
+    }),
+    null,
+    "a live provider route cannot receive no-key synthetic-task wording",
+  );
+  assert.equal(currentCriticCallApproval(DIR), null);
+  const liveCard = openCriticCallApproval({
+    dir: DIR, request: live.request, authorization: liveAuthorization, mode: "required",
+  });
+  assert.ok(liveCard);
+  assert.equal(liveCard.callKind, "provider");
+  assert.equal(liveCard.syntheticTask, null);
+
+  const task = bundle({ connectionConsentVersion: SYNTHETIC_TASK_CRITIC_ROUTE_V1.connectionConsentVersion });
+  const taskAuthorization = approved(task.request, {
+    ...SYNTHETIC_TASK_CRITIC_ROUTE_V1,
+    candidateRound: 1,
+    callAttempt: 2,
+  });
+  assert.equal(
+    openCriticCallApproval({ dir: DIR, request: task.request, authorization: taskAuthorization, mode: "required" }),
+    null,
+    "the inert task fake cannot receive paid-provider wording",
+  );
+  assert.equal(currentCriticCallApproval(DIR), liveCard,
+    "a wrong-family open cannot retire the genuine provider card");
+  assert.equal(clearCriticCallApprovalIfCurrent(DIR, liveCard), true);
+  const taskCard = openSyntheticTaskCriticCallApproval({
+    dir: DIR, request: task.request, authorization: taskAuthorization, mode: "required",
+  });
+  assert.ok(taskCard, "the refusal is about the wording path, not the branded task authorization");
+  assert.equal(taskCard.callKind, "synthetic-task");
+  assert.match(taskCard.credentialText, /No saved provider key is used/u);
+  assert.doesNotMatch(taskCard.credentialText, /signs this one request/u);
+  clearCriticCallApproval(DIR);
+});
+
+test("c1: synthetic task wording requires the exact branded route and exact request", () => {
+  clearCriticCallApproval(DIR);
+  const mismatches: readonly [string, Record<string, unknown>][] = [
+    ["provider", { provider: "other-fake" }],
+    ["endpoint", { baseUrl: "https://other.invalid/v1" }],
+    ["configured model", { model: "cairn/other-fake-v1" }],
+    ["resolved model", { resolvedModel: "cairn/other-fake-v1" }],
+    ["model revision", { resolvedModelRevision: "other-fixture-v1" }],
+    ["consent", { connectionConsentVersion: "other-no-external-call-v1" }],
+    ["transport revision", { transportRevision: "other-critic/v1" }],
+    ["timeout", { timeoutMs: 599_999 }],
+    ["billing basis", { billingBasis: "Some other fake basis." }],
+  ];
+  for (const [label, patch] of mismatches) {
+    const connectionConsentVersion = typeof patch.connectionConsentVersion === "string"
+      ? patch.connectionConsentVersion
+      : SYNTHETIC_TASK_CRITIC_ROUTE_V1.connectionConsentVersion;
+    const { request } = bundle({ connectionConsentVersion });
+    const authorization = approved(request, {
+      ...SYNTHETIC_TASK_CRITIC_ROUTE_V1,
+      candidateRound: 0,
+      callAttempt: 1,
+      ...patch,
+    });
+    assert.equal(
+      openSyntheticTaskCriticCallApproval({ dir: DIR, request, authorization, mode: "required" }),
+      null,
+      `${label} mismatch must refuse`,
+    );
+    assert.equal(currentCriticCallApproval(DIR), null);
+  }
+
+  const exact = bundle({ connectionConsentVersion: SYNTHETIC_TASK_CRITIC_ROUTE_V1.connectionConsentVersion });
+  const authorization = approved(exact.request, {
+    ...SYNTHETIC_TASK_CRITIC_ROUTE_V1, candidateRound: 0, callAttempt: 1,
+  });
+  assert.equal(
+    openSyntheticTaskCriticCallApproval({
+      dir: DIR, request: exact.request, authorization: { ...authorization }, mode: "required",
+    }),
+    null,
+    "a structural authorization copy has no Core brand",
+  );
+  assert.equal(
+    openSyntheticTaskCriticCallApproval({
+      dir: DIR, request: bundle({ connectionConsentVersion: SYNTHETIC_TASK_CRITIC_ROUTE_V1.connectionConsentVersion }).request,
+      authorization, mode: "required",
+    }),
+    null,
+    "a different branded request is not the request this authorization covers",
+  );
+  assert.equal(currentCriticCallApproval(DIR), null);
+});
+
+test("c2: one synthetic task approval yields its exact Core authorization once", () => {
+  clearCriticCallApproval(DIR);
+  const { authorization, disclosure } = syntheticTask(1, 2, "required");
+  assert.ok(disclosure);
+  const outcome = decide(disclosure, "approve");
+  assert.ok(outcome.ok && outcome.grant);
+  assert.equal(takeCriticCallAuthorization(outcome.grant), authorization);
+  assert.equal(takeCriticCallAuthorization(outcome.grant), null);
+  assert.equal(decide(disclosure, "approve").ok, false, "the synthetic task card is spent by the first decision");
+
+  const replacement = syntheticTask(0, 1, "required").disclosure;
+  assert.ok(replacement);
+  clearProviderCriticCallApprovalByKey(canonicalProjectKey(DIR));
+  assert.equal(currentCriticCallApproval(DIR), replacement,
+    "generic preview cleanup cannot erase a run-owned synthetic task card");
+  assert.equal(clearCriticCallApprovalIfCurrent(DIR, replacement), true,
+    "the Q9 owner can retire only the exact card it opened");
+  assert.equal(currentCriticCallApproval(DIR), null);
 });
 
 test("c2: one approval decides once, and a decline consumes it too", () => {
@@ -236,6 +427,9 @@ test("c2: one approval decides once, and a decline consumes it too", () => {
   assert.equal(declined.decision.outcome, "continued-without-critic");
   assert.equal(declined.grant, null);
   assert.equal(decide(second.disclosure, "approve").ok, false, "a declined call cannot then be approved");
+  assert.equal(openCriticCallApproval({
+    dir: DIR, request: second.request, authorization: second.authorization, mode: "optional",
+  }), null, "a declined authorization cannot mint a replacement card");
 
   const third = open("required");
   assert.ok(third.disclosure);
@@ -243,6 +437,54 @@ test("c2: one approval decides once, and a decline consumes it too", () => {
   assert.ok(stopped.ok);
   assert.equal(stopped.decision.outcome, "task-stopped");
   assert.equal(stopped.grant, null);
+  assert.equal(openCriticCallApproval({
+    dir: DIR, request: third.request, authorization: third.authorization, mode: "required",
+  }), null, "a stopped authorization cannot mint a replacement card");
+});
+
+test("c2: Q9 can journal a valid press before the exact card is consumed", () => {
+  clearCriticCallApproval(DIR);
+  const call = open("required");
+  assert.ok(call.disclosure);
+  const raw = {
+    dir: DIR,
+    approvalId: call.disclosure.approvalId,
+    action: "approve" as const,
+    disclosure: call.disclosure,
+  };
+  const preflight = preflightCriticCallDecision(raw);
+  assert.equal(preflight.ok, true);
+  assert.equal(currentCriticCallApproval(DIR), call.disclosure,
+    "validation alone leaves the owner-visible approval current while Main journals the choice");
+  assert.ok(preflight.ok);
+  const committed = commitCriticCallDecision(preflight.preflight);
+  assert.equal(committed.ok, true);
+  assert.equal(committed.ok ? committed.decision.outcome : null, "approved");
+  assert.equal(currentCriticCallApproval(DIR), null);
+  assert.deepEqual(commitCriticCallDecision(preflight.preflight), {
+    ok: false,
+    code: "CRITIC_CALL_DECISION_UNKNOWN_APPROVAL",
+  }, "one durable press cannot yield two grants");
+
+  const stale = open("required");
+  assert.ok(stale.disclosure);
+  const stalePreflight = preflightCriticCallDecision({
+    dir: DIR,
+    approvalId: stale.disclosure.approvalId,
+    action: "approve",
+    disclosure: stale.disclosure,
+  });
+  assert.ok(stalePreflight.ok);
+  assert.equal(clearCriticCallApprovalIfCurrent(DIR, stale.disclosure), true);
+  const replacement = open("required");
+  assert.ok(replacement.disclosure);
+  assert.deepEqual(commitCriticCallDecision(stalePreflight.preflight), {
+    ok: false,
+    code: "CRITIC_CALL_DECISION_UNKNOWN_APPROVAL",
+  });
+  assert.equal(currentCriticCallApproval(DIR), replacement.disclosure,
+    "a stale preflight cannot consume a genuine replacement card");
+  clearCriticCallApproval(DIR);
 });
 
 test("c2: an altered echo decides nothing and destroys nothing", () => {
@@ -361,7 +603,8 @@ test("c2: task-generation cleanup can retire only provider cards", () => {
     approvalSource.indexOf("export function clearProviderCriticCallApprovalByKey"),
     approvalSource.indexOf("/** A read-only diagnostic", approvalSource.indexOf("export function clearProviderCriticCallApprovalByKey")),
   );
-  assert.match(helper, /pending\.get\(key\)\?\.disclosure\.callKind === "provider"/);
+  assert.match(helper, /held\?\.disclosure\.callKind === "provider"/);
+  assert.doesNotMatch(helper, /synthetic-task|synthetic-calibration/);
   assert.equal(helper.match(/pending\.delete\(key\)/gu)?.length, 1,
     "the helper has no unconditional delete path that could erase synthetic calibration");
 });
@@ -400,7 +643,7 @@ test("c2: an id from another card or another project decides nothing", () => {
   );
   assert.equal(currentCriticCallApproval(DIR)?.approvalId, here.disclosure.approvalId, "and the genuine card survives");
 
-  // Opening a second card for the same project makes the first stale.
+  // A second card cannot silently replace the first project's genuine card.
   const next = bundle();
   const replacement = openCriticCallApproval({
     dir: DIR,
@@ -408,10 +651,9 @@ test("c2: an id from another card or another project decides nothing", () => {
     authorization: approved(next.request, { callAttempt: 2 }),
     mode: "required",
   });
-  assert.ok(replacement);
-  assert.notEqual(replacement.approvalId, here.disclosure.approvalId);
-  assert.equal(decide(here.disclosure, "approve").ok, false, "the replaced card is stale");
-  assert.ok(decide(replacement, "approve").ok);
+  assert.equal(replacement, null);
+  assert.equal(currentCriticCallApproval(DIR), here.disclosure);
+  assert.ok(decide(here.disclosure, "approve").ok, "the genuine first card remains decidable");
 });
 
 test("c3: the frozen mode decides the controls", () => {
@@ -525,6 +767,9 @@ test("c5: the renderer cannot forge, widen, or replay through the parsers", () =
     ["a bidi override in the model", { ...disclosure, resolvedModel: "opus\u202e5" }],
     ["a zero attempt", { ...disclosure, attempt: 0 }],
     ["an attempt past the cap", { ...disclosure, attempt: 4 }],
+    ["a shortened attempt cap", { ...disclosure, attemptCap: 2 }],
+    ["a synthetic-task kind without its identity", { ...disclosure, callKind: "synthetic-task" }],
+    ["a hidden malformed task identity on a provider card", { ...disclosure, syntheticTask: { runId: "bad" } }],
   ] as const) {
     assert.equal(parseCriticCallDisclosure(value), null, label);
   }
@@ -550,6 +795,31 @@ test("c5: the renderer cannot forge, widen, or replay through the parsers", () =
     null,
   );
   assert.ok(parseCriticCallDecisionRequest({ dir: DIR, approvalId: disclosure.approvalId, action: "approve", disclosure }));
+
+  clearCriticCallApproval(DIR);
+  const taskCard = syntheticTask(1, 3).disclosure;
+  assert.ok(taskCard?.syntheticTask);
+  const taskView = taskCard.syntheticTask;
+  const { requestSha256: _requestSha256, ...missingTaskField } = taskView;
+  for (const [label, syntheticTaskValue] of [
+    ["an extra task-view key", { ...taskView, authority: true }],
+    ["a missing task-view key", missingTaskField],
+    ["a bad task run id", { ...taskView, runId: "not-a-run" }],
+    ["a bad task candidate hash", { ...taskView, candidateSha256: "bad" }],
+    ["a task round outside 0/1", { ...taskView, round: 2 }],
+    ["an accessor-backed task view", Object.defineProperty({ ...taskView }, "packetSha256", {
+      get: () => "f".repeat(64), enumerable: true, configurable: true,
+    })],
+    ["a proxied task view", new Proxy({ ...taskView }, {})],
+  ] as const) {
+    assert.equal(parseCriticCallDisclosure({ ...taskCard, syntheticTask: syntheticTaskValue }), null, label);
+  }
+  assert.equal(
+    parseCriticCallDisclosure({ ...taskCard, callKind: "provider" }),
+    null,
+    "a task identity cannot hide under provider wording",
+  );
+  clearCriticCallApproval(DIR);
 });
 
 test("c5: the canonical card is order-independent and covers every field", () => {
@@ -566,6 +836,7 @@ test("c5: the canonical card is order-independent and covers every field", () =>
   // approve a card that differs in it.
   for (const [label, patch] of [
     ["approvalId", { approvalId: "11111111-1111-4111-8111-111111111111" }],
+    ["callKind", { callKind: "synthetic-task" as const }],
     ["mode", { mode: "optional" as const }],
     ["attempt", { attempt: 2 }],
     ["attemptCap", { attemptCap: 2 }],
@@ -576,9 +847,19 @@ test("c5: the canonical card is order-independent and covers every field", () =>
     ["resolvedModelRevision", { resolvedModelRevision: "2026-06-01" }],
     ["connectionConsentVersion", { connectionConsentVersion: "consent-v2" }],
     ["routeRequestFingerprintSha256", { routeRequestFingerprintSha256: "d".repeat(64) }],
+    ["purpose", { purpose: "A different purpose." }],
+    ["credentialText", { credentialText: "A different credential statement." }],
     ["selection", { selection: [] }],
     ["selectedFiles", { selectedFiles: 7 }],
     ["selectedCharacters", { selectedCharacters: 7 }],
+    ["planMetadata", { planMetadata: { ...disclosure.planMetadata, checks: 7 } }],
+    ["calibration", { calibration: {
+      manifestSha256: "1".repeat(64), fixtureId: "C01", fixtureIndex: 1, fixtureCount: 12,
+      fixtureSha256: "2".repeat(64), packetSha256: "3".repeat(64), requestSha256: "4".repeat(64),
+      requestBodySha256: "5".repeat(64), text: [],
+    } as never }],
+    ["syntheticTask", { syntheticTask: {} as never }],
+    ["totalRequestCharacters", { totalRequestCharacters: disclosure.totalRequestCharacters + 1 }],
     ["fileCap", { fileCap: 7 }],
     ["perFileCharacterCap", { perFileCharacterCap: 7 }],
     ["totalCharacterCap", { totalCharacterCap: 7 }],
@@ -591,6 +872,29 @@ test("c5: the canonical card is order-independent and covers every field", () =>
     const changed = canonicalCriticCallDisclosure({ ...disclosure, ...patch } as CriticCallDisclosureV1);
     assert.notEqual(changed, baseline, `${label} must move the canonical card`);
   }
+});
+
+test("c5: the canonical card binds every synthetic-task identity field", () => {
+  clearCriticCallApproval(DIR);
+  const disclosure = syntheticTask(0, 1).disclosure;
+  assert.ok(disclosure?.syntheticTask);
+  const baseline = canonicalCriticCallDisclosure(disclosure);
+  const view = disclosure.syntheticTask;
+  for (const [label, patch] of [
+    ["runId", { runId: "11111111-1111-4111-8111-111111111111" }],
+    ["candidateSha256", { candidateSha256: "1".repeat(64) }],
+    ["round", { round: 1 as const }],
+    ["packetSha256", { packetSha256: "2".repeat(64) }],
+    ["requestSha256", { requestSha256: "3".repeat(64) }],
+    ["requestBodySha256", { requestBodySha256: "4".repeat(64) }],
+  ] as const) {
+    assert.notEqual(
+      canonicalCriticCallDisclosure({ ...disclosure, syntheticTask: { ...view, ...patch } }),
+      baseline,
+      `${label} must move the canonical card`,
+    );
+  }
+  clearCriticCallApproval(DIR);
 });
 
 test("c5: the IPC boundary returns a decision and never the grant", () => {

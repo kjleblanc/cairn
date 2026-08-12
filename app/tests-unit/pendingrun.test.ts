@@ -440,6 +440,46 @@ test("revision, prepared terminal action, close, and exact replay form one durab
   }
 });
 
+test("a schema-sized terminal card above the old 16 KiB cap still closes exactly once", () => {
+  const fixture = roots();
+  _resetPendingRunsForTests();
+  try {
+    assert.equal(installPendingRunStore(fixture.profile).ready, true);
+    const bytes = capsule("large-terminal-card");
+    createOne(fixture.project, bytes);
+    const authority = pendingRunAuthority(fixture.project);
+    assert.ok(authority);
+    const terminal = capsule("large-terminal-card-prepared");
+    const canonicalCard = JSON.stringify({
+      acceptedRequest: null,
+      disposition: "STOPPED",
+      kind: "result",
+      taskSpecProjection: "x".repeat(96 * 1024),
+    });
+    assert.ok(Buffer.byteLength(canonicalCard, "utf8") > 16 * 1024,
+      "the regression must exercise the former undersized cap");
+    assert.ok(Buffer.byteLength(canonicalCard, "utf8") < PENDING_RUN_LIMITS.terminalCardBytes);
+    const prepared = preparePendingRunTerminal(
+      authority,
+      1,
+      terminalAction("stop", terminal),
+      terminal,
+      {
+        conversationId: "007",
+        turnTimestamp: "2026-08-11T15:00:00.000Z",
+        canonicalCard,
+      },
+    );
+    assert.equal(prepared.ok, true, prepared.ok ? "" : prepared.code);
+    const closed = closePendingRun(authority, 2, ACTION_ID, RECEIPT);
+    assert.equal(closed.ok, true, closed.ok ? "" : closed.code);
+    assert.equal(pendingRunGate(fixture.project), null);
+  } finally {
+    _resetPendingRunsForTests();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("restart converges an authenticated close marker left before active-inventory removal", () => {
   const fixture = roots();
   _resetPendingRunsForTests();

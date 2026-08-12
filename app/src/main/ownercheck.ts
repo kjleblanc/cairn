@@ -1,14 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { types as nodeTypes } from "node:util";
 import {
+  authorizeCairnCriterionFailureConfirmation,
+  cairnCriterionFailureConfirmationSha256,
+  canonicalCairnCriterionFailureConfirmation,
   composeCriticPolicyAuthorityContext,
   criticAssessmentSha256,
   criticFindingRenderSha256,
+  criticPolicyCairnCriterionResultSha256,
   evidencePlanSha256,
   ownerCheckResolutionSha256,
   taskSpecReviewView,
   taskSpecSha256,
+  type CairnCriterionFailureConfirmationV1,
   type CriticAssessmentV1,
+  type CriticPolicyAuthorityContextV1,
   type CriticFindingV1,
   type CriterionResultV1,
   type EvidencePlanV1,
@@ -26,14 +32,16 @@ import {
   type TaskReviewProjectionV1,
 } from "../shared/task-review.js";
 import { taskSpecProposalPreviewView } from "./conductor/qualityproposal.js";
-import { canonicalProjectKey } from "./conductor/turnauth.js";
+import { canonicalProjectKey, canonicalProjectPath } from "./conductor/turnauth.js";
 
 const AUTHORITY_VERSION = "cairn-main-task-review-authority/v1" as const;
 const OBSERVATION_VERSION = "cairn-owner-criterion-observation/v1" as const;
 const RESOLUTION_VERSION = "cairn-owner-check-resolution/v1" as const;
+const CAIRN_FAILURE_DECISION_VERSION = "cairn-main-cairn-failure-decision/v1" as const;
 const POLICY_CONTEXT_VERSION = "cairn-critic-policy-authority-context/v1" as const;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const MACHINE_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/u;
 const FORBIDDEN_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u;
 
@@ -41,6 +49,22 @@ export type MainTaskReviewAuthorityV1 = Readonly<{ version: typeof AUTHORITY_VER
 export type MainOwnerEvidenceV1 = Readonly<{
   ownerObservations: readonly OwnerCriterionObservationV1[];
   ownerResolutions: readonly OwnerCheckResolutionV1[];
+  cairnFailureDecisions: readonly MainCairnFailureDecisionV1[];
+  cairnFailureConfirmations: readonly CairnCriterionFailureConfirmationV1[];
+}>;
+
+export type MainCairnFailureDecisionV1 = Readonly<{
+  version: typeof CAIRN_FAILURE_DECISION_VERSION;
+  actionId: string;
+  outcome: "confirmed" | "dismissed" | "cant-tell";
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  criterionResultSha256: string;
+  evidenceRefsSeen: readonly string[];
+  actionNonce: string;
+  decidedAt: string;
+  ownerActionReceiptSha256: string;
+  confirmation: CairnCriterionFailureConfirmationV1 | null;
 }>;
 
 type ArtifactDisplay = Readonly<{ id: string; label: string }>;
@@ -62,7 +86,15 @@ type ResolveAction = Readonly<{
   counterEvidenceRefs: readonly string[];
   findingRenderSha256: string;
 }>;
-type ActionBinding = ObserveAction | ResolveAction;
+type CairnFailureAction = Readonly<{
+  kind: "review-cairn-failure";
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  evidenceRefs: readonly string[];
+  result: CriterionResultV1;
+  renderSha256: string;
+}>;
+type ActionBinding = ObserveAction | ResolveAction | CairnFailureAction;
 
 type PendingState = {
   kind: "pending";
@@ -87,11 +119,14 @@ type CandidateState = {
   candidateSha256: string;
   assessment: CriticAssessmentV1 | null;
   assessmentSha256: string | null;
+  policyContext: CriticPolicyAuthorityContextV1;
   results: readonly CriterionResultV1[];
   artifacts: ReadonlyMap<string, ArtifactDisplay>;
   preview: TaskSpecProposalPreviewV1;
   observations: Map<`c${number}`, OwnerCriterionObservationV1>;
   resolutions: Map<string, OwnerCheckResolutionV1>;
+  cairnFailureDecisions: Map<`c${number}`, MainCairnFailureDecisionV1>;
+  cairnFailureConfirmations: Map<`c${number}`, CairnCriterionFailureConfirmationV1>;
   actions: Map<string, ActionBinding>;
   projection: TaskReviewProjectionV1;
 };
@@ -100,6 +135,7 @@ type AuthorityState = PendingState | CandidateState;
 const authorityStates = new WeakMap<object, AuthorityState>();
 const observationBrands = new WeakSet<object>();
 const resolutionBrands = new WeakSet<object>();
+const cairnFailureDecisionBrands = new WeakSet<object>();
 const observationBindings = new WeakMap<object, Readonly<{
   evidencePlanSha256: string;
   failureConditionId: string;
@@ -354,11 +390,44 @@ function observationRenderSha256(
   }));
 }
 
+function cairnFailureRenderSha256(
+  state: CandidateState,
+  criterionId: `c${number}`,
+  result: CriterionResultV1,
+): string | null {
+  const review = taskSpecReviewView(state.taskSpec);
+  const criterion = review?.criteria.find((item) => item.id === criterionId);
+  const resultSha256 = criticPolicyCairnCriterionResultSha256(state.policyContext, criterionId);
+  if (!criterion || criterion.judge !== "cairn" || result.status !== "not-met" || !resultSha256) return null;
+  return sha256(canonical({
+    domain: "cairn-main-cairn-failure-render/v1",
+    projectHash: state.projectHash,
+    runId: state.runId,
+    taskSpecSha256: state.taskSpecSha256,
+    evidencePlanSha256: state.evidencePlanSha256,
+    candidateSha256: state.candidateSha256,
+    criterionId,
+    failureConditionId: criterion.failureCondition.id,
+    criterionResultSha256: resultSha256,
+    evidenceRefsSeen: result.evidenceRefs,
+  }));
+}
+
 function buildCandidateProjection(state: CandidateState): TaskReviewProjectionV1 | null {
   const review = taskSpecReviewView(state.taskSpec);
   if (review === null) return null;
   state.actions.clear();
   const criteria: TaskReviewCriterionStateV1[] = [];
+  const unresolvedNonCairn = review.criteria.some((criterion) => {
+    if (criterion.judge === "owner") {
+      const observation = state.observations.get(criterion.id);
+      return observation === undefined || observation.decision === "cant-tell";
+    }
+    if (criterion.judge !== "critic") return false;
+    const finding = eligibleCriticFinding(state, criterion.id);
+    const resolution = finding === null ? undefined : state.resolutions.get(finding.id);
+    return finding !== null && (resolution === undefined || resolution.decision === "cant-tell");
+  });
   for (const criterion of review.criteria) {
     const procedure = state.evidencePlan.procedures.find((item) => item.criterionId === criterion.id);
     if (procedure === undefined) return null;
@@ -457,9 +526,58 @@ function buildCandidateProjection(state: CandidateState): TaskReviewProjectionV1
     }
 
     const result = state.results.find((item) => item.criterionId === criterion.id);
-    criteria.push(result === undefined
-      ? Object.freeze({ id: criterion.id, state: "pending", source: null, supportingEvidence: blankEvidence(), counterEvidence: blankEvidence(), ownerChecks: Object.freeze([]) })
-      : projectResult(result, state.artifacts));
+    if (result !== undefined && result.status === "not-met" && result.source !== "worker-claim") {
+      const evidence = freezeEvidence(state.artifacts, result.evidenceRefs);
+      const decision = state.cairnFailureDecisions.get(criterion.id);
+      if (decision !== undefined) {
+        criteria.push(Object.freeze({
+          id: criterion.id,
+          state: decision.outcome === "confirmed" ? "not-met" : "cant-tell",
+          source: result.source,
+          supportingEvidence: evidence,
+          counterEvidence: blankEvidence(),
+          ownerChecks: Object.freeze([Object.freeze({
+            kind: "cairn-failure",
+            status: decision.outcome,
+            supportingEvidence: evidence,
+            counterEvidence: blankEvidence(),
+            action: null,
+          })]),
+        }));
+      } else {
+        const renderSha256 = cairnFailureRenderSha256(state, criterion.id, result);
+        if (renderSha256 === null) return null;
+        const actionId = unresolvedNonCairn ? null : randomUUID();
+        if (actionId !== null) {
+          state.actions.set(actionId, Object.freeze({
+            kind: "review-cairn-failure",
+            criterionId: criterion.id,
+            failureConditionId: criterion.failureCondition.id,
+            evidenceRefs: Object.freeze([...result.evidenceRefs]),
+            result,
+            renderSha256,
+          }));
+        }
+        criteria.push(Object.freeze({
+          id: criterion.id,
+          state: "waiting-owner",
+          source: result.source,
+          supportingEvidence: evidence,
+          counterEvidence: blankEvidence(),
+          ownerChecks: Object.freeze([Object.freeze({
+            kind: "cairn-failure",
+            status: actionId === null ? "not-ready" : "awaiting-confirmation",
+            supportingEvidence: evidence,
+            counterEvidence: blankEvidence(),
+            action: actionId === null ? null : Object.freeze({ kind: "review-cairn-failure", actionId }),
+          })]),
+        }));
+      }
+    } else {
+      criteria.push(result === undefined
+        ? Object.freeze({ id: criterion.id, state: "pending", source: null, supportingEvidence: blankEvidence(), counterEvidence: blankEvidence(), ownerChecks: Object.freeze([]) })
+        : projectResult(result, state.artifacts));
+    }
   }
   return Object.freeze({
     version: TASK_REVIEW_PROJECTION_VERSION,
@@ -475,11 +593,25 @@ function buildCandidateProjection(state: CandidateState): TaskReviewProjectionV1
  */
 export function composeCandidateTaskReviewAuthority(raw: unknown): MainTaskReviewAuthorityV1 | null {
   try {
-    const input = inspectRecord(raw, [
+    const baseKeys = [
       "dir", "runId", "taskSpec", "evidencePlan", "candidateSha256", "assessment", "criterionResults", "artifactRegistry",
-    ]);
+    ] as const;
+    const seeded = inspectRecord(raw, [...baseKeys, "seedOwnerEvidence"]);
+    const input = seeded ?? inspectRecord(raw, baseKeys);
     if (!input || !safeText(input.dir, 4_096) || typeof input.runId !== "string" || !UUID_V4.test(input.runId)
       || typeof input.candidateSha256 !== "string" || !SHA256.test(input.candidateSha256)) return null;
+    const durableSeed = seeded ? inspectRecord(seeded.seedOwnerEvidence, [
+      "ownerObservations", "ownerResolutions", "cairnFailureDecisions",
+    ]) : null;
+    const liveSeed = seeded ? inspectRecord(seeded.seedOwnerEvidence, [
+      "ownerObservations", "ownerResolutions", "cairnFailureDecisions", "cairnFailureConfirmations",
+    ]) : null;
+    const seed = durableSeed ?? liveSeed;
+    const seedObservations = seed ? inspectArray(seed.ownerObservations, 24) : seeded ? null : Object.freeze([]);
+    const seedResolutions = seed ? inspectArray(seed.ownerResolutions, 24) : seeded ? null : Object.freeze([]);
+    const seedCairnFailureDecisions = seed ? inspectArray(seed.cairnFailureDecisions, 12) : seeded ? null : Object.freeze([]);
+    if (seedObservations === null || seedResolutions === null || seedCairnFailureDecisions === null) return null;
+    if (liveSeed && seedCairnFailureDecisions.length !== 0) return null;
     const taskSha = taskSpecSha256(input.taskSpec);
     const planSha = evidencePlanSha256(input.evidencePlan);
     const preview = taskSpecProposalPreviewView(input.taskSpec as TaskSpecV1);
@@ -498,7 +630,12 @@ export function composeCandidateTaskReviewAuthority(raw: unknown): MainTaskRevie
     const resultInput = inspectArray(input.criterionResults, review.criteria.length);
     if (artifacts === null || resultInput === null) return null;
     const dirKey = canonicalProjectKey(input.dir);
-    const projectHash = sha256(dirKey);
+    const projectRootReal = canonicalProjectPath(input.dir);
+    // Core binds candidate and Critic authority to the native canonical root
+    // spelling (case-folded on Windows).  The slash-normalized dirKey is only
+    // a Main map key; hashing it here would create a different authority on
+    // Windows and make every genuine candidate assessment unreviewable.
+    const projectHash = sha256(process.platform === "win32" ? projectRootReal.toLowerCase() : projectRootReal);
     const authorityContext = composeCriticPolicyAuthorityContext(taskSpec, evidencePlan, assessment, {
       version: POLICY_CONTEXT_VERSION,
       projectHash,
@@ -508,8 +645,8 @@ export function composeCandidateTaskReviewAuthority(raw: unknown): MainTaskRevie
       candidateSha256: input.candidateSha256,
       assessmentSha256: assessmentSha,
       criterionResults: resultInput,
-      ownerObservations: [],
-      ownerResolutions: [],
+      ownerObservations: seedObservations,
+      ownerResolutions: seedResolutions,
       nativeBoundaryResults: [],
     });
     if (authorityContext === null) return null;
@@ -519,9 +656,129 @@ export function composeCandidateTaskReviewAuthority(raw: unknown): MainTaskRevie
       kind: "candidate", active: true, dirKey, projectHash, runId: input.runId,
       taskSpec, taskSpecSha256: taskSha, evidencePlan, evidencePlanSha256: planSha,
       candidateSha256: input.candidateSha256, assessment, assessmentSha256: assessmentSha,
+      policyContext: authorityContext,
       results, artifacts, preview, observations: new Map(), resolutions: new Map(),
+      cairnFailureDecisions: new Map(), cairnFailureConfirmations: new Map(),
       actions: new Map(), projection: null as unknown as TaskReviewProjectionV1,
     };
+    for (const observation of authorityContext.ownerObservations) {
+      const criterion = review.criteria.find((row) => row.id === observation.criterionId);
+      const procedure = evidencePlan.procedures.find((row) => row.criterionId === observation.criterionId);
+      const expectedKind = criterion?.evidenceStandard.mode === "owner-observation"
+        ? "owner-observation"
+        : criterion?.evidenceStandard.mode === "comparison" ? "comparison-capture" : null;
+      if (!criterion || criterion.judge !== "owner" || !procedure || expectedKind === null
+        || procedure.kind !== expectedKind || observation.projectHash !== projectHash
+        || observation.runId !== state.runId || observation.taskSpecSha256 !== taskSha
+        || observation.candidateSha256 !== state.candidateSha256
+        || !sameStrings(observation.stateArtifactIds, procedure.artifactIds)
+        || !sameStrings(observation.evidenceRefsSeen, procedure.artifactIds)
+        || procedure.artifactIds.some((id) => !artifacts.has(id))) return null;
+      const renderSha256 = observationRenderSha256(state, criterion.id, procedure.artifactIds);
+      observationBrands.add(observation);
+      observationBindings.set(observation, Object.freeze({
+        evidencePlanSha256: planSha,
+        failureConditionId: criterion.failureCondition.id,
+        renderSha256,
+        shownEvidenceRefs: Object.freeze([...procedure.artifactIds]),
+      }));
+      state.observations.set(criterion.id, observation);
+    }
+    for (const resolution of authorityContext.ownerResolutions) {
+      const finding = eligibleCriticFinding(state, resolution.criterionId);
+      const resolutionSha256 = ownerCheckResolutionSha256(resolution);
+      const renderSha256 = assessment === null ? null : criticFindingRenderSha256(assessment, resolution.findingId);
+      if (!finding || resolutionSha256 === null || renderSha256 === null
+        || resolution.runId !== state.runId || resolution.taskSpecSha256 !== taskSha
+        || resolution.candidateSha256 !== state.candidateSha256 || resolution.assessmentSha256 !== assessmentSha
+        || resolution.findingId !== finding.id || resolution.failureConditionId !== finding.failureConditionId
+        || resolution.findingRenderSha256 !== renderSha256
+        || !sameStrings(resolution.evidenceRefsSeen, finding.evidenceRefs)
+        || !sameStrings(resolution.counterEvidenceRefsSeen, finding.counterEvidenceRefs)) return null;
+      resolutionBrands.add(resolution);
+      resolutionBindings.set(resolution, Object.freeze({
+        projectHash,
+        evidencePlanSha256: planSha,
+        shownEvidenceRefs: Object.freeze([...finding.evidenceRefs, ...finding.counterEvidenceRefs]),
+        resolutionSha256,
+      }));
+      state.resolutions.set(finding.id, resolution);
+    }
+    for (const item of seedCairnFailureDecisions) {
+      const row = inspectRecord(item, [
+        "version", "actionId", "outcome", "criterionId", "failureConditionId", "criterionResultSha256",
+        "evidenceRefsSeen", "actionNonce", "decidedAt", "ownerActionReceiptSha256", "confirmationSha256",
+        "confirmationCanonicalPayload",
+      ]);
+      const criterionId = row && typeof row.criterionId === "string" && /^c(?:[1-9]|1[0-2])$/u.test(row.criterionId)
+        ? row.criterionId as `c${number}` : null;
+      const criterion = criterionId ? review.criteria.find((value) => value.id === criterionId) : undefined;
+      const result = criterionId ? results.find((value) => value.criterionId === criterionId) : undefined;
+      const refs = row ? inspectArray(row.evidenceRefsSeen, 12) : null;
+      const currentResultSha256 = criterionId
+        ? criticPolicyCairnCriterionResultSha256(state.policyContext, criterionId)
+        : null;
+      const renderSha256 = criterionId && result
+        ? cairnFailureRenderSha256(state, criterionId, result)
+        : null;
+      if (!row || row.version !== "cairn-pending-run-cairn-failure-decision/v1"
+        || typeof row.actionId !== "string" || !UUID_V4.test(row.actionId)
+        || (row.outcome !== "confirmed" && row.outcome !== "dismissed" && row.outcome !== "cant-tell")
+        || !criterionId || !criterion || criterion.judge !== "cairn" || !result || result.status !== "not-met"
+        || typeof row.failureConditionId !== "string" || row.failureConditionId !== criterion.failureCondition.id
+        || typeof row.criterionResultSha256 !== "string" || row.criterionResultSha256 !== currentResultSha256
+        || !refs || refs.length === 0 || refs.some((value) => typeof value !== "string")
+        || !sameStrings(refs as string[], result.evidenceRefs)
+        || typeof row.actionNonce !== "string" || !UUID_V4.test(row.actionNonce)
+        || typeof row.decidedAt !== "string" || !ISO_INSTANT.test(row.decidedAt)
+        || typeof row.ownerActionReceiptSha256 !== "string" || !SHA256.test(row.ownerActionReceiptSha256)
+        || (row.confirmationSha256 !== null
+          && (typeof row.confirmationSha256 !== "string" || !SHA256.test(row.confirmationSha256)))
+        || (row.confirmationCanonicalPayload !== null && typeof row.confirmationCanonicalPayload !== "string")
+        || ((row.outcome === "confirmed") !== (row.confirmationSha256 !== null))
+        || ((row.outcome === "confirmed") !== (row.confirmationCanonicalPayload !== null))
+        || state.cairnFailureDecisions.has(criterionId)) return null;
+      const expectedReceiptSha256 = renderSha256 === null ? null : sha256(canonical({
+        domain: "cairn-main-cairn-failure-owner-action/v1",
+        projectHash: state.projectHash,
+        runId: state.runId,
+        taskSpecSha256: state.taskSpecSha256,
+        evidencePlanSha256: state.evidencePlanSha256,
+        candidateSha256: state.candidateSha256,
+        actionId: row.actionId,
+        outcome: row.outcome,
+        criterionId,
+        failureConditionId: row.failureConditionId,
+        criterionResultSha256: row.criterionResultSha256,
+        evidenceRefsSeen: refs,
+        actionNonce: row.actionNonce,
+        decidedAt: row.decidedAt,
+        renderSha256,
+      }));
+      if (expectedReceiptSha256 !== row.ownerActionReceiptSha256) return null;
+      // A journaled confirmation is durable evidence that the owner made this
+      // exact decision, but JSON is never promoted back into live Core
+      // authority.  Main consumes the live branded confirmation immediately
+      // before repair admission.  If the process stops in that narrow gap,
+      // restart retains this answered row and fails closed instead of
+      // recreating authority or showing the card again.
+      const confirmation: CairnCriterionFailureConfirmationV1 | null = null;
+      const decision = Object.freeze({
+        version: CAIRN_FAILURE_DECISION_VERSION,
+        actionId: row.actionId,
+        outcome: row.outcome,
+        criterionId,
+        failureConditionId: row.failureConditionId,
+        criterionResultSha256: row.criterionResultSha256,
+        evidenceRefsSeen: Object.freeze(refs as string[]),
+        actionNonce: row.actionNonce,
+        decidedAt: row.decidedAt,
+        ownerActionReceiptSha256: row.ownerActionReceiptSha256,
+        confirmation,
+      }) as MainCairnFailureDecisionV1;
+      cairnFailureDecisionBrands.add(decision);
+      state.cairnFailureDecisions.set(criterionId, decision);
+    }
     const projection = buildCandidateProjection(state);
     if (projection === null) return null;
     state.projection = projection;
@@ -531,15 +788,8 @@ export function composeCandidateTaskReviewAuthority(raw: unknown): MainTaskRevie
   }
 }
 
-function candidateIdentityStillExact(state: CandidateState): boolean {
-  const taskSha = taskSpecSha256(state.taskSpec);
-  const planSha = evidencePlanSha256(state.evidencePlan);
-  const assessmentSha = state.assessment === null ? null : criticAssessmentSha256(state.assessment);
-  if (taskSha !== state.taskSpecSha256 || planSha !== state.evidencePlanSha256
-    || state.evidencePlan.taskSpecSha256 !== taskSha || assessmentSha !== state.assessmentSha256) return false;
-  const expected = expectedArtifactIds(state.evidencePlan, state.assessment);
-  if (expected.size !== state.artifacts.size || [...expected].some((id) => !state.artifacts.has(id))) return false;
-  const context = composeCriticPolicyAuthorityContext(state.taskSpec, state.evidencePlan, state.assessment, {
+function composeCurrentPolicyContext(state: CandidateState): CriticPolicyAuthorityContextV1 | null {
+  return composeCriticPolicyAuthorityContext(state.taskSpec, state.evidencePlan, state.assessment, {
     version: POLICY_CONTEXT_VERSION,
     projectHash: state.projectHash,
     runId: state.runId,
@@ -552,7 +802,24 @@ function candidateIdentityStillExact(state: CandidateState): boolean {
     ownerResolutions: [...state.resolutions.values()],
     nativeBoundaryResults: [],
   });
-  return context !== null;
+}
+
+function candidateIdentityStillExact(state: CandidateState): boolean {
+  const taskSha = taskSpecSha256(state.taskSpec);
+  const planSha = evidencePlanSha256(state.evidencePlan);
+  const assessmentSha = state.assessment === null ? null : criticAssessmentSha256(state.assessment);
+  if (taskSha !== state.taskSpecSha256 || planSha !== state.evidencePlanSha256
+    || state.evidencePlan.taskSpecSha256 !== taskSha || assessmentSha !== state.assessmentSha256) return false;
+  const expected = expectedArtifactIds(state.evidencePlan, state.assessment);
+  if (expected.size !== state.artifacts.size || [...expected].some((id) => !state.artifacts.has(id))) return false;
+  const context = composeCurrentPolicyContext(state);
+  if (context === null) return false;
+  for (const criterionId of state.cairnFailureDecisions.keys()) {
+    if (criticPolicyCairnCriterionResultSha256(context, criterionId)
+      !== criticPolicyCairnCriterionResultSha256(state.policyContext, criterionId)) return false;
+  }
+  state.policyContext = context;
+  return true;
 }
 
 function actionStillExact(state: CandidateState, binding: ActionBinding): boolean {
@@ -564,6 +831,13 @@ function actionStillExact(state: CandidateState, binding: ActionBinding): boolea
     return criterion.judge === "owner" && state.observations.get(binding.criterionId) === undefined
       && procedure?.kind === binding.procedureKind && sameStrings(procedure.artifactIds, binding.artifactIds)
       && observationRenderSha256(state, binding.criterionId, binding.artifactIds) === binding.renderSha256;
+  }
+  if (binding.kind === "review-cairn-failure") {
+    const result = state.results.find((item) => item.criterionId === binding.criterionId);
+    return criterion.judge === "cairn" && result === binding.result && result.status === "not-met"
+      && state.cairnFailureDecisions.get(binding.criterionId) === undefined
+      && sameStrings(result.evidenceRefs, binding.evidenceRefs)
+      && cairnFailureRenderSha256(state, binding.criterionId, result) === binding.renderSha256;
   }
   const finding = eligibleCriticFinding(state, binding.criterionId);
   const render = state.assessment === null ? null : criticFindingRenderSha256(state.assessment, binding.findingId);
@@ -605,6 +879,7 @@ function mintObservation(
     nativeBoundaryResults: [],
   });
   if (context === null) return null;
+  state.policyContext = context;
   observationBrands.add(record);
   observationBindings.set(record, Object.freeze({
     evidencePlanSha256: state.evidencePlanSha256,
@@ -653,6 +928,7 @@ function mintResolution(
     nativeBoundaryResults: [],
   });
   if (context === null) return null;
+  state.policyContext = context;
   resolutionBrands.add(record);
   resolutionBindings.set(record, Object.freeze({
     projectHash: state.projectHash,
@@ -661,6 +937,69 @@ function mintResolution(
     resolutionSha256,
   }));
   return record;
+}
+
+function mintCairnFailureDecision(
+  state: CandidateState,
+  actionId: string,
+  binding: CairnFailureAction,
+  outcome: Extract<TaskReviewActionRequest, { action: { kind: "review-cairn-failure" } }>["action"]["decision"],
+): MainCairnFailureDecisionV1 | null {
+  const criterionResultSha256 = criticPolicyCairnCriterionResultSha256(state.policyContext, binding.criterionId);
+  if (criterionResultSha256 === null) return null;
+  const actionNonce = randomUUID();
+  const decidedAt = new Date().toISOString();
+  const ownerActionReceiptSha256 = sha256(canonical({
+    domain: "cairn-main-cairn-failure-owner-action/v1",
+    projectHash: state.projectHash,
+    runId: state.runId,
+    taskSpecSha256: state.taskSpecSha256,
+    evidencePlanSha256: state.evidencePlanSha256,
+    candidateSha256: state.candidateSha256,
+    actionId,
+    outcome,
+    criterionId: binding.criterionId,
+    failureConditionId: binding.failureConditionId,
+    criterionResultSha256,
+    evidenceRefsSeen: binding.evidenceRefs,
+    actionNonce,
+    decidedAt,
+    renderSha256: binding.renderSha256,
+  }));
+  const confirmation = outcome === "confirmed"
+    ? authorizeCairnCriterionFailureConfirmation(
+        state.taskSpec,
+        state.evidencePlan,
+        state.policyContext,
+        {
+          criterionId: binding.criterionId,
+          failureConditionId: binding.failureConditionId,
+          evidenceRefsSeen: binding.evidenceRefs,
+          decision: "confirmed",
+          actionNonce,
+          confirmedAt: decidedAt,
+          ownerActionReceiptSha256,
+        },
+      )
+    : null;
+  if (outcome === "confirmed" && (!confirmation
+    || cairnCriterionFailureConfirmationSha256(confirmation) === null
+    || canonicalCairnCriterionFailureConfirmation(confirmation) === null)) return null;
+  const decision = Object.freeze({
+    version: CAIRN_FAILURE_DECISION_VERSION,
+    actionId,
+    outcome,
+    criterionId: binding.criterionId,
+    failureConditionId: binding.failureConditionId,
+    criterionResultSha256,
+    evidenceRefsSeen: Object.freeze([...binding.evidenceRefs]),
+    actionNonce,
+    decidedAt,
+    ownerActionReceiptSha256,
+    confirmation,
+  });
+  cairnFailureDecisionBrands.add(decision);
+  return decision;
 }
 
 /** Return the inert output projection only for this exact live Main mint. */
@@ -719,6 +1058,14 @@ export function applyTaskReviewAction(authority: unknown, unknownRequest: unknow
       return null;
     }
     state.resolutions.set(binding.findingId, resolution);
+  } else if (binding.kind === "review-cairn-failure" && request.action.kind === "review-cairn-failure") {
+    const decision = mintCairnFailureDecision(state, request.actionId, binding, request.action.decision);
+    if (decision === null) {
+      state.active = false;
+      return null;
+    }
+    state.cairnFailureDecisions.set(binding.criterionId, decision);
+    if (decision.confirmation !== null) state.cairnFailureConfirmations.set(binding.criterionId, decision.confirmation);
   } else {
     state.active = false;
     return null;
@@ -754,15 +1101,33 @@ export function isMainOwnerCheckResolution(value: unknown): value is OwnerCheckR
   return value !== null && typeof value === "object" && resolutionBrands.has(value) && resolutionBindings.has(value);
 }
 
+export function isMainCairnFailureDecision(value: unknown): value is MainCairnFailureDecisionV1 {
+  return value !== null && typeof value === "object" && cairnFailureDecisionBrands.has(value);
+}
+
 /** Exact privately branded Core rows for a future Main policy call. */
 export function mainOwnerEvidence(authority: unknown): MainOwnerEvidenceV1 | null {
   if (authority === null || typeof authority !== "object") return null;
   const state = authorityStates.get(authority);
   if (state === undefined || !state.active) return null;
-  if (state.kind === "pending") return Object.freeze({ ownerObservations: Object.freeze([]), ownerResolutions: Object.freeze([]) });
+  if (state.kind === "pending") return Object.freeze({
+    ownerObservations: Object.freeze([]),
+    ownerResolutions: Object.freeze([]),
+    cairnFailureDecisions: Object.freeze([]),
+    cairnFailureConfirmations: Object.freeze([]),
+  });
   if (!candidateIdentityStillExact(state)) return null;
   const observations = [...state.observations.values()];
   const resolutions = [...state.resolutions.values()];
-  if (!observations.every(isMainOwnerCriterionObservation) || !resolutions.every(isMainOwnerCheckResolution)) return null;
-  return Object.freeze({ ownerObservations: Object.freeze(observations), ownerResolutions: Object.freeze(resolutions) });
+  const cairnFailureDecisions = [...state.cairnFailureDecisions.values()];
+  const cairnFailureConfirmations = [...state.cairnFailureConfirmations.values()];
+  if (!observations.every(isMainOwnerCriterionObservation) || !resolutions.every(isMainOwnerCheckResolution)
+    || !cairnFailureDecisions.every(isMainCairnFailureDecision)
+    || cairnFailureConfirmations.some((confirmation) => cairnCriterionFailureConfirmationSha256(confirmation) === null)) return null;
+  return Object.freeze({
+    ownerObservations: Object.freeze(observations),
+    ownerResolutions: Object.freeze(resolutions),
+    cairnFailureDecisions: Object.freeze(cairnFailureDecisions),
+    cairnFailureConfirmations: Object.freeze(cairnFailureConfirmations),
+  });
 }

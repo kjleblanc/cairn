@@ -291,6 +291,67 @@ export function appendTurn(root: string, id: string, turn: ConductorTurn): void 
   appendJsonLine(root, id, turn);
 }
 
+/**
+ * Appends one exact envelope turn at most once.
+ *
+ * Q9 persists a terminal card and its timestamp before closing the pending
+ * run. A restart can therefore retry delivery after an unknown crash cut.
+ * Looking for the already-authenticated digest before appending closes the
+ * final physical-JSONL duplicate: a marker-only crash retries forward, while
+ * a line that reached fsync is returned as already present.
+ *
+ * This is intentionally envelope-only. Owner and conductor turns have their
+ * own ordered, one-use identities and must never acquire retry semantics by
+ * accident.
+ */
+export function appendEnvelopeTurnOnce(
+  root: string,
+  id: string,
+  turn: Extract<ConductorTurn, { role: "envelope" }>,
+): "appended" | "already-present" {
+  assertConversationId(id);
+  if (typeof turn.ts !== "string" || turn.ts.length === 0 || !isResultCard(turn.card)) {
+    throw new Error("INVALID_RESULT_CARD: Cairn refused to persist a malformed result card.");
+  }
+  const wanted = cardDigest(root, id, turn.ts, turn.card);
+  const historyText = readConversationText(root, id);
+  // A crash-partial final line is never adoption evidence; Main's own append
+  // always fsyncs a newline-terminated JSON record.
+  const completeLines = historyText === null ? [] : historyText.split(/\r?\n/u).slice(0, -1);
+  let physicalMatches = 0;
+  for (const line of completeLines) {
+    try {
+      const candidate = JSON.parse(line) as Partial<Extract<ConductorTurn, { role: "envelope" }>>;
+      if (candidate.role === "envelope" && typeof candidate.ts === "string" && isResultCard(candidate.card)
+        && cardDigest(root, id, candidate.ts, candidate.card) === wanted) physicalMatches += 1;
+    } catch {
+      // Other corrupt/project-written lines remain inert; this recovery path
+      // adopts only the one exact terminal turn Main already intends to post.
+    }
+  }
+  if (physicalMatches > 1) {
+    throw new Error("CONDUCTOR_ENVELOPE_DUPLICATE: Cairn refused ambiguous duplicate terminal-card bytes.");
+  }
+  const authenticated = (): boolean => readHistorySnapshot(root, id).entries.some((entry) =>
+    entry.authenticatedEnvelope && entry.turn.role === "envelope"
+    && cardDigest(root, id, entry.turn.ts, entry.turn.card) === wanted);
+  if (authenticated()) return "already-present";
+  if (physicalMatches === 1) {
+    // A crash can land the external card marker and the project line before
+    // the ordered transcript marker. Adopt that one exact, already-authorized
+    // line instead of appending a physical duplicate. A worker-written splice
+    // cannot gain authority unless every byte equals this Main-owned turn.
+    recordCardMarker(root, id, turn.ts, turn.card);
+    recordTranscriptEventMarker(root, "envelope", wanted);
+    if (!authenticated()) {
+      throw new Error("CONDUCTOR_ENVELOPE_RECOVERY_REFUSED: Cairn could not authenticate the existing terminal-card line.");
+    }
+    return "already-present";
+  }
+  appendTurn(root, id, turn);
+  return "appended";
+}
+
 export interface AuthenticatedOwnerTurn {
   role: "owner";
   inputId: string;
@@ -483,11 +544,18 @@ function validTaskSpecResultProjection(value: unknown, card: Partial<ResultCard>
   const advisory = denseDataArray(projection.advisoryPreferences, TASK_SPEC_ROW_CAP);
   if (!required || required.length === 0 || !advisory) return false;
   const criterionIds: string[] = [];
+  const adapterAttested = new Map<string, boolean | null>();
   for (let index = 0; index < required.length; index += 1) {
-    const row = exactDataRecord(required[index], ["id", "promise"]);
+    const current = exactDataRecord(required[index], ["adapterAttested", "id", "promise"]);
+    const legacy = current ? null : exactDataRecord(required[index], ["id", "promise"]);
+    const row = current ?? legacy;
     if (!row || row.id !== `c${index + 1}` || !safeTaskSpecText(row.promise, 1_000, true)) return false;
     criterionIds.push(row.id);
+    if (current && typeof current.adapterAttested !== "boolean") return false;
+    adapterAttested.set(row.id as string, current ? current.adapterAttested as boolean : null);
   }
+  const currentAttestationShape = [...adapterAttested.values()].every((value) => typeof value === "boolean");
+  if (!currentAttestationShape && [...adapterAttested.values()].some((value) => value !== null)) return false;
   const preferenceIds: string[] = [];
   for (let index = 0; index < advisory.length; index += 1) {
     const row = exactDataRecord(advisory[index], ["desiredDirection", "dimension", "id"]);
@@ -520,6 +588,8 @@ function validTaskSpecResultProjection(value: unknown, card: Partial<ResultCard>
     seenSequences.add(attestation.sequence as number);
     seenCommandHashes.add(attestation.commandSha256);
   }
+  if (currentAttestationShape && criterionIds.some((criterionId) =>
+    adapterAttested.get(criterionId) !== seenCriteria.has(criterionId))) return false;
 
   let workerClaimDisposition: "DONE" | "STOPPED" | null = null;
   if (projection.workerClaims !== null) {
@@ -564,9 +634,9 @@ function validTaskSpecResultProjection(value: unknown, card: Partial<ResultCard>
     || envelope.stopReason !== card.stopReason || card.claims !== null) return false;
   if (envelope.disposition === "DONE"
     && (workerClaimDisposition !== "DONE"
-      || attestations.length !== criterionIds.length
-      || criterionIds.some((criterionId) => !seenCriteria.has(criterionId))
-      || criterionIds.some((_, index) => !seenSequences.has(index)))) return false;
+      || (!currentAttestationShape && (attestations.length !== criterionIds.length
+        || criterionIds.some((criterionId) => !seenCriteria.has(criterionId))))
+      || attestations.some((_, index) => !seenSequences.has(index)))) return false;
   return true;
 }
 

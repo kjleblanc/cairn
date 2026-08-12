@@ -2,6 +2,12 @@ import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, Ser
 import type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
 import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
 import type { CriticCallDecisionRequest, CriticCallDecisionV1, CriticCallDisclosureV1 } from "./critic-call.js";
+import type { RepairCallDecisionRequest, RepairCallDecisionV1, RepairCallDisclosureV1 } from "./repair-call.js";
+import type {
+  Q9HarnessRevisionDecisionRequest,
+  Q9HarnessRevisionDecisionV1,
+  Q9HarnessRevisionDisclosureV1,
+} from "./harness-revision.js";
 
 export type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
 export type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
@@ -13,6 +19,18 @@ export type {
   CriticCallModeV1,
   CriticCallSelectedFileViewV1,
 } from "./critic-call.js";
+export type {
+  RepairCallActionV1,
+  RepairCallDecisionRequest,
+  RepairCallDecisionV1,
+  RepairCallDisclosureV1,
+} from "./repair-call.js";
+export type {
+  Q9HarnessRevisionActionV1,
+  Q9HarnessRevisionDecisionRequest,
+  Q9HarnessRevisionDecisionV1,
+  Q9HarnessRevisionDisclosureV1,
+} from "./harness-revision.js";
 
 export type {
   AccountLabelProvenance,
@@ -175,6 +193,10 @@ export type RunSessionSnapshot = {
   taskReview?: TaskReviewProjectionV1;
   /** Output-only Independent-critic card for the one call awaiting a decision. */
   criticCall?: CriticCallDisclosureV1;
+  /** Output-only Builder-repair card owned by this running session. */
+  repairCall?: RepairCallDisclosureV1;
+  /** Output-only, guarded mechanical harness-revision choice. */
+  harnessRevision?: Q9HarnessRevisionDisclosureV1;
 };
 
 /** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
@@ -437,6 +459,12 @@ export interface CairnApi {
   /** Decide the one pending critic call. Output only: the reply says what was
    * decided, never anything a renderer could use as authority for a call. */
   criticCallDecide(request: CriticCallDecisionRequest): Promise<Result<CriticCallDecisionV1>>;
+  /** Decide the exact repair card shown by a running session. The renderer
+   * receives only the decision; repair authority remains in Main. */
+  repairCallDecide(request: RepairCallDecisionRequest): Promise<Result<RepairCallDecisionV1>>;
+  /** Decide the one exact guarded harness correction; no executable bytes or
+   * revision authority ever cross into the renderer. */
+  harnessRevisionDecide(request: Q9HarnessRevisionDecisionRequest): Promise<Result<Q9HarnessRevisionDecisionV1>>;
   /** Guarded Q8 seam. Normal production has no injected fake and refuses the
    * open before any card or profile write exists. */
   criticCalibrationOpen(request: CriticCalibrationOpenRequestV1): Promise<Result<CriticCalibrationSnapshotV1>>;
@@ -509,7 +537,14 @@ export interface TaskSpecResultProjectionV1 {
   requestSha256: string;
   taskSpecSha256: string;
   evidencePlanSha256: string;
-  requiredPromises: Array<{ id: `c${number}`; promise: string }>;
+  requiredPromises: Array<{
+    id: `c${number}`;
+    promise: string;
+    /** Present on current cards. It says only whether this cN has one of the
+     * record's adapter-command attestations; false may instead be completed by
+     * owner/critic custody that this output-only projection cannot mint. */
+    adapterAttested?: boolean;
+  }>;
   /** Advisory guidance only; these rows never gate DONE. */
   advisoryPreferences: Array<{
     id: `p${number}`;

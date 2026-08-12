@@ -357,6 +357,11 @@ const candidateBrand = new WeakSet<object>();
 const taskSpecBrand = new WeakSet<object>();
 const evidencePlanBrand = new WeakSet<object>();
 const evidencePreviewBrand = new WeakSet<object>();
+const authorizedEvidenceRevisionBrand = new WeakSet<object>();
+const authorizedEvidenceRevisionBindings = new WeakMap<object, Readonly<{
+  plan: EvidencePlanV1;
+  authorization: EvidencePlanRevisionAuthorizationV1;
+}>>();
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -1819,8 +1824,24 @@ export function authorizeEvidencePlanRevision(
       || authority.ownerActionNonce !== parsed.ownerActionNonce
       || authority.approvedAt !== parsed.approvedAt) return null;
     const plan = frozenEvidencePlan(proposed.plan, true);
-    return Object.freeze({ plan, authorization: parsed });
+    const authorized = Object.freeze({ plan, authorization: parsed });
+    authorizedEvidenceRevisionBrand.add(authorized);
+    authorizedEvidenceRevisionBindings.set(authorized, Object.freeze({ plan, authorization: parsed }));
+    return authorized;
   } catch {
     return null;
   }
+}
+
+/** Exact module-minted tuple check. A branded revised plan is not sufficient:
+ * the plan and its authenticated run/owner authorization must remain the same
+ * pair returned by authorizeEvidencePlanRevision. */
+export function isAuthorizedEvidencePlanRevision(
+  value: unknown,
+): value is AuthorizedEvidencePlanRevisionV1 {
+  if (typeof value !== "object" || value === null || !authorizedEvidenceRevisionBrand.has(value)) return false;
+  const binding = authorizedEvidenceRevisionBindings.get(value);
+  return binding !== undefined
+    && (value as AuthorizedEvidencePlanRevisionV1).plan === binding.plan
+    && (value as AuthorizedEvidencePlanRevisionV1).authorization === binding.authorization;
 }

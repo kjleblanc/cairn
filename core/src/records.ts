@@ -13,6 +13,10 @@ import {
   type TaskSpecV1,
 } from "./quality.js";
 import type { AdapterTaskContract } from "./routing.js";
+import {
+  isCriticCompletionAuthority,
+  type CriticCompletionAuthorityV1,
+} from "./critic.js";
 // Type-only, and it must stay that way: serial.ts already imports this module
 // as a value, so a runtime import back would create a cycle.
 import type { SerialStopReason } from "./serial.js";
@@ -86,6 +90,13 @@ export type TaskSpecRunRecordClassification =
   | Readonly<{ kind: "legacy"; taskSpecBound: false; criticReady: false }>
   | Readonly<{ kind: "task-spec-bound"; taskSpecBound: true; criticReady: false; record: TaskSpecRunRecordV1 }>
   | Readonly<{ kind: "invalid"; taskSpecBound: false; criticReady: false }>;
+
+type CompletionRecordAuthorityInput = Readonly<{
+  authority: CriticCompletionAuthorityV1;
+  projectHash: string;
+  runId: string;
+  candidateSha256: string;
+}>;
 
 const taskSpecRunRecordBrand = new WeakSet<object>();
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -176,6 +187,7 @@ export function composeTaskSpecRunRecord(
   taskSpec: unknown,
   evidencePlan: unknown,
   rawInput: unknown,
+  completionAuthority?: unknown,
 ): TaskSpecRunRecordV1 | null {
   try {
     if (!exactTaskSpecRunRecordInput(rawInput)) return null;
@@ -261,13 +273,31 @@ export function composeTaskSpecRunRecord(
       // brand DONE for a plan whose required evidence is absent from the
       // record, nor for a command that exited outside its frozen expectation.
       const orderedSequences = attestations.map((attestation) => attestation.sequence).sort((left, right) => left - right);
+      const completionInput = exactDataRecord(completionAuthority, [
+        "authority", "projectHash", "runId", "candidateSha256",
+      ]) ? completionAuthority as CompletionRecordAuthorityInput : null;
+      const completed = completionInput !== null && isCriticCompletionAuthority(completionInput.authority)
+        ? completionInput.authority
+        : null;
+      const completedAllCriteria = completed !== null
+        && completionInput !== null
+        && completed.projectHash === completionInput.projectHash
+        && completed.runId === completionInput.runId
+        && completed.candidateSha256 === completionInput.candidateSha256
+        && completed.taskSpecSha256 === specSha
+        && completed.evidencePlanSha256 === planSha
+        && completed.criteria.length === spec.quality.acceptanceChecks.length
+        && completed.criteria.every((row, index) => row.criterionId === spec.quality.acceptanceChecks[index]?.id
+          && row.judge === spec.quality.acceptanceChecks[index]?.judge);
+      const commandProcedures = plan.procedures.filter((procedure) =>
+        procedure.kind === "adapter-command-attestation" && procedure.command !== null);
       if (!claims || claims.disposition !== "DONE"
-        || spec.quality.critic.mode === "required"
-        || plan.procedures.some((procedure) =>
-          procedure.kind !== "adapter-command-attestation" || !procedure.command)
-        || attestations.length !== plan.procedures.length
+        || (!completedAllCriteria && (spec.quality.critic.mode === "required"
+          || plan.procedures.some((procedure) =>
+            procedure.kind !== "adapter-command-attestation" || !procedure.command)))
+        || attestations.length !== commandProcedures.length
         || orderedSequences.some((sequence, index) => sequence !== index)) return null;
-      for (const procedure of plan.procedures) {
+      for (const procedure of commandProcedures) {
         const attestation = attestations.find((entry) => entry.criterionId === procedure.criterionId);
         if (!attestation || !procedure.command
           || attestation.commandSha256 !== procedure.command.sha256
@@ -525,6 +555,11 @@ const STOP_REASON_IN_PLAIN_WORDS: Record<SerialStopReason, string> = {
   REAL_MODEL_CALL_NOT_AUTHORIZED: "the run was not approved to make a real, paid call",
   MODEL_REPORTED_STOPPED: "the worker stopped itself and said why",
   MODEL_RESULT_NOT_VERIFIED: "the change could not be confirmed against a saved history",
+  Q9_CRITIC_CALLS_EXHAUSTED: "the required critic did not return a usable result within its allowed calls and one retry",
+  Q9_REQUIRED_CHECK_STILL_FAILED: "an original required check still failed after the repair",
+  Q9_NATIVE_BOUNDARY_STOPPED: "an independent safety boundary required this task to stop",
+  Q9_REQUIRED_EVIDENCE_INCOMPLETE: "the required evidence was not complete enough to verify the result",
+  Q9_WORKFLOW_VERIFICATION_FAILED: "Cairn could not safely verify the guarded quality workflow",
   ADAPTER_TIMED_OUT: "the worker ran out of time",
   CANCELLED_BY_OWNER: "you stopped it yourself",
 };

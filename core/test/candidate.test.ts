@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import * as publicCore from "../src/index.js";
+import * as mainPendingCore from "../src/main-pending.js";
 import {
   SERIAL_CANDIDATE_BUNDLE_LIMITS,
   SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
   SERIAL_CANDIDATE_TRANSITION_VERSION,
   SERIAL_CANDIDATE_VERSION,
   SERIAL_REPAIR_INSTRUCTION_VERSION,
+  activateSerialCandidateQualityLoop,
   advanceSerialCandidate,
   beginSerialCandidateTerminal,
   captureSerialCandidateBundle,
@@ -22,6 +25,21 @@ import {
   composeSerialCandidateSealAuthorization,
   composeSerialCandidateTaskSpecAuthority,
   composeSerialCandidateTransition,
+  admitSerialCandidateRepair,
+  authorizeSerialCandidateOptionalCriticDecline,
+  authorizeSerialCandidateSealFromCompletion,
+  authorizeSerialRepairPreview,
+  composeSerialRepairPreview,
+  consumeSyntheticTaskCriticCallAuthorization,
+  reserveSerialCandidateRepair,
+  reserveSerialCandidateCritic,
+  settleSerialCandidateCritic,
+  settleSerialCandidateOptionalCriticDecline,
+  settleSerialCandidateOwnerResolution,
+  serialCandidateAttemptCustody,
+  serialCandidateCurrentAvailableAssessment,
+  serialCandidatePriorConfirmedFindings,
+  serialRepairPreviewAuthorityRows,
   composeSerialRepairInstruction,
   isCurrentSerialCandidate,
   isSerialCandidateBundle,
@@ -32,11 +50,38 @@ import {
   serialCandidateBundleSha256,
   serialCandidateGitEnvironmentSafe,
   serialCandidateLineageIdentity,
+  serialCandidateQualityLoopAuthorityRequired,
   serialCandidatePendingRepairLineage,
   serialCandidateRepairAvailability,
   serialCandidateSha256,
   serialCandidateWorkspaceStillExact,
 } from "../src/candidate.js";
+import {
+  CRITIC_SYNTHETIC_TASK_PACKET_AUTHORITY_CONTEXT_VERSION,
+  CRITIC_SYNTHETIC_TASK_SELECTION_VERSION,
+  authorizeCairnCriterionFailureConfirmation,
+  composeCriticPolicyAuthorityContext,
+  composeCriticCompletionAuthority,
+  composeCriticPolicyDecision,
+  composeCriticRepairAuthority,
+  composeCriticPacketAuthorityContext,
+  composeCriticSyntheticTaskPacketAuthorityContext,
+  composeCriticRequest,
+  composeCriticCallAuthorization,
+  composeCriticAssessment,
+  composeCriticAssessmentCustody,
+  consumeCriticCallAuthorization,
+  criticAssessmentSha256,
+  criticFindingRenderSha256,
+  parseCriticOutput,
+} from "../src/critic.js";
+import {
+  authorizeCodexRepair,
+  codexRepairDisclosure,
+  codexRepairDisclosureCoversPreview,
+  consumeCodexRepairAuthorization,
+  prepareCodexRepairRequest,
+} from "../src/codex.js";
 import { bindTaskIntent } from "../src/intent.js";
 import {
   EVIDENCE_PLAN_CANDIDATE_VERSION,
@@ -102,7 +147,10 @@ test.after(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-function quality(mode: "required" | "optional" | "off" = "off") {
+function quality(
+  mode: "required" | "optional" | "off" = "off",
+  judge: "cairn" | "critic" = "cairn",
+) {
   const intent = bindTaskIntent({
     version: "cairn-task-intent/v1",
     outcome: { source: "owner-stated", text: "Build the local result.", ownerQuote: "Build the local result." },
@@ -140,8 +188,8 @@ function quality(mode: "required" | "optional" | "off" = "off") {
     acceptanceChecks: [{
       id: "c1",
       promise: "Build the local result.",
-      kind: "non-regression",
-      judge: "cairn",
+      kind: judge === "critic" ? "acceptance" : "non-regression",
+      judge,
       basis: [{ kind: "intent-outcome" }],
       failureCondition: {
         id: "failure-c1",
@@ -149,12 +197,29 @@ function quality(mode: "required" | "optional" | "off" = "off") {
         allowedArtifactIds: ["artifact-output", "artifact-log"],
       },
       evidenceStandard: {
-        mode: "adapter-attestation",
-        proves: "The approved local check completed.",
+        mode: judge === "critic" ? "artifact-inspection" : "adapter-attestation",
+        proves: judge === "critic" ? "The authenticated packet artifact decides c1." : "The approved local check completed.",
         precondition: null,
       },
       comparison: null,
-    }],
+    }, ...(judge === "critic" ? [{
+      id: "c2",
+      promise: "Keep the supported local path working.",
+      kind: "non-regression",
+      judge: "cairn",
+      basis: [{ kind: "intent-outcome" }],
+      failureCondition: {
+        id: "failure-c2",
+        statement: "The supported local path regressed.",
+        allowedArtifactIds: ["artifact-log"],
+      },
+      evidenceStandard: {
+        mode: "adapter-attestation",
+        proves: "The supported-path check completed.",
+        precondition: null,
+      },
+      comparison: null,
+    }] : [])],
     qualityPreferences: [{
       id: "p1",
       dimension: "polish",
@@ -165,9 +230,9 @@ function quality(mode: "required" | "optional" | "off" = "off") {
     references: [],
     unknowns: [],
     coverage: {
-      outcomeCriterionIds: ["c1"],
+      outcomeCriterionIds: judge === "critic" ? ["c1", "c2"] : ["c1"],
       requirementCriteria: [],
-      supportedPathCriterionId: "c1",
+      supportedPathCriterionId: judge === "critic" ? "c2" : "c1",
     },
   });
   assert.ok(plan);
@@ -177,8 +242,8 @@ function quality(mode: "required" | "optional" | "off" = "off") {
     version: EVIDENCE_PLAN_CANDIDATE_VERSION,
     procedures: [{
       criterionId: "c1",
-      kind: "adapter-command-attestation",
-      command: {
+      kind: judge === "critic" ? "packet-artifact" : "adapter-command-attestation",
+      command: judge === "critic" ? null : {
         executablePath: "node",
         executableSha256: "e".repeat(64),
         arguments: [{ kind: "literal", value: "--test" }],
@@ -190,7 +255,22 @@ function quality(mode: "required" | "optional" | "off" = "off") {
         assertion: { id: "candidate-check", expectedResult: "zero failing tests" },
       },
       artifactIds: ["artifact-output", "artifact-log"],
-    }],
+    }, ...(judge === "critic" ? [{
+      criterionId: "c2",
+      kind: "adapter-command-attestation",
+      command: {
+        executablePath: "node",
+        executableSha256: "f".repeat(64),
+        arguments: [{ kind: "literal", value: "--test" }],
+        fixtureBindings: [],
+        cwdRelative: "core",
+        expectedExitCodes: [0],
+        timeoutMs: 60_000,
+        resultParserMode: "node-test-tap",
+        assertion: { id: "supported-check", expectedResult: "zero failing tests" },
+      },
+      artifactIds: ["artifact-log"],
+    }] : [])],
   });
   assert.ok(evidencePlan);
   const authority = composeSerialCandidateTaskSpecAuthority(taskSpec, evidencePlan);
@@ -198,7 +278,11 @@ function quality(mode: "required" | "optional" | "off" = "off") {
   return { intent, taskSpec, evidencePlan, authority };
 }
 
-function claimsText(taskSpecSha256: string, summary = "The worker reports the local result complete."): string {
+function claimsText(
+  taskSpecSha256: string,
+  summary = "The worker reports the local result complete.",
+  criterionIds: readonly string[] = ["c1"],
+): string {
   return [
     "Done.",
     "",
@@ -209,7 +293,7 @@ function claimsText(taskSpecSha256: string, summary = "The worker reports the lo
       disposition: "DONE",
       summary,
       changes: ["Added the local result."],
-      criteria: [{ id: "c1", result: "The worker says c1 holds." }],
+      criteria: criterionIds.map((id) => ({ id, result: `The worker says ${id} holds.` })),
       preferences: [{ id: "p1", result: "The worker considered p1." }],
       howToTry: "Inspect the local result.",
       limitations: "Worker claims are not criterion evidence.",
@@ -219,9 +303,13 @@ function claimsText(taskSpecSha256: string, summary = "The worker reports the lo
   ].join("\n");
 }
 
-function captured(mode: "required" | "optional" | "off" = "off", content = "visible\n") {
+function captured(
+  mode: "required" | "optional" | "off" = "off",
+  content = "visible\n",
+  judge: "cairn" | "critic" = "cairn",
+) {
   const root = repository();
-  const fixture = quality(mode);
+  const fixture = quality(mode, judge);
   const ignoredBoundary = captureSerialCandidateIgnoredBoundary(root);
   assert.ok(ignoredBoundary);
   writeFileSync(join(root, "visible.txt"), content);
@@ -240,7 +328,11 @@ function captured(mode: "required" | "optional" | "off" = "off", content = "visi
     runId: RUN_ID,
     taskNumber: 1,
     requestSha256: "a".repeat(64),
-    claimsText: claimsText(fixture.authority.taskSpecSha256),
+    claimsText: claimsText(
+      fixture.authority.taskSpecSha256,
+      undefined,
+      fixture.taskSpec.quality.acceptanceChecks.map((criterion) => criterion.id),
+    ),
     bundle: capture.bundle,
     repairEligibility,
   });
@@ -335,6 +427,803 @@ test("candidate authority accepts every critic mode but rejects structural clone
   }
 });
 
+test("Q9 activation permanently closes caller-structured transition authority", () => {
+  const fixture = captured("required");
+  const transitionMintedBeforeAdmission = composeSerialCandidateTransition(
+    fixture.candidate,
+    transitionRaw(fixture.candidate, "critic-clear"),
+  );
+  assert.ok(transitionMintedBeforeAdmission);
+  assert.equal(activateSerialCandidateQualityLoop(fixture.candidate), fixture.candidate);
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(fixture.candidate), true);
+  assert.equal(advanceSerialCandidate(fixture.candidate, transitionMintedBeforeAdmission), null,
+    "activation invalidates even a legacy transition minted just before admission");
+  for (const decision of [
+    "critic-clear", "critic-allegation", "required-check-failure-confirmed",
+    "owner-confirmed", "owner-dismissed", "optional-critic-declined",
+  ]) {
+    assert.equal(composeSerialCandidateTransition(
+      fixture.candidate,
+      transitionRaw(fixture.candidate, decision),
+    ), null, `${decision} requires the opaque Q9 authority path`);
+  }
+  assert.equal(activateSerialCandidateQualityLoop(fixture.candidate), fixture.candidate,
+    "one-way activation is idempotent on the same live lineage");
+
+  const legacy = captured("required");
+  const advanced = advanceSerialCandidate(legacy.candidate, transition(legacy.candidate, "critic-allegation"));
+  assert.ok(advanced, "the explicitly legacy path remains available");
+  assert.equal(activateSerialCandidateQualityLoop(advanced), null,
+    "a lineage cannot relabel past structural authority as Q9 custody");
+});
+
+test("Q9 completion authority cannot cross candidates or runs with the same TaskSpec", () => {
+  const first = captured("off", "first candidate\n");
+  const second = captured("off", "second candidate\n");
+  const otherRun = composeSerialCandidate(first.authority, {
+    version: SERIAL_CANDIDATE_VERSION,
+    runId: "60000000-0000-4000-8000-000000000009",
+    taskNumber: first.candidate.taskNumber,
+    requestSha256: first.candidate.requestSha256,
+    claimsText: claimsText(first.candidate.taskSpecSha256),
+    bundle: first.bundle,
+    repairEligibility: first.candidate.repairEligibility,
+  });
+  assert.ok(otherRun);
+  assert.equal(activateSerialCandidateQualityLoop(first.candidate), first.candidate);
+  assert.equal(activateSerialCandidateQualityLoop(second.candidate), second.candidate);
+  assert.equal(activateSerialCandidateQualityLoop(otherRun), otherRun);
+  assert.equal(composeSerialCandidateSealAuthorization(first.candidate, sealRaw(first.candidate)), null,
+    "an activated critic-off candidate cannot use the legacy structural seal mint");
+  const policy = composeCriticPolicyAuthorityContext(first.taskSpec, first.evidencePlan, null, {
+    version: "cairn-critic-policy-authority-context/v1",
+    projectHash: first.candidate.projectRootSha256,
+    runId: first.candidate.runId,
+    taskSpecSha256: first.candidate.taskSpecSha256,
+    evidencePlanSha256: first.candidate.evidencePlanSha256,
+    candidateSha256: first.candidate.candidateSha256,
+    assessmentSha256: null,
+    criterionResults: [{
+      criterionId: "c1",
+      candidateSha256: first.candidate.candidateSha256,
+      status: "met",
+      source: "adapter-execution",
+      evidenceRefs: ["artifact-output"],
+      evidencePlanSha256: first.candidate.evidencePlanSha256,
+      resolutionSha256: null,
+    }],
+    ownerObservations: [],
+    ownerResolutions: [],
+    nativeBoundaryResults: [],
+  });
+  assert.ok(policy);
+  const completion = composeCriticCompletionAuthority(first.taskSpec, first.evidencePlan, policy);
+  assert.ok(completion);
+  assert.ok(authorizeSerialCandidateSealFromCompletion(first.candidate, completion),
+    "the exact branded all-cN completion authority still seals its current candidate");
+  assert.equal(authorizeSerialCandidateSealFromCompletion(second.candidate, completion), null,
+    "a genuine completion for another project/candidate cannot seal this one");
+  assert.equal(authorizeSerialCandidateSealFromCompletion(otherRun, completion), null,
+    "a genuine completion cannot be replayed into another run over the same project/spec/plan/bundle");
+
+  const optional = captured("optional");
+  assert.equal(activateSerialCandidateQualityLoop(optional.candidate), optional.candidate);
+  const decline = authorizeSerialCandidateOptionalCriticDecline(optional.candidate, {
+    declined: true,
+    actionNonce: "q9-optional-seal-decline",
+    decidedAt: "2026-08-11T12:30:00.000Z",
+    ownerActionReceiptSha256: "d".repeat(64),
+  });
+  assert.ok(decline);
+  const optionalReady = settleSerialCandidateOptionalCriticDecline(optional.candidate, decline);
+  assert.ok(optionalReady);
+  assert.equal(optionalReady.phase, "ready-to-seal");
+  assert.equal(composeSerialCandidateSealAuthorization(optionalReady, sealRaw(optionalReady)), null,
+    "an activated optional-decline candidate cannot use the legacy structural seal mint");
+
+  const legacy = captured("off");
+  assert.ok(composeSerialCandidateSealAuthorization(legacy.candidate, sealRaw(legacy.candidate)),
+    "legacy non-Q9 candidates retain the structural seal path");
+});
+
+test("Q9 repair preview excludes critic prose and reservation pre-spends the only repair", () => {
+  const fixture = captured("off");
+  const policyContext = composeCriticPolicyAuthorityContext(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    null,
+    {
+      version: "cairn-critic-policy-authority-context/v1",
+      projectHash: fixture.candidate.projectRootSha256,
+      runId: fixture.candidate.runId,
+      taskSpecSha256: fixture.candidate.taskSpecSha256,
+      evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+      candidateSha256: fixture.candidate.candidateSha256,
+      assessmentSha256: null,
+      criterionResults: [{
+        criterionId: "c1",
+        candidateSha256: fixture.candidate.candidateSha256,
+        status: "not-met",
+        source: "adapter-execution",
+        evidenceRefs: ["artifact-output"],
+        evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+        resolutionSha256: null,
+      }],
+      ownerObservations: [],
+      ownerResolutions: [],
+      nativeBoundaryResults: [],
+    },
+  );
+  assert.ok(policyContext);
+  assert.equal(composeCriticRepairAuthority(fixture.taskSpec, fixture.evidencePlan, policyContext), null,
+    "Cairn's not-met row still needs the owner's distinct repair admission confirmation");
+  const cairnFailureConfirmation = authorizeCairnCriterionFailureConfirmation(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    policyContext,
+    {
+      criterionId: "c1",
+      failureConditionId: "failure-c1",
+      evidenceRefsSeen: ["artifact-output"],
+      decision: "confirmed",
+      actionNonce: "q9-cairn-failure-confirm-candidate-preview",
+      confirmedAt: "2026-08-12T12:00:00.000Z",
+      ownerActionReceiptSha256: "6".repeat(64),
+    },
+  );
+  assert.ok(cairnFailureConfirmation);
+  const repairAuthority = composeCriticRepairAuthority(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    policyContext,
+    [cairnFailureConfirmation],
+  );
+  assert.ok(repairAuthority);
+  assert.equal(admitSerialCandidateRepair(fixture.candidate, structuredClone(repairAuthority)), null,
+    "a digest-compatible clone is not repair authority");
+  const admission = admitSerialCandidateRepair(fixture.candidate, repairAuthority);
+  assert.ok(admission);
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(admission.candidate), true);
+  assert.equal(composeSerialRepairInstruction(fixture.root, admission.candidate, {
+    ...transitionRaw(admission.candidate, "required-check-failure-confirmed"),
+    version: SERIAL_REPAIR_INSTRUCTION_VERSION,
+    blockers: [{ criterionId: "c1", failureConditionId: "failure-c1", artifactIds: ["artifact-output"] }],
+  }), null, "raw blocker rows cannot mint Builder authority after Q9 admission");
+  const preview = composeSerialRepairPreview(fixture.root, admission.candidate);
+  assert.ok(preview);
+  assert.deepEqual(serialRepairPreviewAuthorityRows(preview)?.[0]?.artifacts, [
+    { id: "artifact-output", kind: "adapter-command-attestation" },
+  ], "unused allowed artifacts do not widen repair authority");
+  assert.equal(preview.instruction.instruction, [
+    "c1 required promise: Build the local result.",
+    "c1 frozen failure condition (failure-c1): The local result is absent.",
+    "c1 permitted evidence artifact ids: artifact-output",
+  ].join("\n"));
+  for (const injected of ["observed", "smallestRepair", "rm -rf", "critic says", "artifact-log"]) {
+    assert.equal(preview.instruction.instruction.includes(injected), false);
+  }
+  assert.equal(admission.candidate.callsUsed.repair, 0, "preview is non-spending");
+  assert.equal(captureSerialCandidateBundleAfterRepair(
+    fixture.root,
+    admission.candidate,
+    preview.instruction,
+    {
+      baseHead: admission.candidate.lineage.round0Bundle.baseHead,
+      taskPaths: ["visible.txt"],
+      protectedPaths: [],
+      ownedPaths: [],
+    },
+  ).eligible, false, "the branded instruction alone cannot bypass the durable repair reservation");
+  const authorization = authorizeSerialRepairPreview(admission.candidate, preview, {
+    approved: true,
+    actionNonce: "q9-repair-approval-1",
+    approvedAt: "2026-08-11T12:00:00.000Z",
+  });
+  assert.ok(authorization);
+  const disclosure = codexRepairDisclosure(fixture.root, preview);
+  assert.ok(disclosure);
+  assert.equal(codexRepairDisclosureCoversPreview(disclosure, preview), true);
+  assert.equal(codexRepairDisclosure(fixture.root, structuredClone(preview)), null);
+  const codexAuthorization = authorizeCodexRepair(disclosure, preview, authorization);
+  assert.ok(codexAuthorization);
+  assert.equal(admission.candidate.callsUsed.repair, 0, "approval remains non-spending");
+  const request = prepareCodexRepairRequest(fixture.root, preview, codexAuthorization);
+  assert.ok(request);
+  assert.equal(consumeCodexRepairAuthorization(codexAuthorization, request, admission.candidate, null), false,
+    "an owner-approved request cannot launch before the durable reservation");
+  const reserved = reserveSerialCandidateRepair(fixture.root, admission.candidate, preview, authorization);
+  assert.ok(reserved);
+  assert.equal(reserved.candidate.phase, "awaiting-repair-result");
+  assert.equal(reserved.candidate.callsUsed.repair, 1, "the durable candidate spends before process start");
+  assert.equal(request.stdin.includes("observed"), false);
+  assert.equal(request.stdin.includes("smallestRepair"), false);
+  assert.equal(request.stdin.includes("artifact-log"), false);
+  assert.equal(consumeCodexRepairAuthorization(
+    codexAuthorization, request, reserved.candidate, reserved.reservation,
+  ), true);
+  assert.equal(consumeCodexRepairAuthorization(
+    codexAuthorization, request, reserved.candidate, reserved.reservation,
+  ), false);
+  assert.deepEqual(serialCandidateAttemptCustody(reserved.candidate)?.map((row) => [row.reservation.kind, row.status]), [
+    ["repair", "reserved"],
+  ]);
+  assert.equal(reserveSerialCandidateRepair(fixture.root, admission.candidate, preview, authorization), null,
+    "one approval cannot reserve twice");
+  assert.equal(composeSerialRepairPreview(fixture.root, reserved.candidate), null,
+    "a reserved process cannot reopen a non-spending preview");
+});
+
+test("Q9 critic reservation spends before transport and permits only one unavailable retry", () => {
+  const fixture = captured("required");
+  const content = "visible\n";
+  const contentSha256 = createHash("sha256").update(content, "utf8").digest("hex");
+  const packetAuthority = composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: fixture.candidate.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    taskSpecSha256: fixture.candidate.taskSpecSha256,
+    evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+    candidateSha256: fixture.candidate.candidateSha256,
+    selectedTrackedText: [{
+      id: "artifact-output",
+      projectRelativePath: "visible.txt",
+      sha256: contentSha256,
+      content,
+      truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1",
+        projectHash: fixture.candidate.projectRootSha256,
+        gitTracked: true,
+        ordinaryText: true,
+        regularFile: true,
+        symbolicLink: false,
+        gitIgnored: false,
+        dependency: false,
+        generated: false,
+        credentialLikePath: false,
+        credentialLikeContent: false,
+        insideProject: true,
+        reservedArea: false,
+        consented: true,
+      },
+    }],
+    checkEvidence: [],
+    priorConfirmedFindings: [],
+    comparisonTrials: [],
+  });
+  assert.ok(packetAuthority);
+  const request = composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, packetAuthority);
+  assert.ok(request);
+  const callAuthorization = (candidate: typeof fixture.candidate, callAttempt: 1 | 2 | 3) => {
+    const authorization = composeCriticCallAuthorization(request, {
+      runId: candidate.runId,
+      candidateRound: candidate.round,
+      callAttempt,
+      provider: "openrouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "anthropic/claude-opus-5",
+      resolvedModel: "anthropic/claude-opus-5",
+      resolvedModelRevision: "2026-05-01",
+      connectionConsentVersion: "consent-v1",
+      transportRevision: "openai-compatible/v1",
+      serializer: "cairn-critic-body/v1",
+      timeoutMs: 600_000,
+      maxOutputCharacters: 262_144,
+      purpose: "critic-assessment",
+      serverSideTools: "none",
+      billingBasis: "Connected provider pricing; no enforceable dollar cap.",
+    });
+    assert.ok(authorization);
+    return authorization;
+  };
+
+  const first = reserveSerialCandidateCritic(fixture.candidate, callAuthorization(fixture.candidate, 1));
+  assert.ok(first);
+  assert.equal(first.candidate.callsUsed.critic, 1);
+  assert.equal(first.candidate.phase, "awaiting-critic-result");
+  const firstUnavailable = settleSerialCandidateCritic(
+    first.candidate, first.reservation, null, "transport-unavailable",
+  );
+  assert.ok(firstUnavailable);
+  assert.equal(firstUnavailable.callsUsed.critic, 1, "transport failure cannot roll back the spend");
+
+  assert.equal(reserveSerialCandidateCritic(firstUnavailable, callAuthorization(firstUnavailable, 2)), null,
+    "a retry cannot launder away the exact unavailable reservation");
+  const second = reserveSerialCandidateCritic(firstUnavailable, callAuthorization(firstUnavailable, 2), first.reservation);
+  assert.ok(second, "one unavailable retry exists");
+  assert.equal(second.candidate.callsUsed.critic, 2);
+  const secondUnavailable = settleSerialCandidateCritic(
+    second.candidate, second.reservation, null, "malformed-output",
+  );
+  assert.ok(secondUnavailable);
+  assert.equal(secondUnavailable.callsUsed.critic, 2, "malformed output also remains spent");
+  assert.equal(
+    reserveSerialCandidateCritic(secondUnavailable, callAuthorization(secondUnavailable, 3), second.reservation),
+    null,
+    "there is no second unavailable retry even though the generic numeric cap is three",
+  );
+});
+
+test("Q9 synthetic critic send cannot spend before its exact candidate reservation", () => {
+  const prior = {
+    e2e: process.env.CAIRN_E2E,
+    mock: process.env.CAIRN_MOCK,
+    q9: process.env.CAIRN_TEST_Q9,
+    nodeTest: process.env.NODE_TEST_CONTEXT,
+  };
+  process.env.CAIRN_E2E = "1";
+  process.env.CAIRN_MOCK = "1";
+  process.env.CAIRN_TEST_Q9 = "1";
+  process.env.NODE_TEST_CONTEXT = "child-v8";
+  try {
+    const fixture = captured("required");
+    const content = "visible\n";
+    const packetAuthority = composeCriticSyntheticTaskPacketAuthorityContext(
+      fixture.taskSpec,
+      fixture.evidencePlan,
+      {
+        version: CRITIC_SYNTHETIC_TASK_PACKET_AUTHORITY_CONTEXT_VERSION,
+        selectionVersion: CRITIC_SYNTHETIC_TASK_SELECTION_VERSION,
+        manifestSha256: "d".repeat(64),
+        fixtureId: "q9-core-reservation",
+        syntheticScopeSha256: fixture.candidate.projectRootSha256,
+        connectionConsentVersion: "synthetic-task-no-external-call-v1",
+        taskSpecSha256: fixture.candidate.taskSpecSha256,
+        evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+        candidateSha256: fixture.candidate.candidateSha256,
+        selectedSyntheticText: [{
+          id: "artifact-output",
+          syntheticPath: "synthetic-q9/q9-core-reservation/visible.txt",
+          sha256: createHash("sha256").update(content).digest("hex"),
+          content,
+          truncated: false,
+        }],
+        checkEvidence: [],
+        priorConfirmedFindings: [],
+        comparisonTrials: [],
+      },
+    );
+    assert.ok(packetAuthority);
+    const request = composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, packetAuthority);
+    assert.ok(request);
+    const authorization = composeCriticCallAuthorization(request, {
+      runId: fixture.candidate.runId, candidateRound: 0, callAttempt: 1,
+      provider: "cairn-synthetic-task-fake", baseUrl: "https://critic-task.invalid/v1",
+      model: "cairn/synthetic-task-critic-v1", resolvedModel: "cairn/synthetic-task-critic-v1",
+      resolvedModelRevision: "synthetic-task-fixture-v1",
+      connectionConsentVersion: "synthetic-task-no-external-call-v1",
+      transportRevision: "openai-compatible-critic/v1",
+      serializer: "cairn-critic-body/v1", timeoutMs: 600_000, maxOutputCharacters: 262_144,
+      purpose: "critic-assessment", serverSideTools: "none",
+      billingBasis: "Injected Q9 task fake only; no provider, network, saved key, billing, or quota is used.",
+    });
+    assert.ok(authorization);
+    assert.equal(consumeCriticCallAuthorization(authorization), false,
+      "the generic provider seam cannot spend a synthetic-task call");
+    assert.equal(consumeSyntheticTaskCriticCallAuthorization(
+      authorization, request, fixture.candidate, null,
+    ), false, "owner approval alone is not a durable counter spend");
+    const reserved = reserveSerialCandidateCritic(fixture.candidate, authorization);
+    assert.ok(reserved);
+    assert.equal(consumeSyntheticTaskCriticCallAuthorization(
+      authorization, request, reserved.candidate, structuredClone(reserved.reservation),
+    ), false, "a structural reservation clone carries no process authority");
+    assert.equal(consumeSyntheticTaskCriticCallAuthorization(
+      authorization, request, reserved.candidate, reserved.reservation,
+    ), true, "the exact current reserved candidate can spend once");
+    assert.equal(consumeSyntheticTaskCriticCallAuthorization(
+      authorization, request, reserved.candidate, reserved.reservation,
+    ), false, "the exact reservation cannot replay a spent call authorization");
+  } finally {
+    if (prior.e2e === undefined) delete process.env.CAIRN_E2E; else process.env.CAIRN_E2E = prior.e2e;
+    if (prior.mock === undefined) delete process.env.CAIRN_MOCK; else process.env.CAIRN_MOCK = prior.mock;
+    if (prior.q9 === undefined) delete process.env.CAIRN_TEST_Q9; else process.env.CAIRN_TEST_Q9 = prior.q9;
+    if (prior.nodeTest === undefined) delete process.env.NODE_TEST_CONTEXT; else process.env.NODE_TEST_CONTEXT = prior.nodeTest;
+  }
+});
+
+test("Q9 mixed critic and Cairn blockers settle durably to separate Cairn confirmation", () => {
+  const fixture = captured("required", "visible\n", "critic");
+  const content = "visible\n";
+  const packet = composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: fixture.candidate.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    taskSpecSha256: fixture.candidate.taskSpecSha256,
+    evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+    candidateSha256: fixture.candidate.candidateSha256,
+    selectedTrackedText: [{
+      id: "artifact-output", projectRelativePath: "visible.txt",
+      sha256: createHash("sha256").update(content).digest("hex"), content, truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: fixture.candidate.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }, {
+      id: "artifact-log", projectRelativePath: "check.log",
+      sha256: createHash("sha256").update("supported check passed\n").digest("hex"),
+      content: "supported check passed\n", truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: fixture.candidate.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }],
+    checkEvidence: [], priorConfirmedFindings: [], comparisonTrials: [],
+  });
+  const request = packet && composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, packet);
+  assert.ok(request);
+  const authorization = composeCriticCallAuthorization(request, {
+    runId: fixture.candidate.runId, candidateRound: 0, callAttempt: 1,
+    provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-opus-5",
+    resolvedModel: "anthropic/claude-opus-5", resolvedModelRevision: "2026-05-01",
+    connectionConsentVersion: "consent-v1", transportRevision: "openai-compatible/v1",
+    serializer: "cairn-critic-body/v1", timeoutMs: 600_000, maxOutputCharacters: 262_144,
+    purpose: "critic-assessment", serverSideTools: "none",
+    billingBasis: "Connected provider pricing; no enforceable dollar cap.",
+  });
+  assert.ok(authorization);
+  const reserved = reserveSerialCandidateCritic(fixture.candidate, authorization);
+  assert.ok(reserved);
+  assert.equal(consumeCriticCallAuthorization(authorization), true);
+  const output = parseCriticOutput({
+    version: "cairn-critic-output/v1",
+    findings: [{
+      id: "f1", criterionId: "c1", status: "not-met", severity: "major", confidence: "high",
+      failureConditionId: "failure-c1", observed: "A bounded injected failure.",
+      evidenceRefs: ["artifact-output"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: "Do not leak this prose into Builder authority.",
+    }, {
+      id: "f2", criterionId: "c2", status: "met", severity: null, confidence: "high",
+      failureConditionId: null, observed: "The critic does not control Cairn's c2 verifier result.",
+      evidenceRefs: ["artifact-log"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }, {
+      id: "f3", criterionId: "p1", status: "met", severity: null, confidence: "medium",
+      failureConditionId: null, observed: "The preference is advisory.", evidenceRefs: ["artifact-output"],
+      counterEvidenceRefs: [], selfCheck: "supported", rootCauseKey: null, smallestRepair: null,
+    }],
+    unscopedFindings: [], comparisons: [], largestGapId: "f1",
+  }, request);
+  assert.ok(output);
+  const assessmentCustody = composeCriticAssessmentCustody(request, {
+    version: "cairn-critic-assessment-custody/v1",
+    runId: authorization.runId,
+    candidateRound: authorization.candidateRound,
+    callAttempt: authorization.callAttempt,
+    taskSpecSha256: authorization.taskSpecSha256,
+    evidencePlanSha256: authorization.evidencePlanSha256,
+    packetSha256: authorization.packetSha256,
+    requestSha256: authorization.requestSha256,
+    candidateSha256: authorization.candidateSha256,
+    provider: authorization.provider,
+    model: authorization.resolvedModel,
+    resolvedModelRevision: authorization.resolvedModelRevision,
+    connectionConsentVersion: authorization.connectionConsentVersion,
+    routeRequestFingerprintSha256: authorization.routeRequestFingerprintSha256,
+    criticPromptSha256: authorization.criticPromptSha256,
+    policySha256: authorization.policySha256,
+    createdAt: "2026-08-11T12:00:00.000Z",
+  }, authorization);
+  assert.ok(assessmentCustody);
+  const assessment = composeCriticAssessment(request, output, assessmentCustody);
+  assert.ok(assessment);
+  const assessmentSha256 = criticAssessmentSha256(assessment);
+  const findingRenderSha256 = criticFindingRenderSha256(assessment, "f1");
+  assert.ok(assessmentSha256);
+  assert.ok(findingRenderSha256);
+  const policyContext = composeCriticPolicyAuthorityContext(fixture.taskSpec, fixture.evidencePlan, assessment, {
+    version: "cairn-critic-policy-authority-context/v1",
+    projectHash: fixture.candidate.projectRootSha256,
+    runId: fixture.candidate.runId,
+    taskSpecSha256: fixture.candidate.taskSpecSha256,
+    evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+    candidateSha256: fixture.candidate.candidateSha256,
+    assessmentSha256,
+    criterionResults: [{
+      criterionId: "c2", candidateSha256: fixture.candidate.candidateSha256, status: "not-met",
+      source: "adapter-execution", evidenceRefs: ["artifact-log"],
+      evidencePlanSha256: fixture.candidate.evidencePlanSha256, resolutionSha256: null,
+    }], ownerObservations: [], ownerResolutions: [{
+      version: "cairn-owner-check-resolution/v1",
+      runId: fixture.candidate.runId,
+      taskSpecSha256: fixture.candidate.taskSpecSha256,
+      candidateSha256: fixture.candidate.candidateSha256,
+      assessmentSha256,
+      findingId: "f1",
+      criterionId: "c1",
+      failureConditionId: "failure-c1",
+      evidenceRefsSeen: ["artifact-output"],
+      counterEvidenceRefsSeen: [],
+      findingRenderSha256,
+      decision: "confirmed",
+      actionNonce: "q9-owner-confirm-atomic-1",
+      decidedAt: "2026-08-11T12:01:00.000Z",
+    }], nativeBoundaryResults: [],
+  });
+  assert.ok(policyContext);
+  const decision = composeCriticPolicyDecision(fixture.taskSpec, fixture.evidencePlan, policyContext);
+  assert.ok(decision);
+  assert.equal(decision.state, "blocked");
+  assert.equal(composeCriticRepairAuthority(fixture.taskSpec, fixture.evidencePlan, policyContext), null,
+    "the confirmed critic allegation cannot carry Cairn's separate owner confirmation");
+  const waitingForCairn = settleSerialCandidateCritic(
+    reserved.candidate, reserved.reservation, decision,
+  );
+  assert.ok(waitingForCairn);
+  assert.equal(waitingForCairn.phase, "awaiting-owner-resolution");
+  assert.equal(waitingForCairn.pendingOwnerReason, "cairn-failure-confirmation");
+  const cairnConfirmation = authorizeCairnCriterionFailureConfirmation(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    policyContext,
+    {
+      criterionId: "c2",
+      failureConditionId: "failure-c2",
+      evidenceRefsSeen: ["artifact-log"],
+      decision: "confirmed",
+      actionNonce: "q9-confirm-cairn-after-critic",
+      confirmedAt: "2026-08-12T12:02:00.000Z",
+      ownerActionReceiptSha256: "d".repeat(64),
+    },
+  );
+  assert.ok(cairnConfirmation);
+  const repairAuthority = composeCriticRepairAuthority(
+    fixture.taskSpec, fixture.evidencePlan, policyContext, [cairnConfirmation],
+  );
+  assert.ok(repairAuthority);
+  assert.equal(settleSerialCandidateOwnerResolution(
+    waitingForCairn, decision, structuredClone(repairAuthority),
+  ), null);
+  assert.equal(isCurrentSerialCandidate(waitingForCairn), true,
+    "a forged authority refusal does not poison the durable confirmation wait");
+  const settled = settleSerialCandidateOwnerResolution(
+    waitingForCairn, decision, repairAuthority,
+  );
+  assert.ok(settled);
+  assert.equal(settled.phase, "awaiting-repair");
+  assert.equal(serialCandidateCurrentAvailableAssessment(settled), assessment,
+    "the exact available assessment remains usable for repair policy after restart");
+  assert.equal(serialCandidateCurrentAvailableAssessment(structuredClone(settled)), null);
+
+  const preview = composeSerialRepairPreview(fixture.root, settled);
+  assert.ok(preview);
+  const repairApproval = authorizeSerialRepairPreview(settled, preview, {
+    approved: true,
+    actionNonce: "q9-prior-finding-repair-approval",
+    approvedAt: "2026-08-11T12:02:00.000Z",
+  });
+  assert.ok(repairApproval);
+  const repairReservation = reserveSerialCandidateRepair(fixture.root, settled, preview, repairApproval);
+  assert.ok(repairReservation);
+  writeFileSync(join(fixture.root, "visible.txt"), "round one visible\n");
+  const roundOneCapture = captureSerialCandidateBundleAfterRepair(
+    fixture.root,
+    repairReservation.candidate,
+    preview.instruction,
+    {
+      baseHead: repairReservation.candidate.bundle.baseHead,
+      taskPaths: ["visible.txt"],
+      protectedPaths: [],
+      ownedPaths: [],
+    },
+  );
+  assert.equal(roundOneCapture.eligible, true);
+  if (!roundOneCapture.eligible) return;
+  const roundOne = replaceSerialCandidateAfterRepair(
+    repairReservation.candidate,
+    preview.instruction,
+    roundOneCapture.bundle,
+    claimsText(fixture.authority.taskSpecSha256, "Round one complete.", ["c1", "c2"]),
+  );
+  assert.ok(roundOne);
+  const prior = serialCandidatePriorConfirmedFindings(roundOne);
+  assert.ok(prior);
+  assert.deepEqual(prior, [{
+    assessmentSha256,
+    findingId: "f1",
+    resolutionSha256: prior[0]!.resolutionSha256,
+    criterionId: "c1",
+    failureConditionId: "failure-c1",
+  }]);
+  const roundOneText = "round one visible\n";
+  const finalPacket = composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: roundOne.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    taskSpecSha256: roundOne.taskSpecSha256,
+    evidencePlanSha256: roundOne.evidencePlanSha256,
+    candidateSha256: roundOne.candidateSha256,
+    selectedTrackedText: [{
+      id: "artifact-output", projectRelativePath: "visible.txt",
+      sha256: createHash("sha256").update(roundOneText).digest("hex"), content: roundOneText, truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: roundOne.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }],
+    checkEvidence: [], priorConfirmedFindings: prior, comparisonTrials: [],
+  });
+  assert.ok(finalPacket);
+  assert.equal(composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    ...finalPacket,
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: roundOne.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    selectedTrackedText: [{
+      id: "artifact-output", projectRelativePath: "visible.txt",
+      sha256: createHash("sha256").update(roundOneText).digest("hex"), content: roundOneText, truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: roundOne.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }],
+    priorConfirmedFindings: structuredClone(prior),
+  }), null, "digest-shaped prior findings cannot be spliced into a final packet");
+  const finalRequest = composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, finalPacket);
+  assert.ok(finalRequest);
+  assert.deepEqual(finalRequest.packet.priorConfirmedFindings, prior);
+  assert.equal(composeCriticCallAuthorization(finalRequest, {
+    runId: "60000000-0000-4000-8000-000000000099", candidateRound: 1, callAttempt: 2,
+    provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-opus-5",
+    resolvedModel: "anthropic/claude-opus-5", resolvedModelRevision: "2026-05-01",
+    connectionConsentVersion: "consent-v1", transportRevision: "openai-compatible/v1",
+    serializer: "cairn-critic-body/v1", timeoutMs: 600_000, maxOutputCharacters: 262_144,
+    purpose: "critic-assessment", serverSideTools: "none",
+    billingBasis: "Connected provider pricing; no enforceable dollar cap.",
+  }), null, "prior-confirmed custody cannot cross runs");
+});
+
+test("Q9 exact owner dismissal completes and seals its critic allegation", () => {
+  const fixture = captured("required", "visible\n", "critic");
+  const content = "visible\n";
+  const packet = composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: fixture.candidate.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    taskSpecSha256: fixture.candidate.taskSpecSha256,
+    evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+    candidateSha256: fixture.candidate.candidateSha256,
+    selectedTrackedText: [{
+      id: "artifact-output", projectRelativePath: "visible.txt",
+      sha256: createHash("sha256").update(content).digest("hex"), content, truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: fixture.candidate.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }, {
+      id: "artifact-log", projectRelativePath: "check.log",
+      sha256: createHash("sha256").update("supported check passed\n").digest("hex"),
+      content: "supported check passed\n", truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: fixture.candidate.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }],
+    checkEvidence: [], priorConfirmedFindings: [], comparisonTrials: [],
+  });
+  const request = packet && composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, packet);
+  assert.ok(request);
+  const authorization = composeCriticCallAuthorization(request, {
+    runId: fixture.candidate.runId, candidateRound: 0, callAttempt: 1,
+    provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-opus-5",
+    resolvedModel: "anthropic/claude-opus-5", resolvedModelRevision: "2026-05-01",
+    connectionConsentVersion: "consent-v1", transportRevision: "openai-compatible/v1",
+    serializer: "cairn-critic-body/v1", timeoutMs: 600_000, maxOutputCharacters: 262_144,
+    purpose: "critic-assessment", serverSideTools: "none",
+    billingBasis: "Connected provider pricing; no enforceable dollar cap.",
+  });
+  assert.ok(authorization);
+  const reserved = reserveSerialCandidateCritic(fixture.candidate, authorization);
+  assert.ok(reserved);
+  assert.equal(consumeCriticCallAuthorization(authorization), true);
+  const output = parseCriticOutput({
+    version: "cairn-critic-output/v1",
+    findings: [{
+      id: "f1", criterionId: "c1", status: "not-met", severity: "major", confidence: "high",
+      failureConditionId: "failure-c1", observed: "The critic alleges the frozen c1 failure.",
+      evidenceRefs: ["artifact-output"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: "Repair only c1.",
+    }, {
+      id: "f2", criterionId: "c2", status: "met", severity: null, confidence: "high",
+      failureConditionId: null, observed: "The supported-path evidence remains met.",
+      evidenceRefs: ["artifact-log"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }, {
+      id: "f3", criterionId: "p1", status: "met", severity: null, confidence: "medium",
+      failureConditionId: null, observed: "The preference is advisory.", evidenceRefs: ["artifact-output"],
+      counterEvidenceRefs: [], selfCheck: "supported", rootCauseKey: null, smallestRepair: null,
+    }],
+    unscopedFindings: [], comparisons: [], largestGapId: "f1",
+  }, request);
+  assert.ok(output);
+  const custody = composeCriticAssessmentCustody(request, {
+    version: "cairn-critic-assessment-custody/v1",
+    runId: authorization.runId, candidateRound: authorization.candidateRound, callAttempt: authorization.callAttempt,
+    taskSpecSha256: authorization.taskSpecSha256, evidencePlanSha256: authorization.evidencePlanSha256,
+    packetSha256: authorization.packetSha256, requestSha256: authorization.requestSha256,
+    candidateSha256: authorization.candidateSha256, provider: authorization.provider,
+    model: authorization.resolvedModel, resolvedModelRevision: authorization.resolvedModelRevision,
+    connectionConsentVersion: authorization.connectionConsentVersion,
+    routeRequestFingerprintSha256: authorization.routeRequestFingerprintSha256,
+    criticPromptSha256: authorization.criticPromptSha256, policySha256: authorization.policySha256,
+    createdAt: "2026-08-11T12:00:00.000Z",
+  }, authorization);
+  assert.ok(custody);
+  const assessment = composeCriticAssessment(request, output, custody);
+  assert.ok(assessment);
+  const assessmentSha = criticAssessmentSha256(assessment);
+  const findingRenderSha = criticFindingRenderSha256(assessment, "f1");
+  assert.ok(assessmentSha);
+  assert.ok(findingRenderSha);
+  const policyRaw = (ownerResolutions: readonly unknown[]) => ({
+    version: "cairn-critic-policy-authority-context/v1",
+    projectHash: fixture.candidate.projectRootSha256,
+    runId: fixture.candidate.runId,
+    taskSpecSha256: fixture.candidate.taskSpecSha256,
+    evidencePlanSha256: fixture.candidate.evidencePlanSha256,
+    candidateSha256: fixture.candidate.candidateSha256,
+    assessmentSha256: assessmentSha,
+    criterionResults: [{
+      criterionId: "c2", candidateSha256: fixture.candidate.candidateSha256, status: "met",
+      source: "adapter-execution", evidenceRefs: ["artifact-log"],
+      evidencePlanSha256: fixture.candidate.evidencePlanSha256, resolutionSha256: null,
+    }], ownerObservations: [], ownerResolutions, nativeBoundaryResults: [],
+  });
+  const waitingPolicy = composeCriticPolicyAuthorityContext(
+    fixture.taskSpec, fixture.evidencePlan, assessment, policyRaw([]),
+  );
+  assert.ok(waitingPolicy);
+  const waitingDecision = composeCriticPolicyDecision(fixture.taskSpec, fixture.evidencePlan, waitingPolicy);
+  assert.ok(waitingDecision);
+  assert.equal(waitingDecision.state, "waiting-owner");
+  const alleged = settleSerialCandidateCritic(reserved.candidate, reserved.reservation, waitingDecision);
+  assert.ok(alleged);
+  const dismissal = {
+    version: "cairn-owner-check-resolution/v1",
+    runId: fixture.candidate.runId,
+    taskSpecSha256: fixture.candidate.taskSpecSha256,
+    candidateSha256: fixture.candidate.candidateSha256,
+    assessmentSha256: assessmentSha,
+    findingId: "f1", criterionId: "c1", failureConditionId: "failure-c1",
+    evidenceRefsSeen: ["artifact-output"], counterEvidenceRefsSeen: [],
+    findingRenderSha256: findingRenderSha, decision: "dismissed",
+    actionNonce: "q9-owner-dismiss-exact-1", decidedAt: "2026-08-11T12:01:00.000Z",
+  };
+  const dismissedPolicy = composeCriticPolicyAuthorityContext(
+    fixture.taskSpec, fixture.evidencePlan, assessment, policyRaw([dismissal]),
+  );
+  assert.ok(dismissedPolicy);
+  const dismissedDecision = composeCriticPolicyDecision(fixture.taskSpec, fixture.evidencePlan, dismissedPolicy);
+  assert.ok(dismissedDecision);
+  assert.equal(dismissedDecision.state, "clear");
+  const ready = settleSerialCandidateOwnerResolution(alleged, dismissedDecision);
+  assert.ok(ready);
+  assert.equal(ready.phase, "ready-to-seal");
+  const completion = composeCriticCompletionAuthority(fixture.taskSpec, fixture.evidencePlan, dismissedPolicy);
+  assert.ok(completion);
+  assert.ok(authorizeSerialCandidateSealFromCompletion(ready, completion));
+
+  const forged = { ...dismissal, findingRenderSha256: "f".repeat(64) };
+  const forgedPolicy = composeCriticPolicyAuthorityContext(
+    fixture.taskSpec, fixture.evidencePlan, assessment, policyRaw([forged]),
+  );
+  assert.ok(forgedPolicy);
+  assert.equal(composeCriticCompletionAuthority(fixture.taskSpec, fixture.evidencePlan, forgedPolicy), null,
+    "a dismissal that does not authenticate the exact allegation cannot complete or seal c1");
+});
+
 test("the package exposes only the prepared serial terminal transaction as a candidate writer", async () => {
   assert.equal(Object.hasOwn(publicCore, "beginSerialCandidateTerminal"), false);
   assert.equal(Object.hasOwn(publicCore, "completeSerialCandidateTerminal"), false);
@@ -342,7 +1231,45 @@ test("the package exposes only the prepared serial terminal transaction as a can
   assert.equal(Object.hasOwn(publicCore, "captureSerialCandidateBundle"), false);
   assert.equal(Object.hasOwn(publicCore, "captureSerialCandidateBundleAfterRepair"), false);
   assert.equal(Object.hasOwn(publicCore, "composeSerialRepairInstruction"), false);
-  assert.equal(typeof publicCore.authorizeSerialCandidateRepair, "function");
+  assert.equal(Object.hasOwn(publicCore, "restoreCriticCompletionAuthorityFromPending"), false,
+    "persisted completion bytes cannot be rebranded through the package barrel");
+  assert.equal(Object.hasOwn(publicCore, "restoreCriticAssessmentFromRestartCustody"), false,
+    "persisted assessment bytes cannot be rebranded without an authenticated pending capsule");
+  assert.equal(Object.hasOwn(publicCore, "restoreCriticAssessmentFromAuthenticatedPending"), false);
+  assert.equal(Object.hasOwn(publicCore, "restoreCairnCriterionFailureConfirmation"), false,
+    "journal bytes cannot become live repair authority through the package barrel");
+  assert.equal(Object.hasOwn(publicCore, "resumeSerialCandidateFromAuthenticatedPending"), false);
+  assert.equal(Object.hasOwn(publicCore, "reconcileSerialCandidateTerminalFromAuthenticatedPending"), false);
+  assert.equal(Object.hasOwn(publicCore, "authorizeSerialAuthenticatedPendingJournal"), false);
+  assert.equal(Object.hasOwn(publicCore, "registerSerialAuthenticatedPendingJournalVerifier"), false,
+    "Main's HMAC proof bridge is never available through the public Core barrel");
+  assert.equal(Object.hasOwn(mainPendingCore, "resumeSerialCandidateFromAuthenticatedPending"), true);
+  assert.equal(Object.hasOwn(mainPendingCore, "reconcileSerialCandidateTerminalFromAuthenticatedPending"), true);
+  assert.equal(Object.hasOwn(mainPendingCore, "authorizeSerialAuthenticatedPendingJournal"), true,
+    "the repository-internal Main module exposes only the proof-gated recovery seam");
+  const hiddenMainSubpath = "@cairn/core/main-pending";
+  await assert.rejects(() => import(hiddenMainSubpath), (error: unknown) =>
+    typeof error === "object" && error !== null
+      && "code" in error && error.code === "ERR_PACKAGE_PATH_NOT_EXPORTED",
+  "package consumers cannot register a permissive verifier or mint trusted recovery tokens");
+  assert.equal(Object.hasOwn(publicCore, "registerCriticAssessmentRestartRestorer"), false);
+  assert.equal(Object.hasOwn(publicCore, "bindCriticPriorConfirmedFindingsForCandidate"), false,
+    "only the exact current candidate can bind prior findings for its round-one packet");
+  assert.equal(Object.hasOwn(publicCore, "bindCriticPriorFindingsForCurrentCandidate"), false);
+  assert.equal(Object.hasOwn(publicCore, "registerCriticPriorFindingsBinder"), false);
+  assert.equal(Object.hasOwn(publicCore, "restoreSerialCandidateQ9ForPending"), false);
+  assert.equal(Object.hasOwn(publicCore, "composeSerialPendingRestoreAuthority"), false);
+  assert.equal(Object.hasOwn(publicCore, "restoreSerialCandidateSealAuthorizationForPending"), false);
+  assert.equal(Object.hasOwn(publicCore, "registerSerialCandidatePendingSealRestorer"), false);
+  assert.equal(Object.hasOwn(publicCore, "activateSerialCandidateAfterPendingRestore"), false);
+  assert.equal(Object.hasOwn(publicCore, "restoredCriticCompletionAuthorityBrands"), false);
+  for (const legacyAuthoritySurface of [
+    "advanceSerialCandidate", "composeSerialCandidateTransition", "composeSerialCandidateSealAuthorization",
+    "replaceSerialCandidateAfterRepair", "authorizeSerialCandidateRepair",
+  ]) {
+    assert.equal(Object.hasOwn(publicCore, legacyAuthoritySurface), false,
+      `${legacyAuthoritySurface} remains Core-internal and cannot escalate restored bytes`);
+  }
   assert.equal(typeof publicCore.captureSerialCandidateAfterRepair, "function");
   assert.equal(Object.hasOwn(publicCore, "finalizeSerialCandidate"), false);
   assert.equal(Object.hasOwn(publicCore, "stopSerialCandidate"), false);

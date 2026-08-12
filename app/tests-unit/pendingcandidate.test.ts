@@ -128,8 +128,22 @@ test("source order keeps journal preparation before Core terminal writes and clo
   assert.ok(finalizeSource.indexOf("preparePendingRunTerminal") < finalizeSource.indexOf("live.terminalPreparation ="));
   assert.ok(finalizeSource.indexOf("live.terminalPreparation =") < finalizeSource.lastIndexOf("executeLiveTerminal"));
   assert.ok(source.indexOf("installPendingRunStore") < source.indexOf("pendingRunRecoveryInputs"));
-  assert.ok(source.includes("resumeSerialCandidateFromPending"));
-  assert.ok(source.includes("reconcileSerialCandidateTerminalFromPending"));
+  const recoverySource = source.slice(source.indexOf("export function installPendingSerialCandidateRecovery"));
+  const authenticatedResume = recoverySource.indexOf("resumeSerialCandidateFromAuthenticatedPending");
+  const authenticatedReconcile = recoverySource.indexOf("reconcileSerialCandidateTerminalFromAuthenticatedPending");
+  assert.ok(recoverySource.indexOf("interruptPendingRunOperationForRecovery") < authenticatedResume,
+    "durable interruption classification precedes authenticated Core resume");
+  assert.ok(authenticatedResume >= 0 && authenticatedReconcile > authenticatedResume);
+  assert.ok(source.includes('from "#cairn-main-pending"'),
+    "Main reaches the trusted recovery seam only through its private package-import bridge");
+  assert.equal(source.includes("resumeSerialCandidateFromPending("), false,
+    "Main recovery must never fall back to Core's public untrusted capsule path");
+  assert.equal(source.includes("reconcileSerialCandidateTerminalFromPending("), false,
+    "prepared recovery must never fall back to Core's public untrusted capsule path");
+  assert.ok(recoverySource.slice(authenticatedResume, recoverySource.indexOf(");", authenticatedResume))
+    .includes("input.journalAuthority"));
+  assert.ok(recoverySource.slice(authenticatedReconcile, recoverySource.indexOf(");", authenticatedReconcile))
+    .includes("input.journalAuthority"));
   assert.ok(source.includes("pendingRunPreparedTerminalInputs"));
   assert.ok(source.includes("markPendingRunRecoveryRequired"));
 });

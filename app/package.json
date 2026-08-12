@@ -7,6 +7,9 @@
   "license": "MIT",
   "private": true,
   "main": ".vite/build/main.js",
+  "imports": {
+    "#cairn-main-pending": "./internal/main-pending.js"
+  },
   "scripts": {
     "prestart": "node scripts/copy-assets.mjs",
     "start": "electron-forge start",

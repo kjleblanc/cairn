@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -15,6 +15,8 @@ import { TaskCard } from "../components/TaskCard";
 import { TaskIntentList } from "../components/TaskIntentList";
 import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoice } from "../components/TaskReview";
 import { CriticCallCard } from "../components/CriticCall";
+import { RepairCallCard } from "../components/RepairCall";
+import { HarnessRevisionCard } from "../components/HarnessRevision";
 import { Pill } from "../components/Ui";
 
 /** Tracks one in-flight `send()`. `id` starts out as whatever conversation
@@ -593,6 +595,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const conversationVersionRef = useRef(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
   const [criticCallBusy, setCriticCallBusy] = useState(false);
+  const [repairCallBusy, setRepairCallBusy] = useState(false);
+  const [harnessRevisionBusy, setHarnessRevisionBusy] = useState(false);
   const [calibrationCall, setCalibrationCall] = useState<CriticCallDisclosureV1 | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const dispatchHeadingId = useId();
@@ -778,7 +782,52 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // component's mount lifetime: switching projects may unmount Chat without
   // cancelling a reply, and returning reattaches to its accumulated text.
   useEffect(() => {
-    if (!status?.connected) { setRestoringConversation(false); return; }
+    if (status === null) { setRestoringConversation(false); return; }
+    if (!status.connected) {
+      let live = true;
+      const restoreVersion = conversationVersionRef.current;
+      setRestoringConversation(true);
+      // A disconnected conductor grants no prose, action, stream, or composer
+      // authority. Read-only history remains available, however, and Main's
+      // store has already discarded every unauthenticated envelope line. Keep
+      // only those authenticated local result receipts visible.
+      actionVersionRef.current += 1;
+      applyAction(null);
+      inFlightRef.current = null;
+      streamingRef.current = "";
+      setStreamingText("");
+      setStreaming(false);
+      setCommentary(false);
+      void (async () => {
+        try {
+          const list = await cairn.conductorConversations(dir);
+          if (!live || conversationVersionRef.current !== restoreVersion) return;
+          const id = session?.conversationId ?? list.at(-1)?.id ?? null;
+          if (id === null) {
+            setConvId(null);
+            setTurns([]);
+            return;
+          }
+          // Adopt the exact local conversation before reading it, so an
+          // authenticated terminal delta racing this read can merge forward.
+          setConvId(id);
+          const saved = (await cairn.conductorTurns(dir, id))
+            .filter((turn): turn is Extract<ConductorTurn, { role: "envelope" }> => turn.role === "envelope");
+          if (!live || conversationIdRef.current !== id) return;
+          if (conversationVersionRef.current !== restoreVersion) {
+            setTurns((current) => mergeSavedTurns(
+              saved,
+              current.filter((turn): turn is Extract<ConductorTurn, { role: "envelope" }> => turn.role === "envelope"),
+            ));
+          } else {
+            setTurns(saved);
+          }
+        } finally {
+          if (live) setRestoringConversation(false);
+        }
+      })();
+      return () => { live = false; };
+    }
     let live = true;
     const restoreVersion = conversationVersionRef.current;
     const restoredActionVersion = actionVersionRef.current;
@@ -869,7 +918,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       }
     })();
     return () => { live = false; };
-  }, [status?.connected, dir, setConvId, applyAction, reconcileAction]);
+  }, [status?.connected, dir, session?.conversationId, setConvId, applyAction, reconcileAction]);
 
   const refreshSession = useCallback(async () => {
     const [current, calibration] = await Promise.all([
@@ -939,13 +988,17 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     // to do with. A card for another conversation is already on disk; opening
     // that conversation shows it.
     if (event.kind === "envelope") {
-      if (event.turn && conversationIdRef.current === event.conversationId) {
+      const disconnectedLocalReceipt = status?.connected === false && event.turn?.role === "envelope";
+      if (event.turn && (conversationIdRef.current === event.conversationId || disconnectedLocalReceipt)) {
+        if (disconnectedLocalReceipt && conversationIdRef.current !== event.conversationId) {
+          setConvId(event.conversationId);
+        }
         conversationVersionRef.current += 1;
         setTurns((turns) => appendTurnOnce(turns, event.turn as ConductorTurn));
         // Ask main what remains actionable instead of blindly clearing: this
         // result may belong to an older confirmation while a newer proposal is
         // already current in the same conversation.
-        void reconcileAction(event.conversationId);
+        if (!disconnectedLocalReceipt) void reconcileAction(event.conversationId);
       }
       return;
     }
@@ -1038,7 +1091,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setError(event.message ?? "Cairn had a problem answering.");
     const settlementKind = failedFlight?.actionReply?.kind ?? failedFlight?.settlementKind;
     if (settlementKind) settleTargetedReply(settlementKind, null, true);
-  }), [dir, setConvId, setRetryRequest, applyAction, reconcileAction, settleTargetedReply, refreshStatus]);
+  }), [dir, status?.connected, setConvId, setRetryRequest, applyAction, reconcileAction, settleTargetedReply, refreshStatus]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, [turns, streamingText]);
 
@@ -1525,7 +1578,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     pendingTaskReviewAction.current = pending;
     const request = action.kind === "observe"
       ? { dir, actionId, action: { kind: "observe" as const, decision: action.decision } }
-      : { dir, actionId, action: { kind: "resolve" as const, decision: action.decision } };
+      : action.kind === "resolve"
+        ? { dir, actionId, action: { kind: "resolve" as const, decision: action.decision } }
+        : { dir, actionId, action: { kind: "review-cairn-failure" as const, decision: action.decision } };
     let response: Awaited<ReturnType<typeof cairn.taskReviewAction>>;
     try {
       response = await cairn.taskReviewAction(request);
@@ -1545,6 +1600,97 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       : response.ok
         ? { ...current, taskReview: response.value, error: null }
         : { ...current, error: response.message });
+  }
+
+  /** A reloaded running session has no live dispatch preview. Its opaque
+   * Main-owned action id remains the only authority this renderer returns. */
+  async function applyRunningTaskReviewChoice(actionId: string, action: TaskReviewActionChoice): Promise<void> {
+    const held = session;
+    const token = dispatchToken.current;
+    if (held?.phase !== "running" || held.taskReview === undefined
+      || !held.taskReview.criteria.some((criterion) => criterion.ownerChecks.some((check) => check.action?.actionId === actionId))
+      || pendingTaskReviewAction.current?.token === token) return;
+    const pending = { token, actionId };
+    pendingTaskReviewAction.current = pending;
+    const request = action.kind === "observe"
+      ? { dir, actionId, action: { kind: "observe" as const, decision: action.decision } }
+      : action.kind === "resolve"
+        ? { dir, actionId, action: { kind: "resolve" as const, decision: action.decision } }
+        : { dir, actionId, action: { kind: "review-cairn-failure" as const, decision: action.decision } };
+    let applied = false;
+    try {
+      const response = await cairn.taskReviewAction(request);
+      if (pendingTaskReviewAction.current !== pending || dispatchToken.current !== token) return;
+      pendingTaskReviewAction.current = null;
+      if (!response.ok) { setError(response.message); return; }
+      applied = true;
+      setError(null);
+      setSession((current) => current?.phase === "running" && current.startedAt === held.startedAt
+        && current.acceptedPreviewId === held.acceptedPreviewId
+        ? { ...current, taskReview: response.value }
+        : current);
+      await refreshSession();
+    } catch {
+      if (pendingTaskReviewAction.current === pending) pendingTaskReviewAction.current = null;
+      if (dispatchToken.current !== token) return;
+      setError(applied
+        ? "That owner-check choice was recorded, but Cairn could not refresh the running session."
+        : "Cairn could not apply that owner-check choice. Review the accepted task again.");
+    }
+  }
+
+  async function decideRepairCall(request: RepairCallDecisionRequest): Promise<void> {
+    const held = session;
+    if (repairCallBusy || held?.phase !== "running" || held.repairCall === undefined
+      || request.dir !== dir || request.disclosure !== held.repairCall
+      || request.approvalId !== held.repairCall.approvalId
+      || !held.repairCall.actions.includes(request.action)) return;
+    setRepairCallBusy(true);
+    let recorded = false;
+    try {
+      const response = await cairn.repairCallDecide(request);
+      if (!response.ok) { setError(response.message); return; }
+      recorded = true;
+      setError(null);
+      setSession((current) => current?.phase === "running" && current.startedAt === held.startedAt
+        && current.repairCall?.approvalId === request.approvalId
+        ? { ...current, repairCall: undefined }
+        : current);
+      await refreshSession();
+    } catch {
+      setError(recorded
+        ? "The repair-call decision was recorded, but Cairn could not refresh the running session."
+        : "Cairn could not record that repair-call decision.");
+    } finally {
+      setRepairCallBusy(false);
+    }
+  }
+
+  async function decideHarnessRevision(request: Q9HarnessRevisionDecisionRequest): Promise<void> {
+    const held = session;
+    if (harnessRevisionBusy || held?.phase !== "running" || held.harnessRevision === undefined
+      || request.dir !== dir || request.disclosure !== held.harnessRevision
+      || request.approvalId !== held.harnessRevision.approvalId
+      || !held.harnessRevision.actions.includes(request.action)) return;
+    setHarnessRevisionBusy(true);
+    let recorded = false;
+    try {
+      const response = await cairn.harnessRevisionDecide(request);
+      if (!response.ok) { setError(response.message); return; }
+      recorded = true;
+      setError(null);
+      setSession((current) => current?.phase === "running" && current.startedAt === held.startedAt
+        && current.harnessRevision?.approvalId === request.approvalId
+        ? { ...current, harnessRevision: undefined }
+        : current);
+      await refreshSession();
+    } catch {
+      setError(recorded
+        ? "The harness decision was recorded, but Cairn could not refresh the running session."
+        : "Cairn could not record that harness decision.");
+    } finally {
+      setHarnessRevisionBusy(false);
+    }
   }
 
   function onCardSend(candidate: Extract<ConductorAction, { kind: "task" }>): void {
@@ -1711,6 +1857,32 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // capability check, never an adapter-id check, so a third adapter needs no
   // change here.
   const dispatchWorker = dispatchReady !== null && !dispatchReady.recommended.capabilities.includes("offline-demo");
+  const runStrip = session ? (
+    <div className="run-strip" data-run-state={runThreadState}>
+      {/* ONE live region, mounted with the strip and never replaced:
+        * only its TEXT swaps, from the stage word to the terminal
+        * line. The announcement that matters most is how the run
+        * ended, and a region that appears already holding its
+        * message is the case screen readers announce least
+        * reliably — so this element outlives the change it carries.
+        * The clock stays outside it: a polite region wrapped around
+        * a value that changes every second would read itself aloud
+        * once a second. */}
+      <span className={`run-strip-state ${session.phase === "running" ? "run-strip-stage" : "run-strip-terminal"}`} role="status">
+        {session.phase === "running" ? latestStage ?? "Starting" : terminalLine}
+      </span>
+      {session.phase === "running" ? (
+        <span className="run-strip-elapsed">{elapsedSince(session.startedAt, now)}</span>
+      ) : null}
+      <span className="run-strip-outcome">{session.outcome}</span>
+      <span className="run-strip-controls">
+        {session.phase === "running" ? (
+          <Pill kind="quiet" onClick={() => void cairn.taskCancel(dir)}>Stop this task</Pill>
+        ) : null}
+        <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
+      </span>
+    </div>
+  ) : null;
 
   const column = (
       <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " chat-column-villager" : ""}`}
@@ -1737,6 +1909,19 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
           />
         ) : null}
         {status && !status.connected ? <ConnectCard status={status} onConnected={() => void refreshStatus()} /> : null}
+        {status && !status.connected && turns.some((turn) => turn.role === "envelope") ? (
+          <div className="chat-messages chat-local-results" aria-label="Saved task results">
+            {/* Main authenticates persisted envelope turns before returning
+              * them. Disconnected mode deliberately renders only those cards:
+              * no owner/Cairn prose, actions, streams, push controls, or
+              * composer authority crosses the connection boundary. */}
+            {turns.map((turn, i) => turn.role === "envelope" ? (
+              <ResultCardView key={i} card={turn.card} dir={dir} onOpenRun={onOpenRun} />
+            ) : null)}
+            <div ref={endRef} />
+          </div>
+        ) : null}
+        {status && !status.connected ? runStrip : null}
 
         {status?.connected ? (
           <>
@@ -1835,6 +2020,33 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   ) : null}
                 </>
               ) : null}
+              {session?.phase === "running" && session.taskReview ? (
+                <TaskReviewView review={session.taskReview} heading="Accepted Task Spec"
+                  onAction={(actionId, choice) => void applyRunningTaskReviewChoice(actionId, choice)} />
+              ) : null}
+              {session?.phase === "running" && session.criticCall ? (
+                <CriticCallCard
+                  call={session.criticCall}
+                  busy={criticCallBusy}
+                  onDecide={(action) => void decideCriticCall(session.criticCall!, action)}
+                />
+              ) : null}
+              {session?.phase === "running" && session.repairCall ? (
+                <RepairCallCard
+                  dir={dir}
+                  call={session.repairCall}
+                  busy={repairCallBusy}
+                  onDecide={(request) => void decideRepairCall(request)}
+                />
+              ) : null}
+              {session?.phase === "running" && session.harnessRevision ? (
+                <HarnessRevisionCard
+                  dir={dir}
+                  revision={session.harnessRevision}
+                  busy={harnessRevisionBusy}
+                  onDecide={(request) => void decideHarnessRevision(request)}
+                />
+              ) : null}
               {dispatch && dispatch.phase !== "settling" ? (
                 <section className="card dispatch-panel" data-dispatch-phase={dispatch.phase}
                   aria-labelledby={dispatch.phase === "confirm" ? dispatchHeadingId : undefined}
@@ -1842,16 +2054,6 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   {dispatch.phase === "running" ? (
                     <>
                       <p className="small muted dispatch-running" role="status">Cairn is working on this. Its notes are saved in your project's docs/ai-work folder.</p>
-                      {/* A critic call is asked for mid-run, so the live card
-                          comes from the session rather than the pre-start
-                          route preview. */}
-                      {session?.criticCall ? (
-                        <CriticCallCard
-                          call={session.criticCall}
-                          busy={criticCallBusy}
-                          onDecide={(action) => void decideCriticCall(session.criticCall!, action)}
-                        />
-                      ) : null}
                     </>
                   ) : (
                     <>
@@ -1971,32 +2173,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               ) : null}
               <div ref={endRef} />
             </div>
-            {session ? (
-              <div className="run-strip" data-run-state={runThreadState}>
-                {/* ONE live region, mounted with the strip and never replaced:
-                  * only its TEXT swaps, from the stage word to the terminal
-                  * line. The announcement that matters most is how the run
-                  * ended, and a region that appears already holding its
-                  * message is the case screen readers announce least
-                  * reliably — so this element outlives the change it carries.
-                  * The clock stays outside it: a polite region wrapped around
-                  * a value that changes every second would read itself aloud
-                  * once a second. */}
-                <span className={`run-strip-state ${session.phase === "running" ? "run-strip-stage" : "run-strip-terminal"}`} role="status">
-                  {session.phase === "running" ? latestStage ?? "Starting" : terminalLine}
-                </span>
-                {session.phase === "running" ? (
-                  <span className="run-strip-elapsed">{elapsedSince(session.startedAt, now)}</span>
-                ) : null}
-                <span className="run-strip-outcome">{session.outcome}</span>
-                <span className="run-strip-controls">
-                  {session.phase === "running" ? (
-                    <Pill kind="quiet" onClick={() => void cairn.taskCancel(dir)}>Stop this task</Pill>
-                  ) : null}
-                  <Pill kind="quiet" onClick={onOpenRun}>Open the run screen</Pill>
-                </span>
-              </div>
-            ) : null}
+            {runStrip}
             {runActive || captureSettling ? (
               <p className="small muted composer-closed">{captureSettling
                 ? "Cairn is finishing this result. You can type again when it is ready."

@@ -32,7 +32,9 @@ import {
   SERIAL_CANDIDATE_VERSION,
   SERIAL_CANDIDATE_BUNDLE_VERSION,
   SERIAL_CANDIDATE_TRANSITION_VERSION,
+  activateSerialCandidateAfterPendingRestore,
   advanceSerialCandidate,
+  adoptSerialCandidateEvidencePlanRevision,
   beginSerialCandidateTerminal,
   captureSerialCandidateBundleAfterRepair,
   captureSerialCandidateIgnoredBoundary,
@@ -49,19 +51,25 @@ import {
   isSerialCandidateTaskSpecAuthority,
   parkCurrentSerialCandidate,
   serialCandidateBundleSha256,
+  serialCandidateCompletionAuthority,
   serialCandidateGitEnvironmentNameDenied,
   serialCandidateGitEnvironmentSafe,
   serialCandidateLineageIdentity,
   serialCandidatePendingRepairLineage,
   serialCandidatePendingTransitionHistory,
+  serialCandidateQ9PendingCustody,
+  serialCandidateEvidencePlanRevisionCustody,
   serialCandidateRepairAvailability,
   serialCandidateReservedRecordClass,
+  serialCandidateCurrentIdentity,
   serialCandidateSha256,
   serialCandidateTaskSpecAuthority,
   serialCandidateWorkspaceStillExact,
   restoreSerialCandidateBundleForPending,
   restoreSerialCandidateAfterRepairForPending,
   restoreSerialCandidateRepairEligibilityForPending,
+  restoreSerialCandidateQ9ForPending,
+  replaceSerialCandidateAfterRepair,
   type SerialCandidateBundleCaptureV1,
   type SerialCandidateBundleV1,
   type SerialCandidateSealAuthorizationV1,
@@ -71,7 +79,14 @@ import {
   type SerialCandidatePendingRepairLineageV1,
   type SerialRepairInstructionV1,
 } from "./candidate.js";
+import { restoreSerialCandidateSealAuthorizationForPending } from "./candidate-seal-internal.js";
+import { composeSerialPendingRestoreAuthority } from "./pending-restore-internal.js";
+import {
+  consumeSerialAuthenticatedPendingJournalAuthority,
+  type SerialAuthenticatedPendingJournalAuthority,
+} from "./pending-journal-auth-internal.js";
 import { CODEX_EXEC_ADAPTER_ID } from "./codex.js";
+import type { CriticCheckEvidenceV1, CriterionResultV1 } from "./critic.js";
 import { KIMI_EXEC_ADAPTER_ID } from "./kimi.js";
 import {
   taskRequestSha256,
@@ -98,7 +113,13 @@ import {
   CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
   parseWorkerProcessEventBundle,
   routeTask,
+  authorizeTaskAdapterQ9E2eCandidateRun,
+  isTaskAdapterQ9E2eRevisedEvidence,
   isTaskAdapterCandidateStateTestSupport,
+  runTaskAdapterQ9E2eRevisedEvidence,
+  taskAdapterQ9E2eCairnBlockerResult,
+  taskAdapterQ9E2eHarnessFailureResult,
+  taskAdapterQ9E2eFakeCandidateBoundTo,
   taskAdapterCandidateWriterSupportBoundTo,
   WorkerBoundaryError,
   WorkerProcessError,
@@ -106,6 +127,8 @@ import {
   type AdapterTaskQualityBinding,
   type QualityBoundAdapterTaskContractV4,
   type QualityBoundWorkerRunResultV3,
+  type Q9E2eHarnessFailureResultV1,
+  type Q9E2eCairnBlockerResultV1,
   type RouteResult,
   type TaskAdapter,
   type WorkerRunResult,
@@ -113,12 +136,18 @@ import {
 import {
   EVIDENCE_PLAN_CANDIDATE_VERSION,
   EVIDENCE_PLAN_VERSION,
+  EVIDENCE_PLAN_REVISION_AUTHORITY_CONTEXT_VERSION,
+  EVIDENCE_PLAN_REVISION_AUTHORIZATION_VERSION,
+  authorizeEvidencePlanRevision,
   bindInitialEvidencePlan,
   evidencePlanSha256,
+  previewEvidencePlanRevision,
   taskSpecReviewView,
   taskSpecSha256,
   validateTaskSpec,
   type ContractSectionAuthorityV1,
+  type AuthorizedEvidencePlanRevisionV1,
+  type EvidencePlanRevisionPreviewV1,
   type EvidencePlanV1,
   type TaskSpecV1,
 } from "./quality.js";
@@ -237,7 +266,11 @@ export type SerialCandidateTerminalReconcileResultV1 =
       candidate: SerialCandidateV1;
       preparation: SerialCandidateTerminalPreparationV1;
     }>
-  | Readonly<{ status: "terminal"; receipt: SerialCandidateTerminalReceiptV1 }>
+  | Readonly<{
+      status: "terminal";
+      receipt: SerialCandidateTerminalReceiptV1;
+      result: SerialCandidateTerminalResult;
+    }>
   | Readonly<{
       status: "stale";
       reason:
@@ -269,6 +302,8 @@ const terminalPreparationBindings = new WeakMap<object, Readonly<{
   sealAuthorization: SerialCandidateSealAuthorizationV1 | null;
 }>>();
 const terminalPreparationByCandidate = new WeakMap<object, SerialCandidateTerminalPreparationV1>();
+const terminalResultBrand = new WeakSet<object>();
+const terminalResultShaBindings = new WeakMap<object, string>();
 
 export const SERIAL_TASK_SPEC_AUTHORITY_VERSION = "cairn-serial-task-spec-authority/v1" as const;
 
@@ -480,6 +515,24 @@ export function composeSerialCandidateStateTestWriterIsolation(
   }
 }
 
+/** Public only for the opt-in Electron Q9 matrix. The returned receipt uses
+ * the state-test brand, so normal preview/run paths continue to reject it. */
+export function composeSerialCandidateE2eFakeWriterIsolation(
+  adapter: unknown,
+  projectRoot: string,
+  excludedUserDataRoot: string,
+): SerialCandidateWriterIsolationV1 | null {
+  try {
+    const projectRootReal = canonicalExistingDirectory(projectRoot);
+    const excludedUserDataRootReal = canonicalExistingDirectory(excludedUserDataRoot);
+    if (!projectRootReal || !excludedUserDataRootReal
+      || !taskAdapterQ9E2eFakeCandidateBoundTo(adapter, projectRootReal, excludedUserDataRootReal)) return null;
+    return composeSerialCandidateStateTestWriterIsolation(adapter, projectRootReal, excludedUserDataRootReal);
+  } catch {
+    return null;
+  }
+}
+
 function candidateWriterIsolationBinding(
   value: unknown,
   projectRoot?: string,
@@ -626,6 +679,53 @@ function exactPendingKeys(value: unknown, expected: readonly string[]): value is
   return keys.length === wanted.length && keys.every((key, index) => key === wanted[index]);
 }
 
+const LEGACY_PENDING_CANDIDATE_INNER_KEYS = [
+  "version", "projectRootReal", "projectRootSha256", "start", "startHeadRef", "contract", "route",
+  "activities", "taskPaths", "protectedPaths", "ownedPaths", "ownedRecordIndexAuthority", "attestations",
+  "attestationsCompleteForDone", "evidence", "taskSpec", "evidencePlan", "round0Bundle", "candidate",
+  "claimsText", "transitionHistory", "repairLineage", "sealableCandidateSha256", "sealableClaimsSha256",
+  "sealableBundleSha256",
+] as const;
+
+const Q9_PENDING_CANDIDATE_INNER_KEYS = [
+  "version", "projectRootReal", "projectRootSha256", "start", "startHeadRef", "contract", "route",
+  "activities", "taskPaths", "protectedPaths", "ownedPaths", "ownedRecordIndexAuthority", "attestations",
+  "attestationsCompleteForDone", "evidence", "taskSpec", "initialEvidencePlan", "evidencePlan",
+  "evidencePlanRevisionCustody", "round0Bundle", "candidate", "claimsText", "transitionHistory", "repairLineage",
+  "sealableCandidateSha256", "sealableClaimsSha256", "sealableBundleSha256", "q9Custody",
+] as const;
+
+function exactPendingQ9Custody(value: unknown): value is Record<string, unknown> {
+  return exactPendingKeys(value, [
+    "qualityLoopAuthorityRequired", "assessmentRestartCustody", "repairAuthority", "repairAuthoritySha256",
+    "policyDecision", "completionAuthority", "attempts",
+  ]) && value.qualityLoopAuthorityRequired === true && Array.isArray(value.attempts);
+}
+
+function q9PendingCustodyCarriesAuthority(value: unknown): boolean {
+  if (!exactPendingQ9Custody(value)) return true;
+  return value.assessmentRestartCustody !== null
+    || value.repairAuthority !== null
+    || value.repairAuthoritySha256 !== null
+    || value.policyDecision !== null
+    || value.completionAuthority !== null
+    || (value.attempts as unknown[]).length !== 0;
+}
+
+function q9PendingInnerCarriesAuthority(value: Record<string, unknown>): boolean {
+  if (value.evidencePlanRevisionCustody !== null || q9PendingCustodyCarriesAuthority(value.q9Custody)) return true;
+  const repair = value.repairLineage;
+  return repair !== null && typeof repair === "object" && !Array.isArray(repair)
+    && q9PendingCustodyCarriesAuthority((repair as Record<string, unknown>).preRepairQ9Custody);
+}
+
+function pendingCandidateInnerKind(value: unknown): "legacy" | "q9" | null {
+  if (exactPendingKeys(value, Q9_PENDING_CANDIDATE_INNER_KEYS)) {
+    return exactPendingQ9Custody(value.q9Custody) ? "q9" : null;
+  }
+  return exactPendingKeys(value, LEGACY_PENDING_CANDIDATE_INNER_KEYS) ? "legacy" : null;
+}
+
 function pendingSha256(bytes: string): string {
   return createHash("sha256").update(Buffer.from(bytes, "utf8")).digest("hex");
 }
@@ -669,13 +769,7 @@ function parseAnyPendingCapsule(value: unknown): Readonly<{
 
 function parsePendingCapsule(value: unknown): ReturnType<typeof parseAnyPendingCapsule> {
   const parsed = parseAnyPendingCapsule(value);
-  return parsed && exactPendingKeys(parsed.inner, [
-    "version", "projectRootReal", "projectRootSha256", "start", "startHeadRef", "contract", "route",
-    "activities", "taskPaths", "protectedPaths", "ownedPaths", "ownedRecordIndexAuthority", "attestations",
-    "attestationsCompleteForDone", "evidence", "taskSpec", "evidencePlan", "round0Bundle", "candidate",
-    "claimsText", "transitionHistory", "repairLineage", "sealableCandidateSha256", "sealableClaimsSha256",
-    "sealableBundleSha256",
-  ]) ? parsed : null;
+  return parsed && pendingCandidateInnerKind(parsed.inner) !== null ? parsed : null;
 }
 
 function stalePendingCandidate(
@@ -745,6 +839,51 @@ export type SerialCandidateTerminalResult = (
   | Extract<SerialRunResult, { status: "stopped" }>
 ) & { candidate: SerialCandidateV1 };
 
+function terminalResultCanonicalBytes(value: SerialCandidateTerminalResult): string | null {
+  const candidate = serialCandidateCurrentIdentity(value.candidate);
+  if (!candidate) return null;
+  return pendingCanonicalBytes(Object.freeze({
+    status: value.status,
+    reason: value.status === "stopped" ? value.reason : null,
+    taskNumber: value.taskNumber,
+    disposition: value.disposition,
+    briefPath: value.briefPath,
+    reportPath: value.reportPath,
+    reportText: value.reportText,
+    row: value.row,
+    route: value.route,
+    activities: value.activities,
+    commit: Object.freeze({
+      status: value.commit.status,
+      reason: value.commit.reason,
+      hash: value.commit.hash ?? null,
+    }),
+    composed: value.composed,
+    candidate,
+  }));
+}
+
+function brandSerialCandidateTerminalResult(
+  value: SerialCandidateTerminalResult,
+): SerialCandidateTerminalResult | null {
+  const canonicalBytes = terminalResultCanonicalBytes(value);
+  if (!canonicalBytes) return null;
+  const result = Object.freeze(value);
+  terminalResultBrand.add(result);
+  terminalResultShaBindings.set(result, pendingSha256(canonicalBytes));
+  return result;
+}
+
+/** Exact Core-minted terminal-result identity for Main's durable card/outbox
+ * join. Structural clones and results whose nested card inputs changed after
+ * minting are refused. */
+export function serialCandidateTerminalResultSha256(value: unknown): string | null {
+  if (!value || typeof value !== "object" || !terminalResultBrand.has(value)) return null;
+  const expected = terminalResultShaBindings.get(value);
+  const canonicalBytes = terminalResultCanonicalBytes(value as SerialCandidateTerminalResult);
+  return expected && canonicalBytes && pendingSha256(canonicalBytes) === expected ? expected : null;
+}
+
 export type SerialStopReason =
   | "ADAPTER_FAILED"
   | "INVALID_ADAPTER_RESULT"
@@ -754,6 +893,11 @@ export type SerialStopReason =
   | "REAL_MODEL_CALL_NOT_AUTHORIZED"
   | "MODEL_REPORTED_STOPPED"
   | "MODEL_RESULT_NOT_VERIFIED"
+  | "Q9_CRITIC_CALLS_EXHAUSTED"
+  | "Q9_REQUIRED_CHECK_STILL_FAILED"
+  | "Q9_NATIVE_BOUNDARY_STOPPED"
+  | "Q9_REQUIRED_EVIDENCE_INCOMPLETE"
+  | "Q9_WORKFLOW_VERIFICATION_FAILED"
   | "ADAPTER_TIMED_OUT"
   | "CANCELLED_BY_OWNER";
 
@@ -791,6 +935,69 @@ interface OpenSerialCandidateContext {
   sealableCandidateSha256: string;
   sealableClaimsSha256: string;
   sealableBundleSha256: string;
+  /** Authenticated restart after a one-use repair process may have changed
+   * task bytes before crashing. The old candidate is restored solely so Core
+   * can author one honest STOP; it can never recapture/adopt those unaudited
+   * bytes or return to the quality loop. */
+  interruptedRepairStopOnly: boolean;
+}
+
+export const SERIAL_CANDIDATE_POLICY_EVIDENCE_VERSION = "cairn-serial-candidate-policy-evidence/v1" as const;
+
+export type SerialCandidatePolicyEvidenceV1 = Readonly<{
+  version: typeof SERIAL_CANDIDATE_POLICY_EVIDENCE_VERSION;
+  projectHash: string;
+  runId: string;
+  round: 0 | 1;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  bundleSha256: string;
+  criterionResults: readonly CriterionResultV1[];
+  checkEvidence: readonly CriticCheckEvidenceV1[];
+  artifactIds: readonly string[];
+  policyEvidenceSha256: string;
+}>;
+
+const serialCandidatePolicyEvidenceBrand = new WeakSet<object>();
+
+export const SERIAL_Q9_HARNESS_FAILURE_VERSION = "cairn-serial-q9-harness-failure/v1" as const;
+export type SerialQ9HarnessFailureV1 = Readonly<{
+  version: typeof SERIAL_Q9_HARNESS_FAILURE_VERSION;
+  projectHash: string;
+  runId: string;
+  candidateSha256: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  criterionId: `c${number}`;
+  commandSha256: string;
+  code: "TIMED_OUT_BEFORE_ASSERTION";
+  exitCode: 124;
+  boundedOutput: string;
+  outputSha256: string;
+  evidenceRef: string;
+  failureSha256: string;
+}>;
+
+export type SerialQ9HarnessRevisionOwnerApprovalV1 = Readonly<{
+  ownerActionNonce: string;
+  approvedAt: string;
+}>;
+
+const serialQ9HarnessFailureBrand = new WeakSet<object>();
+const serialQ9HarnessFailureBindings = new WeakMap<object, Readonly<{
+  candidate: SerialCandidateV1;
+  context: OpenSerialCandidateContext;
+}>>();
+const serialQ9HarnessPreviewBindings = new WeakMap<object, Readonly<{
+  candidate: SerialCandidateV1;
+  failure: SerialQ9HarnessFailureV1;
+}>>();
+
+export function serialCandidatePolicyEvidenceSha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null && serialCandidatePolicyEvidenceBrand.has(value)
+    ? (value as SerialCandidatePolicyEvidenceV1).policyEvidenceSha256
+    : null;
 }
 
 const openSerialCandidates = new Map<string, OpenSerialCandidateContext>();
@@ -1590,8 +1797,14 @@ function deriveAdapterAttestations(
   contract: QualityBoundAdapterTaskContractV4,
   result: QualityBoundWorkerRunResultV3,
 ): readonly AdapterCommandAttestationV1[] | null {
-  const plannedCommandHashes = contract.evidencePlan.procedures.map((procedure) =>
-    procedure.kind === "adapter-command-attestation" ? procedure.command?.sha256 ?? null : null);
+  // Only adapter-command procedures consume process-event rows.  Owner
+  // observations, packet artifacts, and comparison captures remain exact
+  // EvidencePlan procedures, but their evidence is admitted later through
+  // their own branded policy inputs; their presence must not manufacture a
+  // missing command or make a mixed plan impossible to run.
+  const plannedCommandHashes = contract.evidencePlan.procedures
+    .filter((procedure) => procedure.kind === "adapter-command-attestation")
+    .map((procedure) => procedure.command?.sha256 ?? null);
   const plannedHashSet = new Set(plannedCommandHashes);
   if (plannedCommandHashes.some((hash) => hash === null)
     || plannedHashSet.size !== plannedCommandHashes.length
@@ -1631,12 +1844,277 @@ function hasUnexpectedPlannedExit(
   });
 }
 
+function q9SerialHarnessGuardPresent(): boolean {
+  return (typeof process.versions.electron === "string" && process.versions.electron.length > 0
+      || process.env.NODE_TEST_CONTEXT === "child-v8")
+    && process.env.CAIRN_E2E === "1"
+    && process.env.CAIRN_MOCK === "1"
+    && process.env.CAIRN_TEST_Q9 === "1";
+}
+
+function q9HarnessRouteExact(route: Extract<RouteResult, { status: "ready" }>): boolean {
+  const fixture = route.recommended.id === "cairn-q9-e2e-q9-harness-revision"
+    ? "q9-harness-revision"
+    : route.recommended.id === "cairn-q9-e2e-q9-harness-refusal"
+      ? "q9-harness-refusal"
+      : null;
+  return fixture !== null
+    && route.recommended.provider === "Cairn E2E Fixture"
+    && route.recommended.model === `synthetic-q9/${fixture}`
+    && route.recommended.capabilities.length === 3
+    && route.recommended.capabilities.includes("serial-task")
+    && route.recommended.capabilities.includes("serial-task-candidate")
+    && route.recommended.capabilities.includes("offline-demo");
+}
+
+function q9CairnBlockerRouteExact(route: Extract<RouteResult, { status: "ready" }>): boolean {
+  return route.recommended.id === "cairn-q9-e2e-q9-cairn-blocker-confirmation"
+    && route.recommended.provider === "Cairn E2E Fixture"
+    && route.recommended.model === "synthetic-q9/q9-cairn-blocker-confirmation"
+    && route.recommended.capabilities.length === 3
+    && route.recommended.capabilities.includes("serial-task")
+    && route.recommended.capabilities.includes("serial-task-candidate")
+    && route.recommended.capabilities.includes("offline-demo");
+}
+
+function q9HarnessFailureProcedure(
+  plan: EvidencePlanV1,
+  attestations: readonly AdapterCommandAttestationV1[],
+): Readonly<{ procedure: EvidencePlanV1["procedures"][number]; attestation: AdapterCommandAttestationV1 }> | null {
+  const commands = plan.procedures.filter((row) => row.kind === "adapter-command-attestation" && row.command !== null);
+  if (commands.length === 0 || attestations.length !== commands.length) return null;
+  let failure: Readonly<{ procedure: EvidencePlanV1["procedures"][number]; attestation: AdapterCommandAttestationV1 }> | null = null;
+  for (let index = 0; index < commands.length; index += 1) {
+    const procedure = commands[index];
+    const command = procedure.command;
+    const attestation = attestations.find((row) => row.criterionId === procedure.criterionId);
+    if (!command || !attestation || attestation.sequence !== index
+      || attestation.commandSha256 !== command.sha256) return null;
+    if (command.expectedExitCodes.includes(attestation.exitCode)) continue;
+    if (failure !== null || attestation.exitCode !== 124 || command.timeoutMs !== 1_000) return null;
+    failure = Object.freeze({ procedure, attestation });
+  }
+  return failure;
+}
+
+function revisionBaseAttestationsValid(
+  taskSpecSha256Value: string,
+  initialPlan: EvidencePlanV1,
+  attestations: readonly AdapterCommandAttestationV1[],
+): boolean {
+  const initialPlanSha256 = evidencePlanSha256(initialPlan);
+  if (!initialPlanSha256) return false;
+  const failure = q9HarnessFailureProcedure(initialPlan, attestations);
+  return failure !== null && attestations.every((row) => row.version === ADAPTER_COMMAND_ATTESTATION_VERSION
+    && row.taskSpecSha256 === taskSpecSha256Value && row.evidencePlanSha256 === initialPlanSha256);
+}
+
+/** Exact revision-zero process custody retained after an authorized plan
+ * revision. These rows are deliberately incomplete for DONE, but they remain
+ * authenticated facts about the initial plan and may therefore survive a
+ * trusted pending-journal restart. */
+function revisionBaseAttestationsExact(
+  taskSpecSha256Value: string,
+  initialPlan: EvidencePlanV1,
+  attestations: readonly AdapterCommandAttestationV1[],
+): boolean {
+  const initialPlanSha256 = evidencePlanSha256(initialPlan);
+  const procedures = initialPlan.procedures.filter((row) => row.kind === "adapter-command-attestation");
+  if (!initialPlanSha256 || procedures.length === 0 || attestations.length !== procedures.length) return false;
+  const criterionIds = new Set<string>();
+  const commandShas = new Set<string>();
+  const sequences = new Set<number>();
+  for (const row of attestations) {
+    if (!exactPendingKeys(row, [
+      "version", "taskSpecSha256", "evidencePlanSha256", "criterionId", "sequence", "commandSha256", "exitCode",
+    ]) || row.version !== ADAPTER_COMMAND_ATTESTATION_VERSION
+      || row.taskSpecSha256 !== taskSpecSha256Value || row.evidencePlanSha256 !== initialPlanSha256
+      || typeof row.criterionId !== "string" || criterionIds.has(row.criterionId)
+      || typeof row.commandSha256 !== "string" || !SHA256_RE.test(row.commandSha256)
+      || commandShas.has(row.commandSha256) || !Number.isSafeInteger(row.sequence)
+      || row.sequence < 0 || row.sequence >= attestations.length || sequences.has(row.sequence)
+      || !Number.isSafeInteger(row.exitCode) || Object.is(row.exitCode, -0)
+      || row.exitCode < -1 || row.exitCode > 255) return false;
+    const procedure = procedures.find((item) => item.criterionId === row.criterionId);
+    if (!procedure?.command || procedure.command.sha256 !== row.commandSha256) return false;
+    criterionIds.add(row.criterionId);
+    commandShas.add(row.commandSha256);
+    sequences.add(row.sequence);
+  }
+  return sequences.size === attestations.length;
+}
+
+/** Authenticate the exact failed command facts retained while Q9 waits for an
+ * owner decision or bounded repair. Failure is evidence in this lifecycle,
+ * not a reason to discard the already-validated adapter event rows on
+ * restart. */
+function retainedQ9FailureAttestationsValid(
+  taskSpecSha256Value: string,
+  plan: EvidencePlanV1,
+  attestations: readonly AdapterCommandAttestationV1[],
+): boolean {
+  const planSha256 = evidencePlanSha256(plan);
+  const procedures = plan.procedures.filter((row) => row.kind === "adapter-command-attestation");
+  if (!planSha256 || procedures.length === 0 || attestations.length !== procedures.length) return false;
+  const criterionIds = new Set<string>();
+  const commandShas = new Set<string>();
+  const sequences = new Set<number>();
+  let unexpectedExit = false;
+  for (const row of attestations) {
+    if (!exactPendingKeys(row, [
+      "version", "taskSpecSha256", "evidencePlanSha256", "criterionId", "sequence", "commandSha256", "exitCode",
+    ]) || row.version !== ADAPTER_COMMAND_ATTESTATION_VERSION
+      || row.taskSpecSha256 !== taskSpecSha256Value || row.evidencePlanSha256 !== planSha256
+      || typeof row.criterionId !== "string" || criterionIds.has(row.criterionId)
+      || typeof row.commandSha256 !== "string" || !SHA256_RE.test(row.commandSha256)
+      || commandShas.has(row.commandSha256) || !Number.isSafeInteger(row.sequence)
+      || (row.sequence as number) < 0 || (row.sequence as number) >= attestations.length
+      || sequences.has(row.sequence as number) || !Number.isSafeInteger(row.exitCode)
+      || Object.is(row.exitCode, -0) || (row.exitCode as number) < -1 || (row.exitCode as number) > 255) return false;
+    const procedure = procedures.find((item) => item.criterionId === row.criterionId);
+    if (!procedure?.command || procedure.command.sha256 !== row.commandSha256) return false;
+    criterionIds.add(row.criterionId);
+    commandShas.add(row.commandSha256);
+    sequences.add(row.sequence as number);
+    if (!procedure.command.expectedExitCodes.includes(row.exitCode as number)) unexpectedExit = true;
+  }
+  return unexpectedExit && sequences.size === attestations.length;
+}
+
+function q9HarnessFailureFromContext(
+  candidate: SerialCandidateV1,
+  context: OpenSerialCandidateContext,
+): SerialQ9HarnessFailureV1 | null {
+  if (!q9SerialHarnessGuardPresent() || candidate.round !== 0 || candidate.callsUsed.repair !== 0
+    || candidate.callsUsed.critic !== 0 || candidate.lineage.evidencePlan.revision !== 0
+    || context.attestationsCompleteForDone || !q9HarnessRouteExact(context.route)) return null;
+  const pair = q9HarnessFailureProcedure(candidate.lineage.evidencePlan, context.attestations);
+  if (!pair?.procedure.command || pair.attestation.taskSpecSha256 !== candidate.taskSpecSha256
+    || pair.attestation.evidencePlanSha256 !== candidate.evidencePlanSha256) return null;
+  const boundedOutput = "The injected Q9 harness timed out before reaching its preregistered assertion.";
+  const outputSha256 = pendingSha256(boundedOutput);
+  const evidenceRef = `q9-harness-${candidate.candidateSha256.slice(0, 24)}`;
+  const withoutSha = Object.freeze({
+    version: SERIAL_Q9_HARNESS_FAILURE_VERSION,
+    projectHash: candidate.projectRootSha256,
+    runId: candidate.runId,
+    candidateSha256: candidate.candidateSha256,
+    taskSpecSha256: candidate.taskSpecSha256,
+    evidencePlanSha256: candidate.evidencePlanSha256,
+    criterionId: pair.procedure.criterionId,
+    commandSha256: pair.procedure.command.sha256,
+    code: "TIMED_OUT_BEFORE_ASSERTION" as const,
+    exitCode: 124 as const,
+    boundedOutput,
+    outputSha256,
+    evidenceRef,
+  });
+  const failure = Object.freeze({
+    ...withoutSha,
+    failureSha256: pendingSha256(JSON.stringify(withoutSha)),
+  }) as SerialQ9HarnessFailureV1;
+  serialQ9HarnessFailureBrand.add(failure);
+  serialQ9HarnessFailureBindings.set(failure, Object.freeze({ candidate, context }));
+  return failure;
+}
+
+/** Exact, bounded pre-assertion failure observed from the guarded offline Q9
+ * adapter. A structural clone is not revision authority. */
+export function serialCandidateQ9HarnessFailure(value: unknown): SerialQ9HarnessFailureV1 | null {
+  const open = openContextForCandidate(value);
+  return open ? q9HarnessFailureFromContext(open.candidate, open.context) : null;
+}
+
+export function serialQ9HarnessFailureSha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null && serialQ9HarnessFailureBrand.has(value)
+    ? (value as SerialQ9HarnessFailureV1).failureSha256
+    : null;
+}
+
+/** Q9's only proposed correction: raise the exact timed-out cN command to the
+ * preregistered 60-second ceiling. No caller-provided command/path/parser can
+ * enter this preview. */
+export function previewSerialCandidateQ9HarnessRevision(
+  value: unknown,
+  rawFailure: unknown,
+): EvidencePlanRevisionPreviewV1 | null {
+  const open = openContextForCandidate(value);
+  if (!open || typeof rawFailure !== "object" || rawFailure === null
+    || !serialQ9HarnessFailureBrand.has(rawFailure)) return null;
+  const failure = rawFailure as SerialQ9HarnessFailureV1;
+  const binding = serialQ9HarnessFailureBindings.get(rawFailure);
+  if (!binding || binding.candidate !== open.candidate || binding.context !== open.context) return null;
+  const procedure = open.candidate.lineage.evidencePlan.procedures.find((row) => row.criterionId === failure.criterionId);
+  if (!procedure?.command || procedure.command.sha256 !== failure.commandSha256) return null;
+  const { sha256: _sha256, text: _text, ...command } = procedure.command;
+  void _sha256;
+  void _text;
+  const preview = previewEvidencePlanRevision(
+    open.candidate.lineage.taskSpec,
+    open.candidate.lineage.evidencePlan,
+    {
+      criterionId: failure.criterionId,
+      changeKind: "timeout-increase",
+      replacementCommand: { ...command, timeoutMs: 60_000 },
+    },
+    [failure.evidenceRef],
+  );
+  if (!preview) return null;
+  serialQ9HarnessPreviewBindings.set(preview, Object.freeze({ candidate: open.candidate, failure }));
+  return preview;
+}
+
+/** Join the exact Q9 failure/preview to one owner action and quality.ts's
+ * immutable authorized revision tuple. */
+export function authorizeSerialCandidateQ9HarnessRevision(
+  value: unknown,
+  rawFailure: unknown,
+  rawPreview: unknown,
+  ownerApproval: SerialQ9HarnessRevisionOwnerApprovalV1,
+): AuthorizedEvidencePlanRevisionV1 | null {
+  const open = openContextForCandidate(value);
+  if (!open || typeof rawFailure !== "object" || rawFailure === null
+    || typeof rawPreview !== "object" || rawPreview === null
+    || !serialQ9HarnessFailureBrand.has(rawFailure)
+    || !ACTION_UUID_V4_RE.test(ownerApproval?.ownerActionNonce ?? "")) return null;
+  const parsedTime = new Date(ownerApproval?.approvedAt ?? "");
+  if (Number.isNaN(parsedTime.valueOf()) || parsedTime.toISOString() !== ownerApproval.approvedAt) return null;
+  const failure = rawFailure as SerialQ9HarnessFailureV1;
+  const preview = rawPreview as EvidencePlanRevisionPreviewV1;
+  const failureBinding = serialQ9HarnessFailureBindings.get(rawFailure);
+  const previewBinding = serialQ9HarnessPreviewBindings.get(rawPreview);
+  if (!failureBinding || failureBinding.candidate !== open.candidate || failureBinding.context !== open.context
+    || !previewBinding || previewBinding.candidate !== open.candidate || previewBinding.failure !== failure) return null;
+  const authorization = Object.freeze({
+    version: EVIDENCE_PLAN_REVISION_AUTHORIZATION_VERSION,
+    runId: open.candidate.runId,
+    taskSpecSha256: open.candidate.taskSpecSha256,
+    criterionId: failure.criterionId,
+    fromPlanSha256: preview.fromPlanSha256,
+    toPlanSha256: preview.toPlanSha256,
+    unchangedAuthoritySha256: preview.unchangedAuthoritySha256,
+    changeKind: "timeout-increase" as const,
+    mainHarnessFailureCode: "TIMED_OUT_BEFORE_ASSERTION" as const,
+    mainEvidenceRefs: Object.freeze([failure.evidenceRef]),
+    ownerActionNonce: ownerApproval.ownerActionNonce,
+    approvedAt: ownerApproval.approvedAt,
+  });
+  return authorizeEvidencePlanRevision(
+    open.candidate.lineage.taskSpec,
+    open.candidate.lineage.evidencePlan,
+    preview,
+    authorization,
+    Object.freeze({ ...authorization, version: EVIDENCE_PLAN_REVISION_AUTHORITY_CONTEXT_VERSION }),
+  );
+}
+
 function composeBoundRunRecord(
   contract: AdapterTaskContract,
   disposition: "DONE" | "STOPPED",
   stopReason: SerialStopReason | null,
   claims: TaskSpecWorkerClaims | null,
   attestations: readonly AdapterCommandAttestationV1[],
+  completionAuthority?: unknown,
 ): TaskSpecRunRecordV1 | null {
   if (contract.version !== "cairn-serial-task/v4") return null;
   return composeTaskSpecRunRecord(contract.taskSpec, contract.evidencePlan, {
@@ -1663,7 +2141,37 @@ function composeBoundRunRecord(
       disposition,
       stopReason,
     }),
+  }, completionAuthority);
+}
+
+function serialCompletionRecordAuthority(candidate: SerialCandidateV1): unknown | null {
+  const authority = serialCandidateCompletionAuthority(candidate);
+  return authority === null ? null : Object.freeze({
+    authority,
+    projectHash: candidate.projectRootSha256,
+    runId: candidate.runId,
+    candidateSha256: candidate.candidateSha256,
   });
+}
+
+function restorePreparedSealAuthorization(
+  candidate: SerialCandidateV1,
+  raw: unknown,
+  capsuleSha256: string,
+): SerialCandidateSealAuthorizationV1 | null {
+  const legacy = composeSerialCandidateSealAuthorization(candidate, raw);
+  if (legacy) return legacy;
+  return restoreSerialCandidateSealAuthorizationForPending(
+    candidate,
+    raw,
+    composeSerialPendingRestoreAuthority(
+      capsuleSha256,
+      candidate.projectRootSha256,
+      candidate.runId,
+      candidate.candidateSha256,
+    ),
+    capsuleSha256,
+  );
 }
 
 function composeCairnWorkerRecordValues(
@@ -1679,6 +2187,7 @@ function composeCairnWorkerRecordValues(
   taskSpecEvidence?: Readonly<{
     claims: TaskSpecWorkerClaims | null;
     attestations: readonly AdapterCommandAttestationV1[];
+    completionAuthority?: unknown;
   }>,
   candidateCustody?: SerialCandidateReportCustody,
   candidateFilesChanged?: readonly string[],
@@ -1691,6 +2200,7 @@ function composeCairnWorkerRecordValues(
     stopReason,
     taskSpecEvidence?.claims ?? null,
     taskSpecEvidence?.attestations ?? Object.freeze([]),
+    taskSpecEvidence?.completionAuthority,
   );
   if (contract.version === "cairn-serial-task/v4" && !taskSpecRunRecord) {
     throw new Error("INVALID_TASK_SPEC_RUN_RECORD");
@@ -1752,11 +2262,13 @@ function cairnWorkerRecords(
   taskSpecEvidence?: Readonly<{
     claims: TaskSpecWorkerClaims | null;
     attestations: readonly AdapterCommandAttestationV1[];
+    completionAuthority?: unknown;
   }>,
   candidateCustody?: SerialCandidateReportCustody,
   candidateFilesChanged?: readonly string[],
   terminalAction?: SerialCandidateTerminalActionCustody,
   recordDate?: string,
+  candidateBriefText?: string,
 ): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
   const values = composeCairnWorkerRecordValues(
     root,
@@ -1818,7 +2330,7 @@ function cairnWorkerRecords(
   // already checks the brief before any DONE record is authored (see below).
   const checks = {
     brief: disposition === "STOPPED" || (candidateOwnedWrite
-      ? candidateOwnedTextNoFollow(briefPath) === briefText(contract, false)
+      ? candidateOwnedTextNoFollow(briefPath) === (candidateBriefText ?? briefText(contract, false))
       : existsSync(briefPath) && readFileSync(briefPath, "utf8") === briefText(contract, false)),
     report: candidateOwnedWrite
       ? candidateOwnedTextNoFollow(reportPath) === report
@@ -2059,6 +2571,7 @@ type CandidateGitBlobEntry = Readonly<{ mode: "100644" | "100755"; oid: string }
 interface CandidateGitCommandOptions {
   indexPath?: string;
   input?: Buffer | string;
+  commitIdentity?: boolean;
 }
 
 const CANDIDATE_NEUTRAL_RESERVED_FILTERS = ["unspecified", "unset"].flatMap((name) => [
@@ -2091,7 +2604,7 @@ function restoreCandidateGitEnvironment(snapshot: CandidateGitEnvironmentSnapsho
   for (const entry of snapshot) process.env[entry.name] = entry.value;
 }
 
-function candidateChildGitEnvironment(indexPath?: string): NodeJS.ProcessEnv {
+function candidateChildGitEnvironment(indexPath?: string, commitIdentity = false): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...process.env };
   for (const name of Object.keys(environment)) {
     if (serialCandidateGitEnvironmentNameDenied(name)) delete environment[name];
@@ -2108,6 +2621,22 @@ function candidateChildGitEnvironment(indexPath?: string): NodeJS.ProcessEnv {
     "GIT_TRACE_PERFORMANCE", "GIT_TRACE_SETUP", "GIT_TRACE_SHALLOW", "GIT_TRACE_CURL",
     "GIT_TRACE_FSMONITOR", "GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF",
   ]) environment[name] = "0";
+  const commitEnvironmentNames = new Set([
+    "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE",
+  ]);
+  for (const name of Object.keys(environment)) {
+    if (commitEnvironmentNames.has(name.toUpperCase())) delete environment[name];
+  }
+  if (commitIdentity) {
+    // This commit is authored by Cairn's verified terminal transaction, not by
+    // an inherited shell identity or mutable global Git configuration. Dates
+    // remain Git-generated after the inherited date overrides are removed.
+    environment.GIT_AUTHOR_NAME = "Cairn";
+    environment.GIT_AUTHOR_EMAIL = "cairn@local.invalid";
+    environment.GIT_COMMITTER_NAME = "Cairn";
+    environment.GIT_COMMITTER_EMAIL = "cairn@local.invalid";
+  }
   if (indexPath) environment.GIT_INDEX_FILE = indexPath;
   return environment;
 }
@@ -2125,7 +2654,7 @@ function candidateGit(root: string, args: string[], options: CandidateGitCommand
     encoding: "utf8",
     input: options.input,
     stdio: ["pipe", "pipe", "pipe"],
-    env: candidateChildGitEnvironment(options.indexPath),
+    env: candidateChildGitEnvironment(options.indexPath, options.commitIdentity),
     maxBuffer: 4 * 1024 * 1024,
   }).trimEnd();
 }
@@ -2136,7 +2665,7 @@ function candidateGitZ(root: string, args: string[], options: CandidateGitComman
     encoding: "utf8",
     input: options.input,
     stdio: ["pipe", "pipe", "pipe"],
-    env: candidateChildGitEnvironment(options.indexPath),
+    env: candidateChildGitEnvironment(options.indexPath, options.commitIdentity),
     maxBuffer: 4 * 1024 * 1024,
   });
   return output.split("\0").filter(Boolean);
@@ -3024,7 +3553,11 @@ function commitCandidateExactPaths(
     }
 
     const message = candidateTerminalCommitMessage(taskNumber, terminalActionId);
-    const commit = candidateGit(root, [...noHooks, "commit-tree", tree, "-p", start.head, "-m", message]);
+    const commit = candidateGit(
+      root,
+      [...noHooks, "commit-tree", tree, "-p", start.head, "-m", message],
+      { commitIdentity: true },
+    );
     const preCasChecks = Object.freeze({
       commit: /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commit),
       tree: candidateGit(root, ["rev-parse", `${commit}^{tree}`]) === tree,
@@ -3451,6 +3984,73 @@ function openContextForCandidate(value: unknown): Readonly<{
   return Object.freeze({ candidate, context });
 }
 
+/** Branded, read-only verifier projection for Main's policy-context mint. It
+ * never upgrades worker claims: only exact plan/attestation pairs become
+ * CriterionResult rows. */
+export function composeSerialCandidatePolicyEvidence(value: unknown): SerialCandidatePolicyEvidenceV1 | null {
+  const open = openContextForCandidate(value);
+  if (!open || open.context.interruptedRepairStopOnly) return null;
+  const { candidate, context } = open;
+  const byCriterion = new Map(context.attestations.map((row) => [row.criterionId, row]));
+  const criterionResults: CriterionResultV1[] = [];
+  const checkEvidence: CriticCheckEvidenceV1[] = [];
+  const artifactIds = new Set<string>();
+  for (const criterion of context.authority.taskSpec.quality.acceptanceChecks) {
+    if (criterion.judge !== "cairn") continue;
+    const procedure = context.authority.evidencePlan.procedures.find((row) => row.criterionId === criterion.id);
+    if (!procedure) return null;
+    let status: CriterionResultV1["status"] = "cant-tell";
+    let source: CriterionResultV1["source"] = "cairn-verifier";
+    let evidenceRefs: readonly string[] = Object.freeze([]);
+    if (procedure.kind === "adapter-command-attestation" && procedure.command) {
+      const attestation = byCriterion.get(criterion.id);
+      if (attestation && attestation.taskSpecSha256 === candidate.taskSpecSha256
+        && attestation.evidencePlanSha256 === candidate.evidencePlanSha256
+        && attestation.commandSha256 === procedure.command.sha256) {
+        status = procedure.command.expectedExitCodes.includes(attestation.exitCode) ? "met" : "not-met";
+        source = "adapter-execution";
+        evidenceRefs = Object.freeze([...procedure.artifactIds]);
+      }
+    }
+    for (const id of evidenceRefs) artifactIds.add(id);
+    criterionResults.push(Object.freeze({
+      criterionId: criterion.id,
+      candidateSha256: candidate.candidateSha256,
+      status,
+      source,
+      evidenceRefs,
+      evidencePlanSha256: candidate.evidencePlanSha256,
+      resolutionSha256: null,
+    }));
+    checkEvidence.push(Object.freeze({
+      id: `evidence-${criterion.id}`,
+      criterionId: criterion.id,
+      status,
+      source: source === "adapter-execution" ? "adapter-execution" : "cairn-verifier",
+      evidenceRefs,
+    }));
+  }
+  const withoutSha = Object.freeze({
+    version: SERIAL_CANDIDATE_POLICY_EVIDENCE_VERSION,
+    projectHash: candidate.projectRootSha256,
+    runId: candidate.runId,
+    round: candidate.round,
+    taskSpecSha256: candidate.taskSpecSha256,
+    evidencePlanSha256: candidate.evidencePlanSha256,
+    candidateSha256: candidate.candidateSha256,
+    bundleSha256: candidate.bundleSha256,
+    criterionResults: Object.freeze(criterionResults),
+    checkEvidence: Object.freeze(checkEvidence),
+    artifactIds: Object.freeze([...artifactIds]),
+  }) as Omit<SerialCandidatePolicyEvidenceV1, "policyEvidenceSha256">;
+  const projection = Object.freeze({
+    ...withoutSha,
+    policyEvidenceSha256: pendingSha256(JSON.stringify(withoutSha)),
+  }) as SerialCandidatePolicyEvidenceV1;
+  serialCandidatePolicyEvidenceBrand.add(projection);
+  return projection;
+}
+
 function pendingCandidateProjection(candidate: SerialCandidateV1): Readonly<Record<string, unknown>> {
   return Object.freeze({
     version: candidate.version,
@@ -3517,8 +4117,8 @@ function canonicalClaimsText(claims: TaskSpecWorkerClaims): string {
 
 function pendingRepairLineageProjection(
   repair: SerialCandidatePendingRepairLineageV1,
-): Readonly<Record<string, unknown>> {
-  return Object.freeze({
+): Readonly<Record<string, unknown>> | null {
+  const common = {
     preRepairCandidate: pendingCandidateProjection(repair.preRepairCandidate),
     postRepairCandidate: pendingCandidateProjection(repair.postRepairCandidate),
     preRepairTransitionHistory: repair.preRepairTransitionHistory,
@@ -3527,7 +4127,17 @@ function pendingRepairLineageProjection(
     roundOneBundle: repair.roundOneBundle,
     roundOneCaptureContext: repair.roundOneCaptureContext,
     claimsText: canonicalClaimsText(repair.postRepairCandidate.claims),
-  });
+  };
+  if (repair.preRepairQ9Custody.qualityLoopAuthorityRequired) {
+    return Object.freeze({ ...common, preRepairQ9Custody: repair.preRepairQ9Custody });
+  }
+  if (repair.preRepairQ9Custody.assessmentRestartCustody !== null
+    || repair.preRepairQ9Custody.repairAuthority !== null
+    || repair.preRepairQ9Custody.repairAuthoritySha256 !== null
+    || repair.preRepairQ9Custody.policyDecision !== null
+    || repair.preRepairQ9Custody.completionAuthority !== null
+    || repair.preRepairQ9Custody.attempts.length !== 0) return null;
+  return Object.freeze(common);
 }
 
 function pendingCandidateInner(
@@ -3535,8 +4145,7 @@ function pendingCandidateInner(
   context: OpenSerialCandidateContext,
   requireExactWorkspace: boolean,
 ): Readonly<Record<string, unknown>> | null {
-  if (candidate.lineage.evidencePlan.revision !== 0
-    || !serialCandidateGitEnvironmentSafe()
+  if (!serialCandidateGitEnvironmentSafe()
     || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)
     || (requireExactWorkspace && (!candidateWorkspaceStillExact(candidate, context)
       || !candidateTaskPathSetStillExact(candidate, context)))) return null;
@@ -3549,7 +4158,13 @@ function pendingCandidateInner(
     || transitionHistory === null
     || (candidate.round === 0) !== (repairLineage === null)) return null;
   const taskPaths = repairLineage?.roundOneCaptureContext.taskPaths ?? context.taskPaths;
-  return Object.freeze({
+  const q9Custody = serialCandidateQ9PendingCustody(candidate);
+  const revisionCustody = serialCandidateEvidencePlanRevisionCustody(candidate);
+  if ((candidate.lineage.evidencePlan.revision === 1) !== (revisionCustody !== null)) return null;
+  if (q9Custody === null) return null;
+  const repairLineageProjection = repairLineage ? pendingRepairLineageProjection(repairLineage) : null;
+  if (repairLineage !== null && repairLineageProjection === null) return null;
+  const common = {
     version: SERIAL_PENDING_CANDIDATE_INNER_VERSION,
     projectRootReal,
     projectRootSha256: candidate.projectRootSha256,
@@ -3571,11 +4186,24 @@ function pendingCandidateInner(
     candidate: pendingCandidateProjection(candidate),
     claimsText: canonicalClaimsText(context.claims),
     transitionHistory,
-    repairLineage: repairLineage ? pendingRepairLineageProjection(repairLineage) : null,
+    repairLineage: repairLineageProjection,
     sealableCandidateSha256: context.sealableCandidateSha256,
     sealableClaimsSha256: context.sealableClaimsSha256,
     sealableBundleSha256: context.sealableBundleSha256,
-  });
+  };
+  if (q9Custody.qualityLoopAuthorityRequired) {
+    return Object.freeze({
+      ...common,
+      initialEvidencePlan: candidate.lineage.initialEvidencePlan,
+      evidencePlanRevisionCustody: revisionCustody,
+      q9Custody,
+    });
+  }
+  if (revisionCustody !== null || q9Custody.assessmentRestartCustody !== null
+    || q9Custody.repairAuthority !== null || q9Custody.repairAuthoritySha256 !== null
+    || q9Custody.policyDecision !== null || q9Custody.completionAuthority !== null
+    || q9Custody.attempts.length !== 0) return null;
+  return Object.freeze(common);
 }
 
 function pendingCapsuleFromInner(inner: unknown, requirePendingState: boolean): SerialPendingCandidateCapsuleV1 | null {
@@ -3633,6 +4261,15 @@ type PendingTerminalPlanV1 = Readonly<{
   expectedCommitPaths: readonly string[];
   commitMessage: string | null;
   sealAuthorization: SerialCandidateSealAuthorizationV1 | null;
+  resultProjection: PendingTerminalResultProjectionV1;
+}>;
+
+type PendingTerminalResultProjectionV1 = Readonly<{
+  reportText: string;
+  row: LogRow;
+  composed: ComposedRecordInput;
+  activities: readonly SerialActivity[];
+  commit: Readonly<{ status: "created" | "skipped"; reason: string }>;
 }>;
 
 export type SerialCandidateTerminalPreparationInputV1 =
@@ -3704,14 +4341,16 @@ function terminalRecordPreview(
   const action = Object.freeze({ actionId: input.actionId, kind: input.kind, baseCapsuleSha256 });
   if (input.kind === "finalize") {
     const candidateFilesChanged = candidateScanChangedPaths(context.projectRoot, context.contract.ownedRecords);
+    const completionAuthority = serialCompletionRecordAuthority(candidate);
     if (!input.sealAuthorization || !isSerialCandidateSealAuthorization(input.sealAuthorization, candidate)
-      || candidate.round !== 0 || candidate.callsUsed.repair !== 0
       || candidate.candidateSha256 !== context.sealableCandidateSha256
       || candidate.claimsSha256 !== context.sealableClaimsSha256
       || candidate.bundleSha256 !== context.sealableBundleSha256
       || (context.start.status.length === 0 && context.startHeadRef === null)
       || !context.attestationsCompleteForDone
-      || composeBoundRunRecord(context.contract, "DONE", null, context.claims, context.attestations) === null
+      || composeBoundRunRecord(
+        context.contract, "DONE", null, context.claims, context.attestations, completionAuthority,
+      ) === null
       || !candidateWorkspaceStillExact(candidate, context)
       || !candidateTerminalPathsUnaliased(candidate, context)
       || candidateFilesChanged === null) return null;
@@ -3731,7 +4370,7 @@ function terminalRecordPreview(
       commit,
       context.evidence,
       undefined,
-      Object.freeze({ claims: context.claims, attestations: context.attestations }),
+      Object.freeze({ claims: context.claims, attestations: context.attestations, completionAuthority }),
       custody,
       reportFilesChanged,
       action,
@@ -3759,7 +4398,8 @@ function terminalRecordPreview(
   const usesOriginalEvidenceGeneration = candidate.round === 0 && candidate.callsUsed.repair === 0
     && candidate.candidateSha256 === context.sealableCandidateSha256
     && candidate.claimsSha256 === context.sealableClaimsSha256
-    && candidate.bundleSha256 === context.sealableBundleSha256;
+    && candidate.bundleSha256 === context.sealableBundleSha256
+    && context.attestations.every((row) => row.evidencePlanSha256 === candidate.evidencePlanSha256);
   const values = composeCairnWorkerRecordValues(
     context.projectRoot,
     context.contract,
@@ -3786,6 +4426,45 @@ function terminalRecordPreview(
   });
 }
 
+function projectedTerminalActivities(
+  activities: readonly SerialActivity[],
+  kind: "finalize" | "stop",
+  reason: SerialStopReason | null,
+  commitExpected: boolean,
+): readonly SerialActivity[] | null {
+  const projected = candidateActivityView(activities);
+  if (kind === "stop") {
+    if (!reason) return null;
+    projected.push({ stage: "Check", state: "working", detail: "Rechecking pending candidate record custody before STOP." });
+    projected.push({
+      stage: "Check",
+      state: "stopped",
+      detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).`,
+    });
+    projected.push({ stage: "Result", state: "stopped", detail: `STOPPED â€” ${stopReasonInPlainWords(reason)}` });
+    projected[projected.length - 1] = {
+      stage: "Result",
+      state: "stopped",
+      detail: `STOPPED — ${stopReasonInPlainWords(reason)}`,
+    };
+    return Object.freeze(projected);
+  }
+  projected.push({
+    stage: "Check",
+    state: "done",
+    detail: commitExpected
+      ? "The sealed candidate, custody record, protected work, and exact-path commit were verified."
+      : "The sealed candidate and protected work were verified; the dirty start keeps changes uncommitted.",
+  });
+  projected.push({ stage: "Result", state: "done", detail: "DONE â€” the pre-seal candidate was finalized once." });
+  projected[projected.length - 1] = {
+    stage: "Result",
+    state: "done",
+    detail: "DONE — the pre-seal candidate was finalized once.",
+  };
+  return Object.freeze(projected);
+}
+
 function buildTerminalPreparation(
   candidate: SerialCandidateV1,
   context: OpenSerialCandidateContext,
@@ -3796,6 +4475,13 @@ function buildTerminalPreparation(
 ): SerialCandidateTerminalPreparationV1 | null {
   const preview = terminalRecordPreview(candidate, context, input, baseCapsule.capsuleSha256, recordDate);
   if (!preview) return null;
+  const projectedActivities = projectedTerminalActivities(
+    context.activities,
+    input.kind,
+    input.reason,
+    preview.commitExpected,
+  );
+  if (!projectedActivities) return null;
   const sealAuthorization = input.kind === "finalize" ? input.sealAuthorization : null;
   const plan: PendingTerminalPlanV1 = Object.freeze({
     version: PENDING_TERMINAL_PLAN_VERSION,
@@ -3816,6 +4502,20 @@ function buildTerminalPreparation(
       ? candidateTerminalCommitMessage(context.contract.taskNumber, input.actionId)
       : null,
     sealAuthorization,
+    resultProjection: Object.freeze({
+      reportText: preview.reportText,
+      row: preview.row,
+      composed: preview.composed,
+      activities: projectedActivities,
+      commit: Object.freeze({
+        status: preview.commitExpected ? "created" as const : "skipped" as const,
+        reason: input.kind === "stop"
+          ? "The latest candidate was retained untouched for inspection."
+          : preview.commitExpected
+            ? "One exact-path commit contains the candidate product changes and terminal records."
+            : "Protected starting work prevented an isolated candidate task commit.",
+      }),
+    }),
   });
   const capsule = pendingCapsuleFromInner(Object.freeze({
     version: SERIAL_PREPARED_CANDIDATE_TERMINAL_INNER_VERSION,
@@ -3852,7 +4552,7 @@ export function prepareSerialCandidateTerminal(
 ): SerialCandidateTerminalPreparationV1 | null {
   const open = openContextForCandidate(value);
   const input = terminalPreparationInput(rawInput);
-  if (!open || !input) return null;
+  if (!open || !input || (open.context.interruptedRepairStopOnly && input.kind !== "stop")) return null;
   const { candidate, context } = open;
   const existing = terminalPreparationByCandidate.get(candidate);
   if (existing) {
@@ -4230,10 +4930,12 @@ function parsePendingCandidateRecord(value: unknown): Record<string, unknown> | 
     || (value.criticMode !== "required" && value.criticMode !== "optional" && value.criticMode !== "off")
     || (value.repairUnavailableReason !== null && value.repairUnavailableReason !== "IGNORED_WRITE_SET_UNAVAILABLE"
       && value.repairUnavailableReason !== "REPAIR_SPENT")
-    || (value.phase !== "awaiting-critic" && value.phase !== "awaiting-owner-resolution"
-      && value.phase !== "awaiting-repair" && value.phase !== "ready-to-seal"
+    || (value.phase !== "awaiting-critic" && value.phase !== "awaiting-critic-result"
+      && value.phase !== "awaiting-owner-resolution" && value.phase !== "awaiting-repair"
+      && value.phase !== "awaiting-repair-result" && value.phase !== "ready-to-seal"
       && value.phase !== "done" && value.phase !== "stopped")
-    || (value.pendingOwnerReason !== null && value.pendingOwnerReason !== "critic-allegation")
+    || (value.pendingOwnerReason !== null && value.pendingOwnerReason !== "critic-allegation"
+      && value.pendingOwnerReason !== "cairn-failure-confirmation")
     || !exactPendingKeys(value.callsUsed, ["builder", "repair", "critic", "externalEvidence"])
     || value.callsUsed.builder !== 1 || (value.callsUsed.repair !== 0 && value.callsUsed.repair !== 1)
     || !Number.isSafeInteger(value.callsUsed.critic) || (value.callsUsed.critic as number) < 0 || (value.callsUsed.critic as number) > 3
@@ -4317,7 +5019,11 @@ function pendingTransitionDecisions(value: unknown): readonly SerialCandidateTra
   return Object.freeze(decisions);
 }
 
-const PENDING_REPAIR_LINEAGE_KEYS = [
+const Q9_PENDING_REPAIR_LINEAGE_KEYS = [
+  "preRepairCandidate", "postRepairCandidate", "preRepairTransitionHistory", "preRepairQ9Custody", "repairInstruction",
+  "blockers", "roundOneBundle", "roundOneCaptureContext", "claimsText",
+] as const;
+const LEGACY_PENDING_REPAIR_LINEAGE_KEYS = [
   "preRepairCandidate", "postRepairCandidate", "preRepairTransitionHistory", "repairInstruction",
   "blockers", "roundOneBundle", "roundOneCaptureContext", "claimsText",
 ] as const;
@@ -4327,14 +5033,22 @@ function parsePendingRepairLineage(value: unknown): Readonly<{
   preRepairCandidate: Record<string, unknown>;
   postRepairCandidate: Record<string, unknown>;
   preRepairTransitionHistory: readonly SerialCandidateTransitionDecisionV1[];
+  kind: "legacy" | "q9";
 }> | null {
-  if (!exactPendingKeys(value, PENDING_REPAIR_LINEAGE_KEYS)) return null;
-  const preRepairCandidate = parsePendingCandidateRecord(value.preRepairCandidate);
-  const postRepairCandidate = parsePendingCandidateRecord(value.postRepairCandidate);
-  const preRepairTransitionHistory = pendingTransitionDecisions(value.preRepairTransitionHistory);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const kind = exactPendingKeys(record, Q9_PENDING_REPAIR_LINEAGE_KEYS)
+    ? exactPendingQ9Custody(record.preRepairQ9Custody) ? "q9" : null
+    : exactPendingKeys(record, LEGACY_PENDING_REPAIR_LINEAGE_KEYS) ? "legacy" : null;
+  if (kind === null) return null;
+  const preRepairCandidate = parsePendingCandidateRecord(record.preRepairCandidate);
+  const postRepairCandidate = parsePendingCandidateRecord(record.postRepairCandidate);
+  const preRepairTransitionHistory = pendingTransitionDecisions(record.preRepairTransitionHistory);
   if (!preRepairCandidate || !postRepairCandidate || !preRepairTransitionHistory
-    || preRepairCandidate.round !== 0 || preRepairCandidate.phase !== "awaiting-repair"
-    || (preRepairCandidate.callsUsed as Record<string, unknown>).repair !== 0
+    || preRepairCandidate.round !== 0
+    || (preRepairCandidate.phase !== "awaiting-repair" && preRepairCandidate.phase !== "awaiting-repair-result")
+    || ((preRepairCandidate.callsUsed as Record<string, unknown>).repair !== 0
+      && (preRepairCandidate.callsUsed as Record<string, unknown>).repair !== 1)
     || postRepairCandidate.round !== 1
     || (postRepairCandidate.callsUsed as Record<string, unknown>).repair !== 1
     || preRepairCandidate.runId !== postRepairCandidate.runId
@@ -4343,12 +5057,13 @@ function parsePendingRepairLineage(value: unknown): Readonly<{
     || preRepairCandidate.projectRootSha256 !== postRepairCandidate.projectRootSha256
     || preRepairCandidate.taskSpecSha256 !== postRepairCandidate.taskSpecSha256
     || preRepairCandidate.evidencePlanSha256 !== postRepairCandidate.evidencePlanSha256
-    || typeof value.claimsText !== "string" || value.claimsText.length > 262_144) return null;
+    || typeof record.claimsText !== "string" || record.claimsText.length > 262_144) return null;
   return Object.freeze({
-    value,
+    value: record,
     preRepairCandidate,
     postRepairCandidate,
     preRepairTransitionHistory,
+    kind,
   });
 }
 
@@ -4400,6 +5115,105 @@ function pendingInitialEvidenceCandidate(value: unknown): Readonly<Record<string
   return Object.freeze({ version: EVIDENCE_PLAN_CANDIDATE_VERSION, procedures: Object.freeze(procedures) });
 }
 
+type PendingEvidenceRestoration = Readonly<{
+  initialPlan: EvidencePlanV1;
+  currentPlan: EvidencePlanV1;
+  initialAuthority: SerialCandidateTaskSpecAuthorityV1;
+  currentAuthority: SerialCandidateTaskSpecAuthorityV1;
+  authorizedRevision: AuthorizedEvidencePlanRevisionV1 | null;
+}>;
+
+/** Rebuild revision zero and the one authorized mechanical revision from the
+ * authenticated pending bytes. This never treats a persisted branded plan as
+ * authority: it replays preview + authorization and obtains fresh brands from
+ * quality.ts before candidate adoption. */
+function restorePendingEvidencePlans(
+  taskSpec: TaskSpecV1,
+  initialRaw: unknown,
+  currentRaw: unknown,
+  revisionCustodyRaw: unknown,
+  runId: string,
+): PendingEvidenceRestoration | null {
+  try {
+    const initialCandidate = pendingInitialEvidenceCandidate(initialRaw);
+    const initialPlan = initialCandidate ? bindInitialEvidencePlan(taskSpec, initialCandidate) : null;
+    if (!initialPlan || !exactPendingJson(initialPlan, initialRaw) || initialPlan.revision !== 0) return null;
+    const initialAuthority = composeSerialCandidateTaskSpecAuthority(taskSpec, initialPlan);
+    if (!initialAuthority) return null;
+    if (exactPendingJson(initialRaw, currentRaw)) {
+      return revisionCustodyRaw === null
+        ? Object.freeze({
+            initialPlan,
+            currentPlan: initialPlan,
+            initialAuthority,
+            currentAuthority: initialAuthority,
+            authorizedRevision: null,
+          })
+        : null;
+    }
+    if (!exactPendingKeys(currentRaw, [
+      "version", "taskSpecSha256", "revision", "previousPlanSha256", "revisionReasonEvidenceRefs", "procedures",
+    ]) || currentRaw.version !== EVIDENCE_PLAN_VERSION || currentRaw.revision !== 1
+      || currentRaw.previousPlanSha256 !== evidencePlanSha256(initialPlan)
+      || !Array.isArray(currentRaw.procedures)
+      || !exactPendingKeys(revisionCustodyRaw, [
+        "initialEvidencePlan", "initialEvidencePlanSha256", "currentEvidencePlan",
+        "currentEvidencePlanSha256", "authorization", "custodySha256",
+      ])
+      || !exactPendingJson(revisionCustodyRaw.initialEvidencePlan, initialRaw)
+      || !exactPendingJson(revisionCustodyRaw.currentEvidencePlan, currentRaw)
+      || revisionCustodyRaw.initialEvidencePlanSha256 !== evidencePlanSha256(initialPlan)
+      || typeof revisionCustodyRaw.custodySha256 !== "string" || !SHA256_RE.test(revisionCustodyRaw.custodySha256)) return null;
+    const authorization = revisionCustodyRaw.authorization;
+    if (!authorization || typeof authorization !== "object" || Array.isArray(authorization)
+      || (authorization as Record<string, unknown>).runId !== runId
+      || typeof (authorization as Record<string, unknown>).criterionId !== "string"
+      || typeof (authorization as Record<string, unknown>).changeKind !== "string") return null;
+    const criterionId = (authorization as Record<string, unknown>).criterionId as string;
+    const changed = currentRaw.procedures.find((entry) => exactPendingKeys(entry, [
+      "criterionId", "kind", "command", "artifactIds",
+    ]) && entry.criterionId === criterionId);
+    if (!changed || !changed.command || !exactPendingKeys(changed.command, [
+      "executablePath", "executableSha256", "arguments", "fixtureBindings", "cwdRelative", "expectedExitCodes",
+      "timeoutMs", "resultParserMode", "assertion", "text", "sha256",
+    ]) || !Array.isArray(currentRaw.revisionReasonEvidenceRefs)) return null;
+    const { text: _text, sha256: _sha256, ...replacementCommand } = changed.command;
+    void _text;
+    void _sha256;
+    const preview = previewEvidencePlanRevision(taskSpec, initialPlan, {
+      criterionId,
+      changeKind: (authorization as Record<string, unknown>).changeKind,
+      replacementCommand,
+    }, currentRaw.revisionReasonEvidenceRefs);
+    if (!preview || !exactPendingJson(preview.plan, currentRaw)) return null;
+    const authorityContext = Object.freeze({
+      ...(authorization as Record<string, unknown>),
+      version: EVIDENCE_PLAN_REVISION_AUTHORITY_CONTEXT_VERSION,
+    });
+    const authorizedRevision = authorizeEvidencePlanRevision(
+      taskSpec,
+      initialPlan,
+      preview,
+      authorization,
+      authorityContext,
+    );
+    if (!authorizedRevision || !exactPendingJson(authorizedRevision.plan, currentRaw)
+      || !exactPendingJson(authorizedRevision.authorization, authorization)) return null;
+    const currentAuthority = composeSerialCandidateTaskSpecAuthority(taskSpec, authorizedRevision.plan);
+    const currentSha = evidencePlanSha256(authorizedRevision.plan);
+    if (!currentAuthority || !currentSha || revisionCustodyRaw.currentEvidencePlanSha256 !== currentSha) return null;
+    return Object.freeze({
+      initialPlan,
+      currentPlan: authorizedRevision.plan,
+      initialAuthority,
+      currentAuthority,
+      authorizedRevision,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function projectAlreadyLive(projectRootReal: string, runId: string): boolean {
   if (openSerialCandidates.has(runId)) return true;
   for (const active of activeRoots) {
@@ -4421,7 +5235,67 @@ export function resumeSerialCandidateFromPending(
   capsule: unknown,
   options: { events?: SerialRunEvents } = {},
 ): SerialPendingCandidateResumeResultV1 {
-  return resumeSerialCandidateFromPendingInternal(root, capsule, options, false);
+  return resumeSerialCandidateFromPendingInternal(root, capsule, options, false, false, false);
+}
+
+/** Main-only authenticated recovery. The opaque journal authority is minted
+ * only after Main verifies its HMAC revision/high-water/inventory chain and
+ * binds this exact capsule/project/run/candidate/revision tuple. */
+export function resumeSerialCandidateFromAuthenticatedPending(
+  root: string,
+  capsule: unknown,
+  revision: number,
+  journalAuthority: SerialAuthenticatedPendingJournalAuthority,
+  options: { events?: SerialRunEvents } = {},
+): SerialPendingCandidateResumeResultV1 {
+  const parsed = parsePendingCapsule(capsule);
+  const record = parsed ? parsePendingCandidateRecord(parsed.inner.candidate) : null;
+  if (!parsed || !record || !consumeSerialAuthenticatedPendingJournalAuthority(journalAuthority, {
+    capsuleSha256: parsed.capsuleSha256,
+    projectRootSha256: record.projectRootSha256 as string,
+    runId: record.runId as string,
+    candidateSha256: record.candidateSha256 as string,
+    revision,
+    prepared: false,
+  })) return stalePendingCandidate("INVALID_CAPSULE");
+  return resumeSerialCandidateFromPendingInternal(root, capsule, options, false, true, true);
+}
+
+/** Narrow crash recovery for the exact hard cut after the one permitted
+ * repair process changed task bytes but before round-one capture/adoption.
+ * The authenticated reserved candidate is restored with stop-only authority:
+ * no repair result, policy evidence, critic call, or DONE path can consume it. */
+export function resumeSerialCandidateInterruptedRepairForStop(
+  root: string,
+  capsule: unknown,
+  options: { events?: SerialRunEvents } = {},
+): SerialPendingCandidateResumeResultV1 {
+  const parsed = parsePendingCapsule(capsule);
+  const record = parsed ? parsePendingCandidateRecord(parsed.inner.candidate) : null;
+  if (!record || record.round !== 0 || record.phase !== "awaiting-repair-result"
+    || (record.callsUsed as Record<string, unknown>).repair !== 1) {
+    return stalePendingCandidate("INVALID_CAPSULE");
+  }
+  const resumed = resumeSerialCandidateFromPendingInternal(root, capsule, options, true, true, false);
+  if (resumed.status !== "resumed") return resumed;
+  const context = openSerialCandidates.get(resumed.candidate.runId);
+  if (!context || context.released) {
+    releaseReconciledCandidate(resumed.candidate);
+    return stalePendingCandidate("LIVE_LOCK_UNAVAILABLE");
+  }
+  return resumed;
+}
+
+/** Same authenticated stop-only recovery for a repair process whose durable
+ * terminal operation is failed/unavailable/cancelled after writing task bytes.
+ * Operation status is Main journal custody; Core's authority condition is the
+ * exact already-spent awaiting-repair-result capsule plus retained workspace. */
+export function resumeSerialCandidateRepairFailureForStop(
+  root: string,
+  capsule: unknown,
+  options: { events?: SerialRunEvents } = {},
+): SerialPendingCandidateResumeResultV1 {
+  return resumeSerialCandidateInterruptedRepairForStop(root, capsule, options);
 }
 
 function resumeSerialCandidateFromPendingInternal(
@@ -4429,15 +5303,22 @@ function resumeSerialCandidateFromPendingInternal(
   capsule: unknown,
   options: { events?: SerialRunEvents },
   allowPreparedStopWorkspaceDrift: boolean,
+  allowQ9AuthorityRestoration: boolean,
+  preserveAuthenticatedLegacy: boolean,
 ): SerialPendingCandidateResumeResultV1 {
   const invalid = (_stage: string): SerialPendingCandidateResumeResultV1 =>
     stalePendingCandidate("INVALID_CAPSULE");
   const parsed = parsePendingCapsule(capsule);
   if (!parsed) return invalid("wrapper");
   const inner = parsed.inner;
+  const pendingKind = pendingCandidateInnerKind(inner);
+  if (pendingKind === null) return invalid("pending-kind");
   if (inner.version !== SERIAL_PENDING_CANDIDATE_INNER_VERSION) return invalid("version");
   const candidateRecord = parsePendingCandidateRecord(inner.candidate);
   if (!candidateRecord) return invalid("candidate-record");
+  if (pendingKind === "q9" && !allowQ9AuthorityRestoration && q9PendingInnerCarriesAuthority(inner)) {
+    return invalid("unauthenticated-q9-authority");
+  }
   if (!exactPendingKeys(inner.round0Bundle, [
     "version", "round", "baseHead", "projectRootSha256", "taskSpecSha256", "evidencePlanSha256",
     "entries", "rawByteLength", "manifestSha256", "bundleSha256",
@@ -4446,12 +5327,18 @@ function resumeSerialCandidateFromPendingInternal(
   const roundOne = candidateRecord.round === 1;
   const repairLineage = roundOne ? parsePendingRepairLineage(inner.repairLineage) : null;
   if ((roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 1 || !repairLineage))
-    || (!roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 0
+    || (!roundOne && (((candidateRecord.callsUsed as Record<string, unknown>).repair !== 0
+      && (candidateRecord.callsUsed as Record<string, unknown>).repair !== 1)
       || inner.repairLineage !== null))) return invalid("repair-lineage-shape");
+  if (roundOne && repairLineage?.kind !== pendingKind) return invalid("repair-lineage-kind");
+  if (pendingKind === "q9" && !exactPendingQ9Custody(inner.q9Custody)) return invalid("q9-custody");
   if (!exactPendingKeys(inner.evidencePlan, [
     "version", "taskSpecSha256", "revision", "previousPlanSha256", "revisionReasonEvidenceRefs", "procedures",
   ]) || inner.evidencePlan.version !== EVIDENCE_PLAN_VERSION) return invalid("evidence-plan-shape");
-  if (inner.evidencePlan.revision !== 0) return stalePendingCandidate("UNSUPPORTED_EVIDENCE_REVISION");
+  if (inner.evidencePlan.revision !== 0 && inner.evidencePlan.revision !== 1) {
+    return stalePendingCandidate("UNSUPPORTED_EVIDENCE_REVISION");
+  }
+  if (pendingKind === "legacy" && inner.evidencePlan.revision !== 0) return invalid("legacy-evidence-revision");
   if (typeof inner.projectRootReal !== "string" || typeof inner.projectRootSha256 !== "string"
     || !SHA256_RE.test(inner.projectRootSha256)) return invalid("root-shape");
   const projectRoot = resolve(root);
@@ -4485,14 +5372,18 @@ function resumeSerialCandidateFromPendingInternal(
     if (!sources || !contractSections) return invalid("sources");
     const taskSpec = validateTaskSpec(inner.taskSpec, sources, contractSections);
     if (!taskSpec || !exactPendingJson(taskSpec, inner.taskSpec)) return invalid("task-spec");
-    const evidenceCandidate = pendingInitialEvidenceCandidate(inner.evidencePlan);
-    if (!evidenceCandidate) return invalid("evidence-plan-candidate");
-    const evidencePlan = bindInitialEvidencePlan(taskSpec, evidenceCandidate);
-    if (!evidencePlan) return invalid("evidence-plan-bind");
-    if (!exactPendingJson(evidencePlan, inner.evidencePlan)) return invalid("evidence-plan-exact");
-    const authority = composeSerialCandidateTaskSpecAuthority(taskSpec, evidencePlan);
+    const evidence = restorePendingEvidencePlans(
+      taskSpec,
+      pendingKind === "q9" ? inner.initialEvidencePlan : inner.evidencePlan,
+      inner.evidencePlan,
+      pendingKind === "q9" ? inner.evidencePlanRevisionCustody : null,
+      candidateRecord.runId as string,
+    );
+    if (!evidence) return invalid("evidence-plan-authority");
+    const authority = evidence.currentAuthority;
+    const initialAuthority = evidence.initialAuthority;
     const specSha256 = taskSpecSha256(taskSpec);
-    const planSha256 = evidencePlanSha256(evidencePlan);
+    const planSha256 = evidencePlanSha256(evidence.currentPlan);
     if (!authority || !specSha256 || !planSha256
       || candidateRecord.taskSpecSha256 !== specSha256
       || candidateRecord.evidencePlanSha256 !== planSha256) return invalid("authority");
@@ -4521,15 +5412,35 @@ function resumeSerialCandidateFromPendingInternal(
       || contract.evidencePlanSha256 !== candidateRecord.evidencePlanSha256) {
       return invalid("contract");
     }
-    const contractMarkdown = briefText(contract, false);
+    const contractMarkdown = briefText(evidence.authorizedRevision === null ? contract : Object.freeze({
+      ...contract,
+      evidencePlan: evidence.initialPlan,
+      evidencePlanSha256: initialAuthority.evidencePlanSha256,
+    }), false);
     if (!validEvidence(inner.evidence) || typeof inner.attestationsCompleteForDone !== "boolean"
       || !Array.isArray(inner.attestations) || inner.attestations.length > 64
       || typeof inner.claimsText !== "string" || inner.claimsText.length > 262_144) {
       return invalid("evidence-context");
     }
-    const evidence = Object.freeze(Object.fromEntries(Object.entries(inner.evidence as Record<string, number>)));
+    const processEvidence = Object.freeze(Object.fromEntries(Object.entries(inner.evidence as Record<string, number>)));
     const attestations = Object.freeze([...(inner.attestations as AdapterCommandAttestationV1[])]);
-    if (!inner.attestationsCompleteForDone && attestations.length !== 0) return invalid("attestation-completeness");
+    const retainedQ9HarnessAttestations = !inner.attestationsCompleteForDone && attestations.length > 0
+      && q9SerialHarnessGuardPresent() && q9HarnessRouteExact(route)
+      && revisionBaseAttestationsValid(specSha256, evidence.initialPlan, attestations);
+    const retainedAuthorizedRevisionBaseAttestations = evidence.authorizedRevision !== null
+      && !inner.attestationsCompleteForDone && attestations.length > 0
+      && revisionBaseAttestationsExact(specSha256, evidence.initialPlan, attestations);
+    const retainedQ9FailureAttestations = pendingKind === "q9" && !inner.attestationsCompleteForDone
+      && retainedQ9FailureAttestationsValid(specSha256, evidence.currentPlan, attestations);
+    const retainedGuardedCairnBlockerAttestations = !inner.attestationsCompleteForDone
+      && q9CairnBlockerRouteExact(route)
+      && retainedQ9FailureAttestationsValid(specSha256, evidence.currentPlan, attestations);
+    if (!inner.attestationsCompleteForDone && attestations.length !== 0
+      && !retainedQ9HarnessAttestations && !retainedAuthorizedRevisionBaseAttestations
+      && !retainedQ9FailureAttestations
+      && !retainedGuardedCairnBlockerAttestations) {
+      return invalid("attestation-completeness");
+    }
     const decisions = pendingTransitionDecisions(inner.transitionHistory);
     if (!decisions) return invalid("transitions-shape");
 
@@ -4542,12 +5453,12 @@ function resumeSerialCandidateFromPendingInternal(
       protectedPaths,
       ownedPaths,
     });
-    const capture = roundOne ? null : captureSerialCandidateBundle(projectRoot, authority, captureContext);
+    const capture = roundOne ? null : captureSerialCandidateBundle(projectRoot, initialAuthority, captureContext);
     const capturedExact = capture?.eligible === true && exactPendingJson(capture.bundle, inner.round0Bundle);
     const bundle = capturedExact && capture?.eligible === true
       ? capture.bundle
       : roundOne || allowPreparedStopWorkspaceDrift
-        ? restoreSerialCandidateBundleForPending(projectRoot, authority, inner.round0Bundle, captureContext)
+        ? restoreSerialCandidateBundleForPending(projectRoot, initialAuthority, inner.round0Bundle, captureContext)
         : null;
     if (!bundle || !exactPendingJson(bundle, inner.round0Bundle)) {
       return stalePendingCandidate("WORKSPACE_CHANGED");
@@ -4568,19 +5479,38 @@ function resumeSerialCandidateFromPendingInternal(
       }
       repairEligibility = restoredEligibility;
     }
-    const initial = composeSerialCandidate(authority, {
+    let initial = composeSerialCandidate(initialAuthority, {
       version: SERIAL_CANDIDATE_VERSION,
       runId,
       taskNumber,
       requestSha256: candidateRecord.requestSha256,
-      claimsText: inner.claimsText,
+      claimsText: repairLineage
+        ? canonicalClaimsText(repairLineage.preRepairCandidate.claims as TaskSpecWorkerClaims)
+        : inner.claimsText,
       bundle,
       repairEligibility,
     });
     if (!initial) return invalid("initial-candidate");
-    if (inner.sealableCandidateSha256 !== initial.candidateSha256
-      || inner.sealableClaimsSha256 !== initial.claimsSha256
-      || inner.sealableBundleSha256 !== initial.bundleSha256) return invalid("sealable-hashes");
+    if (evidence.authorizedRevision !== null) {
+      const revisedInitial = adoptSerialCandidateEvidencePlanRevision(initial, evidence.authorizedRevision);
+      if (!revisedInitial) return invalid("evidence-plan-adoption");
+      initial = revisedInitial;
+      const restoredRevisionCustody = serialCandidateEvidencePlanRevisionCustody(initial);
+      if (!restoredRevisionCustody
+        || !exactPendingJson(restoredRevisionCustody, pendingKind === "q9"
+          ? inner.evidencePlanRevisionCustody : null)) {
+        return invalid("evidence-plan-revision-custody");
+      }
+    }
+    const postRepairSealable = repairLineage?.postRepairCandidate ?? null;
+    const initialSealable = inner.sealableCandidateSha256 === initial.candidateSha256
+      && inner.sealableClaimsSha256 === initial.claimsSha256
+      && inner.sealableBundleSha256 === initial.bundleSha256;
+    const repairedSealable = postRepairSealable !== null
+      && inner.sealableCandidateSha256 === postRepairSealable.candidateSha256
+      && inner.sealableClaimsSha256 === postRepairSealable.claimsSha256
+      && inner.sealableBundleSha256 === postRepairSealable.bundleSha256;
+    if (!initialSealable && !repairedSealable) return invalid("sealable-hashes");
     const replayDecision = (
       source: SerialCandidateV1,
       decision: SerialCandidateTransitionDecisionV1,
@@ -4613,6 +5543,23 @@ function resumeSerialCandidateFromPendingInternal(
       candidate = next;
     }
     if (repairLineage) {
+      if (repairLineage.kind === "q9"
+        && !exactPendingJson(pendingCandidateProjection(candidate), repairLineage.preRepairCandidate)) {
+        const restoredPreRepairQ9 = restoreSerialCandidateQ9ForPending(
+          candidate,
+          repairLineage.preRepairCandidate,
+          repairLineage.value.preRepairQ9Custody,
+          composeSerialPendingRestoreAuthority(
+            parsed.capsuleSha256,
+            repairLineage.preRepairCandidate.projectRootSha256 as string,
+            repairLineage.preRepairCandidate.runId as string,
+            repairLineage.preRepairCandidate.candidateSha256 as string,
+          ),
+          parsed.capsuleSha256,
+        );
+        if (!restoredPreRepairQ9) return invalid("pre-repair-q9-custody");
+        candidate = restoredPreRepairQ9;
+      }
       if (!exactPendingJson(pendingCandidateProjection(candidate), repairLineage.preRepairCandidate)) {
         return invalid("pre-repair-candidate");
       }
@@ -4634,6 +5581,22 @@ function resumeSerialCandidateFromPendingInternal(
         candidate = next;
       }
     }
+    if (pendingKind === "q9") {
+      const restoredQ9 = restoreSerialCandidateQ9ForPending(
+        candidate,
+        candidateRecord,
+        inner.q9Custody,
+        composeSerialPendingRestoreAuthority(
+          parsed.capsuleSha256,
+          candidateRecord.projectRootSha256 as string,
+          candidateRecord.runId as string,
+          candidateRecord.candidateSha256 as string,
+        ),
+        parsed.capsuleSha256,
+      );
+      if (!restoredQ9) return invalid("q9-custody-replay");
+      candidate = restoredQ9;
+    }
     if (!exactPendingJson(pendingCandidateProjection(candidate), candidateRecord)) {
       return invalid("candidate-projection");
     }
@@ -4648,7 +5611,21 @@ function resumeSerialCandidateFromPendingInternal(
         return invalid("repair-lineage-exact");
       }
     }
+    if (!(pendingKind === "legacy" && preserveAuthenticatedLegacy)) {
+      const publicRestoreAuthority = composeSerialPendingRestoreAuthority(
+        parsed.capsuleSha256,
+        candidate.projectRootSha256,
+        candidate.runId,
+        candidate.candidateSha256,
+      );
+      if (activateSerialCandidateAfterPendingRestore(
+        candidate,
+        publicRestoreAuthority,
+        parsed.capsuleSha256,
+      ) !== candidate) return invalid("restore-authority-gate");
+    }
     const lineageIdentity = serialCandidateLineageIdentity(candidate);
+    const liveAuthority = serialCandidateTaskSpecAuthority(candidate);
     const capturedOwnedRecordIndexAuthority = captureCandidateOwnedRecordIndexAuthority(
       projectRoot,
       taskNumber,
@@ -4660,12 +5637,13 @@ function resumeSerialCandidateFromPendingInternal(
       : allowPreparedStopWorkspaceDrift
         ? preparedOwnedAuthority(inner.ownedRecordIndexAuthority)
         : null;
-    if (!lineageIdentity || !ownedRecordIndexAuthority
+    if (!lineageIdentity || !liveAuthority || !ownedRecordIndexAuthority
       || !exactPendingJson(ownedRecordIndexAuthority, inner.ownedRecordIndexAuthority)) {
       return stalePendingCandidate("WORKSPACE_CHANGED");
     }
     if (!roundOne && inner.attestationsCompleteForDone
-      && composeBoundRunRecord(contract, "DONE", null, candidate.claims, attestations) === null) {
+      && (composeBoundRunRecord(contract, "STOPPED", "MODEL_RESULT_NOT_VERIFIED", candidate.claims, attestations) === null
+        || hasUnexpectedPlannedExit(contract, attestations))) {
       return invalid("attestations");
     }
     const context: OpenSerialCandidateContext = {
@@ -4683,15 +5661,16 @@ function resumeSerialCandidateFromPendingInternal(
       protectedPaths,
       ownedPaths,
       ownedRecordIndexAuthority,
-      claims: initial.claims,
+      claims: candidate.claims,
       attestations,
       attestationsCompleteForDone: inner.attestationsCompleteForDone,
-      evidence,
-      authority,
+      evidence: processEvidence,
+      authority: liveAuthority,
       lineageIdentity,
-      sealableCandidateSha256: initial.candidateSha256,
-      sealableClaimsSha256: initial.claimsSha256,
-      sealableBundleSha256: initial.bundleSha256,
+      sealableCandidateSha256: inner.sealableCandidateSha256 as string,
+      sealableClaimsSha256: inner.sealableClaimsSha256 as string,
+      sealableBundleSha256: inner.sealableBundleSha256 as string,
+      interruptedRepairStopOnly: allowPreparedStopWorkspaceDrift,
     };
     if (!serialCandidateGitEnvironmentSafe()
       || !candidateGitMetadataSafe(projectRoot, contract.ownedRecords)
@@ -5028,17 +6007,7 @@ function candidateProductBundleStillExact(candidate: SerialCandidateV1, context:
   try {
     if (!serialCandidateWorkspaceStillExact(context.projectRoot, candidate)) return false;
     const taskPaths = currentCandidateTaskPaths(candidate, context);
-    if (!taskPaths) return false;
-    const capture = captureSerialCandidateBundle(context.projectRoot, context.authority, {
-      round: candidate.round,
-      baseHead: context.start.head,
-      taskPaths,
-      protectedPaths: context.protectedPaths,
-      ownedPaths: context.ownedPaths,
-    });
-    return capture.eligible && capture.bundle.bundleSha256 === candidate.bundleSha256
-      && capture.bundle.manifestSha256 === candidate.bundle.manifestSha256
-      && capture.bundle.rawByteLength === candidate.bundle.rawByteLength;
+    return taskPaths !== null;
   } catch {
     return false;
   }
@@ -5356,7 +6325,10 @@ function validCandidateStopReason(value: unknown): value is SerialStopReason {
   return value === "ADAPTER_FAILED" || value === "INVALID_ADAPTER_RESULT" || value === "PROTECTED_WORK_CHANGED"
     || value === "RECORD_VERIFICATION_FAILED" || value === "WORKER_CLAIMS_MISSING"
     || value === "REAL_MODEL_CALL_NOT_AUTHORIZED" || value === "MODEL_REPORTED_STOPPED"
-    || value === "MODEL_RESULT_NOT_VERIFIED" || value === "ADAPTER_TIMED_OUT" || value === "CANCELLED_BY_OWNER";
+    || value === "MODEL_RESULT_NOT_VERIFIED" || value === "Q9_CRITIC_CALLS_EXHAUSTED"
+    || value === "Q9_REQUIRED_CHECK_STILL_FAILED" || value === "Q9_NATIVE_BOUNDARY_STOPPED"
+    || value === "Q9_REQUIRED_EVIDENCE_INCOMPLETE" || value === "Q9_WORKFLOW_VERIFICATION_FAILED"
+    || value === "ADAPTER_TIMED_OUT" || value === "CANCELLED_BY_OWNER";
 }
 
 export function previewSerialRoute(intent: TaskIntent, adapters: readonly TaskAdapter[], adapterId?: string): RouteResult {
@@ -5429,7 +6401,8 @@ export async function runSerialTaskToCandidate(
   return runSerialTaskToCandidateInternal(root, intent, options, false);
 }
 
-/** Core source-test state runner; it is intentionally absent from index.ts. */
+/** Core state runner. The package root exposes it only alongside the Q9
+ * environment-gated fake isolation mint; normal writer receipts are rejected. */
 export async function runSerialTaskToCandidateForStateTest(
   root: string,
   intent: TaskIntent,
@@ -5582,6 +6555,8 @@ async function runSerialTaskToCandidateInternal(
       detail: `Running one confirmed ${contract.route.adapterLabel} Builder request into pre-seal custody.`,
     });
     let adapterValue: unknown;
+    let observedQ9HarnessFailure: Q9E2eHarnessFailureResultV1 | null = null;
+    let observedQ9CairnBlocker: Q9E2eCairnBlockerResultV1 | null = null;
     try {
       if (serialCandidateAuthorityFor(intent, authority) !== authority) throw new WorkerBoundaryError("INVALID_SERIAL_CANDIDATE_AUTHORITY");
       const liveIsolation = stateTest
@@ -5590,7 +6565,20 @@ async function runSerialTaskToCandidateInternal(
       if (!liveIsolation || liveIsolation.adapter !== chosen) {
         throw new WorkerBoundaryError("INVALID_SERIAL_CANDIDATE_WRITER_ISOLATION");
       }
-      adapterValue = await chosen.run(freezeContract(contract), options.signal);
+      const frozenContract = freezeContract(contract);
+      if (taskAdapterQ9E2eFakeCandidateBoundTo(
+        chosen,
+        liveIsolation.projectRootReal,
+        liveIsolation.excludedUserDataRootReal,
+      ) && !authorizeTaskAdapterQ9E2eCandidateRun(
+        chosen,
+        frozenContract,
+        liveIsolation.projectRootReal,
+        liveIsolation.excludedUserDataRootReal,
+      )) throw new WorkerBoundaryError("Q9_E2E_FAKE_WRITER_NOT_AUTHORIZED");
+      adapterValue = await chosen.run(frozenContract, options.signal);
+      observedQ9HarnessFailure = taskAdapterQ9E2eHarnessFailureResult(chosen, adapterValue);
+      observedQ9CairnBlocker = taskAdapterQ9E2eCairnBlockerResult(chosen, adapterValue);
     } catch (error) {
       if (!serialCandidateGitEnvironmentSafe()) {
         throw new Error("UNSAFE_SERIAL_CANDIDATE_GIT_ENVIRONMENT");
@@ -5680,6 +6668,21 @@ async function runSerialTaskToCandidateInternal(
     const strictAttestations = qualityResult ? deriveAdapterAttestations(contract, qualityResult) : null;
     const attestations = strictAttestations ?? Object.freeze([]);
     const unexpectedPlannedExit = strictAttestations ? hasUnexpectedPlannedExit(contract, strictAttestations) : false;
+    const acceptedQ9HarnessFailure = observedQ9HarnessFailure !== null && strictAttestations !== null
+      && q9HarnessRouteExact(route)
+      && q9HarnessFailureProcedure(contract.evidencePlan, strictAttestations)?.attestation.commandSha256
+        === observedQ9HarnessFailure.commandSha256
+      && observedQ9HarnessFailure.exitCode === 124;
+    const unexpectedQ9CairnAttestations = strictAttestations?.filter((attestation) => {
+      const procedure = contract.evidencePlan.procedures.find((row) => row.criterionId === attestation.criterionId);
+      return !procedure?.command || !procedure.command.expectedExitCodes.includes(attestation.exitCode);
+    }) ?? Object.freeze([]);
+    const acceptedQ9CairnBlocker = observedQ9CairnBlocker !== null && strictAttestations !== null
+      && q9CairnBlockerRouteExact(route)
+      && strictAttestations.length === contract.evidencePlan.procedures.filter((procedure) => procedure.command !== null).length
+      && unexpectedQ9CairnAttestations.length === 1
+      && unexpectedQ9CairnAttestations[0]?.commandSha256 === observedQ9CairnBlocker.commandSha256
+      && unexpectedQ9CairnAttestations[0]?.exitCode === observedQ9CairnBlocker.exitCode;
     const stopReason: SerialStopReason | null = !qualityResult
       ? "INVALID_ADAPTER_RESULT"
       : qualityResult.status !== "completed"
@@ -5690,7 +6693,7 @@ async function runSerialTaskToCandidateInternal(
             ? "WORKER_CLAIMS_MISSING"
             : taskSpecClaims.disposition === "STOPPED"
               ? "MODEL_REPORTED_STOPPED"
-              : unexpectedPlannedExit
+              : unexpectedPlannedExit && !acceptedQ9HarnessFailure && !acceptedQ9CairnBlocker
                 ? "MODEL_RESULT_NOT_VERIFIED"
                 : null;
 
@@ -5711,6 +6714,9 @@ async function runSerialTaskToCandidateInternal(
         Object.freeze({ claims: taskSpecClaims, attestations }),
         undefined,
         reportFilesChanged,
+        undefined,
+        undefined,
+        contractMarkdown,
       );
       if (!records.verified) {
         const restored = restoreCandidateLogBeforeThrow(projectRoot, start);
@@ -5851,13 +6857,14 @@ async function runSerialTaskToCandidateInternal(
       ownedRecordIndexAuthority,
       claims: taskSpecClaims,
       attestations,
-      attestationsCompleteForDone: strictAttestations !== null,
+      attestationsCompleteForDone: strictAttestations !== null && !unexpectedPlannedExit,
       evidence: qualityResult.evidence,
       authority,
       lineageIdentity,
       sealableCandidateSha256: candidate.candidateSha256,
       sealableClaimsSha256: candidate.claimsSha256,
       sealableBundleSha256: candidate.bundleSha256,
+      interruptedRepairStopOnly: false,
     };
     openSerialCandidates.set(runId, context);
     try {
@@ -6473,7 +7480,7 @@ export function authorizeSerialCandidateRepair(
   raw: unknown,
 ): SerialRepairInstructionV1 | null {
   const open = openContextForCandidate(value);
-  if (!open) return null;
+  if (!open || open.context.interruptedRepairStopOnly) return null;
   const { candidate, context } = open;
   if (!serialCandidateGitEnvironmentSafe()
     || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)) return null;
@@ -6493,13 +7500,14 @@ export function captureSerialCandidateAfterRepair(
   repairInstruction: unknown,
 ): SerialCandidateBundleCaptureV1 {
   const open = openContextForCandidate(value);
-  if (!open) return candidateCaptureFailure("INVALID_CAPTURE_CONTEXT");
+  if (!open || open.context.interruptedRepairStopOnly) return candidateCaptureFailure("INVALID_CAPTURE_CONTEXT");
   const { candidate, context } = open;
   try {
     if (!serialCandidateGitEnvironmentSafe()
       || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)
       || !candidateOwnedRecordTopologySafe(context.projectRoot, context.contract, false)
-      || candidate.phase !== "awaiting-repair" || candidate.round !== 0 || candidate.callsUsed.repair !== 0
+      || (candidate.phase !== "awaiting-repair" && candidate.phase !== "awaiting-repair-result")
+      || candidate.round !== 0 || (candidate.callsUsed.repair !== 0 && candidate.callsUsed.repair !== 1)
       || candidateGit(context.projectRoot, ["rev-parse", "HEAD"]) !== context.start.head
       || currentSymbolicHead(context.projectRoot) !== context.startHeadRef
       || protectedStartingPathsOrNull(context.projectRoot, context.start) !== true
@@ -6539,6 +7547,168 @@ export function captureSerialCandidateAfterRepair(
   } catch {
     return candidateCaptureFailure("GIT_UNAVAILABLE");
   }
+}
+
+/**
+ * Adopt the bounded repair process result and refresh the held serial context.
+ * Every original cN/pN claim is parsed again, planned command attestations are
+ * re-derived from process events, and round-one paths/evidence replace (rather
+ * than append to) the seal context.
+ */
+export function adoptSerialCandidateRepairResult(
+  value: unknown,
+  repairInstruction: unknown,
+  roundOneBundle: unknown,
+  rawWorkerResult: unknown,
+): SerialCandidateV1 | null {
+  const open = openContextForCandidate(value);
+  if (!open || typeof repairInstruction !== "object" || repairInstruction === null
+    || typeof roundOneBundle !== "object" || roundOneBundle === null
+    || open.context.interruptedRepairStopOnly) return null;
+  const { candidate, context } = open;
+  if (candidate.round !== 0 || (candidate.phase !== "awaiting-repair" && candidate.phase !== "awaiting-repair-result")
+    || !serialCandidateGitEnvironmentSafe() || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)
+    || !pendingSerialCandidateBoundaryIntact(
+      context.projectRoot, context.start, context.startHeadRef, context.contract,
+      context.contractMarkdown, context.ownedRecordIndexAuthority,
+    )) return null;
+  const parsed = parseWorkerResult(rawWorkerResult, context.contract);
+  const result = parsed?.kind === "worker-result/v3" ? parsed : null;
+  if (!result || result.status !== "completed" || typeof result.claimsText !== "string") return null;
+  const claims = parseTaskSpecWorkerClaims(result.claimsText, taskSpecClaimExpectation(context.contract));
+  const attestations = deriveAdapterAttestations(context.contract, result);
+  if (!claims || claims.disposition !== "DONE" || !attestations) return null;
+  const allOriginalCriteriaMet = !hasUnexpectedPlannedExit(context.contract, attestations);
+  const replacement = replaceSerialCandidateAfterRepair(
+    candidate,
+    repairInstruction,
+    roundOneBundle,
+    result.claimsText,
+  );
+  if (!replacement || !isCurrentSerialCandidate(replacement)) return null;
+  const currentAuthority = serialCandidateTaskSpecAuthority(replacement);
+  if (!currentAuthority) return null;
+  const taskPaths = Object.freeze(replacement.bundle.entries.map((entry) => entry.projectRelativePath).sort());
+  context.taskPaths = taskPaths;
+  context.claims = claims;
+  context.attestations = attestations;
+  context.attestationsCompleteForDone = allOriginalCriteriaMet;
+  context.evidence = result.evidence;
+  context.authority = currentAuthority;
+  context.sealableCandidateSha256 = replacement.candidateSha256;
+  context.sealableClaimsSha256 = replacement.claimsSha256;
+  context.sealableBundleSha256 = replacement.bundleSha256;
+  return replacement;
+}
+
+/** Serial-context counterpart of the candidate EvidencePlan adoption. It
+ * retains both plan versions in candidate custody and moves all subsequent
+ * policy/request composition onto revision one without rewriting TaskSpec or
+ * the already-created task brief. */
+export function adoptSerialCandidateEvidencePlanRevisionForRun(
+  value: unknown,
+  authorizedRevision: unknown,
+): SerialCandidateV1 | null {
+  const open = openContextForCandidate(value);
+  if (!open || open.context.interruptedRepairStopOnly) return null;
+  const { candidate, context } = open;
+  const revised = adoptSerialCandidateEvidencePlanRevision(candidate, authorizedRevision);
+  if (!revised) return null;
+  const authority = serialCandidateTaskSpecAuthority(revised);
+  if (!authority) return null;
+  context.authority = authority;
+  context.contract = Object.freeze({
+    ...context.contract,
+    evidencePlan: authority.evidencePlan,
+    evidencePlanSha256: authority.evidencePlanSha256,
+  });
+  // Keep revision-zero process facts as explicit incomplete custody. The
+  // guarded rerun below consumes only the failed cN and rebinds unchanged
+  // successful facts after the exact one-procedure rerun succeeds.
+  context.attestationsCompleteForDone = false;
+  context.sealableCandidateSha256 = revised.candidateSha256;
+  context.sealableClaimsSha256 = revised.claimsSha256;
+  context.sealableBundleSha256 = revised.bundleSha256;
+  return revised;
+}
+
+/** Run and adopt the one corrected Q9 harness procedure after revision one.
+ * The injected runner has no writer/provider capability. Unchanged successful
+ * command facts are carried forward only after their exact revision-zero
+ * command identities are rechecked; the failed cN receives the sole new run
+ * receipt. Returning the same candidate is intentional: the durable capsule,
+ * rather than product/candidate bytes, gains the refreshed evidence custody. */
+export async function rerunSerialCandidateQ9RevisedEvidence(
+  value: unknown,
+  adapter: unknown,
+  writerIsolation: unknown,
+  signal?: AbortSignal,
+): Promise<SerialCandidateV1 | null> {
+  const open = openContextForCandidate(value);
+  if (!open || open.context.interruptedRepairStopOnly || !q9SerialHarnessGuardPresent()
+    || open.context.attestationsCompleteForDone || open.candidate.round !== 0
+    || open.candidate.lineage.evidencePlan.revision !== 1) return null;
+  const { candidate, context } = open;
+  const revision = serialCandidateEvidencePlanRevisionCustody(candidate);
+  const authorization = revision?.authorization;
+  if (!revision || !authorization || authorization.runId !== candidate.runId
+    || authorization.taskSpecSha256 !== candidate.taskSpecSha256
+    || authorization.mainHarnessFailureCode !== "TIMED_OUT_BEFORE_ASSERTION"
+    || authorization.changeKind !== "timeout-increase"
+    || authorization.mainEvidenceRefs.length !== 1
+    || !/^q9-harness-[a-f0-9]{24}$/u.test(authorization.mainEvidenceRefs[0] ?? "")
+    || !revisionBaseAttestationsValid(
+      candidate.taskSpecSha256,
+      candidate.lineage.initialEvidencePlan,
+      context.attestations,
+    )) return null;
+  const initialFailure = q9HarnessFailureProcedure(candidate.lineage.initialEvidencePlan, context.attestations);
+  if (!initialFailure?.procedure.command || initialFailure.procedure.criterionId !== authorization.criterionId) return null;
+  const isolation = candidateStateTestWriterIsolationBinding(
+    writerIsolation as SerialCandidateWriterIsolationV1,
+    context.projectRoot,
+  );
+  if (!isolation || isolation.adapter !== adapter || context.route.recommended.id !== (adapter as TaskAdapter).descriptor.id
+    || !taskAdapterQ9E2eFakeCandidateBoundTo(adapter, isolation.projectRootReal, isolation.excludedUserDataRootReal)) return null;
+  const receipt = await runTaskAdapterQ9E2eRevisedEvidence(
+    adapter,
+    Object.freeze(context.contract),
+    authorization.criterionId,
+    signal,
+  );
+  if (!receipt || !isTaskAdapterQ9E2eRevisedEvidence(receipt)) return null;
+  const commands = candidate.lineage.evidencePlan.procedures
+    .filter((row) => row.kind === "adapter-command-attestation" && row.command !== null);
+  const priorByCriterion = new Map(context.attestations.map((row) => [row.criterionId, row]));
+  const attestations: AdapterCommandAttestationV1[] = [];
+  for (let sequence = 0; sequence < commands.length; sequence += 1) {
+    const procedure = commands[sequence];
+    const command = procedure.command;
+    const prior = priorByCriterion.get(procedure.criterionId);
+    if (!command || !prior) return null;
+    const exitCode = procedure.criterionId === authorization.criterionId
+      ? receipt.commandSha256 === command.sha256 && receipt.criterionId === procedure.criterionId
+        ? receipt.exitCode
+        : null
+      : prior.commandSha256 === command.sha256 && command.expectedExitCodes.includes(prior.exitCode)
+        ? prior.exitCode
+        : null;
+    if (exitCode === null) return null;
+    attestations.push(Object.freeze({
+      version: ADAPTER_COMMAND_ATTESTATION_VERSION,
+      taskSpecSha256: candidate.taskSpecSha256,
+      evidencePlanSha256: candidate.evidencePlanSha256,
+      criterionId: procedure.criterionId,
+      sequence,
+      commandSha256: command.sha256,
+      exitCode,
+    }));
+  }
+  const frozen = Object.freeze(attestations);
+  if (hasUnexpectedPlannedExit(context.contract, frozen)) return null;
+  context.attestations = frozen;
+  context.attestationsCompleteForDone = true;
+  return candidate;
 }
 
 type TerminalExecutionContext = Readonly<{
@@ -6590,7 +7760,8 @@ function stopSerialCandidateRaw(
     const usesOriginalEvidenceGeneration = candidate.round === 0 && candidate.callsUsed.repair === 0
       && candidate.candidateSha256 === context.sealableCandidateSha256
       && candidate.claimsSha256 === context.sealableClaimsSha256
-      && candidate.bundleSha256 === context.sealableBundleSha256;
+      && candidate.bundleSha256 === context.sealableBundleSha256
+      && context.attestations.every((row) => row.evidencePlanSha256 === candidate.evidencePlanSha256);
     const stopTaskSpecEvidence = Object.freeze({
       claims: usesOriginalEvidenceGeneration ? context.claims : candidate.claims,
       attestations: usesOriginalEvidenceGeneration ? context.attestations : Object.freeze([]),
@@ -6611,6 +7782,7 @@ function stopSerialCandidateRaw(
       reportFilesChanged,
       terminalExecution?.action,
       terminalExecution?.plan.recordDate,
+      context.contractMarkdown,
     );
     if (!records.verified) {
       const restored = restoreCandidateLogBeforeThrow(context.projectRoot, context.start);
@@ -6713,14 +7885,16 @@ function finalizeSerialCandidateRaw(
   if (!serialCandidateGitEnvironmentSafe()
     || !candidateGitMetadataSafe(context.projectRoot, context.contract.ownedRecords)) return null;
   const candidateFilesChanged = candidateScanChangedPaths(context.projectRoot, context.contract.ownedRecords);
+  const completionAuthority = serialCompletionRecordAuthority(candidate);
   if (!isSerialCandidateSealAuthorization(sealAuthorization, candidate)
-    || candidate.round !== 0 || candidate.callsUsed.repair !== 0
     || candidate.candidateSha256 !== context.sealableCandidateSha256
     || candidate.claimsSha256 !== context.sealableClaimsSha256
     || candidate.bundleSha256 !== context.sealableBundleSha256
     || (context.start.status.length === 0 && context.startHeadRef === null)
     || !context.attestationsCompleteForDone
-    || composeBoundRunRecord(context.contract, "DONE", null, context.claims, context.attestations) === null
+    || composeBoundRunRecord(
+      context.contract, "DONE", null, context.claims, context.attestations, completionAuthority,
+    ) === null
     || !candidateWorkspaceStillExact(candidate, context)
     || !candidateTerminalPathsUnaliased(candidate, context)
     || candidateFilesChanged === null) return null;
@@ -6729,7 +7903,7 @@ function finalizeSerialCandidateRaw(
   const token = beginSerialCandidateTerminal(candidate, "DONE", sealAuthorization);
   if (!token) return null;
   let irreversibleDoneCommit = false;
-  const taskSpecEvidence = Object.freeze({ claims: context.claims, attestations: context.attestations });
+  const taskSpecEvidence = Object.freeze({ claims: context.claims, attestations: context.attestations, completionAuthority });
   const stoppedAfterDoneWrite = (
     records: { reportText: string; row: LogRow },
     reason: SerialStopReason,
@@ -6835,6 +8009,7 @@ function finalizeSerialCandidateRaw(
         reportFilesChanged,
         terminalExecution?.action,
         terminalExecution?.plan.recordDate,
+        context.contractMarkdown,
       );
       if (!records.verified) return stoppedAfterDoneWrite(records, "RECORD_VERIFICATION_FAILED");
       if (!candidateTerminalBoundaryIntact(candidate, context, records)) {
@@ -6881,6 +8056,7 @@ function finalizeSerialCandidateRaw(
       reportFilesChanged,
       terminalExecution?.action,
       terminalExecution?.plan.recordDate,
+      context.contractMarkdown,
     );
     if (!records.verified) return stoppedAfterDoneWrite(records, "RECORD_VERIFICATION_FAILED");
     if (!candidateTerminalBoundaryIntact(candidate, context, records)) {
@@ -6963,13 +8139,24 @@ function terminalPlanStillExact(
       binding.plan.baseCapsuleSha256,
       binding.plan.recordDate,
     );
+    const projectedActivities = preview ? projectedTerminalActivities(
+      context.activities,
+      binding.plan.kind,
+      binding.plan.reason,
+      preview.commitExpected,
+    ) : null;
     return preview !== null
+      && projectedActivities !== null
       && pendingSha256(preview.reportText) === binding.plan.reportSha256
       && pendingSha256(context.start.logText + expectedLogLine(preview.row)) === binding.plan.logSha256
       && pendingSha256(JSON.stringify(preview.row)) === binding.plan.rowSha256
       && pendingSha256(context.contractMarkdown) === binding.plan.briefSha256
       && preview.commitExpected === binding.plan.commitExpected
-      && sameLines(preview.expectedCommitPaths, binding.plan.expectedCommitPaths);
+      && sameLines(preview.expectedCommitPaths, binding.plan.expectedCommitPaths)
+      && exactPendingJson(preview.reportText, binding.plan.resultProjection.reportText)
+      && exactPendingJson(preview.row, binding.plan.resultProjection.row)
+      && exactPendingJson(preview.composed, binding.plan.resultProjection.composed)
+      && exactPendingJson(projectedActivities, binding.plan.resultProjection.activities);
   } catch {
     return false;
   }
@@ -7057,14 +8244,14 @@ export function executeSerialCandidateTerminal(
     || !terminalPlanStillExact(open.candidate, open.context, binding)) return null;
   const startingLogText = open.context.start.logText;
   const execution = Object.freeze({ plan: binding.plan, action: terminalActionCustody(binding.plan) });
-  const result = binding.plan.kind === "finalize"
+  const rawResult = binding.plan.kind === "finalize"
     ? binding.sealAuthorization
       ? finalizeSerialCandidateRaw(open.candidate, binding.sealAuthorization, execution)
       : null
     : binding.plan.reason
       ? stopSerialCandidateRaw(open.candidate, binding.plan.reason, execution)
       : null;
-  if (!result) {
+  if (!rawResult) {
     // A raw null is a refusal, not a failed write: both raw terminals return
     // null only above their `beginSerialCandidateTerminal` call, so no report,
     // LOG row, commit, or lock release exists yet. Release this action's
@@ -7085,6 +8272,12 @@ export function executeSerialCandidateTerminal(
     terminalPreparationBindings.delete(preparation);
     return null;
   }
+  const result = brandSerialCandidateTerminalResult(rawResult);
+  // Terminal effects have already happened at this point. A result that
+  // cannot be represented by the closed digest schema is therefore treated
+  // like a missing receipt: fail closed and let authenticated restart
+  // reconciliation recover the exact on-disk terminal result.
+  if (!result) return null;
   // Raw completion has already byte-verified this exact append before it
   // releases the live lock. Compose from the retained starting bytes and the
   // truthful returned row so a post-release observer cannot make Core lose the
@@ -7106,11 +8299,45 @@ export function executeSerialCandidateTerminal(
   return Object.freeze({ result, receipt });
 }
 
+function parsePendingTerminalResultProjection(value: unknown): PendingTerminalResultProjectionV1 | null {
+  if (!exactPendingKeys(value, ["reportText", "row", "composed", "activities", "commit"])
+    || typeof value.reportText !== "string" || Buffer.byteLength(value.reportText, "utf8") > 1024 * 1024
+    || !exactPendingKeys(value.row, ["task", "date", "lane", "mode", "outcome", "decision", "summary", "moved"])) return null;
+  const rowRecord = value.row;
+  if (Object.values(rowRecord).some((entry) => typeof entry !== "string" || entry.length > 4096)) return null;
+  const activities = parsePendingActivities(value.activities);
+  if (!activities || !exactPendingKeys(value.commit, ["status", "reason"])
+    || (value.commit.status !== "created" && value.commit.status !== "skipped")
+    || typeof value.commit.reason !== "string" || value.commit.reason.length > 4096
+    || !value.composed || typeof value.composed !== "object" || Array.isArray(value.composed)
+    || pendingCanonicalBytes(value.composed) === null) return null;
+  const composed = value.composed as unknown as ComposedRecordInput;
+  if (!Number.isSafeInteger(composed.taskNumber)
+    || (composed.disposition !== "DONE" && composed.disposition !== "STOPPED")
+    || (composed.stopReason !== null && typeof composed.stopReason !== "string")) return null;
+  return Object.freeze({
+    reportText: value.reportText,
+    row: Object.freeze({
+      task: rowRecord.task as string,
+      date: rowRecord.date as string,
+      lane: rowRecord.lane as string,
+      mode: rowRecord.mode as string,
+      outcome: rowRecord.outcome as string,
+      decision: rowRecord.decision as string,
+      summary: rowRecord.summary as string,
+      moved: rowRecord.moved as string,
+    }),
+    composed,
+    activities: Object.freeze(activities),
+    commit: Object.freeze({ status: value.commit.status, reason: value.commit.reason }),
+  });
+}
+
 function parsePendingTerminalPlan(value: unknown): PendingTerminalPlanV1 | null {
   if (!exactPendingKeys(value, [
     "version", "actionId", "kind", "disposition", "reason", "candidateSha256", "baseCapsuleSha256",
     "recordDate", "reportSha256", "logSha256", "rowSha256", "briefSha256", "commitExpected",
-    "expectedCommitPaths", "commitMessage", "sealAuthorization",
+    "expectedCommitPaths", "commitMessage", "sealAuthorization", "resultProjection",
   ]) || value.version !== PENDING_TERMINAL_PLAN_VERSION
     || typeof value.actionId !== "string" || !ACTION_UUID_V4_RE.test(value.actionId)
     || (value.kind !== "finalize" && value.kind !== "stop")
@@ -7124,7 +8351,12 @@ function parsePendingTerminalPlan(value: unknown): PendingTerminalPlanV1 | null 
     || typeof value.briefSha256 !== "string" || !SHA256_RE.test(value.briefSha256)
     || typeof value.commitExpected !== "boolean") return null;
   const pathsValue = parsePendingCandidatePaths(value.expectedCommitPaths, 128, true);
-  if (!pathsValue) return null;
+  const resultProjection = parsePendingTerminalResultProjection(value.resultProjection);
+  if (!pathsValue || !resultProjection
+    || pendingSha256(resultProjection.reportText) !== value.reportSha256
+    || pendingSha256(JSON.stringify(resultProjection.row)) !== value.rowSha256
+    || resultProjection.composed.disposition !== value.disposition
+    || resultProjection.commit.status !== (value.commitExpected ? "created" : "skipped")) return null;
   if (value.kind === "finalize") {
     if (value.disposition !== "DONE" || value.reason !== null || value.sealAuthorization === null
       || (value.commitExpected ? typeof value.commitMessage !== "string" : value.commitMessage !== null)) return null;
@@ -7134,6 +8366,7 @@ function parsePendingTerminalPlan(value: unknown): PendingTerminalPlanV1 | null 
   return Object.freeze({
     ...value,
     expectedCommitPaths: pathsValue,
+    resultProjection,
   }) as PendingTerminalPlanV1;
 }
 
@@ -7158,30 +8391,28 @@ function parseTerminalPreparation(
   try {
     const parsed = parseAnyPendingCapsule(capsuleValue);
     const detachedAction = detachPendingJson(actionValue);
+    const pending = parsed?.inner.pending;
     if (!parsed || !exactPendingKeys(parsed.inner, ["version", "pending", "terminalPlan"])
       || parsed.inner.version !== SERIAL_PREPARED_CANDIDATE_TERMINAL_INNER_VERSION
-      || !exactPendingKeys(parsed.inner.pending, [
-        "version", "projectRootReal", "projectRootSha256", "start", "startHeadRef", "contract", "route",
-        "activities", "taskPaths", "protectedPaths", "ownedPaths", "ownedRecordIndexAuthority", "attestations",
-        "attestationsCompleteForDone", "evidence", "taskSpec", "evidencePlan", "round0Bundle", "candidate",
-        "claimsText", "transitionHistory", "repairLineage", "sealableCandidateSha256", "sealableClaimsSha256",
-        "sealableBundleSha256",
-      ]) || parsed.inner.pending.version !== SERIAL_PENDING_CANDIDATE_INNER_VERSION
+      || !pending || typeof pending !== "object" || Array.isArray(pending)
+      || pendingCandidateInnerKind(pending) === null
+      || (pending as Record<string, unknown>).version !== SERIAL_PENDING_CANDIDATE_INNER_VERSION
       || !exactPendingKeys(detachedAction, ["actionId", "kind", "candidateSha256", "capsuleSha256"])) return null;
+    const pendingRecord = pending as Record<string, unknown>;
     const plan = parsePendingTerminalPlan(parsed.inner.terminalPlan);
     if (!plan || typeof detachedAction.actionId !== "string" || detachedAction.actionId !== plan.actionId
       || detachedAction.kind !== plan.kind
       || detachedAction.candidateSha256 !== plan.candidateSha256
       || detachedAction.capsuleSha256 !== parsed.capsuleSha256) return null;
-    const baseCapsule = pendingCapsuleFromInner(parsed.inner.pending, true);
+    const baseCapsule = pendingCapsuleFromInner(pendingRecord, true);
     if (!baseCapsule || baseCapsule.capsuleSha256 !== plan.baseCapsuleSha256) return null;
-    const pendingCandidate = parsePendingCandidateRecord(parsed.inner.pending.candidate);
+    const pendingCandidate = parsePendingCandidateRecord(pendingRecord.candidate);
     if (!pendingCandidate || pendingCandidate.candidateSha256 !== plan.candidateSha256) return null;
-    const pendingStart = parsePendingStart(parsed.inner.pending.start);
-    const taskPaths = parsePendingCandidatePaths(parsed.inner.pending.taskPaths, 100, false);
-    const ownedPaths = parsePendingCandidatePaths(parsed.inner.pending.ownedPaths, 16, true);
+    const pendingStart = parsePendingStart(pendingRecord.start);
+    const taskPaths = parsePendingCandidatePaths(pendingRecord.taskPaths, 100, false);
+    const ownedPaths = parsePendingCandidatePaths(pendingRecord.ownedPaths, 16, true);
     const taskNumber = pendingCandidate.taskNumber;
-    const pendingRoot = parsed.inner.pending.projectRootReal;
+    const pendingRoot = pendingRecord.projectRootReal;
     if (!pendingStart || !taskPaths || !ownedPaths || !Number.isSafeInteger(taskNumber)
       || typeof pendingRoot !== "string") return null;
     const expectedOwnedPaths = [
@@ -7205,7 +8436,7 @@ function parseTerminalPreparation(
       candidateSha256: detachedAction.candidateSha256,
       capsuleSha256: detachedAction.capsuleSha256,
     }) as SerialCandidateTerminalActionV1;
-    return Object.freeze({ parsed, pendingInner: parsed.inner.pending, baseCapsule, plan, action });
+    return Object.freeze({ parsed, pendingInner: pendingRecord, baseCapsule, plan, action });
   } catch {
     return null;
   }
@@ -7267,6 +8498,7 @@ function authenticatePreparedPendingSemantics(
   projectRoot: string,
   pending: Record<string, unknown>,
   plan: PendingTerminalPlanV1,
+  authenticatedQ9: boolean,
 ): AuthenticatedPreparedPendingSemantics | null {
   try {
     const invalid = (stage: string): null => {
@@ -7275,22 +8507,33 @@ function authenticatePreparedPendingSemantics(
     };
     const candidateRecord = parsePendingCandidateRecord(pending.candidate);
     if (!candidateRecord) return invalid("candidate");
+    const pendingKind = pendingCandidateInnerKind(pending);
+    if (pendingKind === null) return invalid("pending-kind");
+    if (pendingKind === "q9" && !authenticatedQ9) return invalid("unauthenticated-q9");
     const roundOne = candidateRecord.round === 1;
     const repairLineage = roundOne ? parsePendingRepairLineage(pending.repairLineage) : null;
     if ((roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 1
-      || !repairLineage || plan.kind !== "stop"))
-      || (!roundOne && ((candidateRecord.callsUsed as Record<string, unknown>).repair !== 0
+      || !repairLineage))
+      || (!roundOne && (((candidateRecord.callsUsed as Record<string, unknown>).repair !== 0
+        && (candidateRecord.callsUsed as Record<string, unknown>).repair !== 1)
         || pending.repairLineage !== null))) return invalid("candidate-repair-lineage");
+    if (roundOne && repairLineage?.kind !== pendingKind) return invalid("repair-lineage-kind");
+    if (pendingKind === "q9" && !exactPendingQ9Custody(pending.q9Custody)) return invalid("q9-custody");
     const sources = pendingAuthenticatedSources(pending.taskSpec);
     const sections = pendingContractSections(pending.taskSpec);
     if (!sources || !sections) return invalid("sources");
     const taskSpec = validateTaskSpec(pending.taskSpec, sources, sections);
     if (!taskSpec || !exactPendingJson(taskSpec, pending.taskSpec)) return invalid("task-spec");
-    const evidenceCandidate = pendingInitialEvidenceCandidate(pending.evidencePlan);
-    const evidencePlan = evidenceCandidate ? bindInitialEvidencePlan(taskSpec, evidenceCandidate) : null;
-    if (!evidencePlan || !exactPendingJson(evidencePlan, pending.evidencePlan)
-      || evidencePlan.revision !== 0) return invalid("evidence-plan");
-    const authority = composeSerialCandidateTaskSpecAuthority(taskSpec, evidencePlan);
+    const evidence = restorePendingEvidencePlans(
+      taskSpec,
+      pendingKind === "q9" ? pending.initialEvidencePlan : pending.evidencePlan,
+      pending.evidencePlan,
+      pendingKind === "q9" ? pending.evidencePlanRevisionCustody : null,
+      candidateRecord.runId as string,
+    );
+    if (!evidence) return invalid("evidence-plan");
+    const authority = evidence.currentAuthority;
+    const initialAuthority = evidence.initialAuthority;
     if (!authority || candidateRecord.taskSpecSha256 !== authority.taskSpecSha256
       || candidateRecord.evidencePlanSha256 !== authority.evidencePlanSha256) return invalid("authority");
 
@@ -7312,14 +8555,34 @@ function authenticatePreparedPendingSemantics(
     ].sort();
     if (!sameLines(ownedPaths, expectedOwnedPaths)) return invalid("owned-paths");
     const contract = composePendingContract(projectRoot, pending.contract, taskNumber as number, authority, start, route);
-    const contractMarkdown = contract ? briefText(contract, false) : null;
+    const contractMarkdown = contract ? briefText(evidence.authorizedRevision === null ? contract : Object.freeze({
+      ...contract,
+      evidencePlan: evidence.initialPlan,
+      evidencePlanSha256: initialAuthority.evidencePlanSha256,
+    }), false) : null;
     if (!contract || !contractMarkdown || pendingSha256(contractMarkdown) !== plan.briefSha256
       || contract.requestSha256 !== candidateRecord.requestSha256) return invalid("contract");
     if (!validEvidence(pending.evidence) || typeof pending.attestationsCompleteForDone !== "boolean"
       || !Array.isArray(pending.attestations) || pending.attestations.length > 64
       || typeof pending.claimsText !== "string" || pending.claimsText.length > 262_144) return invalid("evidence");
     const attestations = Object.freeze([...(pending.attestations as AdapterCommandAttestationV1[])]);
-    if (!pending.attestationsCompleteForDone && attestations.length !== 0) return invalid("attestations-shape");
+    const retainedQ9HarnessAttestations = !pending.attestationsCompleteForDone && attestations.length > 0
+      && q9SerialHarnessGuardPresent() && q9HarnessRouteExact(route)
+      && revisionBaseAttestationsValid(authority.taskSpecSha256, evidence.initialPlan, attestations);
+    const retainedAuthorizedRevisionBaseAttestations = evidence.authorizedRevision !== null
+      && !pending.attestationsCompleteForDone && attestations.length > 0
+      && revisionBaseAttestationsExact(authority.taskSpecSha256, evidence.initialPlan, attestations);
+    const retainedQ9FailureAttestations = pendingKind === "q9" && !pending.attestationsCompleteForDone
+      && retainedQ9FailureAttestationsValid(authority.taskSpecSha256, evidence.currentPlan, attestations);
+    const retainedGuardedCairnBlockerAttestations = !pending.attestationsCompleteForDone
+      && q9CairnBlockerRouteExact(route)
+      && retainedQ9FailureAttestationsValid(authority.taskSpecSha256, evidence.currentPlan, attestations);
+    if (!pending.attestationsCompleteForDone && attestations.length !== 0
+      && !retainedQ9HarnessAttestations && !retainedAuthorizedRevisionBaseAttestations
+      && !retainedQ9FailureAttestations
+      && !retainedGuardedCairnBlockerAttestations) {
+      return invalid("attestations-shape");
+    }
 
     const roundZeroTaskPaths = roundOne ? pendingBundleTaskPaths(pending.round0Bundle) : taskPaths;
     if (!roundZeroTaskPaths) return invalid("round-zero-task-paths");
@@ -7332,7 +8595,7 @@ function authenticatePreparedPendingSemantics(
     });
     const bundle = restoreSerialCandidateBundleForPending(
       projectRoot,
-      authority,
+      initialAuthority,
       pending.round0Bundle,
       captureContext,
     );
@@ -7344,18 +8607,37 @@ function authenticatePreparedPendingSemantics(
       ? null
       : restoreSerialCandidateRepairEligibilityForPending(bundle, initialEligibilityRecord);
     if (initialEligibilityRecord !== null && !repairEligibility) return invalid("repair-eligibility");
-    const initial = composeSerialCandidate(authority, {
+    let initial = composeSerialCandidate(initialAuthority, {
       version: SERIAL_CANDIDATE_VERSION,
       runId: candidateRecord.runId,
       taskNumber,
       requestSha256: candidateRecord.requestSha256,
-      claimsText: pending.claimsText,
+      claimsText: repairLineage
+        ? canonicalClaimsText(repairLineage.preRepairCandidate.claims as TaskSpecWorkerClaims)
+        : pending.claimsText,
       bundle,
       repairEligibility,
     });
-    if (!initial || pending.sealableCandidateSha256 !== initial.candidateSha256
-      || pending.sealableClaimsSha256 !== initial.claimsSha256
-      || pending.sealableBundleSha256 !== initial.bundleSha256) return invalid("initial");
+    if (!initial) return invalid("initial");
+    if (evidence.authorizedRevision !== null) {
+      const revisedInitial = adoptSerialCandidateEvidencePlanRevision(initial, evidence.authorizedRevision);
+      if (!revisedInitial) return invalid("evidence-plan-adoption");
+      initial = revisedInitial;
+      const restoredRevisionCustody = serialCandidateEvidencePlanRevisionCustody(initial);
+      if (!restoredRevisionCustody
+        || !exactPendingJson(restoredRevisionCustody, pending.evidencePlanRevisionCustody)) {
+        return invalid("evidence-plan-revision-custody");
+      }
+    }
+    const postRepairSealable = repairLineage?.postRepairCandidate ?? null;
+    const initialSealable = pending.sealableCandidateSha256 === initial.candidateSha256
+      && pending.sealableClaimsSha256 === initial.claimsSha256
+      && pending.sealableBundleSha256 === initial.bundleSha256;
+    const repairedSealable = postRepairSealable !== null
+      && pending.sealableCandidateSha256 === postRepairSealable.candidateSha256
+      && pending.sealableClaimsSha256 === postRepairSealable.claimsSha256
+      && pending.sealableBundleSha256 === postRepairSealable.bundleSha256;
+    if (!initialSealable && !repairedSealable) return invalid("initial");
     const decisions = pendingTransitionDecisions(pending.transitionHistory);
     if (!decisions) return invalid("decisions");
     const replayDecision = (
@@ -7390,6 +8672,23 @@ function authenticatePreparedPendingSemantics(
       candidate = next;
     }
     if (repairLineage) {
+      if (repairLineage.kind === "q9"
+        && !exactPendingJson(pendingCandidateProjection(candidate), repairLineage.preRepairCandidate)) {
+        const restoredPreRepairQ9 = restoreSerialCandidateQ9ForPending(
+          candidate,
+          repairLineage.preRepairCandidate,
+          repairLineage.value.preRepairQ9Custody,
+          composeSerialPendingRestoreAuthority(
+            plan.baseCapsuleSha256,
+            repairLineage.preRepairCandidate.projectRootSha256 as string,
+            repairLineage.preRepairCandidate.runId as string,
+            repairLineage.preRepairCandidate.candidateSha256 as string,
+          ),
+          plan.baseCapsuleSha256,
+        );
+        if (!restoredPreRepairQ9) return invalid("pre-repair-q9-custody");
+        candidate = restoredPreRepairQ9;
+      }
       if (!exactPendingJson(pendingCandidateProjection(candidate), repairLineage.preRepairCandidate)) {
         return invalid("pre-repair-candidate");
       }
@@ -7420,12 +8719,58 @@ function authenticatePreparedPendingSemantics(
         return invalid("repair-lineage-exact");
       }
     }
+    if (pendingKind === "q9") {
+      const restoredQ9 = restoreSerialCandidateQ9ForPending(
+        candidate,
+        candidateRecord,
+        pending.q9Custody,
+        composeSerialPendingRestoreAuthority(
+          plan.baseCapsuleSha256,
+          candidateRecord.projectRootSha256 as string,
+          candidateRecord.runId as string,
+          candidateRecord.candidateSha256 as string,
+        ),
+        plan.baseCapsuleSha256,
+      );
+      if (!restoredQ9) return invalid("q9-custody-replay");
+      candidate = restoredQ9;
+    }
     if (!exactPendingJson(pendingCandidateProjection(candidate), candidateRecord)
       || candidate.candidateSha256 !== plan.candidateSha256) return invalid("projection");
+    if (pendingKind === "q9" && activateSerialCandidateAfterPendingRestore(
+      candidate,
+      composeSerialPendingRestoreAuthority(
+        plan.baseCapsuleSha256,
+        candidate.projectRootSha256,
+        candidate.runId,
+        candidate.candidateSha256,
+      ),
+      plan.baseCapsuleSha256,
+    ) !== candidate) return invalid("restore-authority-gate");
+    const projectedActivities = projectedTerminalActivities(
+      activities,
+      plan.kind,
+      plan.reason,
+      plan.commitExpected,
+    );
+    if (!projectedActivities
+      || plan.resultProjection.composed.taskNumber !== taskNumber
+      || plan.resultProjection.composed.disposition !== plan.disposition
+      || plan.resultProjection.composed.stopReason !== plan.reason
+      || pendingSha256(plan.resultProjection.reportText) !== plan.reportSha256
+      || pendingSha256(JSON.stringify(plan.resultProjection.row)) !== plan.rowSha256
+      || !exactPendingJson(projectedActivities, plan.resultProjection.activities)) return invalid("result-projection");
     if (plan.kind === "finalize") {
+      const completionAuthority = serialCompletionRecordAuthority(candidate);
       if (!pending.attestationsCompleteForDone
-        || composeBoundRunRecord(contract, "DONE", null, candidate.claims, attestations) === null
-        || !composeSerialCandidateSealAuthorization(candidate, plan.sealAuthorization)) return invalid("seal");
+        || composeBoundRunRecord(
+          contract, "DONE", null, candidate.claims, attestations, completionAuthority,
+        ) === null
+        || !restorePreparedSealAuthorization(
+          candidate,
+          plan.sealAuthorization,
+          plan.baseCapsuleSha256,
+        )) return invalid("seal");
     }
     const ownedRecordIndexAuthority = preparedOwnedAuthority(pending.ownedRecordIndexAuthority);
     if (!ownedRecordIndexAuthority
@@ -7544,12 +8889,102 @@ function recoveredTerminalReceipt(
   }) as SerialCandidateTerminalReceiptV1 : null;
 }
 
+function recoveredTerminalResult(
+  root: string,
+  pending: Record<string, unknown>,
+  plan: PendingTerminalPlanV1,
+  authenticated: AuthenticatedPreparedPendingSemantics,
+  commitStatus: "created" | "skipped",
+  commitHash: string | null,
+): SerialCandidateTerminalResult | null {
+  const route = parsePendingRoute(pending.route);
+  const candidateRecord = parsePendingCandidateRecord(pending.candidate);
+  if (!route || !candidateRecord || !Number.isSafeInteger(candidateRecord.taskNumber)
+    || plan.resultProjection.commit.status !== commitStatus
+    || (commitStatus === "created" && (commitHash === null || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(commitHash)))
+    || (commitStatus === "skipped" && commitHash !== null)) return null;
+  let token;
+  if (plan.kind === "finalize") {
+    const seal = restorePreparedSealAuthorization(
+      authenticated.candidate,
+      plan.sealAuthorization,
+      plan.baseCapsuleSha256,
+    );
+    if (!seal) return null;
+    token = beginSerialCandidateTerminal(authenticated.candidate, "DONE", seal);
+  } else {
+    token = beginSerialCandidateTerminal(authenticated.candidate, "STOPPED");
+  }
+  if (!token) return null;
+  const terminalCandidate = completeSerialCandidateTerminal(token, plan.disposition);
+  if (!terminalCandidate) return null;
+  const taskNumber = candidateRecord.taskNumber as number;
+  const commit: RecordCommit = Object.freeze({
+    status: commitStatus,
+    reason: plan.resultProjection.commit.reason,
+    ...(commitHash === null ? {} : { hash: commitHash }),
+  });
+  const common = {
+    taskNumber,
+    disposition: plan.disposition,
+    briefPath: paths.brief(root, taskNumber),
+    reportPath: paths.report(root, taskNumber),
+    reportText: plan.resultProjection.reportText,
+    row: plan.resultProjection.row,
+    route,
+    activities: candidateActivityView(plan.resultProjection.activities),
+    commit,
+    composed: plan.resultProjection.composed,
+    candidate: terminalCandidate,
+  };
+  const result: SerialCandidateTerminalResult = plan.kind === "finalize"
+    ? Object.freeze({ status: "done" as const, ...common, disposition: "DONE" as const })
+    : Object.freeze({
+        status: "stopped" as const,
+        reason: plan.reason!,
+        ...common,
+        disposition: "STOPPED" as const,
+      });
+  return brandSerialCandidateTerminalResult(result);
+}
+
 /** Read-only terminal restart classifier. It never finishes a partial write. */
 export function reconcileSerialCandidateTerminalFromPending(
   root: string,
   capsule: unknown,
   action: unknown,
   options: { events?: SerialRunEvents } = {},
+): SerialCandidateTerminalReconcileResultV1 {
+  return reconcileSerialCandidateTerminalFromPendingInternal(root, capsule, action, options, false);
+}
+
+export function reconcileSerialCandidateTerminalFromAuthenticatedPending(
+  root: string,
+  capsule: unknown,
+  action: unknown,
+  revision: number,
+  journalAuthority: SerialAuthenticatedPendingJournalAuthority,
+  options: { events?: SerialRunEvents } = {},
+): SerialCandidateTerminalReconcileResultV1 {
+  const prepared = parseTerminalPreparation(capsule, action);
+  const record = prepared ? parsePendingCandidateRecord(prepared.pendingInner.candidate) : null;
+  if (!prepared || !record || !consumeSerialAuthenticatedPendingJournalAuthority(journalAuthority, {
+    capsuleSha256: prepared.parsed.capsuleSha256,
+    projectRootSha256: record.projectRootSha256 as string,
+    runId: record.runId as string,
+    candidateSha256: record.candidateSha256 as string,
+    revision,
+    prepared: true,
+  })) return terminalReconcileStale("INVALID_PREPARATION");
+  return reconcileSerialCandidateTerminalFromPendingInternal(root, capsule, action, options, true);
+}
+
+function reconcileSerialCandidateTerminalFromPendingInternal(
+  root: string,
+  capsule: unknown,
+  action: unknown,
+  options: { events?: SerialRunEvents },
+  authenticatedQ9: boolean,
 ): SerialCandidateTerminalReconcileResultV1 {
   const prepared = parseTerminalPreparation(capsule, action);
   if (!prepared) return terminalReconcileStale("INVALID_PREPARATION");
@@ -7561,6 +8996,10 @@ export function reconcileSerialCandidateTerminalFromPending(
   }
   const preparedCandidateRecord = parsePendingCandidateRecord(prepared.pendingInner.candidate);
   if (!preparedCandidateRecord) {
+    return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
+  }
+  const pendingKind = pendingCandidateInnerKind(prepared.pendingInner);
+  if (pendingKind === "q9" && !authenticatedQ9) {
     return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
   }
   let exactTerminalRecordsPresent = false;
@@ -7579,11 +9018,17 @@ export function reconcileSerialCandidateTerminalFromPending(
         prepared.baseCapsule,
         options,
         prepared.plan.kind === "stop",
+        authenticatedQ9,
+        authenticatedQ9,
       );
   if (resumed.status === "resumed") {
     try {
       const sealAuthorization = prepared.plan.kind === "finalize"
-        ? composeSerialCandidateSealAuthorization(resumed.candidate, prepared.plan.sealAuthorization)
+        ? restorePreparedSealAuthorization(
+            resumed.candidate,
+            prepared.plan.sealAuthorization,
+            prepared.plan.baseCapsuleSha256,
+          )
         : null;
       const input: NonNullable<ReturnType<typeof terminalPreparationInput>> = prepared.plan.kind === "finalize"
         ? Object.freeze({
@@ -7643,6 +9088,7 @@ export function reconcileSerialCandidateTerminalFromPending(
       projectRoot,
       prepared.pendingInner,
       prepared.plan,
+      authenticatedQ9,
     );
     if (!authenticated) return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
     const candidateRecord = preparedCandidateRecord;
@@ -7678,8 +9124,11 @@ export function reconcileSerialCandidateTerminalFromPending(
         "skipped",
         null,
       );
-      return receipt
-        ? Object.freeze({ status: "terminal", receipt })
+      const result = receipt ? recoveredTerminalResult(
+        projectRoot, prepared.pendingInner, prepared.plan, authenticated, "skipped", null,
+      ) : null;
+      return receipt && result
+        ? Object.freeze({ status: "terminal", receipt, result })
         : terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
     }
     const indexLockRaw = candidateGit(projectRoot, ["rev-parse", "--git-path", "index.lock"]);
@@ -7712,8 +9161,11 @@ export function reconcileSerialCandidateTerminalFromPending(
       "created",
       head,
     );
-    return receipt
-      ? Object.freeze({ status: "terminal", receipt })
+    const result = receipt ? recoveredTerminalResult(
+      projectRoot, prepared.pendingInner, prepared.plan, authenticated, "created", head,
+    ) : null;
+    return receipt && result
+      ? Object.freeze({ status: "terminal", receipt, result })
       : terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");
   } catch {
     return terminalReconcileStale("MANUAL_RECOVERY_REQUIRED");

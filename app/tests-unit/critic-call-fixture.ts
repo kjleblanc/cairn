@@ -149,16 +149,20 @@ export function provenance() {
   };
 }
 
-export function bundle(overrides: { path?: string } = {}) {
+export function bundle(overrides: {
+  path?: string;
+  connectionConsentVersion?: string;
+  candidateSha256?: string;
+} = {}) {
   const spec = taskSpec();
   const plan = evidencePlan(spec);
   const packetAuthority = composeCriticPacketAuthorityContext(spec, plan, {
     version: "cairn-critic-packet-authority-context/v1",
     projectHash: projectHash(),
-    connectionConsentVersion: CONSENT_VERSION,
+    connectionConsentVersion: overrides.connectionConsentVersion ?? CONSENT_VERSION,
     taskSpecSha256: taskSpecSha256(spec),
     evidencePlanSha256: evidencePlanSha256(plan),
-    candidateSha256: CANDIDATE_SHA,
+    candidateSha256: overrides.candidateSha256 ?? CANDIDATE_SHA,
     selectedTrackedText: [{
       id: "artifact-output",
       projectRelativePath: overrides.path ?? "src/result.ts",

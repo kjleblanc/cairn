@@ -19,6 +19,7 @@ import {
   type CriticCallDisclosureV1,
   type CriticCallCalibrationViewV1,
   type CriticCallSelectedFileViewV1,
+  type CriticCallSyntheticTaskViewV1,
 } from "./critic-call.js";
 
 /**
@@ -40,6 +41,7 @@ const DISCLOSURE_KEYS = Object.freeze([
   "version", "approvalId", "callKind", "mode", "attempt", "attemptCap", "provider", "baseUrl", "configuredModel",
   "resolvedModel", "resolvedModelRevision", "connectionConsentVersion", "routeRequestFingerprintSha256",
   "purpose", "notSent", "credentialText", "selection", "selectedFiles", "selectedCharacters", "planMetadata", "calibration",
+  "syntheticTask",
   "totalRequestCharacters", "fileCap", "perFileCharacterCap",
   "totalCharacterCap", "timeoutMs", "maxOutputCharacters", "billingBasis", "actions",
 ] as const);
@@ -168,6 +170,25 @@ function parseCalibration(value: unknown, selection: readonly CriticCallSelected
   });
 }
 
+function parseSyntheticTask(value: unknown): CriticCallSyntheticTaskViewV1 | null {
+  const record = inspectRecord(value, [
+    "runId", "candidateSha256", "round", "packetSha256", "requestSha256", "requestBodySha256",
+  ]);
+  if (record === null || typeof record.runId !== "string" || !UUID_V4.test(record.runId)
+    || (!Object.is(record.round, 0) && !Object.is(record.round, 1))) return null;
+  for (const key of ["candidateSha256", "packetSha256", "requestSha256", "requestBodySha256"] as const) {
+    if (typeof record[key] !== "string" || !SHA256.test(record[key])) return null;
+  }
+  return Object.freeze({
+    runId: record.runId,
+    candidateSha256: record.candidateSha256 as string,
+    round: record.round as 0 | 1,
+    packetSha256: record.packetSha256 as string,
+    requestSha256: record.requestSha256 as string,
+    requestBodySha256: record.requestBodySha256 as string,
+  });
+}
+
 /**
  * The renderer's echo, re-parsed on the way back in. It is compared against a
  * freshly derived card, so this only has to refuse anything malformed — it
@@ -178,7 +199,8 @@ export function parseCriticCallDisclosure(value: unknown): CriticCallDisclosureV
   if (record === null || record.version !== CRITIC_CALL_DISCLOSURE_VERSION) return null;
 
   const mode = record.mode === "required" || record.mode === "optional" ? record.mode : null;
-  const callKind = record.callKind === "provider" || record.callKind === "synthetic-calibration" ? record.callKind : null;
+  const callKind = record.callKind === "provider" || record.callKind === "synthetic-calibration"
+    || record.callKind === "synthetic-task" ? record.callKind : null;
   const approvalId = typeof record.approvalId === "string" && UUID_V4.test(record.approvalId) ? record.approvalId : null;
   const provider = safeText(record.provider, 256);
   const baseUrl = safeText(record.baseUrl, 512);
@@ -204,6 +226,7 @@ export function parseCriticCallDisclosure(value: unknown): CriticCallDisclosureV
   const maxOutputCharacters = wholeCount(record.maxOutputCharacters, CRITIC_CALL_OUTPUT_CHARACTER_CAP);
   if (attemptCap === null || attempt === null || attempt < 1 || fileCap === null || perFileCharacterCap === null
     || totalCharacterCap === null || timeoutMs === null || timeoutMs < 1 || maxOutputCharacters === null) return null;
+  if (attemptCap !== (callKind === "synthetic-calibration" ? 1 : CRITIC_CALL_ATTEMPT_CAP)) return null;
 
   const expectedNotSent = CRITIC_CALL_NOT_SENT_BY_KIND[callKind];
   const expectedCredentialText = CRITIC_CALL_CREDENTIAL_TEXT_BY_KIND[callKind];
@@ -246,7 +269,11 @@ export function parseCriticCallDisclosure(value: unknown): CriticCallDisclosureV
   // The whole request cannot be smaller than the file contents inside it.
   if (totalRequestCharacters < characters) return null;
   const calibration = record.calibration === null ? null : parseCalibration(record.calibration, selection);
-  if ((callKind === "provider") !== (calibration === null)) return null;
+  const syntheticTask = record.syntheticTask === null ? null : parseSyntheticTask(record.syntheticTask);
+  if ((record.calibration !== null && calibration === null) || (record.syntheticTask !== null && syntheticTask === null)
+    || (callKind === "provider" && (calibration !== null || syntheticTask !== null))
+    || (callKind === "synthetic-calibration" && (calibration === null || syntheticTask !== null))
+    || (callKind === "synthetic-task" && (calibration !== null || syntheticTask === null))) return null;
 
   return Object.freeze({
     version: CRITIC_CALL_DISCLOSURE_VERSION,
@@ -277,6 +304,7 @@ export function parseCriticCallDisclosure(value: unknown): CriticCallDisclosureV
       comparisonTrials: metadataCounts[5] as number,
     }),
     calibration,
+    syntheticTask,
     totalRequestCharacters,
     fileCap,
     perFileCharacterCap,

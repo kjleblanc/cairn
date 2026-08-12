@@ -12,6 +12,8 @@ import {
   CRITIC_CALL_NOT_SENT,
   CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT,
   CRITIC_CALL_SYNTHETIC_NOT_SENT,
+  CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT,
+  CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT,
 } from "../src/shared/critic-call.js";
 
 const renderer = (...parts: string[]) =>
@@ -40,8 +42,11 @@ const cardCode = card.split("\n").filter((line) => !/^\s*(?:\/\/|\*|\/\*)/u.test
 
 test("c1: the card shows every fact the owner is promised, from main's card alone", () => {
   assert.match(cardCode, /call\.callKind === "synthetic-calibration"/u);
+  assert.match(cardCode, /call\.callKind === "provider"/u);
   assert.match(cardCode, /call\.calibration === null/u);
   assert.match(cardCode, /synthetic calibration \{call\.calibration\.fixtureId\}/u);
+  assert.match(cardCode, /synthetic task call \{count\(call\.attempt\)\} of at most \{count\(call\.attemptCap\)\}/u);
+  assert.match(cardCode, /candidate round \{count\(call\.syntheticTask\.round\)\}/u);
   assert.match(cardCode, /\{count\(call\.attempt\)\} of at most \{count\(call\.attemptCap\)\}/u);
   assert.match(cardCode, /fixture \{count\(call\.calibration\.fixtureIndex\)\} of \{count\(call\.calibration\.fixtureCount\)\}/u);
 
@@ -74,6 +79,13 @@ test("c1: the card shows every fact the owner is promised, from main's card alon
   }
   assert.match(cardCode, /call\.calibration\.text\.map/u);
   assert.match(cardCode, /Inspect the exact synthetic text/u);
+  for (const field of ["runId", "candidateSha256", "round", "packetSha256", "requestSha256", "requestBodySha256"]) {
+    assert.ok(cardCode.includes(`call.syntheticTask.${field}`), `synthetic task cards must show ${field}`);
+  }
+  assert.match(cardCode, /aria-label="Synthetic task call identity"/u);
+  assert.doesNotMatch(cardCode, /synthetic task paid call/u);
+  assert.match(cardCode, /frozen synthetic task evidence items/u);
+  assert.match(cardCode, /No synthetic task evidence text is included/u);
 });
 
 test("c1: numbers and durations cannot vary by locale or be rounded away", () => {
@@ -138,6 +150,18 @@ test("c5: both run surfaces echo the exact card and press only what it offered",
   }
 });
 
+test("c5: Chat restores running-session approvals without ephemeral dispatch UI", () => {
+  const dispatchPanel = chat.indexOf('{dispatch && dispatch.phase !== "settling" ? (');
+  const sessionCritic = chat.indexOf("call={session.criticCall}");
+  const sessionReview = chat.indexOf("review={session.taskReview}");
+  assert.ok(sessionCritic >= 0 && sessionCritic < dispatchPanel,
+    "the final critic card must render from the session even when dispatch is null after reload");
+  assert.ok(sessionReview >= 0 && sessionReview < dispatchPanel,
+    "the accepted review is likewise session-owned, not duplicated in a running dispatch panel");
+  assert.equal(chat.match(/call=\{session\.criticCall\}/gu)?.length, 1, "one restored final-critic card");
+  assert.equal(chat.match(/review=\{session\.taskReview\}/gu)?.length, 1, "one accepted running review");
+});
+
 test("c5: a refusal leaves the card on screen, because main leaves the approval standing", () => {
   // Main spends an approval only on a decision that succeeds. A renderer that
   // cleared its card on refusal would strand a live approval the owner can no
@@ -175,7 +199,9 @@ test("c5: the parser's bounds are the same numbers main composes from", () => {
 
 test("c1: the card component carries no route-specific provenance or credential wording of its own", () => {
   assert.match(cardCode, /call\.notSent\.join/u);
-  for (const item of [...CRITIC_CALL_NOT_SENT, ...CRITIC_CALL_SYNTHETIC_NOT_SENT]) {
+  for (const item of [
+    ...CRITIC_CALL_NOT_SENT, ...CRITIC_CALL_SYNTHETIC_NOT_SENT, ...CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT,
+  ]) {
     assert.equal(card.includes(item), false, `"${item}" must come from main, not from the component`);
   }
   assert.equal(card.includes("cannot read or edit the project"), false, "the purpose sentence is main's");
@@ -186,8 +212,12 @@ test("c1: the card component carries no route-specific provenance or credential 
   assert.match(cardCode, /\{call\.credentialText\}/u);
   assert.equal(card.includes(CRITIC_CALL_CREDENTIAL_TEXT), false);
   assert.equal(card.includes(CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT), false);
+  assert.equal(card.includes(CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT), false);
   assert.equal([...CRITIC_CALL_NOT_SENT].some((item) => /key/u.test(item)), false,
     "the provider key must not be listed as something that is not sent");
   assert.match(CRITIC_CALL_CREDENTIAL_TEXT, /signs this one request/u);
   assert.match(CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT, /No saved provider key is used/u);
+  assert.match(CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT, /No saved provider key is used/u);
+  assert.match(CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT, /no project-filesystem read or external-service call/u);
+  assert.ok(CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT.includes("any data to an external service"));
 });

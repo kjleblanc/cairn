@@ -10,6 +10,10 @@ import {
   type EvidencePlanV1,
   type TaskSpecV1,
 } from "./quality.js";
+import { restoredCriticCompletionAuthorityBrands } from "./critic-completion-internal.js";
+import { registerCriticAssessmentRestartRestorer } from "./critic-assessment-internal.js";
+import { registerSyntheticTaskCriticConsumer } from "./critic-call-internal.js";
+import { registerCriticPriorFindingsBinder } from "./critic-prior-findings-internal.js";
 
 export const CRITIC_TASK_SPEC_PROJECTION_VERSION = "cairn-critic-task-spec-projection/v1" as const;
 export const CRITIC_PACKET_AUTHORITY_CONTEXT_VERSION = "cairn-critic-packet-authority-context/v1" as const;
@@ -19,12 +23,17 @@ export const CRITIC_REQUEST_VERSION = "cairn-critic-request/v1" as const;
 export const CRITIC_SYSTEM_PROMPT_VERSION = "cairn-critic-system/v1" as const;
 export const CRITIC_OUTPUT_VERSION = "cairn-critic-output/v1" as const;
 export const CRITIC_ASSESSMENT_CUSTODY_VERSION = "cairn-critic-assessment-custody/v1" as const;
+export const CRITIC_ASSESSMENT_RESTART_CUSTODY_VERSION = "cairn-critic-assessment-restart-custody/v1" as const;
 export const CRITIC_ASSESSMENT_VERSION = "cairn-critic-assessment/v1" as const;
 export const OWNER_CHECK_RESOLUTION_VERSION = "cairn-owner-check-resolution/v1" as const;
 export const OWNER_CRITERION_OBSERVATION_VERSION = "cairn-owner-criterion-observation/v1" as const;
 export const NATIVE_BOUNDARY_RESULT_VERSION = "cairn-native-boundary-result/v1" as const;
 export const CRITIC_POLICY_AUTHORITY_CONTEXT_VERSION = "cairn-critic-policy-authority-context/v1" as const;
 export const CRITIC_POLICY_RESULT_VERSION = "cairn-critic-policy-result/v1" as const;
+export const CAIRN_CRITERION_FAILURE_CONFIRMATION_VERSION = "cairn-owner-cairn-failure-confirmation/v1" as const;
+export const CRITIC_REPAIR_AUTHORITY_VERSION = "cairn-critic-repair-authority/v1" as const;
+export const CRITIC_POLICY_DECISION_VERSION = "cairn-critic-policy-decision/v1" as const;
+export const CRITIC_COMPLETION_AUTHORITY_VERSION = "cairn-critic-completion-authority/v1" as const;
 export const CRITIC_POLICY_VERSION = "cairn-critic-policy/v1" as const;
 export const CRITIC_CALL_AUTHORIZATION_VERSION = "cairn-critic-call-authorization/v1" as const;
 export const CRITIC_CALL_PURPOSE = "critic-assessment" as const;
@@ -212,6 +221,9 @@ export type CriticPacketAuthorityContextV1 = Readonly<{
 export const CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION =
   "cairn-critic-synthetic-packet-authority-context/v1" as const;
 export const CRITIC_SYNTHETIC_SELECTION_VERSION = "cairn-critic-synthetic-selection/v1" as const;
+export const CRITIC_SYNTHETIC_TASK_PACKET_AUTHORITY_CONTEXT_VERSION =
+  "cairn-critic-synthetic-task-packet-authority-context/v1" as const;
+export const CRITIC_SYNTHETIC_TASK_SELECTION_VERSION = "cairn-critic-synthetic-task-selection/v1" as const;
 
 export type CriticSyntheticSelectedTextAuthorityV1 = Readonly<{
   id: string;
@@ -224,6 +236,22 @@ export type CriticSyntheticSelectedTextAuthorityV1 = Readonly<{
 export type CriticSyntheticPacketAuthorityContextV1 = Readonly<{
   version: typeof CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION;
   selectionVersion: typeof CRITIC_SYNTHETIC_SELECTION_VERSION;
+  manifestSha256: string;
+  fixtureId: string;
+  syntheticScopeSha256: string;
+  connectionConsentVersion: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  selectedSyntheticText: readonly CriticSyntheticSelectedTextAuthorityV1[];
+  checkEvidence: readonly CriticCheckEvidenceV1[];
+  priorConfirmedFindings: readonly CriticPriorConfirmedFindingV1[];
+  comparisonTrials: readonly CriticComparisonTrialV1[];
+}>;
+
+export type CriticSyntheticTaskPacketAuthorityContextV1 = Readonly<{
+  version: typeof CRITIC_SYNTHETIC_TASK_PACKET_AUTHORITY_CONTEXT_VERSION;
+  selectionVersion: typeof CRITIC_SYNTHETIC_TASK_SELECTION_VERSION;
   manifestSha256: string;
   fixtureId: string;
   syntheticScopeSha256: string;
@@ -391,6 +419,19 @@ export type CriticAssessmentV1 = Readonly<{
   createdAt: string;
 }>;
 
+export type CriticAssessmentRestartCustodyV1 = Readonly<{
+  version: typeof CRITIC_ASSESSMENT_RESTART_CUSTODY_VERSION;
+  sourceKind: "tracked" | "calibration" | "q9-task";
+  packetAuthority: CriticPacketAuthorityContextV1
+    | CriticSyntheticPacketAuthorityContextV1
+    | CriticSyntheticTaskPacketAuthorityContextV1;
+  request: CriticRequestV1;
+  requestSha256: string;
+  assessment: CriticAssessmentV1;
+  assessmentSha256: string;
+  custodySha256: string;
+}>;
+
 export type CriterionResultV1 = Readonly<{
   criterionId: `c${number}`;
   candidateSha256: string;
@@ -519,6 +560,119 @@ export type CriticPolicyResultV1 = Readonly<{
 }>;
 
 export type CriticPolicyResult = CriticPolicyResultV1;
+
+/** The Main-owned action recorded when the owner confirms that Cairn may use
+ * one exact current verifier failure to authorize Builder repair. This is not
+ * the later approval to launch a Builder process. */
+export type CairnCriterionFailureConfirmationActionV1 = Readonly<{
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  evidenceRefsSeen: readonly string[];
+  decision: "confirmed";
+  actionNonce: string;
+  confirmedAt: string;
+  ownerActionReceiptSha256: string;
+}>;
+
+/** Persistable, prose-free custody for the owner's exact confirmation of a
+ * Cairn-judged failure. Its process-local brand is required to mint repair
+ * authority. Canonical bytes are durable evidence only: they cannot be
+ * rebranded after restart, so repair resumes only from a candidate capsule
+ * that already owns the derived repair authority. */
+export type CairnCriterionFailureConfirmationV1 = Readonly<{
+  version: typeof CAIRN_CRITERION_FAILURE_CONFIRMATION_VERSION;
+  projectHash: string;
+  runId: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  policyContextSha256: string;
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  failureConditionSha256: string;
+  criterionResultSha256: string;
+  evidenceRefsSeen: readonly string[];
+  decision: "confirmed";
+  actionNonce: string;
+  confirmedAt: string;
+  ownerActionReceiptSha256: string;
+  confirmationSha256: string;
+}>;
+
+/**
+ * Persistable, prose-free custody for the exact failures that may authorize
+ * Cairn's one repair.  `sourceSha256` authenticates the Cairn result, owner
+ * observation, or owner-confirmed critic finding from which the row came; the
+ * critic's observed text and proposed repair are deliberately absent.
+ */
+export type CriticRepairAuthorityRowV1 = Readonly<{
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  artifactIds: readonly string[];
+  source: "cairn" | "owner" | "critic";
+  sourceSha256: string;
+}>;
+
+export type CriticRepairAuthorityV1 = Readonly<{
+  version: typeof CRITIC_REPAIR_AUTHORITY_VERSION;
+  projectHash: string;
+  runId: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  assessmentSha256: string | null;
+  policySha256: typeof CRITIC_POLICY_SHA256;
+  policyContextSha256: string;
+  rows: readonly CriticRepairAuthorityRowV1[];
+  repairAuthoritySha256: string;
+}>;
+
+/** One available critic result, reduced to policy and bound to its branded
+ * authority context. Candidate state consumes this instead of raw critic
+ * prose or a structurally forged CriticPolicyResult. */
+export type CriticPolicyDecisionV1 = Readonly<{
+  version: typeof CRITIC_POLICY_DECISION_VERSION;
+  projectHash: string;
+  runId: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  assessmentSha256: string | null;
+  candidateRound: 0 | 1 | null;
+  callAttempt: 1 | 2 | 3 | null;
+  requestSha256: string | null;
+  routeRequestFingerprintSha256: string | null;
+  policyContextSha256: string;
+  state: Exclude<CriticPolicyResultV1["state"], "critic-unavailable">;
+  assessmentStatus: Exclude<CriticPolicyResultV1["assessmentStatus"], "critic-unavailable">;
+  blockerCount: number;
+  waitingOwnerCount: number;
+  nativeStopCount: number;
+  stopReason: string | null;
+  policyDecisionSha256: string;
+}>;
+
+export type CriticCompletionCriterionV1 = Readonly<{
+  criterionId: `c${number}`;
+  judge: "cairn" | "owner" | "critic";
+  sourceSha256: string;
+}>;
+
+/** Closed-world authority that every original cN has fresh, candidate-bound
+ * evidence and that the same branded policy context contains no blocker,
+ * unresolved owner decision, or native stop. */
+export type CriticCompletionAuthorityV1 = Readonly<{
+  version: typeof CRITIC_COMPLETION_AUTHORITY_VERSION;
+  projectHash: string;
+  runId: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  assessmentSha256: string | null;
+  policyContextSha256: string;
+  criteria: readonly CriticCompletionCriterionV1[];
+  completionAuthoritySha256: string;
+}>;
 
 type InspectedRecord = Readonly<Record<string, unknown>>;
 
@@ -776,6 +930,8 @@ const requestBrands = new WeakSet<object>();
 const packetAuthorityContextBindings = new WeakMap<object, Readonly<{
   taskSpec: TaskSpecV1;
   evidencePlan: EvidencePlanV1;
+  sourceKind: "tracked" | "calibration" | "q9-task";
+  priorConfirmedRunId: string | null;
 }>>();
 const assessmentCustodyBindings = new WeakMap<object, CriticRequestV1>();
 const outputBindings = new WeakMap<object, string>();
@@ -789,6 +945,11 @@ const requestBindings = new WeakMap<object, Readonly<{
   requestSha256: string;
   projectHash: string;
   connectionConsentVersion: string;
+  sourceKind: "tracked" | "calibration" | "q9-task";
+  priorConfirmedRunId: string | null;
+  packetAuthority: CriticPacketAuthorityContextV1
+    | CriticSyntheticPacketAuthorityContextV1
+    | CriticSyntheticTaskPacketAuthorityContextV1;
 }>>();
 const callAuthorizationBrands = new WeakSet<object>();
 /** Consumed by the one send this authorization permits. */
@@ -800,6 +961,46 @@ const policyAuthorityContextBindings = new WeakMap<object, Readonly<{
   taskSpec: TaskSpecV1;
   evidencePlan: EvidencePlanV1;
   assessment: CriticAssessmentV1 | null;
+}>>();
+const cairnFailureConfirmationBrands = new WeakSet<object>();
+const cairnFailureConfirmationBindings = new WeakMap<object, Readonly<{
+  taskSpec: TaskSpecV1;
+  evidencePlan: EvidencePlanV1;
+  context: CriticPolicyAuthorityContextV1;
+  criterionResult: CriterionResultV1;
+}>>();
+/** A logical confirmation is one-use even when a caller retains the original
+ * branded object or composes a canonically equivalent policy context. The
+ * durable bytes are intentionally not a public restart mint: after a crash,
+ * only a candidate capsule that already owns the derived repair authority may
+ * resume repair. */
+const spentCairnFailureConfirmationShas = new Set<string>();
+/** Prevent two live Main actions from confirming the same row or reusing an
+ * identity inside one authenticated policy context. */
+const cairnFailureConfirmationCriterionIdsByContext = new WeakMap<object, Set<string>>();
+const cairnFailureConfirmationShasByContext = new WeakMap<object, Set<string>>();
+const cairnFailureConfirmationActionNoncesByContext = new WeakMap<object, Set<string>>();
+const cairnFailureConfirmationReceiptsByContext = new WeakMap<object, Set<string>>();
+/** Main action identities are unique across every branded policy context in
+ * one project/run. This closes the pre-admission gap where the same click
+ * could otherwise be presented to two canonically different contexts and
+ * confirm two different cN rows before either confirmation was spent. */
+const cairnFailureConfirmationActionNoncesByRun = new Map<string, Set<string>>();
+const cairnFailureConfirmationReceiptsByRun = new Map<string, Set<string>>();
+const repairAuthorityBrands = new WeakSet<object>();
+const repairAuthorityBindings = new WeakMap<object, CriticPolicyAuthorityContextV1>();
+const policyDecisionBrands = new WeakSet<object>();
+const policyDecisionBindings = new WeakMap<object, CriticPolicyAuthorityContextV1>();
+const completionAuthorityBrands = new WeakSet<object>();
+const completionAuthorityBindings = new WeakMap<object, CriticPolicyAuthorityContextV1>();
+const priorConfirmedFindingBrands = new WeakSet<object>();
+const priorConfirmedFindingBindings = new WeakMap<object, Readonly<{
+  runId: string;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  candidateSha256: string;
+  candidateRound: 1;
+  policyDecisionSha256: string;
 }>>();
 
 function copyComparableState(value: ComparableStateV1): ComparableStateV1 {
@@ -985,6 +1186,68 @@ function parsePriorFinding(value: unknown, criterionIds: ReadonlySet<string>): C
   return Object.freeze({ assessmentSha256, findingId, resolutionSha256, criterionId, failureConditionId });
 }
 
+function parseAuthorizedPriorFindings(
+  input: readonly unknown[],
+  projection: CriticTaskSpecProjectionV1,
+  target: Readonly<{ taskSpecSha256: string; evidencePlanSha256: string; candidateSha256: string }>,
+): readonly CriticPriorConfirmedFindingV1[] | null {
+  const criterionIds = new Set(projection.criteria.map((criterion) => criterion.id));
+  const rows: CriticPriorConfirmedFindingV1[] = [];
+  const seen = new Set<string>();
+  let runId: string | null = null;
+  for (const item of input) {
+    if (!item || typeof item !== "object" || !priorConfirmedFindingBrands.has(item)) return null;
+    const parsed = parsePriorFinding(item, criterionIds);
+    const binding = priorConfirmedFindingBindings.get(item);
+    const criterion = parsed ? projection.criteria.find((row) => row.id === parsed.criterionId) : null;
+    if (!parsed || !binding || !criterion
+      || binding.taskSpecSha256 !== target.taskSpecSha256
+      || binding.evidencePlanSha256 !== target.evidencePlanSha256
+      || binding.candidateSha256 !== target.candidateSha256
+      || binding.candidateRound !== 1
+      || parsed.failureConditionId !== criterion.failureConditionId
+      || seen.has(parsed.findingId)
+      || (runId !== null && binding.runId !== runId)) return null;
+    runId = binding.runId;
+    seen.add(parsed.findingId);
+    rows.push(parsed);
+  }
+  return Object.freeze(rows);
+}
+
+/** Restart-only parser. Serial has already authenticated the complete pending
+ * candidate capsule and exact packet bytes before reaching this function; the
+ * live WeakMap carried only anti-splice provenance, so restore reconstructs
+ * that same binding from the authenticated round-one packet target. */
+function restoreAuthorizedPriorFindings(
+  input: readonly unknown[],
+  projection: CriticTaskSpecProjectionV1,
+  target: Readonly<{ taskSpecSha256: string; evidencePlanSha256: string; candidateSha256: string }>,
+): readonly CriticPriorConfirmedFindingV1[] | null {
+  const criterionIds = new Set(projection.criteria.map((criterion) => criterion.id));
+  const rows: CriticPriorConfirmedFindingV1[] = [];
+  const seen = new Set<string>();
+  for (const item of input) {
+    const parsed = parsePriorFinding(item, criterionIds);
+    const criterion = parsed ? projection.criteria.find((row) => row.id === parsed.criterionId) : null;
+    if (!parsed || !criterion || parsed.failureConditionId !== criterion.failureConditionId
+      || seen.has(parsed.findingId)) return null;
+    seen.add(parsed.findingId);
+    const row = Object.freeze(parsed);
+    priorConfirmedFindingBrands.add(row);
+    priorConfirmedFindingBindings.set(row, Object.freeze({
+      runId: "pending-restart",
+      taskSpecSha256: target.taskSpecSha256,
+      evidencePlanSha256: target.evidencePlanSha256,
+      candidateSha256: target.candidateSha256,
+      candidateRound: 1,
+      policyDecisionSha256: "0".repeat(64),
+    }));
+    rows.push(row);
+  }
+  return Object.freeze(rows);
+}
+
 function parseComparisonTrial(
   value: unknown,
   criteria: ReadonlyMap<string, CriticProjectedCriterionV1 | CriticTaskSpecProjectionV1["preferences"][number]>,
@@ -1135,12 +1398,12 @@ export function composeCriticPacketAuthorityContext(
 
   const priorInput = inspectArray(context.priorConfirmedFindings, CRITIC_LIMITS.priorConfirmedFindings);
   if (priorInput === null) return null;
-  // Q2 has no main-owned registry capable of proving the assessment and owner
-  // resolution behind a prior-row digest. Accepting hash-shaped summaries
-  // would manufacture provenance, so v1 remains dark and accepts only empty
-  // history until that registry boundary is implemented.
-  if (priorInput.length !== 0) return null;
-  const priorConfirmedFindings: CriticPriorConfirmedFindingV1[] = [];
+  const priorConfirmedFindings = parseAuthorizedPriorFindings(priorInput, projection, {
+    taskSpecSha256: taskSha,
+    evidencePlanSha256: planSha,
+    candidateSha256,
+  });
+  if (priorConfirmedFindings === null) return null;
 
   const projectedRows = new Map<string, CriticProjectedCriterionV1 | CriticTaskSpecProjectionV1["preferences"][number]>([
     ...projection.criteria.map((row) => [row.id, row] as const),
@@ -1181,8 +1444,40 @@ export function composeCriticPacketAuthorityContext(
     priorConfirmedFindings,
     comparisonTrials,
   }) as CriticPacketAuthorityContextV1;
-  packetAuthorityContextBindings.set(authority, Object.freeze({ taskSpec: spec, evidencePlan: plan }));
+  packetAuthorityContextBindings.set(authority, Object.freeze({
+    taskSpec: spec,
+    evidencePlan: plan,
+    sourceKind: "tracked",
+    priorConfirmedRunId: priorInput.length === 0
+      ? null
+      : priorConfirmedFindingBindings.get(priorInput[0] as object)?.runId ?? null,
+  }));
   return authority;
+}
+
+function restoreCriticPacketAuthorityContext(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  rawAuthority: unknown,
+): CriticPacketAuthorityContextV1 | null {
+  const raw = inspectRecord(rawAuthority, [
+    "version", "projectHash", "connectionConsentVersion", "taskSpecSha256", "evidencePlanSha256", "candidateSha256",
+    "selectedTrackedText", "checkEvidence", "priorConfirmedFindings", "comparisonTrials",
+  ]);
+  if (!raw || !Array.isArray(raw.priorConfirmedFindings)) return null;
+  const projection = criticTaskSpecProjection(taskSpec);
+  const taskSha = taskSpecSha256(taskSpec);
+  const planSha = evidencePlanSha256(evidencePlan);
+  const candidateSha256 = safeSha(raw.candidateSha256);
+  if (!projection || !taskSha || !planSha || !candidateSha256) return null;
+  const restored = restoreAuthorizedPriorFindings(raw.priorConfirmedFindings, projection, {
+    taskSpecSha256: taskSha, evidencePlanSha256: planSha, candidateSha256,
+  });
+  if (!restored) return null;
+  return composeCriticPacketAuthorityContext(taskSpec, evidencePlan, {
+    ...raw,
+    priorConfirmedFindings: restored,
+  });
 }
 
 /**
@@ -1193,11 +1488,12 @@ export function composeCriticPacketAuthorityContext(
  * in-memory fixture. Shape alone still is not request authority; only this
  * exact branded return value can be passed to `composeCriticRequest`.
  */
-export function composeCriticSyntheticPacketAuthorityContext(
+function composeCriticSyntheticPacketAuthorityContextInternal(
   taskSpec: unknown,
   evidencePlan: unknown,
   rawAuthority: unknown,
-): CriticSyntheticPacketAuthorityContextV1 | null {
+  purpose: "calibration" | "q9-task",
+): CriticSyntheticPacketAuthorityContextV1 | CriticSyntheticTaskPacketAuthorityContextV1 | null {
   const taskSha = taskSpecSha256(taskSpec);
   const planSha = evidencePlanSha256(evidencePlan);
   if (taskSha === null || planSha === null) return null;
@@ -1210,11 +1506,17 @@ export function composeCriticSyntheticPacketAuthorityContext(
     "taskSpecSha256", "evidencePlanSha256", "candidateSha256", "selectedSyntheticText", "checkEvidence",
     "priorConfirmedFindings", "comparisonTrials",
   ]);
+  const expectedVersion = purpose === "calibration"
+    ? CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+    : CRITIC_SYNTHETIC_TASK_PACKET_AUTHORITY_CONTEXT_VERSION;
+  const expectedSelection = purpose === "calibration"
+    ? CRITIC_SYNTHETIC_SELECTION_VERSION
+    : CRITIC_SYNTHETIC_TASK_SELECTION_VERSION;
   if (projection === null || context === null
-    || context.version !== CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
-    || context.selectionVersion !== CRITIC_SYNTHETIC_SELECTION_VERSION) return null;
+    || context.version !== expectedVersion || context.selectionVersion !== expectedSelection) return null;
   const manifestSha256 = safeSha(context.manifestSha256);
-  const fixtureId = typeof context.fixtureId === "string" && /^C\d{2}$/u.test(context.fixtureId)
+  const fixtureId = typeof context.fixtureId === "string"
+    && (purpose === "calibration" ? /^C\d{2}$/u : /^q9-[a-z0-9][a-z0-9-]{0,27}$/u).test(context.fixtureId)
     ? context.fixtureId
     : null;
   const syntheticScopeSha256 = safeSha(context.syntheticScopeSha256);
@@ -1238,7 +1540,8 @@ export function composeCriticSyntheticPacketAuthorityContext(
     const syntheticPath = safeProjectRelativePath(row.syntheticPath);
     const sha256 = safeSha(row.sha256);
     const content = safeText(row.content, QUALITY_LIMITS.selectedArtifactCharacters, true);
-    if (id === null || syntheticPath === null || !syntheticPath.startsWith(`synthetic-calibration/${fixtureId}/`)
+    const prefix = purpose === "calibration" ? `synthetic-calibration/${fixtureId}/` : `synthetic-q9/${fixtureId}/`;
+    if (id === null || syntheticPath === null || !syntheticPath.startsWith(prefix)
       || sha256 === null || content === null || typeof row.truncated !== "boolean"
       || selectedIds.has(id) || selectedPaths.has(syntheticPath) || sha256Utf8(content) !== sha256) return null;
     selectedCharacters += content.length;
@@ -1261,8 +1564,13 @@ export function composeCriticSyntheticPacketAuthorityContext(
   }
 
   const priorInput = inspectArray(context.priorConfirmedFindings, CRITIC_LIMITS.priorConfirmedFindings);
-  if (priorInput === null || priorInput.length !== 0) return null;
-  const priorConfirmedFindings: CriticPriorConfirmedFindingV1[] = [];
+  if (priorInput === null) return null;
+  const priorConfirmedFindings = parseAuthorizedPriorFindings(priorInput, projection, {
+    taskSpecSha256: taskSha,
+    evidencePlanSha256: planSha,
+    candidateSha256,
+  });
+  if (priorConfirmedFindings === null) return null;
 
   const projectedRows = new Map<string, CriticProjectedCriterionV1 | CriticTaskSpecProjectionV1["preferences"][number]>([
     ...projection.criteria.map((row) => [row.id, row] as const),
@@ -1289,8 +1597,8 @@ export function composeCriticSyntheticPacketAuthorityContext(
   }
 
   const authority = deepFreeze({
-    version: CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION,
-    selectionVersion: CRITIC_SYNTHETIC_SELECTION_VERSION,
+    version: expectedVersion,
+    selectionVersion: expectedSelection,
     manifestSha256,
     fixtureId,
     syntheticScopeSha256,
@@ -1302,9 +1610,48 @@ export function composeCriticSyntheticPacketAuthorityContext(
     checkEvidence,
     priorConfirmedFindings,
     comparisonTrials,
-  }) as CriticSyntheticPacketAuthorityContextV1;
-  packetAuthorityContextBindings.set(authority, Object.freeze({ taskSpec: spec, evidencePlan: plan }));
+  }) as CriticSyntheticPacketAuthorityContextV1 | CriticSyntheticTaskPacketAuthorityContextV1;
+  packetAuthorityContextBindings.set(authority, Object.freeze({
+    taskSpec: spec,
+    evidencePlan: plan,
+    sourceKind: purpose,
+    priorConfirmedRunId: priorInput.length === 0
+      ? null
+      : priorConfirmedFindingBindings.get(priorInput[0] as object)?.runId ?? null,
+  }));
   return authority;
+}
+
+export function composeCriticSyntheticPacketAuthorityContext(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  rawAuthority: unknown,
+): CriticSyntheticPacketAuthorityContextV1 | null {
+  return composeCriticSyntheticPacketAuthorityContextInternal(
+    taskSpec, evidencePlan, rawAuthority, "calibration",
+  ) as CriticSyntheticPacketAuthorityContextV1 | null;
+}
+
+function q9SyntheticTaskAuthorityEnabled(): boolean {
+  return (typeof process.versions.electron === "string" && process.versions.electron.length > 0
+      || process.env.NODE_TEST_CONTEXT === "child-v8")
+    && process.env.CAIRN_E2E === "1"
+    && process.env.CAIRN_MOCK === "1"
+    && process.env.CAIRN_TEST_Q9 === "1";
+}
+
+/** Electron-Q9-only synthetic task evidence. It is deliberately distinct from
+ * calibration authority and remains dark unless the complete test guard is
+ * present before module use. */
+export function composeCriticSyntheticTaskPacketAuthorityContext(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  rawAuthority: unknown,
+): CriticSyntheticTaskPacketAuthorityContextV1 | null {
+  if (!q9SyntheticTaskAuthorityEnabled()) return null;
+  return composeCriticSyntheticPacketAuthorityContextInternal(
+    taskSpec, evidencePlan, rawAuthority, "q9-task",
+  ) as CriticSyntheticTaskPacketAuthorityContextV1 | null;
 }
 
 export function composeCriticRequest(
@@ -1321,11 +1668,14 @@ export function composeCriticRequest(
     || typeof authenticatedPacketContext !== "object" || authenticatedPacketContext === null) return null;
   const authorityBinding = packetAuthorityContextBindings.get(authenticatedPacketContext);
   if (authorityBinding === undefined || authorityBinding.taskSpec !== spec || authorityBinding.evidencePlan !== plan) return null;
-  const context = authenticatedPacketContext as CriticPacketAuthorityContextV1 | CriticSyntheticPacketAuthorityContextV1;
+  const context = authenticatedPacketContext as CriticPacketAuthorityContextV1
+    | CriticSyntheticPacketAuthorityContextV1 | CriticSyntheticTaskPacketAuthorityContextV1;
   if (context.taskSpecSha256 !== taskSha || context.evidencePlanSha256 !== planSha) return null;
   const projection = criticTaskSpecProjection(spec);
   if (projection === null) return null;
-  const selectedTrackedText: CriticSelectedTrackedTextV1[] = context.version === CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+  const synthetic = context.version === CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+    || context.version === CRITIC_SYNTHETIC_TASK_PACKET_AUTHORITY_CONTEXT_VERSION;
+  const selectedTrackedText: CriticSelectedTrackedTextV1[] = synthetic
     ? context.selectedSyntheticText.map((row) => Object.freeze({
         id: row.id,
         projectRelativePath: row.syntheticPath,
@@ -1380,12 +1730,23 @@ export function composeCriticRequest(
     evidencePlanSha256: planSha,
     packetSha256,
     requestSha256,
-    projectHash: context.version === CRITIC_SYNTHETIC_PACKET_AUTHORITY_CONTEXT_VERSION
+    projectHash: synthetic
       ? context.syntheticScopeSha256
       : context.projectHash,
     connectionConsentVersion: context.connectionConsentVersion,
+    sourceKind: authorityBinding.sourceKind,
+    priorConfirmedRunId: authorityBinding.priorConfirmedRunId,
+    packetAuthority: context,
   }));
   return request;
+}
+
+/** Brand-only guard preventing Main from relabelling a tracked/calibration
+ * request as the injected Q9 route. */
+export function criticRequestHasSyntheticTaskAuthority(value: unknown): boolean {
+  if (!q9SyntheticTaskAuthorityEnabled()
+    || typeof value !== "object" || value === null || !requestBrands.has(value)) return false;
+  return requestBindings.get(value)?.sourceKind === "q9-task";
 }
 
 function canonicalRequestValue(value: CriticRequestV1): string {
@@ -1465,7 +1826,9 @@ export function composeCriticCallAuthorization(
     || (route.callAttempt as number) > budget.maxCriticAttempts
     || !Number.isSafeInteger(route.timeoutMs) || (route.timeoutMs as number) <= 0
     || (route.timeoutMs as number) > budget.maxCriticElapsedMs
-    || route.maxOutputCharacters !== CRITIC_LIMITS.rawOutputCharacters) return null;
+    || route.maxOutputCharacters !== CRITIC_LIMITS.rawOutputCharacters
+    || (binding.priorConfirmedRunId !== null
+      && (runId !== binding.priorConfirmedRunId || route.candidateRound !== 1))) return null;
 
   // The selected files come from the authenticated packet. Their caps were
   // already enforced when the packet was authorized; re-check them here so a
@@ -1617,10 +1980,26 @@ export function criticCallRequestBodyAuthorized(authorization: unknown, body: un
  */
 export function consumeCriticCallAuthorization(value: unknown): boolean {
   if (typeof value !== "object" || value === null || !callAuthorizationBrands.has(value)) return false;
-  if (!callAuthorizationBindings.has(value)) return false;
+  const request = callAuthorizationBindings.get(value);
+  if (request === undefined || requestBindings.get(request)?.sourceKind === "q9-task") return false;
   callAuthorizationBindings.delete(value);
   return true;
 }
+
+function consumeSyntheticTaskCriticCallAuthorizationAfterReservation(
+  authorization: unknown,
+  request: unknown,
+): boolean {
+  if (!q9SyntheticTaskAuthorityEnabled() || typeof authorization !== "object" || authorization === null
+    || typeof request !== "object" || request === null || !callAuthorizationBrands.has(authorization)
+    || !requestBrands.has(request) || callAuthorizationBindings.get(authorization) !== request
+    || callAuthorizationRequests.get(authorization) !== request
+    || requestBindings.get(request)?.sourceKind !== "q9-task") return false;
+  callAuthorizationBindings.delete(authorization);
+  return true;
+}
+
+registerSyntheticTaskCriticConsumer(consumeSyntheticTaskCriticCallAuthorizationAfterReservation);
 
 /**
  * True only when this exact branded request is the one the authorization was
@@ -2068,6 +2447,165 @@ export function criticAssessmentSha256(value: unknown): string | null {
   const canonical = canonicalCriticAssessment(value);
   return canonical === null ? null : sha256Utf8(canonical);
 }
+
+function assessmentRestartCustodySha256(
+  sourceKind: CriticAssessmentRestartCustodyV1["sourceKind"],
+  packetAuthority: CriticAssessmentRestartCustodyV1["packetAuthority"],
+  requestSha256: string,
+  assessmentSha256: string,
+): string {
+  return sha256Utf8(objectCanonical([
+    ["version", quote(CRITIC_ASSESSMENT_RESTART_CUSTODY_VERSION)],
+    ["sourceKind", quote(sourceKind)],
+    ["packetAuthoritySha256", quote(sha256Utf8(JSON.stringify(packetAuthority)))],
+    ["requestSha256", quote(requestSha256)],
+    ["assessmentSha256", quote(assessmentSha256)],
+  ]));
+}
+
+function assessmentRestartCustody(value: unknown): CriticAssessmentRestartCustodyV1 | null {
+  if (typeof value !== "object" || value === null || !assessmentBindings.has(value)) return null;
+  const assessment = value as CriticAssessmentV1;
+  const assessmentBinding = assessmentBindings.get(assessment);
+  const requestBinding = assessmentBinding ? requestBindings.get(assessmentBinding.request) : undefined;
+  const assessmentSha256 = criticAssessmentSha256(assessment);
+  const requestSha256 = assessmentBinding ? criticRequestSha256(assessmentBinding.request) : null;
+  if (!assessmentBinding || !requestBinding || !assessmentSha256 || !requestSha256) return null;
+  const withoutSha = deepFreeze({
+    version: CRITIC_ASSESSMENT_RESTART_CUSTODY_VERSION,
+    sourceKind: requestBinding.sourceKind,
+    packetAuthority: requestBinding.packetAuthority,
+    request: assessmentBinding.request,
+    requestSha256,
+    assessment,
+    assessmentSha256,
+  }) as Omit<CriticAssessmentRestartCustodyV1, "custodySha256">;
+  return deepFreeze({
+    ...withoutSha,
+    custodySha256: assessmentRestartCustodySha256(
+      withoutSha.sourceKind,
+      withoutSha.packetAuthority,
+      withoutSha.requestSha256,
+      withoutSha.assessmentSha256,
+    ),
+  }) as CriticAssessmentRestartCustodyV1;
+}
+
+/** Rehydrate only the assessment embedded in authenticated candidate custody.
+ * The original packet-authority context is replayed first, so request/output
+ * validation retains the exact artifact registry and source kind instead of
+ * trusting a detached assessment digest. */
+function restoreCriticAssessmentFromRestartCustody(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  rawCustody: unknown,
+  rawExpected: unknown,
+): CriticAssessmentV1 | null {
+  const invalid = (_stage: string): null => null;
+  const taskSha = taskSpecSha256(taskSpec);
+  const planSha = evidencePlanSha256(evidencePlan);
+  if (!taskSha || !planSha) return null;
+  const custody = inspectRecord(rawCustody, [
+    "version", "sourceKind", "packetAuthority", "request", "requestSha256",
+    "assessment", "assessmentSha256", "custodySha256",
+  ]);
+  const expected = inspectRecord(rawExpected, [
+    "projectHash", "runId", "candidateRound", "callAttempt", "candidateSha256",
+    "requestSha256", "routeRequestFingerprintSha256", "assessmentSha256",
+  ]);
+  if (!custody || !expected || custody.version !== CRITIC_ASSESSMENT_RESTART_CUSTODY_VERSION
+    || (custody.sourceKind !== "tracked" && custody.sourceKind !== "calibration" && custody.sourceKind !== "q9-task")
+    || safeSha(custody.requestSha256) === null || safeSha(custody.assessmentSha256) === null
+    || safeSha(custody.custodySha256) === null || safeSha(expected.projectHash) === null
+    || safeUuid(expected.runId) === null || (expected.candidateRound !== 0 && expected.candidateRound !== 1)
+    || (expected.callAttempt !== 1 && expected.callAttempt !== 2 && expected.callAttempt !== 3)
+    || safeSha(expected.candidateSha256) === null || safeSha(expected.requestSha256) === null
+    || safeSha(expected.routeRequestFingerprintSha256) === null || safeSha(expected.assessmentSha256) === null
+    || expected.requestSha256 !== custody.requestSha256
+    || expected.assessmentSha256 !== custody.assessmentSha256) return null;
+  const packetAuthority = custody.sourceKind === "tracked"
+    ? restoreCriticPacketAuthorityContext(taskSpec, evidencePlan, custody.packetAuthority)
+    : custody.sourceKind === "calibration"
+      ? composeCriticSyntheticPacketAuthorityContext(taskSpec, evidencePlan, custody.packetAuthority)
+      : composeCriticSyntheticTaskPacketAuthorityContext(taskSpec, evidencePlan, custody.packetAuthority);
+  if (!packetAuthority) return invalid("packet-authority");
+  const request = composeCriticRequest(taskSpec, evidencePlan, packetAuthority);
+  if (!request || criticRequestSha256(request) !== custody.requestSha256
+    || JSON.stringify(request) !== JSON.stringify(custody.request)) return invalid("request");
+  const requestBinding = requestBindings.get(request);
+  if (!requestBinding || requestBinding.projectHash !== expected.projectHash) return invalid("request-binding");
+  const rawAssessment = inspectRecord(custody.assessment, [
+    "version", "runId", "candidateRound", "callAttempt", "taskSpecSha256", "packetSha256",
+    "requestSha256", "candidateSha256", "output", "provider", "model", "resolvedModelRevision",
+    "connectionConsentVersion", "routeRequestFingerprintSha256", "criticPromptSha256", "policySha256", "createdAt",
+  ]);
+  if (!rawAssessment || rawAssessment.version !== CRITIC_ASSESSMENT_VERSION
+    || rawAssessment.runId !== expected.runId || rawAssessment.candidateRound !== expected.candidateRound
+    || rawAssessment.callAttempt !== expected.callAttempt || rawAssessment.taskSpecSha256 !== taskSha
+    || rawAssessment.packetSha256 !== requestBinding.packetSha256
+    || rawAssessment.requestSha256 !== requestBinding.requestSha256
+    || rawAssessment.candidateSha256 !== expected.candidateSha256
+    || rawAssessment.connectionConsentVersion !== requestBinding.connectionConsentVersion
+    || rawAssessment.routeRequestFingerprintSha256 !== expected.routeRequestFingerprintSha256
+    || rawAssessment.criticPromptSha256 !== CRITIC_SYSTEM_PROMPT_SHA256
+    || rawAssessment.policySha256 !== CRITIC_POLICY_SHA256) return invalid("assessment-shape");
+  const parsedOutput = parseCriticOutput(rawAssessment.output, request);
+  const parsedCustody = parseAssessmentCustody({
+    version: CRITIC_ASSESSMENT_CUSTODY_VERSION,
+    runId: rawAssessment.runId,
+    candidateRound: rawAssessment.candidateRound,
+    callAttempt: rawAssessment.callAttempt,
+    taskSpecSha256: rawAssessment.taskSpecSha256,
+    evidencePlanSha256: planSha,
+    packetSha256: rawAssessment.packetSha256,
+    requestSha256: rawAssessment.requestSha256,
+    candidateSha256: rawAssessment.candidateSha256,
+    provider: rawAssessment.provider,
+    model: rawAssessment.model,
+    resolvedModelRevision: rawAssessment.resolvedModelRevision,
+    connectionConsentVersion: rawAssessment.connectionConsentVersion,
+    routeRequestFingerprintSha256: rawAssessment.routeRequestFingerprintSha256,
+    criticPromptSha256: rawAssessment.criticPromptSha256,
+    policySha256: rawAssessment.policySha256,
+    createdAt: rawAssessment.createdAt,
+  });
+  if (!parsedOutput || !parsedCustody) return invalid("parsed-output-custody");
+  const assessment = deepFreeze({
+    version: CRITIC_ASSESSMENT_VERSION,
+    runId: parsedCustody.runId,
+    candidateRound: parsedCustody.candidateRound,
+    callAttempt: parsedCustody.callAttempt,
+    taskSpecSha256: parsedCustody.taskSpecSha256,
+    packetSha256: parsedCustody.packetSha256,
+    requestSha256: parsedCustody.requestSha256,
+    candidateSha256: parsedCustody.candidateSha256,
+    output: parsedOutput,
+    provider: parsedCustody.provider,
+    model: parsedCustody.model,
+    resolvedModelRevision: parsedCustody.resolvedModelRevision,
+    connectionConsentVersion: parsedCustody.connectionConsentVersion,
+    routeRequestFingerprintSha256: parsedCustody.routeRequestFingerprintSha256,
+    criticPromptSha256: parsedCustody.criticPromptSha256,
+    policySha256: parsedCustody.policySha256,
+    createdAt: parsedCustody.createdAt,
+  }) as CriticAssessmentV1;
+  const assessmentSha256 = sha256Utf8(canonicalAssessmentValue(assessment));
+  if (assessmentSha256 !== custody.assessmentSha256
+    || assessmentRestartCustodySha256(
+      custody.sourceKind,
+      packetAuthority,
+      custody.requestSha256 as string,
+      assessmentSha256,
+    ) !== custody.custodySha256) return invalid("digest");
+  assessmentBindings.set(assessment, Object.freeze({
+    request,
+    evidencePlanSha256: planSha,
+    projectHash: requestBinding.projectHash,
+  }));
+  return assessment;
+}
+
+registerCriticAssessmentRestartRestorer(restoreCriticAssessmentFromRestartCustody);
 
 function artifactRender(value: CriticPacketArtifactV1, request: CriticRequestV1): string {
   if (value.kind === "selected-tracked-text") {
@@ -2715,8 +3253,12 @@ export function deriveCriticPolicy(
 
   let state: CriticPolicyResultV1["state"] = "clear";
   if (nativeStops.length > 0) state = "stopped";
-  else if (blockers.length > 0) state = "blocked";
+  // An unresolved critic allegation must remain visible even when a Cairn or
+  // owner verifier has already found a blocker. Otherwise the blocked state
+  // cannot be settled without repair authority and the mixed case has no
+  // durable path to collect the remaining owner decisions.
   else if (waitingOwner.length > 0) state = "waiting-owner";
+  else if (blockers.length > 0) state = "blocked";
   else if (assessmentStatus === "critic-unavailable" && spec.quality.critic.mode === "required") state = "critic-unavailable";
   const stopReason = nativeStops.length > 0
     ? nativeStops[0]!.reason
@@ -2732,4 +3274,724 @@ export function deriveCriticPolicy(
     nativeStops,
     stopReason,
   });
+}
+
+function canonicalCriterionResult(value: CriterionResultV1): string {
+  return objectCanonical([
+    ["criterionId", quote(value.criterionId)],
+    ["candidateSha256", quote(value.candidateSha256)],
+    ["status", quote(value.status)],
+    ["source", quote(value.source)],
+    ["evidenceRefs", canonicalStringArray(value.evidenceRefs)],
+    ["evidencePlanSha256", quote(value.evidencePlanSha256)],
+    ["resolutionSha256", canonicalNullable(value.resolutionSha256)],
+  ]);
+}
+
+function canonicalOwnerObservation(value: OwnerCriterionObservationV1): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["projectHash", quote(value.projectHash)],
+    ["runId", quote(value.runId)], ["taskSpecSha256", quote(value.taskSpecSha256)],
+    ["candidateSha256", quote(value.candidateSha256)], ["criterionId", quote(value.criterionId)],
+    ["stateArtifactIds", canonicalStringArray(value.stateArtifactIds)],
+    ["evidenceRefsSeen", canonicalStringArray(value.evidenceRefsSeen)],
+    ["decision", quote(value.decision)], ["actionNonce", quote(value.actionNonce)],
+    ["observedAt", quote(value.observedAt)],
+  ]);
+}
+
+function canonicalNativeBoundaryResult(value: NativeBoundaryResultV1): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["runId", quote(value.runId)],
+    ["taskSpecSha256", quote(value.taskSpecSha256)], ["candidateSha256", quote(value.candidateSha256)],
+    ["assessmentSha256", quote(value.assessmentSha256)], ["findingId", quote(value.findingId)],
+    ["category", quote(value.category)], ["evidenceRefsSeen", canonicalStringArray(value.evidenceRefsSeen)],
+    ["counterEvidenceRefsSeen", canonicalStringArray(value.counterEvidenceRefsSeen)],
+    ["decision", quote(value.decision)], ["stopReason", canonicalNullable(value.stopReason)],
+    ["checkedAt", quote(value.checkedAt)],
+  ]);
+}
+
+function canonicalPolicyAuthorityContext(value: CriticPolicyAuthorityContextV1): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["projectHash", quote(value.projectHash)],
+    ["runId", quote(value.runId)], ["taskSpecSha256", quote(value.taskSpecSha256)],
+    ["evidencePlanSha256", quote(value.evidencePlanSha256)], ["candidateSha256", quote(value.candidateSha256)],
+    ["assessmentSha256", canonicalNullable(value.assessmentSha256)],
+    ["criterionResults", arrayCanonical(value.criterionResults.map(canonicalCriterionResult))],
+    ["ownerObservations", arrayCanonical(value.ownerObservations.map(canonicalOwnerObservation))],
+    ["ownerResolutions", arrayCanonical(value.ownerResolutions.map(canonicalOwnerResolution))],
+    ["nativeBoundaryResults", arrayCanonical(value.nativeBoundaryResults.map(canonicalNativeBoundaryResult))],
+  ]);
+}
+
+/** Hash only a context that passed the authority mint; a structural clone is
+ * data, not authenticated custody. */
+export function criticPolicyAuthorityContextSha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null && policyAuthorityContextBindings.has(value)
+    ? sha256Utf8(canonicalPolicyAuthorityContext(value as CriticPolicyAuthorityContextV1))
+    : null;
+}
+
+/** Read-only, brand-gated identity for Main's neutral owner-review journal.
+ * Dismissed and cant-tell actions can bind the exact current Cairn result
+ * without manufacturing Core's private canonical ordering or minting repair
+ * authority. */
+export function criticPolicyCairnCriterionResultSha256(
+  authenticatedPolicyContext: unknown,
+  criterionId: unknown,
+): string | null {
+  if (typeof authenticatedPolicyContext !== "object" || authenticatedPolicyContext === null) return null;
+  const binding = policyAuthorityContextBindings.get(authenticatedPolicyContext);
+  const id = safeCId(criterionId);
+  if (!binding || id === null) return null;
+  const context = authenticatedPolicyContext as CriticPolicyAuthorityContextV1;
+  const target = exactCairnFailureConfirmationTarget(binding.taskSpec, binding.evidencePlan, context, id);
+  return target === null ? null : sha256Utf8(canonicalCriterionResult(target.result));
+}
+
+function canonicalCairnFailureConfirmationWithoutSha(
+  value: Omit<CairnCriterionFailureConfirmationV1, "confirmationSha256">,
+): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["projectHash", quote(value.projectHash)], ["runId", quote(value.runId)],
+    ["taskSpecSha256", quote(value.taskSpecSha256)], ["evidencePlanSha256", quote(value.evidencePlanSha256)],
+    ["candidateSha256", quote(value.candidateSha256)], ["policyContextSha256", quote(value.policyContextSha256)],
+    ["criterionId", quote(value.criterionId)], ["failureConditionId", quote(value.failureConditionId)],
+    ["failureConditionSha256", quote(value.failureConditionSha256)],
+    ["criterionResultSha256", quote(value.criterionResultSha256)],
+    ["evidenceRefsSeen", canonicalStringArray(value.evidenceRefsSeen)], ["decision", quote(value.decision)],
+    ["actionNonce", quote(value.actionNonce)], ["confirmedAt", quote(value.confirmedAt)],
+    ["ownerActionReceiptSha256", quote(value.ownerActionReceiptSha256)],
+  ]);
+}
+
+function canonicalCairnFailureConfirmationRecord(value: CairnCriterionFailureConfirmationV1): string {
+  const withoutSha = canonicalCairnFailureConfirmationWithoutSha(value);
+  return `${withoutSha.slice(0, -1)},${quote("confirmationSha256")}:${quote(value.confirmationSha256)}}`;
+}
+
+function cairnFailureConditionSha256(criterion: CriticProjectedCriterionV1): string {
+  return sha256Utf8(objectCanonical([
+    ["id", quote(criterion.failureConditionId)],
+    ["statement", quote(criterion.failureCondition)],
+  ]));
+}
+
+function parseCairnFailureConfirmationAction(
+  value: unknown,
+): CairnCriterionFailureConfirmationActionV1 | null {
+  const record = inspectRecord(value, [
+    "criterionId", "failureConditionId", "evidenceRefsSeen", "decision", "actionNonce", "confirmedAt",
+    "ownerActionReceiptSha256",
+  ]);
+  if (record === null || record.decision !== "confirmed") return null;
+  const criterionId = safeCId(record.criterionId);
+  const failureConditionId = safeMachineId(record.failureConditionId);
+  const evidenceRefsSeen = uniqueStrings(record.evidenceRefsSeen, QUALITY_LIMITS.evidenceRefsPerFinding);
+  const actionNonce = safeAuthorityId(record.actionNonce);
+  const confirmedAt = safeInstant(record.confirmedAt);
+  const ownerActionReceiptSha256 = safeSha(record.ownerActionReceiptSha256);
+  if (criterionId === null || failureConditionId === null || evidenceRefsSeen === null || evidenceRefsSeen.length === 0
+    || actionNonce === null || confirmedAt === null || ownerActionReceiptSha256 === null) return null;
+  return Object.freeze({
+    criterionId,
+    failureConditionId,
+    evidenceRefsSeen,
+    decision: "confirmed",
+    actionNonce,
+    confirmedAt,
+    ownerActionReceiptSha256,
+  });
+}
+
+function exactCairnFailureConfirmationTarget(
+  taskSpec: TaskSpecV1,
+  evidencePlan: EvidencePlanV1,
+  context: CriticPolicyAuthorityContextV1,
+  criterionId: `c${number}`,
+): Readonly<{
+  criterion: CriticProjectedCriterionV1;
+  result: CriterionResultV1;
+  taskSpecSha256: string;
+  evidencePlanSha256: string;
+  policyContextSha256: string;
+}> | null {
+  const projection = criticTaskSpecProjection(taskSpec);
+  const taskSha = taskSpecSha256(taskSpec);
+  const planSha = evidencePlanSha256(evidencePlan);
+  const criterion = projection?.criteria.find((row) => row.id === criterionId);
+  const result = context.criterionResults.find((row) => row.criterionId === criterionId);
+  if (!projection || !criterion || criterion.judge !== "cairn" || !result || result.status !== "not-met"
+    || taskSha === null || planSha === null || taskSha !== context.taskSpecSha256
+    || planSha !== context.evidencePlanSha256 || result.candidateSha256 !== context.candidateSha256
+    || result.evidencePlanSha256 !== context.evidencePlanSha256
+    || !sourceSatisfiesEvidenceStandard(criterion, result, evidencePlan)) return null;
+  return Object.freeze({
+    criterion,
+    result,
+    taskSpecSha256: taskSha,
+    evidencePlanSha256: planSha,
+    policyContextSha256: sha256Utf8(canonicalPolicyAuthorityContext(context)),
+  });
+}
+
+function bindCairnFailureConfirmation(
+  confirmation: CairnCriterionFailureConfirmationV1,
+  taskSpec: TaskSpecV1,
+  evidencePlan: EvidencePlanV1,
+  context: CriticPolicyAuthorityContextV1,
+  result: CriterionResultV1,
+): CairnCriterionFailureConfirmationV1 | null {
+  let criterionIds = cairnFailureConfirmationCriterionIdsByContext.get(context);
+  let shas = cairnFailureConfirmationShasByContext.get(context);
+  let actionNonces = cairnFailureConfirmationActionNoncesByContext.get(context);
+  let receipts = cairnFailureConfirmationReceiptsByContext.get(context);
+  const runScope = `${confirmation.projectHash}:${confirmation.runId}`;
+  let runActionNonces = cairnFailureConfirmationActionNoncesByRun.get(runScope);
+  let runReceipts = cairnFailureConfirmationReceiptsByRun.get(runScope);
+  if (criterionIds?.has(confirmation.criterionId) || shas?.has(confirmation.confirmationSha256)
+    || actionNonces?.has(confirmation.actionNonce) || receipts?.has(confirmation.ownerActionReceiptSha256)
+    || runActionNonces?.has(confirmation.actionNonce)
+    || runReceipts?.has(confirmation.ownerActionReceiptSha256)) return null;
+  if (!criterionIds) {
+    criterionIds = new Set<string>();
+    cairnFailureConfirmationCriterionIdsByContext.set(context, criterionIds);
+  }
+  if (!shas) {
+    shas = new Set<string>();
+    cairnFailureConfirmationShasByContext.set(context, shas);
+  }
+  if (!actionNonces) {
+    actionNonces = new Set<string>();
+    cairnFailureConfirmationActionNoncesByContext.set(context, actionNonces);
+  }
+  if (!receipts) {
+    receipts = new Set<string>();
+    cairnFailureConfirmationReceiptsByContext.set(context, receipts);
+  }
+  if (!runActionNonces) {
+    runActionNonces = new Set<string>();
+    cairnFailureConfirmationActionNoncesByRun.set(runScope, runActionNonces);
+  }
+  if (!runReceipts) {
+    runReceipts = new Set<string>();
+    cairnFailureConfirmationReceiptsByRun.set(runScope, runReceipts);
+  }
+  criterionIds.add(confirmation.criterionId);
+  shas.add(confirmation.confirmationSha256);
+  actionNonces.add(confirmation.actionNonce);
+  receipts.add(confirmation.ownerActionReceiptSha256);
+  runActionNonces.add(confirmation.actionNonce);
+  runReceipts.add(confirmation.ownerActionReceiptSha256);
+  cairnFailureConfirmationBrands.add(confirmation);
+  cairnFailureConfirmationBindings.set(confirmation, Object.freeze({ taskSpec, evidencePlan, context, criterionResult: result }));
+  return confirmation;
+}
+
+/** Main trust-boundary mint. The owner action is accepted only for the exact
+ * current Cairn-judged not-met result, frozen failure condition, and complete
+ * verifier evidence row held by this branded policy context. */
+export function authorizeCairnCriterionFailureConfirmation(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  authenticatedPolicyContext: unknown,
+  rawAction: unknown,
+): CairnCriterionFailureConfirmationV1 | null {
+  if (typeof authenticatedPolicyContext !== "object" || authenticatedPolicyContext === null) return null;
+  const binding = policyAuthorityContextBindings.get(authenticatedPolicyContext);
+  const action = parseCairnFailureConfirmationAction(rawAction);
+  if (!binding || binding.taskSpec !== taskSpec || binding.evidencePlan !== evidencePlan || !action) return null;
+  const context = authenticatedPolicyContext as CriticPolicyAuthorityContextV1;
+  const target = exactCairnFailureConfirmationTarget(binding.taskSpec, binding.evidencePlan, context, action.criterionId);
+  if (!target || action.failureConditionId !== target.criterion.failureConditionId
+    || !sameStringArray(action.evidenceRefsSeen, target.result.evidenceRefs)) return null;
+  const withoutSha = deepFreeze({
+    version: CAIRN_CRITERION_FAILURE_CONFIRMATION_VERSION,
+    projectHash: context.projectHash,
+    runId: context.runId,
+    taskSpecSha256: target.taskSpecSha256,
+    evidencePlanSha256: target.evidencePlanSha256,
+    candidateSha256: context.candidateSha256,
+    policyContextSha256: target.policyContextSha256,
+    criterionId: action.criterionId,
+    failureConditionId: target.criterion.failureConditionId,
+    failureConditionSha256: cairnFailureConditionSha256(target.criterion),
+    criterionResultSha256: sha256Utf8(canonicalCriterionResult(target.result)),
+    evidenceRefsSeen: [...target.result.evidenceRefs],
+    decision: "confirmed" as const,
+    actionNonce: action.actionNonce,
+    confirmedAt: action.confirmedAt,
+    ownerActionReceiptSha256: action.ownerActionReceiptSha256,
+  }) as Omit<CairnCriterionFailureConfirmationV1, "confirmationSha256">;
+  const confirmation = deepFreeze({
+    ...withoutSha,
+    confirmationSha256: sha256Utf8(canonicalCairnFailureConfirmationWithoutSha(withoutSha)),
+  }) as CairnCriterionFailureConfirmationV1;
+  return bindCairnFailureConfirmation(confirmation, binding.taskSpec, binding.evidencePlan, context, target.result);
+}
+
+/** Canonical durable bytes are exposed only from a live branded confirmation;
+ * a structural clone cannot be persisted as owner authority. */
+export function canonicalCairnCriterionFailureConfirmation(value: unknown): string | null {
+  return typeof value === "object" && value !== null && cairnFailureConfirmationBrands.has(value)
+    ? canonicalCairnFailureConfirmationRecord(value as CairnCriterionFailureConfirmationV1)
+    : null;
+}
+
+export function cairnCriterionFailureConfirmationSha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null && cairnFailureConfirmationBrands.has(value)
+    ? (value as CairnCriterionFailureConfirmationV1).confirmationSha256
+    : null;
+}
+
+function canonicalRepairAuthorityWithoutSha(value: Omit<CriticRepairAuthorityV1, "repairAuthoritySha256">): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["projectHash", quote(value.projectHash)],
+    ["runId", quote(value.runId)], ["taskSpecSha256", quote(value.taskSpecSha256)],
+    ["evidencePlanSha256", quote(value.evidencePlanSha256)], ["candidateSha256", quote(value.candidateSha256)],
+    ["assessmentSha256", canonicalNullable(value.assessmentSha256)], ["policySha256", quote(value.policySha256)],
+    ["policyContextSha256", quote(value.policyContextSha256)],
+    ["rows", arrayCanonical(value.rows.map((row) => objectCanonical([
+      ["criterionId", quote(row.criterionId)], ["failureConditionId", quote(row.failureConditionId)],
+      ["artifactIds", canonicalStringArray(row.artifactIds)], ["source", quote(row.source)],
+      ["sourceSha256", quote(row.sourceSha256)],
+    ])))],
+  ]);
+}
+
+export function criticRepairAuthoritySha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null && repairAuthorityBrands.has(value)
+    ? (value as CriticRepairAuthorityV1).repairAuthoritySha256
+    : null;
+}
+
+export function isCriticRepairAuthority(value: unknown): value is CriticRepairAuthorityV1 {
+  return typeof value === "object" && value !== null && repairAuthorityBrands.has(value)
+    && repairAuthorityBindings.has(value);
+}
+
+/**
+ * Reduce an authenticated blocked policy context to the only facts Builder is
+ * allowed to receive.  Waiting owner decisions (including cant-tell) and
+ * native stops make the mint fail; neither can be silently treated as repair
+ * consent.
+ */
+export function composeCriticRepairAuthority(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  authenticatedPolicyContext: unknown,
+  rawCairnFailureConfirmations?: unknown,
+): CriticRepairAuthorityV1 | null {
+  const taskSha = taskSpecSha256(taskSpec);
+  const planSha = evidencePlanSha256(evidencePlan);
+  if (taskSha === null || planSha === null || typeof authenticatedPolicyContext !== "object"
+    || authenticatedPolicyContext === null) return null;
+  const binding = policyAuthorityContextBindings.get(authenticatedPolicyContext);
+  if (binding === undefined || binding.taskSpec !== taskSpec || binding.evidencePlan !== evidencePlan) return null;
+  const context = authenticatedPolicyContext as CriticPolicyAuthorityContextV1;
+  const policy = deriveCriticPolicy(taskSpec, evidencePlan, binding.assessment, context);
+  if (policy.state !== "blocked" || policy.blockers.length === 0 || policy.waitingOwner.length !== 0
+    || policy.nativeStops.length !== 0
+    || (policy.assessmentStatus === "critic-unavailable"
+      && policy.blockers.some((blocker) => blocker.source === "critic"))) return null;
+  const projection = criticTaskSpecProjection(taskSpec);
+  if (projection === null) return null;
+  const confirmationInput = rawCairnFailureConfirmations === undefined
+    ? Object.freeze([])
+    : inspectArray(rawCairnFailureConfirmations, QUALITY_LIMITS.acceptanceChecks);
+  if (confirmationInput === null) return null;
+  const requiredCairnCriteria = new Set<`c${number}`>();
+  for (const blocker of policy.blockers) {
+    if (blocker.source === "cairn") {
+      for (const criterionId of blocker.criterionIds) requiredCairnCriteria.add(criterionId);
+    }
+  }
+  const confirmations = new Map<`c${number}`, CairnCriterionFailureConfirmationV1>();
+  const confirmationNonces = new Set<string>();
+  const confirmationReceipts = new Set<string>();
+  for (const item of confirmationInput) {
+    if (typeof item !== "object" || item === null || !cairnFailureConfirmationBrands.has(item)
+      || spentCairnFailureConfirmationShas.has((item as CairnCriterionFailureConfirmationV1).confirmationSha256)) return null;
+    const confirmation = item as CairnCriterionFailureConfirmationV1;
+    const confirmationBinding = cairnFailureConfirmationBindings.get(item);
+    const currentResult = context.criterionResults.find((row) => row.criterionId === confirmation.criterionId);
+    if (!confirmationBinding || confirmationBinding.taskSpec !== taskSpec || confirmationBinding.evidencePlan !== evidencePlan
+      || !requiredCairnCriteria.has(confirmation.criterionId)
+      || confirmations.has(confirmation.criterionId)
+      || confirmation.projectHash !== context.projectHash || confirmation.runId !== context.runId
+      || confirmation.taskSpecSha256 !== context.taskSpecSha256
+      || confirmation.evidencePlanSha256 !== context.evidencePlanSha256
+      || confirmation.candidateSha256 !== context.candidateSha256
+      || confirmation.policyContextSha256 !== sha256Utf8(canonicalPolicyAuthorityContext(context))
+      || currentResult === undefined
+      || confirmation.criterionResultSha256 !== sha256Utf8(canonicalCriterionResult(currentResult))
+      || confirmation.criterionResultSha256 !== sha256Utf8(canonicalCriterionResult(confirmationBinding.criterionResult))
+      || !sameStringArray(confirmation.evidenceRefsSeen, currentResult.evidenceRefs)
+      || !sameStringArray(confirmation.evidenceRefsSeen, confirmationBinding.criterionResult.evidenceRefs)
+      || confirmationNonces.has(confirmation.actionNonce)
+      || confirmationReceipts.has(confirmation.ownerActionReceiptSha256)) return null;
+    confirmationNonces.add(confirmation.actionNonce);
+    confirmationReceipts.add(confirmation.ownerActionReceiptSha256);
+    confirmations.set(confirmation.criterionId, confirmation);
+  }
+  if (confirmations.size !== requiredCairnCriteria.size) return null;
+  const assessment = binding.assessment;
+  const assessmentSha = assessment === null ? null : criticAssessmentSha256(assessment);
+  const rows: CriticRepairAuthorityRowV1[] = [];
+  const seen = new Set<string>();
+  for (const blocker of policy.blockers) {
+    for (const criterionId of blocker.criterionIds) {
+      if (seen.has(criterionId)) continue;
+      const criterion = projection.criteria.find((item) => item.id === criterionId);
+      if (criterion === undefined) return null;
+      let sourceSha256: string | null = null;
+      let sourceArtifactIds: readonly string[] | null = null;
+      if (blocker.source === "cairn") {
+        const result = context.criterionResults.find((item) => item.criterionId === criterionId);
+        const confirmation = confirmations.get(criterionId);
+        if (result !== undefined && result.status === "not-met"
+          && result.candidateSha256 === context.candidateSha256
+          && result.evidencePlanSha256 === context.evidencePlanSha256
+          && sourceSatisfiesEvidenceStandard(criterion, result, binding.evidencePlan)
+          && confirmation !== undefined
+          && confirmation.failureConditionId === criterion.failureConditionId
+          && confirmation.failureConditionSha256 === cairnFailureConditionSha256(criterion)
+          && confirmation.criterionResultSha256 === sha256Utf8(canonicalCriterionResult(result))
+          && sameStringArray(confirmation.evidenceRefsSeen, result.evidenceRefs)) {
+          sourceSha256 = sha256Utf8(objectCanonical([
+            ["criterionResultSha256", quote(confirmation.criterionResultSha256)],
+            ["ownerConfirmationSha256", quote(confirmation.confirmationSha256)],
+          ]));
+          sourceArtifactIds = result.evidenceRefs;
+        }
+      } else if (blocker.source === "owner") {
+        const observation = context.ownerObservations.find((item) => item.criterionId === criterionId);
+        if (observation !== undefined && observation.decision === "not-met"
+          && ownerObservationSatisfies(observation, criterion, binding.evidencePlan)) {
+          sourceSha256 = sha256Utf8(canonicalOwnerObservation(observation));
+          sourceArtifactIds = observation.evidenceRefsSeen;
+        }
+      } else if (assessment !== null && assessmentSha !== null) {
+        const finding = assessment.output.findings.find((item) => item.criterionId === criterionId
+          && blocker.findingIds.includes(item.id));
+        const resolution = finding === undefined ? undefined
+          : context.ownerResolutions.find((item) => item.findingId === finding.id);
+        if (finding !== undefined && resolution !== undefined && resolution.decision === "confirmed"
+          && exactOwnerResolution(resolution, context, assessment, assessmentSha, finding, criterion)) {
+          sourceSha256 = sha256Utf8(objectCanonical([
+            ["assessmentSha256", quote(assessmentSha)],
+            ["findingSha256", quote(sha256Utf8(canonicalFinding(finding)))],
+            ["resolutionSha256", quote(sha256Utf8(canonicalOwnerResolution(resolution)))],
+          ]));
+          sourceArtifactIds = finding.evidenceRefs;
+        }
+      }
+      if (sourceSha256 === null || sourceArtifactIds === null || sourceArtifactIds.length === 0
+        || !sourceArtifactIds.every((artifactId) => criterion.allowedArtifactIds.includes(artifactId))) return null;
+      seen.add(criterionId);
+      rows.push(Object.freeze({
+        criterionId,
+        failureConditionId: criterion.failureConditionId,
+        artifactIds: Object.freeze([...sourceArtifactIds]),
+        source: blocker.source,
+        sourceSha256,
+      }));
+    }
+  }
+  const order = new Map(projection.criteria.map((criterion, index) => [criterion.id, index]));
+  rows.sort((left, right) => order.get(left.criterionId)! - order.get(right.criterionId)!);
+  const policyContextSha256 = sha256Utf8(canonicalPolicyAuthorityContext(context));
+  const withoutSha = deepFreeze({
+    version: CRITIC_REPAIR_AUTHORITY_VERSION,
+    projectHash: context.projectHash,
+    runId: context.runId,
+    taskSpecSha256: context.taskSpecSha256,
+    evidencePlanSha256: context.evidencePlanSha256,
+    candidateSha256: context.candidateSha256,
+    assessmentSha256: context.assessmentSha256,
+    policySha256: CRITIC_POLICY_SHA256,
+    policyContextSha256,
+    rows,
+  }) as Omit<CriticRepairAuthorityV1, "repairAuthoritySha256">;
+  const authority = deepFreeze({
+    ...withoutSha,
+    repairAuthoritySha256: sha256Utf8(canonicalRepairAuthorityWithoutSha(withoutSha)),
+  }) as CriticRepairAuthorityV1;
+  repairAuthorityBrands.add(authority);
+  repairAuthorityBindings.set(authority, context);
+  for (const confirmation of confirmations.values()) {
+    spentCairnFailureConfirmationShas.add(confirmation.confirmationSha256);
+  }
+  return authority;
+}
+
+/** Brand-gated projection used by the candidate state machine to distinguish
+ * a blocked decision that still needs Cairn-failure confirmation from other
+ * blocked decisions. It returns ids only; no critic prose or repair input can
+ * cross this seam. */
+export function criticPolicyDecisionCairnFailureCriterionIds(
+  value: unknown,
+): readonly `c${number}`[] | null {
+  if (!isCriticPolicyDecision(value)) return null;
+  const context = policyDecisionBindings.get(value)!;
+  const binding = policyAuthorityContextBindings.get(context);
+  if (!binding) return null;
+  const policy = deriveCriticPolicy(binding.taskSpec, binding.evidencePlan, binding.assessment, context);
+  const ids: `c${number}`[] = [];
+  for (const blocker of policy.blockers) {
+    if (blocker.source !== "cairn") continue;
+    for (const id of blocker.criterionIds) if (!ids.includes(id)) ids.push(id);
+  }
+  return Object.freeze(ids);
+}
+
+function canonicalPolicyDecisionWithoutSha(value: Omit<CriticPolicyDecisionV1, "policyDecisionSha256">): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["projectHash", quote(value.projectHash)], ["runId", quote(value.runId)],
+    ["taskSpecSha256", quote(value.taskSpecSha256)], ["evidencePlanSha256", quote(value.evidencePlanSha256)],
+    ["candidateSha256", quote(value.candidateSha256)], ["assessmentSha256", canonicalNullable(value.assessmentSha256)],
+    ["candidateRound", value.candidateRound === null ? "null" : String(value.candidateRound)],
+    ["callAttempt", value.callAttempt === null ? "null" : String(value.callAttempt)],
+    ["requestSha256", canonicalNullable(value.requestSha256)],
+    ["routeRequestFingerprintSha256", canonicalNullable(value.routeRequestFingerprintSha256)],
+    ["policyContextSha256", quote(value.policyContextSha256)], ["state", quote(value.state)],
+    ["assessmentStatus", quote(value.assessmentStatus)], ["blockerCount", String(value.blockerCount)],
+    ["waitingOwnerCount", String(value.waitingOwnerCount)], ["nativeStopCount", String(value.nativeStopCount)],
+    ["stopReason", canonicalNullable(value.stopReason)],
+  ]);
+}
+
+export function criticPolicyDecisionSha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null && policyDecisionBrands.has(value)
+    ? (value as CriticPolicyDecisionV1).policyDecisionSha256
+    : null;
+}
+
+export function isCriticPolicyDecision(value: unknown): value is CriticPolicyDecisionV1 {
+  return typeof value === "object" && value !== null && policyDecisionBrands.has(value)
+    && policyDecisionBindings.has(value);
+}
+
+export function composeCriticPolicyDecision(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  authenticatedPolicyContext: unknown,
+): CriticPolicyDecisionV1 | null {
+  if (typeof authenticatedPolicyContext !== "object" || authenticatedPolicyContext === null) return null;
+  const binding = policyAuthorityContextBindings.get(authenticatedPolicyContext);
+  if (binding === undefined || binding.taskSpec !== taskSpec || binding.evidencePlan !== evidencePlan) return null;
+  const context = authenticatedPolicyContext as CriticPolicyAuthorityContextV1;
+  const policy = deriveCriticPolicy(taskSpec, evidencePlan, binding.assessment, context);
+  if (policy.state === "critic-unavailable" || policy.assessmentStatus === "critic-unavailable") return null;
+  const withoutSha = deepFreeze({
+    version: CRITIC_POLICY_DECISION_VERSION,
+    projectHash: context.projectHash,
+    runId: context.runId,
+    taskSpecSha256: context.taskSpecSha256,
+    evidencePlanSha256: context.evidencePlanSha256,
+    candidateSha256: context.candidateSha256,
+    assessmentSha256: context.assessmentSha256,
+    candidateRound: binding.assessment?.candidateRound ?? null,
+    callAttempt: binding.assessment?.callAttempt ?? null,
+    requestSha256: binding.assessment?.requestSha256 ?? null,
+    routeRequestFingerprintSha256: binding.assessment?.routeRequestFingerprintSha256 ?? null,
+    policyContextSha256: sha256Utf8(canonicalPolicyAuthorityContext(context)),
+    state: policy.state,
+    assessmentStatus: policy.assessmentStatus,
+    blockerCount: policy.blockers.length,
+    waitingOwnerCount: policy.waitingOwner.length,
+    nativeStopCount: policy.nativeStops.length,
+    stopReason: policy.stopReason,
+  }) as Omit<CriticPolicyDecisionV1, "policyDecisionSha256">;
+  const decision = deepFreeze({
+    ...withoutSha,
+    policyDecisionSha256: sha256Utf8(canonicalPolicyDecisionWithoutSha(withoutSha)),
+  }) as CriticPolicyDecisionV1;
+  policyDecisionBrands.add(decision);
+  policyDecisionBindings.set(decision, context);
+  return decision;
+}
+
+/** Persistable assessment/request authority is exposed only from the exact
+ * branded policy decision that consumed it. A critic output appended before
+ * candidate settlement therefore cannot enter candidate restart custody. */
+export function criticPolicyDecisionAssessmentRestartCustody(
+  value: unknown,
+): CriticAssessmentRestartCustodyV1 | null {
+  if (!isCriticPolicyDecision(value)) return null;
+  const context = policyDecisionBindings.get(value)!;
+  const binding = policyAuthorityContextBindings.get(context);
+  const assessment = binding?.assessment ?? null;
+  if (!assessment || (value as CriticPolicyDecisionV1).assessmentSha256 !== criticAssessmentSha256(assessment)) return null;
+  return assessmentRestartCustody(assessment);
+}
+
+/** Bind the exact confirmed critic findings that authorized round-zero repair
+ * to one current round-one candidate. The public row deliberately stays in
+ * the frozen packet schema; its process-local brand additionally carries the
+ * run/current-candidate join so a copied hash summary cannot be spliced into a
+ * different final critic call. Candidate.ts is the sole package-internal
+ * caller and derives `target` from a branded live candidate. */
+function bindCriticPriorConfirmedFindingsForCandidate(
+  value: unknown,
+  rawTarget: unknown,
+): readonly CriticPriorConfirmedFindingV1[] | null {
+  if (!isCriticPolicyDecision(value)) return null;
+  const decision = value as CriticPolicyDecisionV1;
+  const context = policyDecisionBindings.get(value)!;
+  const binding = policyAuthorityContextBindings.get(context);
+  const assessment = binding?.assessment ?? null;
+  const target = inspectRecord(rawTarget, [
+    "runId", "taskSpecSha256", "evidencePlanSha256", "candidateSha256", "candidateRound",
+  ]);
+  if (!binding || !assessment || decision.state !== "blocked" || decision.assessmentStatus !== "available"
+    || decision.assessmentSha256 !== criticAssessmentSha256(assessment) || !target
+    || target.runId !== decision.runId || target.taskSpecSha256 !== decision.taskSpecSha256
+    || safeSha(target.evidencePlanSha256) === null || safeSha(target.candidateSha256) === null
+    || target.candidateRound !== 1) return null;
+  const projection = criticTaskSpecProjection(binding.taskSpec);
+  const assessmentSha256 = decision.assessmentSha256;
+  if (!projection || assessmentSha256 === null) return null;
+  const rows: CriticPriorConfirmedFindingV1[] = [];
+  for (const finding of assessment.output.findings) {
+    if (!/^c(?:[1-9]|1[0-2])$/u.test(finding.criterionId) || finding.status !== "not-met"
+      || finding.failureConditionId === null) continue;
+    const criterion = projection.criteria.find((row) => row.id === finding.criterionId);
+    const resolution = context.ownerResolutions.find((row) => row.findingId === finding.id);
+    if (!criterion || !resolution || resolution.decision !== "confirmed"
+      || !exactOwnerResolution(
+        resolution,
+        context,
+        assessment,
+        assessmentSha256,
+        finding,
+        criterion,
+      )) continue;
+    const row = Object.freeze({
+      assessmentSha256,
+      findingId: finding.id,
+      resolutionSha256: sha256Utf8(canonicalOwnerResolution(resolution)),
+      criterionId: finding.criterionId as `c${number}`,
+      failureConditionId: finding.failureConditionId,
+    });
+    priorConfirmedFindingBrands.add(row);
+    priorConfirmedFindingBindings.set(row, Object.freeze({
+      runId: decision.runId,
+      taskSpecSha256: decision.taskSpecSha256,
+      evidencePlanSha256: target.evidencePlanSha256 as string,
+      candidateSha256: target.candidateSha256 as string,
+      candidateRound: 1,
+      policyDecisionSha256: decision.policyDecisionSha256,
+    }));
+    rows.push(row);
+  }
+  return rows.length > 0 ? Object.freeze(rows) : null;
+}
+
+registerCriticPriorFindingsBinder(bindCriticPriorConfirmedFindingsForCandidate);
+
+function canonicalCompletionWithoutSha(value: Omit<CriticCompletionAuthorityV1, "completionAuthoritySha256">): string {
+  return objectCanonical([
+    ["version", quote(value.version)], ["projectHash", quote(value.projectHash)], ["runId", quote(value.runId)],
+    ["taskSpecSha256", quote(value.taskSpecSha256)], ["evidencePlanSha256", quote(value.evidencePlanSha256)],
+    ["candidateSha256", quote(value.candidateSha256)], ["assessmentSha256", canonicalNullable(value.assessmentSha256)],
+    ["policyContextSha256", quote(value.policyContextSha256)],
+    ["criteria", arrayCanonical(value.criteria.map((row) => objectCanonical([
+      ["criterionId", quote(row.criterionId)], ["judge", quote(row.judge)], ["sourceSha256", quote(row.sourceSha256)],
+    ])))],
+  ]);
+}
+
+export function criticCompletionAuthoritySha256(value: unknown): string | null {
+  return typeof value === "object" && value !== null
+    && (completionAuthorityBrands.has(value) || restoredCriticCompletionAuthorityBrands.has(value))
+    ? (value as CriticCompletionAuthorityV1).completionAuthoritySha256
+    : null;
+}
+
+export function isCriticCompletionAuthority(value: unknown): value is CriticCompletionAuthorityV1 {
+  return typeof value === "object" && value !== null
+    && (completionAuthorityBrands.has(value) && completionAuthorityBindings.has(value)
+      || restoredCriticCompletionAuthorityBrands.has(value));
+}
+
+export function composeCriticCompletionAuthority(
+  taskSpec: unknown,
+  evidencePlan: unknown,
+  authenticatedPolicyContext: unknown,
+): CriticCompletionAuthorityV1 | null {
+  if (typeof authenticatedPolicyContext !== "object" || authenticatedPolicyContext === null) return null;
+  const binding = policyAuthorityContextBindings.get(authenticatedPolicyContext);
+  if (binding === undefined || binding.taskSpec !== taskSpec || binding.evidencePlan !== evidencePlan) return null;
+  const context = authenticatedPolicyContext as CriticPolicyAuthorityContextV1;
+  const projection = criticTaskSpecProjection(taskSpec);
+  if (projection === null) return null;
+  const policy = deriveCriticPolicy(taskSpec, evidencePlan, binding.assessment, context);
+  if (policy.state !== "clear" || policy.blockers.length !== 0 || policy.waitingOwner.length !== 0
+    || policy.nativeStops.length !== 0) return null;
+  const assessment = binding.assessment;
+  const assessmentSha = assessment === null ? null : criticAssessmentSha256(assessment);
+  const criteria: CriticCompletionCriterionV1[] = [];
+  for (const criterion of projection.criteria) {
+    let sourceSha256: string | null = null;
+    if (criterion.judge === "cairn") {
+      const result = context.criterionResults.find((item) => item.criterionId === criterion.id);
+      if (result !== undefined && result.status === "met" && result.candidateSha256 === context.candidateSha256
+        && result.evidencePlanSha256 === context.evidencePlanSha256
+        && sourceSatisfiesEvidenceStandard(criterion, result, binding.evidencePlan)) {
+        sourceSha256 = sha256Utf8(canonicalCriterionResult(result));
+      }
+    } else if (criterion.judge === "owner") {
+      const observation = context.ownerObservations.find((item) => item.criterionId === criterion.id);
+      if (observation !== undefined && observation.projectHash === context.projectHash
+        && observation.runId === context.runId && observation.taskSpecSha256 === context.taskSpecSha256
+        && observation.candidateSha256 === context.candidateSha256 && observation.decision === "met"
+        && ownerObservationSatisfies(observation, criterion, binding.evidencePlan)) {
+        sourceSha256 = sha256Utf8(canonicalOwnerObservation(observation));
+      }
+    } else if (assessment !== null && assessmentSha !== null) {
+      const finding = assessment.output.findings.find((item) => item.criterionId === criterion.id);
+      if (finding !== undefined && finding.status === "met" && finding.evidenceRefs.length > 0
+        && finding.evidenceRefs.every((ref) => criterion.allowedArtifactIds.includes(ref))) {
+        sourceSha256 = sha256Utf8(objectCanonical([
+          ["assessmentSha256", quote(assessmentSha)], ["findingSha256", quote(sha256Utf8(canonicalFinding(finding)))],
+        ]));
+      } else if (finding !== undefined && finding.status === "not-met"
+        && finding.failureConditionId === criterion.failureConditionId
+        && finding.evidenceRefs.length > 0
+        && finding.evidenceRefs.every((ref) => criterion.allowedArtifactIds.includes(ref))) {
+        const resolution = context.ownerResolutions.find((item) => item.findingId === finding.id);
+        if (resolution !== undefined && resolution.decision === "dismissed"
+          && exactOwnerResolution(resolution, context, assessment, assessmentSha, finding, criterion)) {
+          sourceSha256 = sha256Utf8(objectCanonical([
+            ["assessmentSha256", quote(assessmentSha)],
+            ["findingSha256", quote(sha256Utf8(canonicalFinding(finding)))],
+            ["dismissalSha256", quote(sha256Utf8(canonicalOwnerResolution(resolution)))],
+          ]));
+        }
+      }
+    }
+    if (sourceSha256 === null) return null;
+    criteria.push(Object.freeze({ criterionId: criterion.id, judge: criterion.judge, sourceSha256 }));
+  }
+  if (criteria.length !== projection.criteria.length) return null;
+  const withoutSha = deepFreeze({
+    version: CRITIC_COMPLETION_AUTHORITY_VERSION,
+    projectHash: context.projectHash,
+    runId: context.runId,
+    taskSpecSha256: context.taskSpecSha256,
+    evidencePlanSha256: context.evidencePlanSha256,
+    candidateSha256: context.candidateSha256,
+    assessmentSha256: context.assessmentSha256,
+    policyContextSha256: sha256Utf8(canonicalPolicyAuthorityContext(context)),
+    criteria,
+  }) as Omit<CriticCompletionAuthorityV1, "completionAuthoritySha256">;
+  const authority = deepFreeze({
+    ...withoutSha,
+    completionAuthoritySha256: sha256Utf8(canonicalCompletionWithoutSha(withoutSha)),
+  }) as CriticCompletionAuthorityV1;
+  completionAuthorityBrands.add(authority);
+  completionAuthorityBindings.set(authority, context);
+  return authority;
 }

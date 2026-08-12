@@ -364,7 +364,7 @@ test("critic calibration: decline, mismatch, cross-project, stale, and replay st
   }
 });
 
-test("critic calibration: a replacement project approval cannot decide or authorize the held fixture", async () => {
+test("critic calibration: a competing project approval cannot replace or decide the held fixture", async () => {
   const profile = mkdtempSync(join(tmpdir(), "cairn-critic-calibration-profile-"));
   const project = mkdtempSync(join(tmpdir(), "cairn-critic-calibration-project-"));
   const fixture = CRITIC_CALIBRATION_MANIFEST.fixtures.find((row) => row.id === "C06")!;
@@ -388,29 +388,15 @@ test("critic calibration: a replacement project approval cannot decide or author
       authorization: approved(other.request),
       mode: "required",
     });
-    assert.ok(replacement);
-    assert.notEqual(replacement.approvalId, opened.value.disclosure.approvalId);
-
-    assert.deepEqual(await orchestrator.decide({
-      dir: project,
-      approvalId: replacement.approvalId,
-      action: "stop-task",
-      disclosure: replacement,
-    }), { ok: false, code: "CRITIC_CALL_DECISION_UNKNOWN_APPROVAL" });
+    assert.equal(replacement, null);
     assert.equal(calls, 0);
     assert.deepEqual(orchestrator.records(), []);
-    assert.equal(currentCriticCallApproval(project), replacement,
-      "the genuine replacement approval must remain current and unconsumed");
+    assert.equal(currentCriticCallApproval(project), opened.value.disclosure,
+      "the genuine held fixture must remain current and unconsumed");
     assert.equal(orchestrator.hasActive(project), true, "the held fixture remains separately cancellable");
     assert.equal(orchestrator.cancel(project).ok, true);
-    assert.equal(currentCriticCallApproval(project), replacement,
-      "cancelling the held fixture must not retire its genuine replacement");
-    assert.equal(decideCriticCall({
-      dir: project,
-      approvalId: replacement.approvalId,
-      action: "stop-task",
-      disclosure: replacement,
-    }).ok, true, "the rightful approval path must still be able to consume its own card");
+    assert.equal(currentCriticCallApproval(project), null,
+      "cancelling the held fixture retires only its exact card");
     assert.equal(calls, 0);
   } finally {
     rmSync(project, { recursive: true, force: true });

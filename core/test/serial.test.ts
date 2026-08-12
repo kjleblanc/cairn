@@ -46,6 +46,7 @@ import {
   CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
   NODE_PERMISSION_MODEL_CANDIDATE_TEST_PROGRAM_VERSION,
   composeNodePermissionModelCandidateAdapterForTest,
+  composeQ9E2eFakeCandidateAdapter,
   composeTaskAdapterCandidateWriterSupportForTest,
   createOfflineDemoAdapter,
   type AdapterTaskContract,
@@ -69,19 +70,54 @@ import {
   SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
   SERIAL_CANDIDATE_TRANSITION_VERSION,
   SERIAL_REPAIR_INSTRUCTION_VERSION,
+  activateSerialCandidateQualityLoop,
   advanceSerialCandidate,
+  admitSerialCandidateRepair,
+  authorizeSerialRepairPreview,
+  authorizeSerialCandidateSealFromCompletion,
   composeSerialCandidate,
   composeSerialCandidateSealAuthorization,
   composeSerialCandidateTaskSpecAuthority,
   composeSerialCandidateTransition,
+  composeSerialRepairPreview,
+  reserveSerialCandidateRepair,
+  reserveSerialCandidateCritic,
+  serialCandidateAttemptCustody,
+  serialCandidatePriorConfirmedFindings,
+  serialCandidateCurrentAvailableAssessment,
+  serialCandidateQualityLoopAuthorityRequired,
+  serialCandidateTaskSpecAuthority,
+  settleSerialCandidateCritic,
+  settleSerialCandidateOwnerResolution,
+  serialCandidateWorkspaceStillExact,
   replaceSerialCandidateAfterRepair,
   type SerialCandidateSealAuthorizationV1,
   type SerialCandidateV1,
 } from "../src/candidate.js";
 import {
+  authorizeCairnCriterionFailureConfirmation,
+  composeCriticAssessment,
+  composeCriticAssessmentCustody,
+  composeCriticCallAuthorization,
+  composeCriticCompletionAuthority,
+  composeCriticPacketAuthorityContext,
+  composeCriticPolicyAuthorityContext,
+  composeCriticRepairAuthority,
+  composeCriticRequest,
+  composeCriticPolicyDecision,
+  consumeCriticCallAuthorization,
+  criticAssessmentSha256,
+  criticFindingRenderSha256,
+  parseCriticOutput,
+} from "../src/critic.js";
+import {
   authorizeSerialCandidateRepair,
+  adoptSerialCandidateRepairResult,
+  adoptSerialCandidateEvidencePlanRevisionForRun,
+  authorizeSerialCandidateQ9HarnessRevision,
   captureSerialCandidateAfterRepair,
   composeSerialCandidateStateTestWriterIsolation,
+  composeSerialCandidateE2eFakeWriterIsolation,
   composeSerialCandidateWriterIsolation,
   composeSerialTaskSpecAuthority,
   executeSerialCandidateTerminal,
@@ -89,6 +125,7 @@ import {
   parkSerialCandidateForRestart,
   prepareSerialCandidateTerminal,
   previewSerialCandidateRoute,
+  previewSerialCandidateQ9HarnessRevision,
   previewSerialCandidateRouteForStateTest,
   previewSerialRoute,
   previewTaskSpecSerialRoute,
@@ -97,11 +134,24 @@ import {
   runSerialTaskToCandidateForStateTest as runSerialTaskToCandidateRaw,
   runSerialTask as runSerialTaskWithIntent,
   resumeSerialCandidateFromPending,
+  resumeSerialCandidateInterruptedRepairForStop,
+  rerunSerialCandidateQ9RevisedEvidence,
+  composeSerialCandidatePolicyEvidence,
+  serialCandidateQ9HarnessFailure,
+  serialQ9HarnessFailureSha256,
+  serialCandidateTerminalResultSha256,
   type SerialStopReason,
   type SerialRunOptions,
   type SerialCandidateRunOptions,
   type SerialCandidateWriterIsolationV1,
 } from "../src/serial.js";
+import {
+  authorizeSerialAuthenticatedPendingJournal,
+  reconcileSerialCandidateTerminalFromAuthenticatedPending,
+  registerSerialAuthenticatedPendingJournalVerifier,
+  resumeSerialCandidateFromAuthenticatedPending,
+  type SerialAuthenticatedPendingJournalBinding,
+} from "../src/main-pending.js";
 import { acquireRunLock } from "../src/lock.js";
 import { classifyTaskSpecRunRecord } from "../src/records.js";
 import { projectStatus } from "../src/steps.js";
@@ -112,6 +162,49 @@ const LOG_HEADER =
 
 const DIRECT_INPUT_ID = "00000000-0000-4000-8000-000000000055";
 let terminalActionSequence = 1;
+let pendingJournalRevision = 1;
+const pendingJournalBindings = new WeakMap<object, SerialAuthenticatedPendingJournalBinding>();
+assert.equal(registerSerialAuthenticatedPendingJournalVerifier((authority, expected) => {
+  if (typeof authority !== "object" || authority === null) return false;
+  const binding = pendingJournalBindings.get(authority);
+  return binding !== undefined && JSON.stringify(binding) === JSON.stringify(expected);
+}), true);
+
+function authenticatedPendingProof(capsule: { canonicalBytes: string; capsuleSha256: string }, prepared: boolean) {
+  const inner = JSON.parse(capsule.canonicalBytes) as Record<string, any>;
+  const pending = prepared ? inner.pending : inner;
+  const candidate = pending.candidate as Record<string, unknown>;
+  const revision = pendingJournalRevision++;
+  const binding = Object.freeze({
+    capsuleSha256: capsule.capsuleSha256,
+    projectRootSha256: candidate.projectRootSha256 as string,
+    runId: candidate.runId as string,
+    candidateSha256: candidate.candidateSha256 as string,
+    revision,
+    prepared,
+  });
+  const mainAuthority = Object.freeze(Object.create(null));
+  pendingJournalBindings.set(mainAuthority, binding);
+  const journalAuthority = authorizeSerialAuthenticatedPendingJournal(mainAuthority, binding);
+  assert.ok(journalAuthority);
+  return { revision, journalAuthority };
+}
+
+function resumeAuthenticated(root: string, capsule: { canonicalBytes: string; capsuleSha256: string }) {
+  const proof = authenticatedPendingProof(capsule, false);
+  return resumeSerialCandidateFromAuthenticatedPending(root, capsule, proof.revision, proof.journalAuthority);
+}
+
+function reconcileAuthenticated(
+  root: string,
+  capsule: { canonicalBytes: string; capsuleSha256: string },
+  action: unknown,
+) {
+  const proof = authenticatedPendingProof(capsule, true);
+  return reconcileSerialCandidateTerminalFromAuthenticatedPending(
+    root, capsule, action, proof.revision, proof.journalAuthority,
+  );
+}
 
 function nextTerminalActionId(): string {
   const suffix = (terminalActionSequence++).toString(16).padStart(12, "0");
@@ -350,7 +443,7 @@ function qualityInputs(criticMode: "off" | "optional" | "required" = "off") {
       id: "p1",
       dimension: "polish",
       desiredDirection: "Prefer a polished result when it changes no required behavior.",
-      basis: [{ kind: "intent-requirement", index: 0 }],
+      basis: [{ kind: "intent-outcome" }],
       comparison: null,
     }],
     references: [],
@@ -3113,6 +3206,366 @@ test("Q7 candidate route refuses revision-one evidence authority before Builder 
   probe.release();
 });
 
+test("Q9 one authorized EvidencePlan revision survives pending restart with both plans", async () => {
+  const root = project();
+  const fixture = candidateFixture("optional");
+  const initial = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(initial.status, "candidate");
+  if (initial.status !== "candidate") return;
+  const originalCommand = fixture.evidencePlan.procedures[0]?.command;
+  assert.ok(originalCommand);
+  const { sha256: _sha256, text: _text, ...replacementCommand } = originalCommand;
+  void _sha256;
+  void _text;
+  const preview = previewEvidencePlanRevision(fixture.taskSpec, fixture.evidencePlan, {
+    criterionId: "c1",
+    changeKind: "timeout-increase",
+    replacementCommand: { ...replacementCommand, timeoutMs: originalCommand.timeoutMs + 30_000 },
+  }, ["main-harness-timeout-custody"]);
+  assert.ok(preview);
+  const authorization = {
+    version: EVIDENCE_PLAN_REVISION_AUTHORIZATION_VERSION,
+    runId: initial.candidate.runId,
+    taskSpecSha256: initial.candidate.taskSpecSha256,
+    criterionId: "c1",
+    fromPlanSha256: initial.candidate.evidencePlanSha256,
+    toPlanSha256: preview.toPlanSha256,
+    unchangedAuthoritySha256: preview.unchangedAuthoritySha256,
+    changeKind: "timeout-increase" as const,
+    mainHarnessFailureCode: "TIMED_OUT_BEFORE_ASSERTION" as const,
+    mainEvidenceRefs: ["main-harness-timeout-custody"],
+    ownerActionNonce: "73333333-3333-4333-8333-333333333333",
+    approvedAt: "2026-08-11T16:00:00.000Z",
+  };
+  const revised = authorizeEvidencePlanRevision(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    preview,
+    authorization,
+    { ...authorization, version: EVIDENCE_PLAN_REVISION_AUTHORITY_CONTEXT_VERSION },
+  );
+  assert.ok(revised);
+  const adopted = adoptSerialCandidateEvidencePlanRevisionForRun(initial.candidate, revised);
+  assert.ok(adopted);
+  assert.equal(adopted.lineage.initialEvidencePlan.revision, 0);
+  assert.equal(adopted.lineage.evidencePlan.revision, 1);
+  const capsule = exportSerialCandidatePendingState(adopted);
+  assert.ok(capsule);
+  const inner = JSON.parse(capsule.canonicalBytes) as Record<string, unknown>;
+  assert.equal((inner.initialEvidencePlan as Record<string, unknown>).revision, 0);
+  assert.equal((inner.evidencePlan as Record<string, unknown>).revision, 1);
+  assert.ok(inner.evidencePlanRevisionCustody);
+  assert.equal(parkSerialCandidateForRestart(adopted, capsule.capsuleSha256), true);
+  assert.deepEqual(resumeSerialCandidateFromPending(root, capsule), {
+    status: "stale", reason: "INVALID_CAPSULE",
+  }, "revision custody cannot be restored from self-hashed bytes alone");
+  const pendingRecord = (JSON.parse(capsule.canonicalBytes) as Record<string, any>).candidate as Record<string, unknown>;
+  const revision = pendingJournalRevision++;
+  const binding = Object.freeze({
+    capsuleSha256: capsule.capsuleSha256,
+    projectRootSha256: pendingRecord.projectRootSha256 as string,
+    runId: pendingRecord.runId as string,
+    candidateSha256: pendingRecord.candidateSha256 as string,
+    revision,
+    prepared: false,
+  });
+  const mainAuthority = Object.freeze(Object.create(null));
+  pendingJournalBindings.set(mainAuthority, binding);
+  assert.equal(authorizeSerialAuthenticatedPendingJournal(mainAuthority, { ...binding, prepared: true }), null);
+  assert.equal(authorizeSerialAuthenticatedPendingJournal(mainAuthority, {
+    ...binding, candidateSha256: "f".repeat(64),
+  }), null);
+  const journalAuthority = authorizeSerialAuthenticatedPendingJournal(mainAuthority, binding);
+  assert.ok(journalAuthority);
+  assert.equal(resumeSerialCandidateFromAuthenticatedPending(
+    root, capsule, revision + 1, journalAuthority,
+  ).status, "stale", "the proof cannot cross revisions");
+  const resumed = resumeSerialCandidateFromAuthenticatedPending(
+    root, capsule, revision, journalAuthority,
+  );
+  assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+  if (resumed.status !== "resumed") return;
+  assert.equal(resumeSerialCandidateFromAuthenticatedPending(
+    root, capsule, revision, journalAuthority,
+  ).status, "stale", "one verified revision proof spends once");
+  assert.equal(resumed.candidate.evidencePlanSha256, evidencePlanSha256(revised.plan));
+  assert.equal(resumed.candidate.lineage.initialEvidencePlan.revision, 0);
+  assert.equal(resumed.candidate.lineage.evidencePlan.revision, 1);
+  assert.equal(serialCandidateWorkspaceStillExact(root, resumed.candidate), true,
+    "revision adoption does not invalidate the product bundle's original capture authority");
+  assert.ok(exportSerialCandidatePendingState(resumed.candidate),
+    "the resumed revision remains exportable before terminal preparation");
+  assert.equal(stopSerialCandidate(resumed.candidate)?.status, "stopped");
+});
+
+test("Q9 guarded harness failure authorizes one exact revision and rebinds only its rerun evidence", async () => {
+  const priorEnv = Object.freeze({
+    e2e: process.env.CAIRN_E2E,
+    mock: process.env.CAIRN_MOCK,
+    q9: process.env.CAIRN_TEST_Q9,
+  });
+  process.env.CAIRN_E2E = "1";
+  process.env.CAIRN_MOCK = "1";
+  process.env.CAIRN_TEST_Q9 = "1";
+  try {
+    const root = project();
+    const excludedUserDataRoot = mkdtempSync(join(tmpdir(), "cairn-q9-harness-profile-"));
+    const inputs = qualityInputs("off");
+    const original = inputs.evidencePlan.procedures[0]?.command;
+    assert.ok(original);
+    const { sha256: _sha256, text: _text, ...command } = original;
+    void _sha256;
+    void _text;
+    const initialPlan = bindInitialEvidencePlan(inputs.taskSpec, {
+      version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+      procedures: [{
+        criterionId: "c1",
+        kind: "adapter-command-attestation",
+        command: { ...command, timeoutMs: 1_000 },
+        artifactIds: ["artifact-output"],
+      }],
+    });
+    assert.ok(initialPlan);
+    const authority = composeSerialCandidateTaskSpecAuthority(inputs.taskSpec, initialPlan);
+    assert.ok(authority);
+    const adapter = composeQ9E2eFakeCandidateAdapter({
+      fixtureId: "q9-harness-revision",
+      descriptor: {
+        id: "cairn-q9-e2e-q9-harness-revision",
+        label: "Cairn Q9 harness revision fixture",
+        provider: "Cairn E2E Fixture",
+        model: "synthetic-q9/q9-harness-revision",
+        connected: true,
+        capabilities: ["serial-task", "serial-task-candidate", "offline-demo"],
+        priority: 100,
+      },
+      projectRoot: root,
+      excludedUserDataRoot,
+      program: {
+        version: NODE_PERMISSION_MODEL_CANDIDATE_TEST_PROGRAM_VERSION,
+        operations: [{
+          kind: "write", path: join(root, "candidate-output.txt"),
+          contents: "q9 harness candidate\n", expect: "allowed",
+        }],
+        result: {
+          status: "completed",
+          claimsText: taskSpecClaimsFence(authority.taskSpecSha256),
+          evidence: { outputTokens: 0 },
+        },
+      },
+    });
+    assert.ok(adapter);
+    const isolation = composeSerialCandidateE2eFakeWriterIsolation(
+      adapter,
+      root,
+      excludedUserDataRoot,
+    );
+    assert.ok(isolation);
+    const initial = await runSerialTaskToCandidateRaw(root, inputs.intent, {
+      adapters: [adapter], authority, writerIsolation: isolation,
+    });
+    assert.equal(initial.status, "candidate");
+    if (initial.status !== "candidate") return;
+    const policyBefore = composeSerialCandidatePolicyEvidence(initial.candidate);
+    assert.equal(policyBefore?.criterionResults[0]?.status, "not-met");
+    const failure = serialCandidateQ9HarnessFailure(initial.candidate);
+    assert.ok(failure);
+    assert.equal(failure.code, "TIMED_OUT_BEFORE_ASSERTION");
+    assert.equal(failure.exitCode, 124);
+    assert.match(serialQ9HarnessFailureSha256(failure) ?? "", /^[a-f0-9]{64}$/u);
+    assert.equal(serialQ9HarnessFailureSha256(structuredClone(failure)), null);
+    const preview = previewSerialCandidateQ9HarnessRevision(initial.candidate, failure);
+    assert.ok(preview);
+    assert.equal(preview.criterionId, "c1");
+    assert.equal(preview.changeKind, "timeout-increase");
+    assert.equal(preview.plan.procedures[0]?.command?.timeoutMs, 60_000);
+    assert.equal(previewSerialCandidateQ9HarnessRevision(initial.candidate, structuredClone(failure)), null);
+    const authorized = authorizeSerialCandidateQ9HarnessRevision(initial.candidate, failure, preview, {
+      ownerActionNonce: "74444444-4444-4444-8444-444444444444",
+      approvedAt: "2026-08-11T17:00:00.000Z",
+    });
+    assert.ok(authorized);
+    const revised = adoptSerialCandidateEvidencePlanRevisionForRun(initial.candidate, authorized);
+    assert.ok(revised);
+    assert.equal(composeSerialCandidatePolicyEvidence(revised)?.criterionResults[0]?.status, "cant-tell");
+    const capsule = exportSerialCandidatePendingState(revised);
+    assert.ok(capsule);
+    assert.equal(parkSerialCandidateForRestart(revised, capsule.capsuleSha256), true);
+    assert.equal(resumeSerialCandidateFromPending(root, structuredClone(capsule)).status, "stale");
+    const resumed = resumeAuthenticated(root, structuredClone(capsule));
+    assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+    if (resumed.status !== "resumed") return;
+    const refreshed = await rerunSerialCandidateQ9RevisedEvidence(
+      resumed.candidate,
+      adapter,
+      isolation,
+    );
+    assert.equal(refreshed, resumed.candidate);
+    assert.equal(composeSerialCandidatePolicyEvidence(refreshed)?.criterionResults[0]?.status, "met");
+    assert.equal(await rerunSerialCandidateQ9RevisedEvidence(refreshed, adapter, isolation), null,
+      "the exact local rerun receipt is adopted once");
+    const refreshedCapsule = exportSerialCandidatePendingState(refreshed);
+    assert.ok(refreshedCapsule);
+    assert.equal(parkSerialCandidateForRestart(refreshed, refreshedCapsule.capsuleSha256), true);
+    const refreshedResume = resumeAuthenticated(root, structuredClone(refreshedCapsule));
+    assert.equal(refreshedResume.status, "resumed", JSON.stringify(refreshedResume));
+    if (refreshedResume.status !== "resumed") return;
+    const completionEvidence = composeSerialCandidatePolicyEvidence(refreshedResume.candidate);
+    const completionTaskAuthority = serialCandidateTaskSpecAuthority(refreshedResume.candidate);
+    assert.equal(completionEvidence?.criterionResults[0]?.status, "met");
+    assert.ok(completionTaskAuthority);
+    const completionPolicy = composeCriticPolicyAuthorityContext(
+      completionTaskAuthority.taskSpec,
+      completionTaskAuthority.evidencePlan,
+      null,
+      {
+        version: "cairn-critic-policy-authority-context/v1",
+        projectHash: refreshedResume.candidate.projectRootSha256,
+        runId: refreshedResume.candidate.runId,
+        taskSpecSha256: refreshedResume.candidate.taskSpecSha256,
+        evidencePlanSha256: refreshedResume.candidate.evidencePlanSha256,
+        candidateSha256: refreshedResume.candidate.candidateSha256,
+        assessmentSha256: null,
+        criterionResults: completionEvidence?.criterionResults ?? [],
+        ownerObservations: [], ownerResolutions: [], nativeBoundaryResults: [],
+      },
+    );
+    assert.ok(completionPolicy);
+    const completion = composeCriticCompletionAuthority(
+      completionTaskAuthority.taskSpec,
+      completionTaskAuthority.evidencePlan,
+      completionPolicy,
+    );
+    assert.ok(completion);
+    const seal = authorizeSerialCandidateSealFromCompletion(refreshedResume.candidate, completion);
+    assert.ok(seal);
+    const prepared = prepareSerialCandidateTerminal(refreshedResume.candidate, {
+      actionId: nextTerminalActionId(), kind: "finalize", sealAuthorization: seal,
+    });
+    assert.ok(prepared);
+    const executed = executeSerialCandidateTerminal(
+      refreshedResume.candidate,
+      prepared,
+      prepared.action.capsuleSha256,
+    );
+    assert.ok(executed, "a refreshed revision-one harness candidate executes the exact prepared DONE");
+    assert.equal(executed.result.status, "done");
+  } finally {
+    if (priorEnv.e2e === undefined) delete process.env.CAIRN_E2E;
+    else process.env.CAIRN_E2E = priorEnv.e2e;
+    if (priorEnv.mock === undefined) delete process.env.CAIRN_MOCK;
+    else process.env.CAIRN_MOCK = priorEnv.mock;
+    if (priorEnv.q9 === undefined) delete process.env.CAIRN_TEST_Q9;
+    else process.env.CAIRN_TEST_Q9 = priorEnv.q9;
+  }
+});
+
+test("Q9 guarded Cairn blocker fixture retains one exact not-met candidate for owner confirmation", async () => {
+  const priorEnv = Object.freeze({
+    e2e: process.env.CAIRN_E2E,
+    mock: process.env.CAIRN_MOCK,
+    q9: process.env.CAIRN_TEST_Q9,
+  });
+  process.env.CAIRN_E2E = "1";
+  process.env.CAIRN_MOCK = "1";
+  process.env.CAIRN_TEST_Q9 = "1";
+  try {
+    const root = project();
+    const excludedUserDataRoot = mkdtempSync(join(tmpdir(), "cairn-q9-cairn-blocker-profile-"));
+    const inputs = qualityInputs("off");
+    const authority = composeSerialCandidateTaskSpecAuthority(inputs.taskSpec, inputs.evidencePlan);
+    assert.ok(authority);
+    const adapter = composeQ9E2eFakeCandidateAdapter({
+      fixtureId: "q9-cairn-blocker-confirmation",
+      descriptor: {
+        id: "cairn-q9-e2e-q9-cairn-blocker-confirmation",
+        label: "Cairn Q9 Cairn blocker fixture",
+        provider: "Cairn E2E Fixture",
+        model: "synthetic-q9/q9-cairn-blocker-confirmation",
+        connected: true,
+        capabilities: ["serial-task", "serial-task-candidate", "offline-demo"],
+        priority: 100,
+      },
+      projectRoot: root,
+      excludedUserDataRoot,
+      program: {
+        version: NODE_PERMISSION_MODEL_CANDIDATE_TEST_PROGRAM_VERSION,
+        operations: [{
+          kind: "write", path: join(root, "candidate-output.txt"),
+          contents: "q9 Cairn blocker candidate\n", expect: "allowed",
+        }],
+        result: {
+          status: "completed",
+          claimsText: taskSpecClaimsFence(authority.taskSpecSha256),
+          evidence: { outputTokens: 0 },
+        },
+      },
+    });
+    assert.ok(adapter);
+    const isolation = composeSerialCandidateE2eFakeWriterIsolation(adapter, root, excludedUserDataRoot);
+    assert.ok(isolation);
+    const initial = await runSerialTaskToCandidateRaw(root, inputs.intent, {
+      adapters: [adapter], authority, writerIsolation: isolation,
+    });
+    assert.equal(initial.status, "candidate", JSON.stringify(initial));
+    if (initial.status !== "candidate") return;
+    assert.equal(initial.candidate.phase, "ready-to-seal");
+    const evidence = composeSerialCandidatePolicyEvidence(initial.candidate);
+    assert.ok(evidence);
+    assert.deepEqual(evidence.criterionResults.map((row) => ({
+      criterionId: row.criterionId,
+      status: row.status,
+      source: row.source,
+      evidenceRefs: row.evidenceRefs,
+    })), [{
+      criterionId: "c1", status: "not-met", source: "adapter-execution", evidenceRefs: ["artifact-output"],
+    }]);
+    const context = composeCriticPolicyAuthorityContext(inputs.taskSpec, inputs.evidencePlan, null, {
+      version: "cairn-critic-policy-authority-context/v1",
+      projectHash: initial.candidate.projectRootSha256,
+      runId: initial.candidate.runId,
+      taskSpecSha256: initial.candidate.taskSpecSha256,
+      evidencePlanSha256: initial.candidate.evidencePlanSha256,
+      candidateSha256: initial.candidate.candidateSha256,
+      assessmentSha256: null,
+      criterionResults: evidence.criterionResults,
+      ownerObservations: [], ownerResolutions: [], nativeBoundaryResults: [],
+    });
+    assert.ok(context);
+    assert.equal(composeCriticRepairAuthority(inputs.taskSpec, inputs.evidencePlan, context), null);
+    const confirmation = authorizeCairnCriterionFailureConfirmation(inputs.taskSpec, inputs.evidencePlan, context, {
+      criterionId: "c1", failureConditionId: "failure-c1", evidenceRefsSeen: ["artifact-output"],
+      decision: "confirmed", actionNonce: "q9-cairn-blocker-fixture-confirmation",
+      confirmedAt: "2026-08-12T13:00:00.000Z", ownerActionReceiptSha256: "9".repeat(64),
+    });
+    assert.ok(confirmation);
+    const repairAuthority = composeCriticRepairAuthority(
+      inputs.taskSpec, inputs.evidencePlan, context, [confirmation],
+    );
+    assert.ok(repairAuthority);
+    const admitted = admitSerialCandidateRepair(initial.candidate, repairAuthority);
+    assert.ok(admitted);
+    assert.equal(admitted.candidate.phase, "awaiting-repair");
+    const capsule = exportSerialCandidatePendingState(admitted.candidate);
+    assert.ok(capsule);
+    assert.equal(parkSerialCandidateForRestart(admitted.candidate, capsule.capsuleSha256), true);
+    const resumed = resumeAuthenticated(root, structuredClone(capsule));
+    assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+    if (resumed.status !== "resumed") return;
+    assert.equal(resumed.candidate.phase, "awaiting-repair",
+      "restart resumes the capsule-owned repair authority without rebranding the owner journal row");
+    assert.ok(composeSerialRepairPreview(root, resumed.candidate));
+    assert.ok(stopSerialCandidate(resumed.candidate, "Q9_REQUIRED_EVIDENCE_INCOMPLETE"));
+  } finally {
+    if (priorEnv.e2e === undefined) delete process.env.CAIRN_E2E; else process.env.CAIRN_E2E = priorEnv.e2e;
+    if (priorEnv.mock === undefined) delete process.env.CAIRN_MOCK; else process.env.CAIRN_MOCK = priorEnv.mock;
+    if (priorEnv.q9 === undefined) delete process.env.CAIRN_TEST_Q9; else process.env.CAIRN_TEST_Q9 = priorEnv.q9;
+  }
+});
+
 test("Q7 pending capsule parks the exact candidate, releases its lock, and strictly resumes transition history", async () => {
   const root = project();
   const fixture = candidateFixture("optional");
@@ -3146,7 +3599,7 @@ test("Q7 pending capsule parks the exact candidate, releases its lock, and stric
   })), { status: "stale", reason: "INVALID_CAPSULE" });
   assert.deepEqual(resumeSerialCandidateFromPending(root, rewriteCapsule((inner) => {
     (inner.evidencePlan as Record<string, unknown>).revision = 1;
-  })), { status: "stale", reason: "UNSUPPORTED_EVIDENCE_REVISION" });
+  })), { status: "stale", reason: "INVALID_CAPSULE" });
   assert.equal(parkSerialCandidateForRestart(transitioned, "0".repeat(64)), false);
   assert.throws(() => acquireRunLock(root), /SERIAL_RUN_ACTIVE/);
   assert.equal(parkSerialCandidateForRestart(transitioned, capsule.capsuleSha256), true);
@@ -3178,6 +3631,132 @@ test("Q7 pending capsule parks the exact candidate, releases its lock, and stric
     status: "stale",
     reason: "INVALID_CAPSULE",
   });
+});
+
+test("Q9 pending custody cannot be downgraded to legacy by deleting or falsifying its activation flag", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const initial = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(initial.status, "candidate");
+  if (initial.status !== "candidate") return;
+  assert.equal(activateSerialCandidateQualityLoop(initial.candidate), initial.candidate);
+  const capsule = exportSerialCandidatePendingState(initial.candidate);
+  assert.ok(capsule);
+  const rewrite = (flag: "delete" | false) => {
+    const inner = JSON.parse(capsule.canonicalBytes) as {
+      q9Custody: Record<string, unknown>;
+    };
+    if (flag === "delete") delete inner.q9Custody.qualityLoopAuthorityRequired;
+    else inner.q9Custody.qualityLoopAuthorityRequired = false;
+    const canonicalBytes = JSON.stringify(inner);
+    return {
+      version: capsule.version,
+      canonicalBytes,
+      capsuleSha256: createHash("sha256").update(Buffer.from(canonicalBytes, "utf8")).digest("hex"),
+    };
+  };
+  assert.equal(parkSerialCandidateForRestart(initial.candidate, capsule.capsuleSha256), true);
+  for (const flag of ["delete", false] as const) {
+    assert.deepEqual(resumeSerialCandidateFromPending(root, rewrite(flag)), {
+      status: "stale",
+      reason: "INVALID_CAPSULE",
+    }, `recomputed Q9 capsule with ${String(flag)} activation flag stays fail-closed`);
+  }
+  const resumed = resumeSerialCandidateFromPending(root, structuredClone(capsule));
+  assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+  if (resumed.status !== "resumed") return;
+  assert.equal(composeSerialCandidateTransition(resumed.candidate, {
+    version: SERIAL_CANDIDATE_TRANSITION_VERSION,
+    runId: resumed.candidate.runId,
+    generation: resumed.candidate.generation,
+    taskNumber: resumed.candidate.taskNumber,
+    projectRootSha256: resumed.candidate.projectRootSha256,
+    round: resumed.candidate.round,
+    taskSpecSha256: resumed.candidate.taskSpecSha256,
+    evidencePlanSha256: resumed.candidate.evidencePlanSha256,
+    candidateSha256: resumed.candidate.candidateSha256,
+    bundleSha256: resumed.candidate.bundleSha256,
+    evidenceStateSha256: resumed.candidate.evidenceStateSha256,
+    decision: "critic-clear",
+  }), null, "the genuine resumed awaiting-critic candidate retains Q9 transition isolation");
+});
+
+test("a full Q9-to-legacy shape rewrite resumes only with authority-gated STOP recovery", async () => {
+  const root = project();
+  const fixture = candidateFixture("required");
+  const initial = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(initial.status, "candidate");
+  if (initial.status !== "candidate") return;
+  assert.equal(activateSerialCandidateQualityLoop(initial.candidate), initial.candidate);
+  const capsule = exportSerialCandidatePendingState(initial.candidate);
+  assert.ok(capsule);
+  const inner = JSON.parse(capsule.canonicalBytes) as Record<string, unknown>;
+  delete inner.initialEvidencePlan;
+  delete inner.evidencePlanRevisionCustody;
+  delete inner.q9Custody;
+  const canonicalBytes = JSON.stringify(inner);
+  const stripped = {
+    version: capsule.version,
+    canonicalBytes,
+    capsuleSha256: createHash("sha256").update(Buffer.from(canonicalBytes, "utf8")).digest("hex"),
+  };
+  assert.equal(parkSerialCandidateForRestart(initial.candidate, capsule.capsuleSha256), true);
+  const resumed = resumeSerialCandidateFromPending(root, stripped);
+  assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+  if (resumed.status !== "resumed") return;
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(resumed.candidate), true,
+    "all public persisted-byte restores are authority-gated, including the complete historical legacy shape");
+  assert.equal(composeSerialCandidateTransition(resumed.candidate, {
+    ...candidateTransitionBinding(resumed.candidate),
+    decision: "critic-clear",
+  }), null, "rewriting the wire format cannot recover caller-structured transition authority");
+  assert.equal(composeSerialCandidateSealAuthorization(resumed.candidate, {
+    ...candidateTransitionBinding(resumed.candidate),
+    version: SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
+    requiredCriteriaComplete: true,
+    confirmedBlockerCount: 0,
+    nativeStopCount: 0,
+  }), null, "rewriting the wire format cannot recover caller-structured seal authority");
+  const stop = prepareSerialCandidateTerminal(resumed.candidate, {
+    actionId: nextTerminalActionId(),
+    kind: "stop",
+    reason: "Q9_WORKFLOW_VERIFICATION_FAILED",
+  });
+  assert.ok(stop, "genuine legacy recovery remains available through the fail-closed STOP transaction");
+  const executed = executeSerialCandidateTerminal(resumed.candidate, stop, stop.action.capsuleSha256);
+  assert.ok(executed);
+  assert.equal(executed.result.status, "stopped");
+});
+
+test("an authenticated Main journal preserves exact legacy ready-to-seal authority across restart", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.equal(pending.candidate.phase, "ready-to-seal");
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(pending.candidate), false);
+  const capsule = exportSerialCandidatePendingState(pending.candidate);
+  assert.ok(capsule);
+  assert.equal(parkSerialCandidateForRestart(pending.candidate, capsule.capsuleSha256), true);
+
+  const resumed = resumeAuthenticated(root, structuredClone(capsule));
+  assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+  if (resumed.status !== "resumed") return;
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(resumed.candidate), false,
+    "only Main's exact authenticated legacy capsule preserves historical seal authority");
+  const result = finalizeSerialCandidate(resumed.candidate, sealCandidate(resumed.candidate));
+  assert.ok(result);
+  assert.equal(result.status, "done");
 });
 
 test("Q7 round-one capsule restores exact repair lineage and stops once after a fresh lock", async () => {
@@ -3300,8 +3879,13 @@ test("Q7 round-one capsule restores exact repair lineage and stops once after a 
   assert.equal(resumed.candidate.bundleSha256, ready.bundleSha256);
   assert.equal(resumed.candidate.evidenceStateSha256, ready.evidenceStateSha256);
   assert.deepEqual(resumed.candidate.callsUsed, ready.callsUsed);
-  assert.equal(finalizeSerialCandidate(resumed.candidate, sealCandidate(resumed.candidate)), null,
-    "round one still cannot seal without refreshed Q9 process/evidence custody");
+  assert.equal(composeSerialCandidateSealAuthorization(resumed.candidate, {
+    ...candidateTransitionBinding(resumed.candidate),
+    version: SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
+    requiredCriteriaComplete: true,
+    confirmedBlockerCount: 0,
+    nativeStopCount: 0,
+  }), null, "round one still cannot seal without refreshed Q9 process/evidence custody");
   assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
   const stopped = stopSerialCandidate(resumed.candidate, "MODEL_RESULT_NOT_VERIFIED");
   assert.ok(stopped);
@@ -3376,34 +3960,839 @@ test("Q7 prepared round-one STOP converges across both terminal hard cuts", asyn
   );
   assert.ok(execution);
   assert.equal(execution.result.status, "stopped");
+  const terminalResultSha256 = serialCandidateTerminalResultSha256(execution.result);
+  assert.match(terminalResultSha256 ?? "", /^[a-f0-9]{64}$/u);
+  assert.equal(serialCandidateTerminalResultSha256(structuredClone(execution.result)), null,
+    "a structural terminal-result clone cannot become card/outbox authority");
   const afterEffect = reconcileSerialCandidateTerminalFromPending(
     root,
     structuredClone(preparation.capsule),
     structuredClone(preparation.action),
   );
   assert.equal(afterEffect.status, "terminal", JSON.stringify(afterEffect));
-  if (afterEffect.status === "terminal") assert.deepEqual(afterEffect.receipt, execution.receipt);
+  if (afterEffect.status === "terminal") {
+    assert.deepEqual(afterEffect.receipt, execution.receipt);
+    assert.deepEqual(afterEffect.result, execution.result,
+      "the hard-cut classifier reconstructs the same honest terminal card input");
+    assert.equal(serialCandidateTerminalResultSha256(afterEffect.result), terminalResultSha256,
+      "normal return and hard-cut recovery mint the same exact terminal-result identity");
+  }
   const logText = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
   assert.equal(logText.match(/^\| 001 \|/gmu)?.length, 1);
   const probe = acquireRunLock(root);
   probe.release();
 });
 
-test("Q7 prepared terminal no-effect restart rehydrates exact one-shot authority", async () => {
+test("Q9 interrupted repair restart retains changed bytes and restores stop-only authority", async () => {
   const root = project();
-  const fixture = candidateFixture();
+  const fixture = candidateFixture("off");
   const pending = await runSerialTaskToCandidate(root, fixture.intent, {
     adapters: [candidateQualityAdapter(root)],
     authority: fixture.authority,
   });
   assert.equal(pending.status, "candidate");
   if (pending.status !== "candidate") return;
+  const preQ9LegacySeal = sealCandidate(pending.candidate);
+  const policyContext = composeCriticPolicyAuthorityContext(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    null,
+    {
+      version: "cairn-critic-policy-authority-context/v1",
+      projectHash: pending.candidate.projectRootSha256,
+      runId: pending.candidate.runId,
+      taskSpecSha256: pending.candidate.taskSpecSha256,
+      evidencePlanSha256: pending.candidate.evidencePlanSha256,
+      candidateSha256: pending.candidate.candidateSha256,
+      assessmentSha256: null,
+      criterionResults: [{
+        criterionId: "c1",
+        candidateSha256: pending.candidate.candidateSha256,
+        status: "not-met",
+        source: "adapter-execution",
+        evidenceRefs: ["artifact-output"],
+        evidencePlanSha256: pending.candidate.evidencePlanSha256,
+        resolutionSha256: null,
+      }],
+      ownerObservations: [],
+      ownerResolutions: [],
+      nativeBoundaryResults: [],
+    },
+  );
+  assert.ok(policyContext);
+  const cairnFailureConfirmation = authorizeCairnCriterionFailureConfirmation(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    policyContext,
+    {
+      criterionId: "c1",
+      failureConditionId: "failure-c1",
+      evidenceRefsSeen: ["artifact-output"],
+      decision: "confirmed",
+      actionNonce: "q9-interrupted-repair-cairn-confirmation",
+      confirmedAt: "2026-08-12T12:00:00.000Z",
+      ownerActionReceiptSha256: "6".repeat(64),
+    },
+  );
+  assert.ok(cairnFailureConfirmation);
+  const repairAuthority = composeCriticRepairAuthority(
+    fixture.taskSpec,
+    fixture.evidencePlan,
+    policyContext,
+    [cairnFailureConfirmation],
+  );
+  assert.ok(repairAuthority);
+  const admitted = admitSerialCandidateRepair(pending.candidate, repairAuthority);
+  assert.ok(admitted);
+  const preview = composeSerialRepairPreview(root, admitted.candidate);
+  assert.ok(preview);
+  const approval = authorizeSerialRepairPreview(admitted.candidate, preview, {
+    approved: true,
+    actionNonce: "q9-interrupted-repair-stop-only",
+    approvedAt: "2026-08-11T12:00:00.000Z",
+  });
+  assert.ok(approval);
+  const reserved = reserveSerialCandidateRepair(root, admitted.candidate, preview, approval);
+  assert.ok(reserved);
+  const capsule = exportSerialCandidatePendingState(reserved.candidate);
+  assert.ok(capsule);
+  assert.equal(parkSerialCandidateForRestart(reserved.candidate, capsule.capsuleSha256), true);
+
+  const strippedInner = JSON.parse(capsule.canonicalBytes) as Record<string, unknown>;
+  delete strippedInner.initialEvidencePlan;
+  delete strippedInner.evidencePlanRevisionCustody;
+  delete strippedInner.q9Custody;
+  const strippedBytes = JSON.stringify(strippedInner);
+  const strippedCapsule = {
+    version: capsule.version,
+    canonicalBytes: strippedBytes,
+    capsuleSha256: createHash("sha256").update(Buffer.from(strippedBytes, "utf8")).digest("hex"),
+  };
+  assert.deepEqual(resumeSerialCandidateInterruptedRepairForStop(root, strippedCapsule), {
+    status: "stale",
+    reason: "INVALID_CAPSULE",
+  }, "stripping Q9 custody cannot invent a historical legacy repair-reservation state");
+
+  const changedPath = join(root, "candidate-output.txt");
+  writeFileSync(changedPath, "repair bytes survived process crash\n", "utf8");
+  assert.deepEqual(resumeSerialCandidateFromPending(root, structuredClone(capsule)), {
+    status: "stale",
+    reason: "INVALID_CAPSULE",
+  }, "ordinary public resume refuses the authority-bearing capsule before workspace or lock handling");
+  const recovered = resumeSerialCandidateInterruptedRepairForStop(root, structuredClone(capsule));
+  assert.equal(recovered.status, "resumed", JSON.stringify(recovered));
+  if (recovered.status !== "resumed") return;
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(recovered.candidate), true,
+    "the public stop-only exception never preserves or reconstructs legacy DONE authority");
+  assert.equal(composeSerialCandidatePolicyEvidence(recovered.candidate), null,
+    "unaudited post-process bytes cannot become verifier evidence");
+  assert.equal(captureSerialCandidateAfterRepair(recovered.candidate, preview.instruction).eligible, false,
+    "stop-only recovery cannot adopt an interrupted Builder result");
+  assert.equal(finalizeSerialCandidate(recovered.candidate, preQ9LegacySeal), null,
+    "even a genuine pre-Q9 seal cannot cross the stop-only restart boundary into DONE");
+  const preparation = prepareSerialCandidateTerminal(recovered.candidate, {
+    actionId: nextTerminalActionId(),
+    kind: "stop",
+    reason: "MODEL_RESULT_NOT_VERIFIED",
+  });
+  assert.ok(preparation);
+  const execution = executeSerialCandidateTerminal(
+    recovered.candidate,
+    preparation,
+    preparation.action.capsuleSha256,
+  );
+  assert.ok(execution);
+  assert.equal(execution.result.status, "stopped");
+  assert.equal(readFileSync(changedPath, "utf8"), "repair bytes survived process crash\n");
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8").match(/^\| 001 \|/gmu)?.length, 1);
+});
+
+test("Q9 round-one final critic reservation survives restart with carried repair custody and exact counts", async () => {
+  const root = project();
+  const intent = bindTaskIntent({
+    version: "cairn-task-intent/v1",
+    outcome: { source: "owner-stated", text: "Build the local result.", ownerQuote: "Build the local result." },
+    requirements: [{ source: "owner-stated", text: "The supported path still passes.",
+      ownerQuote: "The supported path still passes." }],
+    context: [],
+  }, [{ kind: "conversation", inputId: "35555555-5555-4555-8555-555555555555",
+    text: "Build the local result. The supported path still passes." }]);
+  assert.ok(intent);
+  const quality = parseQualityPlanCandidate({
+    version: QUALITY_PLAN_VERSION,
+    target: { kind: "local-task", basis: [{ kind: "intent-outcome" }] },
+    supportedPath: { statement: "The supported path still passes.",
+      basis: [{ kind: "intent-requirement", index: 0 }] },
+    critic: { mode: "required", reason: "The inspected acceptance check requires independent critic evidence.",
+      basis: [{ kind: "intent-outcome" }] },
+    candidateStates: [{
+      id: "candidate-main", route: "/main", viewport: { width: 1280, height: 720 },
+      inputFixtureId: "fixture-input", dataFixtureId: "fixture-data", versionOrTime: "v1",
+      locale: "en-US", accessibilityMode: "default",
+    }],
+    acceptanceChecks: [{
+      id: "c1", promise: "Build the local result.", kind: "acceptance", judge: "critic",
+      basis: [{ kind: "intent-outcome" }],
+      failureCondition: { id: "failure-c1", statement: "The inspected result is absent.",
+        allowedArtifactIds: ["artifact-primary"] },
+      evidenceStandard: { mode: "artifact-inspection", proves: "The inspected artifact contains the result.",
+        precondition: null },
+      comparison: null,
+    }, {
+      id: "c2", promise: "The supported path still passes.", kind: "non-regression", judge: "cairn",
+      basis: [{ kind: "intent-requirement", index: 0 }],
+      failureCondition: { id: "failure-c2", statement: "The supported path regressed.",
+        allowedArtifactIds: ["artifact-primary"] },
+      evidenceStandard: { mode: "adapter-attestation", proves: "The supported-path command exits zero.",
+        precondition: null },
+      comparison: null,
+    }],
+    qualityPreferences: [{
+      id: "p1", dimension: "polish", desiredDirection: "Prefer a polished result.",
+      basis: [{ kind: "intent-requirement", index: 0 }], comparison: null,
+    }],
+    references: [], unknowns: [],
+    coverage: { outcomeCriterionIds: ["c1"],
+      requirementCriteria: [{ requirementIndex: 0, criterionIds: ["c2"] }], supportedPathCriterionId: "c2" },
+  });
+  assert.ok(quality);
+  const taskSpec = bindTaskSpec(intent, quality);
+  assert.ok(taskSpec);
+  const evidencePlan = bindInitialEvidencePlan(taskSpec, {
+    version: EVIDENCE_PLAN_CANDIDATE_VERSION,
+    procedures: [{ criterionId: "c1", kind: "packet-artifact", command: null,
+      artifactIds: ["artifact-primary"] }, {
+      criterionId: "c2", kind: "adapter-command-attestation", command: {
+        executablePath: "node", executableSha256: "e".repeat(64),
+        arguments: [{ kind: "literal", value: "--test" }], fixtureBindings: [], cwdRelative: "core",
+        expectedExitCodes: [0], timeoutMs: 60_000, resultParserMode: "node-test-tap",
+        assertion: { id: "supported-path-passes", expectedResult: "zero failing tests" },
+      }, artifactIds: ["artifact-primary"],
+    }],
+  });
+  assert.ok(evidencePlan);
+  const authority = composeSerialCandidateTaskSpecAuthority(taskSpec, evidencePlan);
+  assert.ok(authority);
+  const claimsFor = (taskSpecSha256Value: string, summary: string) => taskSpecClaimsFence(
+    taskSpecSha256Value,
+    "DONE",
+    {
+      summary,
+      criteria: [{ id: "c1", result: "The worker reports the local result present." },
+        { id: "c2", result: "The worker reports the supported path passes." }],
+    },
+  );
+  const roundZeroContent = "frozen candidate bytes\n";
+  const excludedUserDataRoot = mkdtempSync(join(tmpdir(), "cairn-q9-mixed-blocker-profile-"));
+  const priorEnv = Object.freeze({
+    e2e: process.env.CAIRN_E2E,
+    mock: process.env.CAIRN_MOCK,
+    q9: process.env.CAIRN_TEST_Q9,
+  });
+  process.env.CAIRN_E2E = "1";
+  process.env.CAIRN_MOCK = "1";
+  process.env.CAIRN_TEST_Q9 = "1";
+  const adapter = composeQ9E2eFakeCandidateAdapter({
+    fixtureId: "q9-cairn-blocker-confirmation",
+    descriptor: {
+      id: "cairn-q9-e2e-q9-cairn-blocker-confirmation",
+      label: "Cairn Q9 mixed blocker fixture",
+      provider: "Cairn E2E Fixture",
+      model: "synthetic-q9/q9-cairn-blocker-confirmation",
+      connected: true,
+      capabilities: ["serial-task", "serial-task-candidate", "offline-demo"],
+      priority: 100,
+    },
+    projectRoot: root,
+    excludedUserDataRoot,
+    program: {
+      version: NODE_PERMISSION_MODEL_CANDIDATE_TEST_PROGRAM_VERSION,
+      operations: [{ kind: "write", path: join(root, "candidate-output.txt"), contents: roundZeroContent, expect: "allowed" }],
+      result: {
+        status: "completed",
+        claimsText: claimsFor(authority.taskSpecSha256, "The initial mixed-evidence fixture completed."),
+        evidence: { outputTokens: 0 },
+      },
+    },
+  });
+  assert.ok(adapter);
+  const isolation = composeSerialCandidateE2eFakeWriterIsolation(adapter, root, excludedUserDataRoot);
+  assert.ok(isolation);
+  const fixture = { intent, taskSpec, evidencePlan, authority };
+  const initial = await (async () => {
+    try {
+      return await runSerialTaskToCandidateRaw(root, fixture.intent, {
+        adapters: [adapter], authority: fixture.authority, writerIsolation: isolation,
+      });
+    } finally {
+      if (priorEnv.e2e === undefined) delete process.env.CAIRN_E2E; else process.env.CAIRN_E2E = priorEnv.e2e;
+      if (priorEnv.mock === undefined) delete process.env.CAIRN_MOCK; else process.env.CAIRN_MOCK = priorEnv.mock;
+      if (priorEnv.q9 === undefined) delete process.env.CAIRN_TEST_Q9; else process.env.CAIRN_TEST_Q9 = priorEnv.q9;
+    }
+  })();
+  assert.equal(initial.status, "candidate");
+  if (initial.status !== "candidate") return;
+  let initialCandidate = initial.candidate;
+  const initialCapsule = exportSerialCandidatePendingState(initialCandidate);
+  assert.ok(initialCapsule);
+  assert.equal(parkSerialCandidateForRestart(initialCandidate, initialCapsule.capsuleSha256), true);
+  const initialResumed = resumeSerialCandidateFromPending(root, structuredClone(initialCapsule));
+  assert.equal(initialResumed.status, "resumed", JSON.stringify(initialResumed));
+  if (initialResumed.status !== "resumed") return;
+  assert.equal(initialResumed.candidate.phase, "awaiting-critic");
+  initialCandidate = initialResumed.candidate;
+  const initialEvidence = composeSerialCandidatePolicyEvidence(initialCandidate);
+  assert.ok(initialEvidence);
+  const roundZeroPacket = composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: initialCandidate.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    taskSpecSha256: initialCandidate.taskSpecSha256,
+    evidencePlanSha256: initialCandidate.evidencePlanSha256,
+    candidateSha256: initialCandidate.candidateSha256,
+    selectedTrackedText: [{
+      id: "artifact-primary", projectRelativePath: "candidate-output.txt",
+      sha256: createHash("sha256").update(roundZeroContent).digest("hex"), content: roundZeroContent, truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: initialCandidate.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }],
+    checkEvidence: initialEvidence.checkEvidence, priorConfirmedFindings: [], comparisonTrials: [],
+  });
+  assert.ok(roundZeroPacket);
+  const roundZeroRequest = roundZeroPacket
+    && composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, roundZeroPacket);
+  assert.ok(roundZeroRequest);
+  const roundZeroAuthorization = composeCriticCallAuthorization(roundZeroRequest, {
+    runId: initialCandidate.runId, candidateRound: 0, callAttempt: 1,
+    provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-opus-5",
+    resolvedModel: "anthropic/claude-opus-5", resolvedModelRevision: "2026-05-01",
+    connectionConsentVersion: "consent-v1", transportRevision: "openai-compatible/v1",
+    serializer: "cairn-critic-body/v1", timeoutMs: 600_000, maxOutputCharacters: 262_144,
+    purpose: "critic-assessment", serverSideTools: "none",
+    billingBasis: "Connected provider pricing; no enforceable dollar cap.",
+  });
+  assert.ok(roundZeroAuthorization);
+  const roundZeroReserved = reserveSerialCandidateCritic(initialCandidate, roundZeroAuthorization);
+  assert.ok(roundZeroReserved);
+  assert.equal(consumeCriticCallAuthorization(roundZeroAuthorization), true);
+  const roundZeroOutput = parseCriticOutput({
+    version: "cairn-critic-output/v1",
+    findings: [{
+      id: "f1", criterionId: "c1", status: "not-met", severity: "major", confidence: "high",
+      failureConditionId: "failure-c1", observed: "The round-zero artifact shows the confirmed fixture gap.",
+      evidenceRefs: ["artifact-primary"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: "Change only the approved fixture result.",
+    }, {
+      id: "f2", criterionId: "c2", status: "met", severity: null, confidence: "high",
+      failureConditionId: null, observed: "The supported-path command is still green.",
+      evidenceRefs: ["artifact-primary"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }, {
+      id: "f3", criterionId: "p1", status: "met", severity: null, confidence: "medium",
+      failureConditionId: null, observed: "The advisory preference is otherwise satisfied.",
+      evidenceRefs: ["artifact-primary"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }],
+    unscopedFindings: [], comparisons: [], largestGapId: "f1",
+  }, roundZeroRequest);
+  assert.ok(roundZeroOutput);
+  const roundZeroCustody = composeCriticAssessmentCustody(roundZeroRequest, {
+    version: "cairn-critic-assessment-custody/v1",
+    runId: roundZeroAuthorization.runId,
+    candidateRound: roundZeroAuthorization.candidateRound,
+    callAttempt: roundZeroAuthorization.callAttempt,
+    taskSpecSha256: roundZeroAuthorization.taskSpecSha256,
+    evidencePlanSha256: roundZeroAuthorization.evidencePlanSha256,
+    packetSha256: roundZeroAuthorization.packetSha256,
+    requestSha256: roundZeroAuthorization.requestSha256,
+    candidateSha256: roundZeroAuthorization.candidateSha256,
+    provider: roundZeroAuthorization.provider,
+    model: roundZeroAuthorization.resolvedModel,
+    resolvedModelRevision: roundZeroAuthorization.resolvedModelRevision,
+    connectionConsentVersion: roundZeroAuthorization.connectionConsentVersion,
+    routeRequestFingerprintSha256: roundZeroAuthorization.routeRequestFingerprintSha256,
+    criticPromptSha256: roundZeroAuthorization.criticPromptSha256,
+    policySha256: roundZeroAuthorization.policySha256,
+    createdAt: "2026-08-11T11:55:00.000Z",
+  }, roundZeroAuthorization);
+  assert.ok(roundZeroCustody);
+  const roundZeroAssessment = composeCriticAssessment(roundZeroRequest, roundZeroOutput, roundZeroCustody);
+  assert.ok(roundZeroAssessment);
+  const roundZeroAssessmentSha256 = criticAssessmentSha256(roundZeroAssessment);
+  const findingRenderSha256 = criticFindingRenderSha256(roundZeroAssessment, "f1");
+  assert.ok(roundZeroAssessmentSha256);
+  assert.ok(findingRenderSha256);
+  const initialPolicy = composeCriticPolicyAuthorityContext(fixture.taskSpec, fixture.evidencePlan, roundZeroAssessment, {
+    version: "cairn-critic-policy-authority-context/v1",
+    projectHash: initialCandidate.projectRootSha256,
+    runId: initialCandidate.runId,
+    taskSpecSha256: initialCandidate.taskSpecSha256,
+    evidencePlanSha256: initialCandidate.evidencePlanSha256,
+    candidateSha256: initialCandidate.candidateSha256,
+    assessmentSha256: roundZeroAssessmentSha256,
+    criterionResults: initialEvidence.criterionResults,
+    ownerObservations: [],
+    ownerResolutions: [{
+      version: "cairn-owner-check-resolution/v1",
+      runId: initialCandidate.runId,
+      taskSpecSha256: initialCandidate.taskSpecSha256,
+      candidateSha256: initialCandidate.candidateSha256,
+      assessmentSha256: roundZeroAssessmentSha256,
+      findingId: "f1", criterionId: "c1", failureConditionId: "failure-c1",
+      evidenceRefsSeen: ["artifact-primary"], counterEvidenceRefsSeen: [],
+      findingRenderSha256,
+      decision: "confirmed", actionNonce: "q9-round-zero-confirmed-finding",
+      decidedAt: "2026-08-11T11:56:00.000Z",
+    }],
+    nativeBoundaryResults: [],
+  });
+  assert.ok(initialPolicy);
+  const roundZeroDecision = composeCriticPolicyDecision(fixture.taskSpec, fixture.evidencePlan, initialPolicy);
+  assert.ok(roundZeroDecision);
+  assert.equal(composeCriticRepairAuthority(fixture.taskSpec, fixture.evidencePlan, initialPolicy), null,
+    "the confirmed critic finding does not confirm Cairn's independent c2 verifier failure");
+  const awaitingCairnConfirmation = settleSerialCandidateCritic(
+    roundZeroReserved.candidate,
+    roundZeroReserved.reservation,
+    roundZeroDecision,
+  );
+  assert.ok(awaitingCairnConfirmation);
+  assert.equal(awaitingCairnConfirmation.phase, "awaiting-owner-resolution");
+  assert.equal(awaitingCairnConfirmation.pendingOwnerReason, "cairn-failure-confirmation");
+  const awaitingCairnCapsule = exportSerialCandidatePendingState(awaitingCairnConfirmation);
+  assert.ok(awaitingCairnCapsule);
+  const forgedPhaseInner = JSON.parse(awaitingCairnCapsule.canonicalBytes) as {
+    candidate: { phase: string };
+  };
+  forgedPhaseInner.candidate.phase = "awaiting-repair";
+  const forgedPhaseBytes = JSON.stringify(forgedPhaseInner);
+  const forgedPhaseCapsule = {
+    version: awaitingCairnCapsule.version,
+    canonicalBytes: forgedPhaseBytes,
+    capsuleSha256: createHash("sha256").update(Buffer.from(forgedPhaseBytes, "utf8")).digest("hex"),
+  };
+  assert.equal(parkSerialCandidateForRestart(
+    awaitingCairnConfirmation,
+    awaitingCairnCapsule.capsuleSha256,
+  ), true);
+  assert.equal(resumeSerialCandidateFromPending(root, forgedPhaseCapsule).status, "stale",
+    "self-rehashing the confirmation wait into awaiting-repair cannot manufacture persisted repair authority");
+  const awaitingCairnResume = resumeAuthenticated(root, structuredClone(awaitingCairnCapsule));
+  assert.equal(awaitingCairnResume.status, "resumed", JSON.stringify(awaitingCairnResume));
+  if (awaitingCairnResume.status !== "resumed") return;
+  assert.equal(awaitingCairnResume.candidate.pendingOwnerReason, "cairn-failure-confirmation",
+    "the distinct owner-confirmation wait survives the authenticated candidate capsule");
+  const restoredRoundZeroAssessment = serialCandidateCurrentAvailableAssessment(awaitingCairnResume.candidate);
+  const restoredInitialEvidence = composeSerialCandidatePolicyEvidence(awaitingCairnResume.candidate);
+  const restoredInitialAuthority = serialCandidateTaskSpecAuthority(awaitingCairnResume.candidate);
+  assert.ok(restoredRoundZeroAssessment);
+  assert.ok(restoredInitialEvidence);
+  assert.ok(restoredInitialAuthority);
+  const restoredAssessmentSha256 = criticAssessmentSha256(restoredRoundZeroAssessment);
+  const restoredFindingRenderSha256 = criticFindingRenderSha256(restoredRoundZeroAssessment, "f1");
+  assert.ok(restoredAssessmentSha256);
+  assert.ok(restoredFindingRenderSha256);
+  const restoredInitialPolicy = composeCriticPolicyAuthorityContext(
+    restoredInitialAuthority.taskSpec,
+    restoredInitialAuthority.evidencePlan,
+    restoredRoundZeroAssessment,
+    {
+      version: "cairn-critic-policy-authority-context/v1",
+      projectHash: awaitingCairnResume.candidate.projectRootSha256,
+      runId: awaitingCairnResume.candidate.runId,
+      taskSpecSha256: awaitingCairnResume.candidate.taskSpecSha256,
+      evidencePlanSha256: awaitingCairnResume.candidate.evidencePlanSha256,
+      candidateSha256: awaitingCairnResume.candidate.candidateSha256,
+      assessmentSha256: restoredAssessmentSha256,
+      criterionResults: restoredInitialEvidence.criterionResults,
+      ownerObservations: [],
+      ownerResolutions: [{
+        version: "cairn-owner-check-resolution/v1",
+        runId: awaitingCairnResume.candidate.runId,
+        taskSpecSha256: awaitingCairnResume.candidate.taskSpecSha256,
+        candidateSha256: awaitingCairnResume.candidate.candidateSha256,
+        assessmentSha256: restoredAssessmentSha256,
+        findingId: "f1", criterionId: "c1", failureConditionId: "failure-c1",
+        evidenceRefsSeen: ["artifact-primary"], counterEvidenceRefsSeen: [],
+        findingRenderSha256: restoredFindingRenderSha256,
+        decision: "confirmed", actionNonce: "q9-round-zero-confirmed-finding",
+        decidedAt: "2026-08-11T11:56:00.000Z",
+      }],
+      nativeBoundaryResults: [],
+    },
+  );
+  assert.ok(restoredInitialPolicy);
+  const restoredRoundZeroDecision = composeCriticPolicyDecision(
+    restoredInitialAuthority.taskSpec, restoredInitialAuthority.evidencePlan, restoredInitialPolicy,
+  );
+  assert.ok(restoredRoundZeroDecision);
+  const cairnConfirmation = authorizeCairnCriterionFailureConfirmation(
+    restoredInitialAuthority.taskSpec,
+    restoredInitialAuthority.evidencePlan,
+    restoredInitialPolicy,
+    {
+      criterionId: "c2",
+      failureConditionId: "failure-c2",
+      evidenceRefsSeen: ["artifact-primary"],
+      decision: "confirmed",
+      actionNonce: "q9-round-zero-cairn-confirmation",
+      confirmedAt: "2026-08-11T11:57:00.000Z",
+      ownerActionReceiptSha256: "a".repeat(64),
+    },
+  );
+  assert.ok(cairnConfirmation);
+  const repairAuthority = composeCriticRepairAuthority(
+    restoredInitialAuthority.taskSpec,
+    restoredInitialAuthority.evidencePlan,
+    restoredInitialPolicy,
+    [cairnConfirmation],
+  );
+  assert.ok(repairAuthority);
+  const forgedInner = JSON.parse(awaitingCairnCapsule.canonicalBytes) as Record<string, any>;
+  forgedInner.candidate.phase = "awaiting-repair";
+  forgedInner.candidate.pendingOwnerReason = null;
+  forgedInner.candidate.generation += 1;
+  forgedInner.candidate.evidenceStateSha256 = "e".repeat(64);
+  forgedInner.q9Custody.repairAuthority = structuredClone(repairAuthority);
+  forgedInner.q9Custody.repairAuthoritySha256 = repairAuthority.repairAuthoritySha256;
+  const forgedAuthorityBytes = JSON.stringify(forgedInner);
+  assert.deepEqual(resumeSerialCandidateFromPending(root, {
+    version: awaitingCairnCapsule.version,
+    canonicalBytes: forgedAuthorityBytes,
+    capsuleSha256: createHash("sha256").update(Buffer.from(forgedAuthorityBytes, "utf8")).digest("hex"),
+  }), { status: "stale", reason: "INVALID_CAPSULE" },
+  "self-consistent repair-authority bytes cannot upgrade an untrusted confirmation-wait capsule");
+  const awaitingRepair = settleSerialCandidateOwnerResolution(
+    awaitingCairnResume.candidate,
+    restoredRoundZeroDecision,
+    repairAuthority,
+  );
+  assert.ok(awaitingRepair);
+  assert.equal(awaitingRepair.phase, "awaiting-repair");
+  const repairPreview = composeSerialRepairPreview(root, awaitingRepair);
+  assert.ok(repairPreview);
+  const repairApproval = authorizeSerialRepairPreview(awaitingRepair, repairPreview, {
+    approved: true,
+    actionNonce: "q9-round-one-restart-repair",
+    approvedAt: "2026-08-11T12:00:00.000Z",
+  });
+  assert.ok(repairApproval);
+  const repair = reserveSerialCandidateRepair(root, awaitingRepair, repairPreview, repairApproval);
+  assert.ok(repair);
+  writeFileSync(join(root, "candidate-output.txt"), "round one exact bytes\n", "utf8");
+  const capture = captureSerialCandidateAfterRepair(repair.candidate, repairPreview.instruction);
+  assert.equal(capture.eligible, true);
+  if (!capture.eligible) return;
+  const command = repair.candidate.lineage.evidencePlan.procedures
+    .find((procedure) => procedure.criterionId === "c2")?.command;
+  assert.ok(command);
+  const roundOne = adoptSerialCandidateRepairResult(
+    repair.candidate,
+    repairPreview.instruction,
+    capture.bundle,
+    {
+      kind: "worker-result/v3",
+      taskNumber: repair.candidate.taskNumber,
+      requestSha256: repair.candidate.requestSha256,
+      taskSpecSha256: repair.candidate.taskSpecSha256,
+      evidencePlanSha256: repair.candidate.evidencePlanSha256,
+      status: "completed",
+      claimsText: claimsFor(repair.candidate.taskSpecSha256, "Every original check was rerun for round one."),
+      evidence: { outputTokens: 0 },
+      processEvents: {
+        representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+        complete: true,
+        events: [{ sequence: 0, commandSha256: command.sha256, exitCode: 0 }],
+      },
+    },
+  );
+  assert.ok(roundOne);
+  assert.equal(serialCandidatePriorConfirmedFindings(roundOne)?.length, 1,
+    "the confirmed round-zero critic finding is exact round-one packet custody");
+  const roundOneEvidence = composeSerialCandidatePolicyEvidence(roundOne);
+  assert.ok(roundOneEvidence);
+  const content = "round one exact bytes\n";
+  const packet = composeCriticPacketAuthorityContext(fixture.taskSpec, fixture.evidencePlan, {
+    version: "cairn-critic-packet-authority-context/v1",
+    projectHash: roundOne.projectRootSha256,
+    connectionConsentVersion: "consent-v1",
+    taskSpecSha256: roundOne.taskSpecSha256,
+    evidencePlanSha256: roundOne.evidencePlanSha256,
+    candidateSha256: roundOne.candidateSha256,
+    selectedTrackedText: [{
+      id: "artifact-primary", projectRelativePath: "candidate-output.txt",
+      sha256: createHash("sha256").update(content).digest("hex"), content, truncated: false,
+      provenance: {
+        selectorVersion: "cairn-conductor-context-selector/v1", projectHash: roundOne.projectRootSha256,
+        gitTracked: true, ordinaryText: true, regularFile: true, symbolicLink: false, gitIgnored: false,
+        dependency: false, generated: false, credentialLikePath: false, credentialLikeContent: false,
+        insideProject: true, reservedArea: false, consented: true,
+      },
+    }],
+    checkEvidence: roundOneEvidence.checkEvidence,
+    priorConfirmedFindings: serialCandidatePriorConfirmedFindings(roundOne)!, comparisonTrials: [],
+  });
+  const request = packet && composeCriticRequest(fixture.taskSpec, fixture.evidencePlan, packet);
+  assert.ok(request);
+  const approval = composeCriticCallAuthorization(request, {
+    runId: roundOne.runId, candidateRound: 1, callAttempt: 2,
+    provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", model: "anthropic/claude-opus-5",
+    resolvedModel: "anthropic/claude-opus-5", resolvedModelRevision: "2026-05-01",
+    connectionConsentVersion: "consent-v1", transportRevision: "openai-compatible/v1",
+    serializer: "cairn-critic-body/v1", timeoutMs: 600_000, maxOutputCharacters: 262_144,
+    purpose: "critic-assessment", serverSideTools: "none",
+    billingBasis: "Connected provider pricing; no enforceable dollar cap.",
+  });
+  assert.ok(approval);
+  const finalReservation = reserveSerialCandidateCritic(roundOne, approval);
+  assert.ok(finalReservation);
+  assert.equal(consumeCriticCallAuthorization(approval), true);
+  const output = parseCriticOutput({
+    version: "cairn-critic-output/v1",
+    findings: [{
+      id: "f1", criterionId: "c1", status: "met", severity: null, confidence: "high",
+      failureConditionId: null, observed: "The refreshed round-one artifact meets c1.",
+      evidenceRefs: ["artifact-primary"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }, {
+      id: "f2", criterionId: "c2", status: "met", severity: null, confidence: "high",
+      failureConditionId: null, observed: "The refreshed supported-path command meets c2.",
+      evidenceRefs: ["artifact-primary"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }, {
+      id: "f3", criterionId: "p1", status: "met", severity: null, confidence: "medium",
+      failureConditionId: null, observed: "The preference remains advisory and is satisfied.",
+      evidenceRefs: ["artifact-primary"], counterEvidenceRefs: [], selfCheck: "supported",
+      rootCauseKey: null, smallestRepair: null,
+    }],
+    unscopedFindings: [], comparisons: [], largestGapId: null,
+  }, request);
+  assert.ok(output);
+  const assessmentCustody = composeCriticAssessmentCustody(request, {
+    version: "cairn-critic-assessment-custody/v1",
+    runId: approval.runId,
+    candidateRound: approval.candidateRound,
+    callAttempt: approval.callAttempt,
+    taskSpecSha256: approval.taskSpecSha256,
+    evidencePlanSha256: approval.evidencePlanSha256,
+    packetSha256: approval.packetSha256,
+    requestSha256: approval.requestSha256,
+    candidateSha256: approval.candidateSha256,
+    provider: approval.provider,
+    model: approval.resolvedModel,
+    resolvedModelRevision: approval.resolvedModelRevision,
+    connectionConsentVersion: approval.connectionConsentVersion,
+    routeRequestFingerprintSha256: approval.routeRequestFingerprintSha256,
+    criticPromptSha256: approval.criticPromptSha256,
+    policySha256: approval.policySha256,
+    createdAt: "2026-08-11T12:10:00.000Z",
+  }, approval);
+  assert.ok(assessmentCustody);
+  const assessment = composeCriticAssessment(request, output, assessmentCustody);
+  assert.ok(assessment);
+  assert.equal(finalReservation.candidate.round, 1);
+  assert.equal(finalReservation.candidate.callsUsed.repair, 1);
+  assert.equal(finalReservation.candidate.callsUsed.critic, 2);
+  const capsule = exportSerialCandidatePendingState(finalReservation.candidate);
+  assert.ok(capsule);
+  assert.equal(parkSerialCandidateForRestart(finalReservation.candidate, capsule.capsuleSha256), true);
+  const resumed = resumeAuthenticated(root, structuredClone(capsule));
+  assert.equal(resumed.status, "resumed", JSON.stringify(resumed));
+  if (resumed.status !== "resumed") return;
+  assert.equal(resumed.candidate.round, 1);
+  assert.equal(resumed.candidate.phase, "awaiting-critic-result");
+  assert.deepEqual(resumed.candidate.callsUsed, { builder: 1, repair: 1, critic: 2, externalEvidence: 0 });
+  assert.deepEqual(serialCandidateAttemptCustody(resumed.candidate)?.map((row) => [
+    row.reservation.kind, row.reservation.round, row.reservation.attempt, row.status,
+  ]), [
+    ["critic", 0, 1, "available"],
+    ["repair", 0, 1, "completed"],
+    ["critic", 1, 2, "reserved"],
+  ]);
+  const policyEvidence = composeSerialCandidatePolicyEvidence(resumed.candidate);
+  assert.ok(policyEvidence);
+  const finalPolicy = composeCriticPolicyAuthorityContext(fixture.taskSpec, fixture.evidencePlan, assessment, {
+    version: "cairn-critic-policy-authority-context/v1",
+    projectHash: resumed.candidate.projectRootSha256,
+    runId: resumed.candidate.runId,
+    taskSpecSha256: resumed.candidate.taskSpecSha256,
+    evidencePlanSha256: resumed.candidate.evidencePlanSha256,
+    candidateSha256: resumed.candidate.candidateSha256,
+    assessmentSha256: criticAssessmentSha256(assessment),
+    criterionResults: policyEvidence.criterionResults,
+    ownerObservations: [], ownerResolutions: [], nativeBoundaryResults: [],
+  });
+  assert.ok(finalPolicy);
+  const decision = composeCriticPolicyDecision(fixture.taskSpec, fixture.evidencePlan, finalPolicy);
+  assert.ok(decision);
+  assert.equal(decision.state, "clear");
+  const restoredReservation = serialCandidateAttemptCustody(resumed.candidate)
+    ?.find((row) => row.reservation.kind === "critic" && row.status === "reserved")?.reservation;
+  assert.ok(restoredReservation);
+  const ready = settleSerialCandidateCritic(resumed.candidate, restoredReservation, decision);
+  assert.ok(ready);
+  assert.equal(ready.phase, "ready-to-seal");
+  assert.equal(serialCandidateCurrentAvailableAssessment(ready), assessment);
+  const readyCapsule = exportSerialCandidatePendingState(ready);
+  assert.ok(readyCapsule);
+  assert.equal(parkSerialCandidateForRestart(ready, readyCapsule.capsuleSha256), true);
+  const readyResumed = resumeAuthenticated(root, structuredClone(readyCapsule));
+  assert.equal(readyResumed.status, "resumed", JSON.stringify(readyResumed));
+  if (readyResumed.status !== "resumed") return;
+  assert.equal(readyResumed.candidate.phase, "ready-to-seal");
+  assert.equal(
+    criticAssessmentSha256(serialCandidateCurrentAvailableAssessment(readyResumed.candidate)),
+    criticAssessmentSha256(assessment),
+    "ready-to-seal restart restores only the assessment joined to the answered final call",
+  );
+  const restoredAssessment = serialCandidateCurrentAvailableAssessment(readyResumed.candidate);
+  const terminalEvidence = composeSerialCandidatePolicyEvidence(readyResumed.candidate);
+  const terminalAuthority = serialCandidateTaskSpecAuthority(readyResumed.candidate);
+  assert.ok(restoredAssessment);
+  assert.ok(terminalEvidence);
+  assert.ok(terminalAuthority);
+  const terminalPolicy = composeCriticPolicyAuthorityContext(
+    terminalAuthority.taskSpec,
+    terminalAuthority.evidencePlan,
+    restoredAssessment,
+    {
+      version: "cairn-critic-policy-authority-context/v1",
+      projectHash: readyResumed.candidate.projectRootSha256,
+      runId: readyResumed.candidate.runId,
+      taskSpecSha256: readyResumed.candidate.taskSpecSha256,
+      evidencePlanSha256: readyResumed.candidate.evidencePlanSha256,
+      candidateSha256: readyResumed.candidate.candidateSha256,
+      assessmentSha256: criticAssessmentSha256(restoredAssessment),
+      criterionResults: terminalEvidence.criterionResults,
+      ownerObservations: [], ownerResolutions: [], nativeBoundaryResults: [],
+    },
+  );
+  assert.ok(terminalPolicy);
+  const completion = composeCriticCompletionAuthority(
+    terminalAuthority.taskSpec,
+    terminalAuthority.evidencePlan,
+    terminalPolicy,
+  );
+  assert.ok(completion);
+  const seal = authorizeSerialCandidateSealFromCompletion(readyResumed.candidate, completion);
+  assert.ok(seal);
+  const terminal = prepareSerialCandidateTerminal(readyResumed.candidate, {
+    actionId: nextTerminalActionId(),
+    kind: "finalize",
+    sealAuthorization: seal,
+  });
+  assert.ok(terminal, "a repaired round-one candidate with refreshed all-cN evidence is terminal-preparable");
+  const strippedPreparedInner = JSON.parse(terminal.capsule.canonicalBytes) as {
+    pending: Record<string, unknown> & { repairLineage: Record<string, unknown> | null };
+    terminalPlan: { baseCapsuleSha256: string };
+  };
+  delete strippedPreparedInner.pending.initialEvidencePlan;
+  delete strippedPreparedInner.pending.evidencePlanRevisionCustody;
+  delete strippedPreparedInner.pending.q9Custody;
+  if (strippedPreparedInner.pending.repairLineage !== null) {
+    delete strippedPreparedInner.pending.repairLineage.preRepairQ9Custody;
+  }
+  strippedPreparedInner.terminalPlan.baseCapsuleSha256 = createHash("sha256")
+    .update(Buffer.from(JSON.stringify(strippedPreparedInner.pending), "utf8")).digest("hex");
+  const strippedPreparedBytes = JSON.stringify(strippedPreparedInner);
+  const strippedPreparedSha = createHash("sha256")
+    .update(Buffer.from(strippedPreparedBytes, "utf8")).digest("hex");
+  assert.equal(parkSerialCandidateForRestart(
+    readyResumed.candidate,
+    terminal.action.capsuleSha256,
+  ), true);
+  const strippedPreparedResult = reconcileSerialCandidateTerminalFromPending(
+    root,
+    {
+      version: terminal.capsule.version,
+      canonicalBytes: strippedPreparedBytes,
+      capsuleSha256: strippedPreparedSha,
+    },
+    { ...terminal.action, capsuleSha256: strippedPreparedSha },
+  );
+  assert.equal(strippedPreparedResult.status, "stale",
+    "a Q9 prepared DONE rewritten into the complete legacy shape never reconstructs terminal authority");
+  const terminalResumed = reconcileAuthenticated(
+    root,
+    structuredClone(terminal.capsule),
+    structuredClone(terminal.action),
+  );
+  assert.equal(terminalResumed.status, "resumed", JSON.stringify(terminalResumed));
+  if (terminalResumed.status !== "resumed") return;
+  assert.equal(terminalResumed.candidate.round, 1);
+  assert.deepEqual(terminalResumed.candidate.callsUsed, {
+    builder: 1, repair: 1, critic: 2, externalEvidence: 0,
+  });
+  const execution = executeSerialCandidateTerminal(
+    terminalResumed.candidate,
+    terminalResumed.preparation,
+    terminal.action.capsuleSha256,
+  );
+  assert.ok(execution);
+  assert.equal(execution.result.status, "done");
+});
+
+test("an authenticated Main journal rehydrates one exact legacy prepared DONE", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(pending.candidate), false);
+  const preparation = prepareSerialCandidateTerminal(pending.candidate, {
+    actionId: nextTerminalActionId(),
+    kind: "finalize",
+    sealAuthorization: sealCandidate(pending.candidate),
+  });
+  assert.ok(preparation);
+  assert.equal(parkSerialCandidateForRestart(
+    pending.candidate,
+    preparation.action.capsuleSha256,
+  ), true);
+
+  const reconciled = reconcileAuthenticated(
+    root,
+    structuredClone(preparation.capsule),
+    structuredClone(preparation.action),
+  );
+  assert.equal(reconciled.status, "resumed", JSON.stringify(reconciled));
+  if (reconciled.status !== "resumed") return;
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(reconciled.candidate), false);
+  const execution = executeSerialCandidateTerminal(
+    reconciled.candidate,
+    reconciled.preparation,
+    preparation.action.capsuleSha256,
+  );
+  assert.ok(execution);
+  assert.equal(execution.result.status, "done");
+});
+
+test("legacy prepared DONE restart fails closed but preserves authenticated STOP recovery", async () => {
+  const root = project();
+  const fixture = candidateFixture("off");
+  assert.equal(fixture.taskSpec.quality.critic.mode, "off",
+    "this causal cut has no required-critic completion rule that could independently reject DONE");
+  const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+    adapters: [candidateQualityAdapter(root)],
+    authority: fixture.authority,
+  });
+  assert.equal(pending.status, "candidate");
+  if (pending.status !== "candidate") return;
+  assert.equal(pending.candidate.phase, "ready-to-seal");
 
   const actionId = nextTerminalActionId();
+  const genuineLegacySeal = sealCandidate(pending.candidate);
   const preparation = prepareSerialCandidateTerminal(pending.candidate, {
     actionId,
     kind: "finalize",
-    sealAuthorization: sealCandidate(pending.candidate),
+    sealAuthorization: genuineLegacySeal,
   });
   assert.ok(preparation);
   assert.equal(Object.isFrozen(preparation), true);
@@ -3438,22 +4827,42 @@ test("Q7 prepared terminal no-effect restart rehydrates exact one-shot authority
     structuredClone(preparation.capsule),
     structuredClone(preparation.action),
   );
-  assert.equal(reconciled.status, "resumed", JSON.stringify(reconciled));
-  if (reconciled.status !== "resumed") return;
-  assert.equal(reconciled.preparation.capsule.canonicalBytes, preparation.capsule.canonicalBytes);
-  assert.equal(reconciled.preparation.action.capsuleSha256, preparation.action.capsuleSha256);
+  assert.deepEqual(reconciled, { status: "stale", reason: "MANUAL_RECOVERY_REQUIRED" },
+    "an unkeyed historical structural seal cannot be promoted back to DONE after restart");
   assert.equal(git(root, ["rev-parse", "HEAD"]), baseHead);
   assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), startingLog);
   assert.equal(existsSync(reportPath), false, "classification before terminal effects is read-only");
-
-  const execution = executeSerialCandidateTerminal(
-    reconciled.candidate,
-    reconciled.preparation,
-    preparation.action.capsuleSha256,
-  );
+  const preparedInner = JSON.parse(preparation.capsule.canonicalBytes) as {
+    pending: Record<string, unknown>;
+    terminalPlan: { baseCapsuleSha256: string };
+  };
+  const baseBytes = JSON.stringify(preparedInner.pending);
+  const baseCapsule = {
+    version: preparation.capsule.version,
+    canonicalBytes: baseBytes,
+    capsuleSha256: createHash("sha256").update(Buffer.from(baseBytes, "utf8")).digest("hex"),
+  };
+  assert.equal(baseCapsule.capsuleSha256, preparedInner.terminalPlan.baseCapsuleSha256);
+  const recovered = resumeSerialCandidateFromPending(root, baseCapsule);
+  assert.equal(recovered.status, "resumed", JSON.stringify(recovered));
+  if (recovered.status !== "resumed") return;
+  assert.equal(serialCandidateQualityLoopAuthorityRequired(recovered.candidate), true,
+    "the persisted candidate is activated before any legacy seal can be reconstructed");
+  assert.equal(composeSerialCandidateSealAuthorization(recovered.candidate, {
+    ...candidateTransitionBinding(recovered.candidate),
+    version: SERIAL_CANDIDATE_SEAL_AUTHORIZATION_VERSION,
+    requiredCriteriaComplete: true,
+    confirmedBlockerCount: 0,
+    nativeStopCount: 0,
+  }), null, "removing or reordering the restore activation gate would reopen this exact critic-off DONE mint");
+  const stop = prepareSerialCandidateTerminal(recovered.candidate, {
+    actionId: nextTerminalActionId(), kind: "stop", reason: "Q9_WORKFLOW_VERIFICATION_FAILED",
+  });
+  assert.ok(stop);
+  const execution = executeSerialCandidateTerminal(recovered.candidate, stop, stop.action.capsuleSha256);
   assert.ok(execution);
-  assert.equal(execution.receipt.actionId, actionId);
-  assert.equal(execution.receipt.commitStatus, "created");
+  assert.equal(execution.result.status, "stopped");
+  assert.equal(execution.result.reason, "Q9_WORKFLOW_VERIFICATION_FAILED");
 });
 
 test("Q7 prepared STOP rehydrates its exact no-effect plan over retained product drift", async () => {
@@ -3543,7 +4952,10 @@ test("Q7 exact action-bound commit reconciles to one immutable receipt after Cor
       structuredClone(preparation.action),
     );
     assert.equal(reconciled.status, "terminal", JSON.stringify(reconciled));
-    if (reconciled.status === "terminal") assert.deepEqual(reconciled.receipt, execution.receipt);
+    if (reconciled.status === "terminal") {
+      assert.deepEqual(reconciled.receipt, execution.receipt);
+      assert.deepEqual(reconciled.result, execution.result);
+    }
     assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
     assert.equal(git(root, ["status", "--porcelain=v1", "--untracked-files=all"]), beforeStatus);
     assert.equal(readFileSync(execution.result.reportPath, "utf8"), beforeReport);
@@ -4369,6 +5781,71 @@ test("Q6 optional decline and an exact branded seal finalize once with terminal 
   assert.equal(stopSerialCandidate(ready), null);
   assert.equal(stopSerialCandidate(done.candidate), null);
   assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), closedLog);
+});
+
+test("Q6 candidate terminal commit uses only Cairn identity when Git identity is missing or hostile", async (t) => {
+  const identityNames = [
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE",
+  ] as const;
+  const identityBefore = new Map(identityNames.map((name) => [name, process.env[name]]));
+  try {
+    for (const hostile of [false, true]) await t.test(hostile ? "hostile ambient identity" : "missing identity", async () => {
+      const root = project();
+      git(root, ["config", "--unset-all", "user.name"]);
+      git(root, ["config", "--unset-all", "user.email"]);
+      for (const name of identityNames) delete process.env[name];
+      if (hostile) {
+        process.env.GIT_AUTHOR_NAME = "Untrusted Author";
+        process.env.GIT_AUTHOR_EMAIL = "untrusted-author@example.invalid";
+        process.env.GIT_AUTHOR_DATE = "2001-02-03T04:05:06Z";
+        process.env.GIT_COMMITTER_NAME = "Untrusted Committer";
+        process.env.GIT_COMMITTER_EMAIL = "untrusted-committer@example.invalid";
+        process.env.GIT_COMMITTER_DATE = "2002-03-04T05:06:07Z";
+      }
+      const fixture = candidateFixture("optional");
+      const pending = await runSerialTaskToCandidate(root, fixture.intent, {
+        adapters: [candidateQualityAdapter(root)],
+        authority: fixture.authority,
+      });
+      assert.equal(pending.status, "candidate");
+      if (pending.status !== "candidate") return;
+      const ready = transitionCandidate(pending.candidate, "optional-critic-declined");
+      const preparation = prepareSerialCandidateTerminal(ready, {
+        actionId: nextTerminalActionId(),
+        kind: "finalize",
+        sealAuthorization: sealCandidate(ready),
+      });
+      assert.ok(preparation);
+      const execution = executeSerialCandidateTerminal(
+        ready,
+        preparation,
+        preparation.action.capsuleSha256,
+      );
+      assert.ok(execution, "the prepared DONE returns its exact receipt instead of becoming an unreconciled terminal effect");
+      const done = execution.result;
+      assert.ok(done);
+      assert.equal(done.status, "done");
+      assert.equal(done.disposition, "DONE");
+      assert.equal(done.commit.status, "created");
+      assert.equal(execution.receipt.commitStatus, "created");
+      assert.equal(
+        git(root, ["show", "-s", "--format=%an <%ae>|%cn <%ce>", "HEAD"]),
+        "Cairn <cairn@local.invalid>|Cairn <cairn@local.invalid>",
+      );
+      assert.doesNotMatch(git(root, ["show", "-s", "--format=%aI|%cI", "HEAD"]), /^2001-|\|2002-/u);
+    });
+  } finally {
+    for (const name of identityNames) {
+      const value = identityBefore.get(name);
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
 test("Q6 candidate commit verifies filter-aware Git blobs while retaining exact CRLF worktree bytes", async () => {

@@ -45,9 +45,13 @@ export function CriticCallCard({ call, busy = false, onDecide }: {
   return (
     <section className="critic-call" aria-label="Independent critic call">
       <h3 className="critic-call-title">
-        {call.calibration === null
+        {call.callKind === "provider"
           ? <>Independent critic — paid call {count(call.attempt)} of at most {count(call.attemptCap)}</>
-          : <>Independent critic — synthetic calibration {call.calibration.fixtureId}, fixture {count(call.calibration.fixtureIndex)} of {count(call.calibration.fixtureCount)}</>}
+          : call.calibration !== null
+            ? <>Independent critic — synthetic calibration {call.calibration.fixtureId}, fixture {count(call.calibration.fixtureIndex)} of {count(call.calibration.fixtureCount)}</>
+            : call.syntheticTask !== null
+              ? <>Independent critic — synthetic task call {count(call.attempt)} of at most {count(call.attemptCap)}, candidate round {count(call.syntheticTask.round)}</>
+              : null}
       </h3>
 
       <dl className="critic-call-route">
@@ -87,10 +91,25 @@ export function CriticCallCard({ call, busy = false, onDecide }: {
         </section>
       )}
 
+      {call.syntheticTask === null ? null : (
+        <section className="critic-call-synthetic-task" aria-label="Synthetic task call identity">
+          <dl>
+            <div><dt>Run</dt><dd className="mono">{call.syntheticTask.runId}</dd></div>
+            <div><dt>Candidate hash</dt><dd className="mono">{call.syntheticTask.candidateSha256}</dd></div>
+            <div><dt>Candidate round</dt><dd>{count(call.syntheticTask.round)}</dd></div>
+            <div><dt>Packet hash</dt><dd className="mono">{call.syntheticTask.packetSha256}</dd></div>
+            <div><dt>Request hash</dt><dd className="mono">{call.syntheticTask.requestSha256}</dd></div>
+            <div><dt>Request-body hash</dt><dd className="mono">{call.syntheticTask.requestBodySha256}</dd></div>
+          </dl>
+        </section>
+      )}
+
       <p className="critic-call-sends">
         <strong>
           Sends {count(call.selectedFiles)} of at most {count(call.fileCap)}
-          {call.callKind === "synthetic-calibration" ? " preregistered synthetic text fixtures" : " tracked text files"}
+          {call.callKind === "synthetic-calibration"
+            ? " preregistered synthetic text fixtures"
+            : call.callKind === "synthetic-task" ? " frozen synthetic task evidence items" : " tracked text files"}
         </strong>
         {" — "}{count(call.selectedCharacters)} of at most {count(call.totalCharacterCap)} characters,
         and no more than {count(call.perFileCharacterCap)} from any one file.
@@ -99,7 +118,9 @@ export function CriticCallCard({ call, busy = false, onDecide }: {
         <p className="critic-call-empty">
           {call.callKind === "synthetic-calibration"
             ? "No synthetic fixture text is included in this call."
-            : "No file contents are included in this call."}
+            : call.callKind === "synthetic-task"
+              ? "No synthetic task evidence text is included in this call."
+              : "No file contents are included in this call."}
         </p>
       ) : (
         <ul className="critic-call-files">

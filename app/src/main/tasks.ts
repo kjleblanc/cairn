@@ -1,5 +1,5 @@
 import { ipcMain, type BrowserWindow } from "electron";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   createDirectTaskIntent,
   previewSerialRoute,
@@ -27,15 +27,20 @@ import type {
   TaskRunRequest,
   TaskReviewProjectionV1,
   CriticCallDecisionV1,
+  RepairCallDecisionV1,
+  Q9HarnessRevisionDecisionV1,
 } from "../shared/ipc.js";
 import { parseTaskReviewActionRequest } from "../shared/task-review.js";
 import type { TaskSpecProposalPreviewV1 } from "../shared/quality-preview.js";
-import { composeErrorCard, composeResultCard, postResultCard } from "./conductor/relay.js";
+import { composeErrorCard, composeResultCard, postResultCard, postResultCardOnce } from "./conductor/relay.js";
+import { newConversationId } from "./conductor/store.js";
 import {
   commentary,
   consumeCurrentTaskProposal,
   currentTaskProposal,
+  onCurrentProjectChanged,
   onTaskProposalChanged,
+  prepareCommentary,
 } from "./conductor/service.js";
 import { isConversationId } from "./conductor/conversation-id.js";
 import { canonicalProjectKey } from "./conductor/turnauth.js";
@@ -78,6 +83,31 @@ import {
   taskReviewProjection,
   type MainTaskReviewAuthorityV1,
 } from "./ownercheck.js";
+import {
+  Q9_PENDING_CANDIDATE_TERMINAL,
+  activeQ9QualityLoops,
+  applyQ9QualityLoopToSession,
+  cancelQ9QualityLoop,
+  currentQ9QualityLoop,
+  decideQ9Critic,
+  decideQ9HarnessRevision,
+  decideQ9Repair,
+  decideQ9TaskReview,
+  restoreQ9QualityLoops,
+  startQ9QualityLoop,
+  suspendQ9QualityLoopForRestart,
+  type Q9QualityLoopDependenciesV1,
+  type Q9QualityLoopSessionV1,
+} from "./qualityloop.js";
+import type {
+  Q9FakeCriticTransportV1,
+  Q9FakeTaskHarnessV1,
+} from "./q9fake.js";
+import {
+  currentPendingSerialCandidate,
+  pendingSerialCandidateTerminalCardDeliveries,
+  recordPendingSerialCandidateTerminalCardDelivery,
+} from "./pendingcandidate.js";
 
 const controllers = new Map<string, AbortController>();
 const settlements = new Map<string, Promise<unknown>>();
@@ -129,29 +159,234 @@ type PendingPreview = Readonly<{
   taskSpecPreview?: TaskSpecProposalPreviewV1;
   taskReviewAuthority?: MainTaskReviewAuthorityV1;
   taskReview?: TaskReviewProjectionV1;
+  q9Harness?: Q9FakeTaskHarnessV1;
 }>;
+
+export type Q9TaskRuntimeV1 = Readonly<{
+  harness: Q9FakeTaskHarnessV1;
+  criticTransport: Q9FakeCriticTransportV1;
+  onCutPoint?: Q9QualityLoopDependenciesV1["onCutPoint"];
+}>;
+
+function canonicalJson(value: unknown): string {
+  if (value === undefined || value === null) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+}
+
+function q9AdapterIdentitySha256(harness: Q9FakeTaskHarnessV1): string {
+  return createHash("sha256").update(canonicalJson(harness.adapter.descriptor)).digest("hex");
+}
+
+function q9RuntimeForProject(runtime: Q9TaskRuntimeV1 | null, dir: string): Q9TaskRuntimeV1 | null {
+  if (runtime === null) return null;
+  try {
+    return canonicalProjectKey(runtime.harness.projectRoot) === canonicalProjectKey(dir) ? runtime : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Deliver every authenticated closed Q9 outbox. A restart may call this
+ * again: the conversation store adopts or returns the one exact turn and the
+ * pending journal records delivery only after that authenticated read. */
+export function deliverPendingTaskResultCards(win: () => BrowserWindow | null): Readonly<{
+  delivered: number;
+  pending: number;
+}> {
+  let delivered = 0;
+  for (const entry of pendingSerialCandidateTerminalCardDeliveries()) {
+    try {
+      const card = JSON.parse(entry.card.canonicalCard) as ResultCard;
+      const posted = postResultCardOnce(
+        entry.projectRoot,
+        entry.card.conversationId,
+        card,
+        entry.card.turnTimestamp,
+      );
+      if (posted.status === "appended") {
+        const delta: ConductorDelta = {
+          dir: entry.projectRoot,
+          conversationId: entry.card.conversationId,
+          kind: "envelope",
+          turn: posted.turn,
+        };
+        win()?.webContents.send("conductor:delta", delta);
+        emitBridgeSync();
+      }
+      const preparedCommentary = prepareCommentary(
+        entry.projectRoot,
+        entry.card.conversationId,
+        card,
+        (commentDelta) => {
+          win()?.webContents.send("conductor:delta", commentDelta);
+          emitBridgeSync();
+        },
+      );
+      // Boot may adopt the exact card before its project has been selected and
+      // revalidated. Keep the authenticated outbox pending in that one case;
+      // project selection wakes this delivery loop again. Every other
+      // disposition is a one-shot claim: record it before starting a model
+      // call, so a crash can never duplicate a paid commentary attempt.
+      if (preparedCommentary.status === "defer-project-unselected") continue;
+      if (!recordPendingSerialCandidateTerminalCardDelivery(
+        entry.card.deliveryIdSha256,
+        posted.deliveredSha256,
+      )) continue;
+      delivered += 1;
+      if (preparedCommentary.status === "ready") preparedCommentary.start();
+    } catch (error) {
+      logError("task:q9 result-card delivery", error);
+    }
+  }
+  return Object.freeze({ delivered, pending: pendingSerialCandidateTerminalCardDeliveries().length });
+}
+
+function q9LoopDependencies(
+  runtime: Q9TaskRuntimeV1,
+  win: () => BrowserWindow | null,
+): Q9QualityLoopDependenciesV1 {
+  return Object.freeze({
+    repairWriter: runtime.harness.repairWriter,
+    criticTransport: runtime.criticTransport,
+    harnessRevision: Object.freeze({
+      kind: "synthetic-q9-harness-revision" as const,
+      adapter: runtime.harness.adapter,
+      writerIsolation: runtime.harness.writerIsolation,
+    }),
+    ...(runtime.onCutPoint === undefined ? {} : { onCutPoint: runtime.onCutPoint }),
+    terminal: Q9_PENDING_CANDIDATE_TERMINAL,
+    onChanged(projectRoot) {
+      const session = sessions.get(canonicalProjectKey(projectRoot));
+      const snapshot = currentQ9QualityLoop(projectRoot);
+      if (session && snapshot?.status === "recovery-required" && snapshot.refusal) {
+        session.error = `${snapshot.refusal}: Cairn kept this guarded Q9 run closed for recovery.`;
+      }
+    },
+    onTerminal(projectRoot, result) {
+      const key = canonicalProjectKey(projectRoot);
+      const session = sessions.get(key);
+      if (session) {
+        session.phase = "closed";
+        session.result = result;
+        session.error = null;
+        delete session.taskReview;
+        delete session.criticCall;
+        delete session.repairCall;
+        delete session.harnessRevision;
+      }
+      clearRunning(key);
+      controllers.delete(key);
+      deliverPendingTaskResultCards(win);
+    },
+  });
+}
+
+function restoredQ9Session(
+  runtime: Q9TaskRuntimeV1,
+  session: Q9QualityLoopSessionV1,
+): RunSessionSnapshot | null {
+  const active = currentPendingSerialCandidate(runtime.harness.projectRoot);
+  const request = taskRequestView(runtime.harness.intent);
+  if (!active || request === null || session.acceptedRequest === null
+    || canonicalJson(session.acceptedRequest) !== canonicalJson(request)
+    || session.adapterIdentitySha256 !== q9AdapterIdentitySha256(runtime.harness)) return null;
+  return {
+    dir: active.projectRoot,
+    outcome: request.outcome.text,
+    request,
+    adapterId: runtime.harness.adapter.descriptor.id,
+    conversationId: session.conversationId,
+    worker: false,
+    startedAt: session.startedAt,
+    activities: [],
+    phase: "running",
+    result: null,
+    error: null,
+    evidenceRunId: session.evidenceRunId,
+  };
+}
+
+/** Rebuild only the output/session surface for an already authenticated Q9
+ * candidate. Core + PendingRun restore the authority first; this function can
+ * neither mint a candidate nor select a different scenario. */
+export function restoreQ9TaskRuns(
+  runtime: Q9TaskRuntimeV1 | null,
+  win: () => BrowserWindow | null,
+): Readonly<{ restored: number; refused: number }> {
+  if (runtime === null) return Object.freeze({ restored: 0, refused: 0 });
+  const restored = restoreQ9QualityLoops({
+    dependenciesFor(projectRoot, session) {
+      const exactRuntime = q9RuntimeForProject(runtime, projectRoot);
+      if (exactRuntime === null) return null;
+      const projection = restoredQ9Session(exactRuntime, session);
+      if (projection === null) return null;
+      const key = canonicalProjectKey(projectRoot);
+      sessions.set(key, projection);
+      markRunning(key);
+      return q9LoopDependencies(exactRuntime, win);
+    },
+  });
+  if (currentQ9QualityLoop(runtime.harness.projectRoot) === null) {
+    const key = canonicalProjectKey(runtime.harness.projectRoot);
+    const session = sessions.get(key);
+    if (session?.phase === "running") sessions.delete(key);
+    clearRunning(key);
+  }
+  return restored;
+}
 
 /** Read-only runtime projection for workspace and IPC assembly. IPC callers
  * receive a structured clone; main-process callers must treat it as immutable. */
 export function currentTaskSession(dir: string): RunSessionSnapshot | null {
-  try { return sessions.get(canonicalProjectKey(dir)) ?? null; } catch { return null; }
+  try {
+    const session = sessions.get(canonicalProjectKey(dir));
+    return session ? applyQ9QualityLoopToSession(session, currentQ9QualityLoop(dir)) : null;
+  } catch { return null; }
 }
 
 /** Quit protection: name live runs, cancel them, and await their fail-closed close. */
-export function activeTaskRuns(): { dirs: string[]; cancelAll(): void; settled(): Promise<void> } {
+export function activeTaskRuns(): {
+  dirs: string[];
+  parkableDirs: string[];
+  allParkable: boolean;
+  suspendAllForRestart(): boolean;
+  cancelAll(): void;
+  settled(): Promise<void>;
+} {
+  const q9 = activeQ9QualityLoops();
+  const q9Keys = new Set(q9.dirs.map((dir) => canonicalProjectKey(dir)));
+  const nonQ9Running = runningDirs().filter((dir) => !q9Keys.has(canonicalProjectKey(dir)));
+  const nonQ9Starting = [...starting].filter((key) => !q9Keys.has(key));
+  const allParkable = q9.allParkable && nonQ9Running.length === 0 && nonQ9Starting.length === 0;
   return {
-    dirs: runningDirs(),
+    dirs: [...new Set([...runningDirs(), ...q9.dirs])],
+    parkableDirs: [...q9.parkableDirs],
+    allParkable,
+    suspendAllForRestart() {
+      if (!allParkable) return false;
+      return q9.dirs.every((dir) => suspendQ9QualityLoopForRestart(dir));
+    },
     cancelAll() {
       for (const controller of controllers.values()) controller.abort();
+      q9.cancelAll();
     },
     async settled() {
-      await Promise.allSettled([...settlements.values()]);
+      await Promise.allSettled([...settlements.values(), q9.settled()]);
     },
   };
 }
 
 function anyTaskRunningOrStarting(): boolean {
   return runningDirs().length > 0 || starting.size > 0;
+}
+
+function taskRunningOrStartingOutside(currentStartingKey: string): boolean {
+  return runningDirs().length > 0 || [...starting].some((key) => key !== currentStartingKey);
 }
 
 /** A calibration disclosure may be mirrored onto an older retained session,
@@ -277,6 +512,7 @@ function invalidateProjectPreview(dir: string | null): void {
 }
 
 let unsubscribeProposalChanges: (() => void) | null = null;
+let unsubscribeCurrentProjectChanges: (() => void) | null = null;
 
 function evidenceTitle(outcome: string): string {
   return outcome.replace(/\s+/g, " ").trim().slice(0, 500);
@@ -285,11 +521,16 @@ function evidenceTitle(outcome: string): string {
 export function registerTaskIpc(
   win: () => BrowserWindow | null,
   criticCalibration: CriticCalibrationOrchestrator | null = null,
+  q9Runtime: Q9TaskRuntimeV1 | null = null,
 ): void {
   const mock = process.env.CAIRN_MOCK === "1";
 
   unsubscribeProposalChanges?.();
   unsubscribeProposalChanges = onTaskProposalChanged(invalidateProjectPreview);
+  unsubscribeCurrentProjectChanges?.();
+  unsubscribeCurrentProjectChanges = onCurrentProjectChanged(() => {
+    deliverPendingTaskResultCards(win);
+  });
 
   ipcMain.handle("task:route", async (_event, unsafeRequest: unknown) => {
     const request = checkedRouteRequest(unsafeRequest);
@@ -299,7 +540,7 @@ export function registerTaskIpc(
       const status = projectStatus(dir);
       if (status.legacyState) throw new Error("LEGACY_STATE_PRESENT: Legacy Cairn runtime state was preserved unchanged. Migrate it safely before starting another task.");
       const key = canonicalProjectKey(dir);
-      const refusal = runRefusal(isTaskRunning(key) || starting.has(key), isQuitDraining());
+      const refusal = runRefusal(anyTaskRunningOrStarting(), isQuitDraining());
       if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
       if (criticCalibration?.hasActive()) {
         return { ok: false, message: CRITIC_CALIBRATION_ACTIVE } satisfies Result<never>;
@@ -311,9 +552,17 @@ export function registerTaskIpc(
       let intent: TaskIntent | null = null;
       let taskSpec: TaskSpecV1 | undefined;
       let taskSpecPreview: TaskSpecProposalPreviewV1 | undefined;
+      const guardedQ9 = q9RuntimeForProject(q9Runtime, dir);
+      if (guardedQ9 !== null && source.kind === "proposal") {
+        return { ok: false, message: "Q9_TEST_MANUAL_ONLY: The guarded offline lifecycle starts only from the local task screen." } satisfies Result<never>;
+      }
       if (source.kind === "manual") {
-        if (source.rawOutcome.length > 2_000) return { ok: false, message: DIRECT_TASK_TOO_LONG } satisfies Result<never>;
-        intent = createDirectTaskIntent(source.rawOutcome, randomUUID());
+        if (guardedQ9 !== null) {
+          intent = guardedQ9.harness.intent;
+        } else {
+          if (source.rawOutcome.length > 2_000) return { ok: false, message: DIRECT_TASK_TOO_LONG } satisfies Result<never>;
+          intent = createDirectTaskIntent(source.rawOutcome, randomUUID());
+        }
         if (intent === null) return { ok: false, message: DIRECT_TASK_INVALID } satisfies Result<never>;
         if (QUALITY_PREVIEW_ACTIVE) {
           const proposal = composeDirectTaskSpecProposal(intent);
@@ -330,7 +579,14 @@ export function registerTaskIpc(
         taskSpecPreview = current.taskSpecPreview;
       }
 
-      const detected = await detectedAdapters(mock, dir);
+      const detected: Awaited<ReturnType<typeof detectedAdapters>> = guardedQ9 === null
+        ? await detectedAdapters(mock, dir)
+        : { adapters: [guardedQ9.harness.adapter] };
+      const postDetectionRunRefusal = runRefusal(anyTaskRunningOrStarting(), isQuitDraining());
+      if (postDetectionRunRefusal) {
+        if (routeGenerations.get(key) === generation) nextGeneration(key);
+        return { ok: false, message: postDetectionRunRefusal } satisfies Result<never>;
+      }
       if (criticCalibration?.hasActive()) {
         if (routeGenerations.get(key) === generation) nextGeneration(key);
         return { ok: false, message: CRITIC_CALIBRATION_ACTIVE } satisfies Result<never>;
@@ -387,6 +643,7 @@ export function registerTaskIpc(
         ...(taskSpecPreview === undefined ? {} : { taskSpecPreview }),
         ...(taskReviewAuthority === undefined ? {} : { taskReviewAuthority }),
         ...(taskReview === undefined ? {} : { taskReview }),
+        ...(guardedQ9 === null ? {} : { q9Harness: guardedQ9.harness }),
       });
       if (routeGenerations.get(key) !== generation) return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
       previews.set(key, pending);
@@ -416,6 +673,10 @@ export function registerTaskIpc(
     }
     try {
       projectStatus(request.dir);
+      const q9 = decideQ9TaskReview(request);
+      if (q9.handled) return q9.ok
+        ? { ok: true, value: q9.value }
+        : { ok: false, message: `${q9.code}: Cairn refused that guarded Q9 owner-check choice.` };
       const key = canonicalProjectKey(request.dir);
       const authority = reviewAuthorities.get(key);
       if (authority === undefined) {
@@ -460,6 +721,10 @@ export function registerTaskIpc(
       // touches anything.
       projectStatus(request.dir);
       const key = canonicalProjectKey(request.dir);
+      const q9 = decideQ9Critic(request);
+      if (q9.handled) return q9.ok
+        ? { ok: true, value: q9.value }
+        : { ok: false, message: `${q9.code}: Cairn refused that guarded Q9 critic decision.` };
       // A project Cairn has gated for pending-run recovery may not have a
       // paid call approved against it, exactly as task start and push may not
       // proceed. Without this the critic surface would be the one authority
@@ -497,6 +762,36 @@ export function registerTaskIpc(
     } catch (error) {
       logError("critic:call-decide", error);
       return { ok: false, message: "CRITIC_CALL_STALE: That critic call is no longer waiting for a decision." };
+    }
+  });
+
+  ipcMain.handle("repair:call-decide", (_event, unsafeRequest: unknown): Result<RepairCallDecisionV1> => {
+    try {
+      const q9 = decideQ9Repair(unsafeRequest);
+      if (!q9.handled) {
+        return { ok: false, message: "Q9_REPAIR_NOT_WAITING: No guarded Builder repair is waiting for this project." };
+      }
+      return q9.ok
+        ? { ok: true, value: q9.value }
+        : { ok: false, message: `${q9.code}: Cairn refused that guarded Q9 repair decision.` };
+    } catch (error) {
+      logError("repair:call-decide", error);
+      return { ok: false, message: "Q9_REPAIR_NOT_WAITING: That guarded Builder repair is no longer waiting." };
+    }
+  });
+
+  ipcMain.handle("harness:revision-decide", (_event, unsafeRequest: unknown): Result<Q9HarnessRevisionDecisionV1> => {
+    try {
+      const q9 = decideQ9HarnessRevision(unsafeRequest);
+      if (!q9.handled) {
+        return { ok: false, message: "Q9_HARNESS_NOT_WAITING: No guarded harness correction is waiting for this project." };
+      }
+      return q9.ok
+        ? { ok: true, value: q9.value }
+        : { ok: false, message: `${q9.code}: Cairn refused that guarded harness decision.` };
+    } catch (error) {
+      logError("harness:revision-decide", error);
+      return { ok: false, message: "Q9_HARNESS_NOT_WAITING: That guarded harness correction is no longer waiting." };
     }
   });
 
@@ -590,7 +885,7 @@ export function registerTaskIpc(
       logError("task:run", error);
       return { ok: false, message: plainMessage(error) } satisfies Result<never>;
     }
-    const refusal = runRefusal(isTaskRunning(key) || starting.has(key), isQuitDraining());
+    const refusal = runRefusal(anyTaskRunningOrStarting(), isQuitDraining());
     if (refusal) return { ok: false, message: refusal } satisfies Result<never>;
     if (criticCalibration?.hasActive()) {
       return { ok: false, message: CRITIC_CALIBRATION_ACTIVE } satisfies Result<never>;
@@ -640,7 +935,9 @@ export function registerTaskIpc(
     }
     let detected: Awaited<ReturnType<typeof detectedAdapters>>;
     try {
-      detected = await detectedAdapters(mock, dir, realCallConfirmed === true ? pending.intent : undefined);
+      detected = pending.q9Harness
+        ? { adapters: [pending.q9Harness.adapter] }
+        : await detectedAdapters(mock, dir, realCallConfirmed === true ? pending.intent : undefined);
     } catch (error) {
       logError("task:run", error);
       return refuseBeforeAcceptance(plainMessage(error));
@@ -650,9 +947,8 @@ export function registerTaskIpc(
     if (previews.get(key) !== pending || routeGenerations.get(key) !== pending.generation || !pendingReviewIsCurrent(key, pending)) {
       return { ok: false, message: PREVIEW_STALE } satisfies Result<never>;
     }
-    if (isQuitDraining()) {
-      return refuseBeforeAcceptance(runRefusal(false, true) ?? "QUIT_IN_PROGRESS");
-    }
+    const postDetectionRunRefusal = runRefusal(taskRunningOrStartingOutside(key), isQuitDraining());
+    if (postDetectionRunRefusal) return refuseBeforeAcceptance(postDetectionRunRefusal);
     const postDetectionPendingRefusal = pendingTaskStartRefusal(dir);
     if (postDetectionPendingRefusal) return refuseBeforeAcceptance(postDetectionPendingRefusal);
     if (pending.source.kind === "proposal") {
@@ -716,7 +1012,9 @@ export function registerTaskIpc(
       if (reviewAuthorities.get(key) === pending.taskReviewAuthority) reviewAuthorities.delete(key);
     }
     const outcome = pending.request.outcome.text;
-    const conversationId = pending.source.kind === "proposal" ? pending.source.conversationId : null;
+    const conversationId = pending.source.kind === "proposal"
+      ? pending.source.conversationId
+      : pending.q9Harness ? newConversationId(dir) : null;
     // Capture the output-only view at the acceptance point. Acknowledgement may
     // remove the session before an asynchronous close, so ERROR cards never
     // query renderer/session/conversation state for provenance later.
@@ -799,6 +1097,87 @@ export function registerTaskIpc(
       }
       post(() => composeErrorCard(message, acceptedRequest, null, acceptedTaskReview));
       return { ok: false, message } satisfies Result<never>;
+    }
+
+    if (pending.q9Harness) {
+      const q9Harness = pending.q9Harness;
+      const runtime = q9RuntimeForProject(q9Runtime, dir);
+      if (runtime === null || runtime.harness !== q9Harness) {
+        return refuseBeforeAcceptance("Q9_TEST_RUNTIME_CHANGED: The guarded offline fixture changed before start.");
+      }
+      const session = sessions.get(key);
+      if (!session) return refuseBeforeAcceptance("Q9_TEST_SESSION_REFUSED: Cairn could not retain the guarded run session.");
+      const q9Session: Q9QualityLoopSessionV1 = Object.freeze({
+        conversationId,
+        startedAt: session.startedAt,
+        adapterIdentitySha256: q9AdapterIdentitySha256(q9Harness),
+        evidenceRunId: null,
+        acceptedRequest,
+      });
+      const controller = controllers.get(key);
+      if (!controller) return refuseBeforeAcceptance("Q9_TEST_SESSION_REFUSED: Cairn could not retain the guarded run controller.");
+      let ownsDurableQ9Terminal = false;
+      const run = (async (): Promise<Result<SerialRunResult>> => {
+        try {
+          const initial = await q9Harness.runInitial(controller.signal);
+          if (initial.status !== "candidate") {
+            if (initial.status !== "connection-required") {
+              session.phase = "closed";
+              session.result = initial;
+              return { ok: true, value: initial };
+            }
+            throw new Error("Q9_INITIAL_CANDIDATE_REFUSED");
+          }
+          const settlement = startQ9QualityLoop({
+            projectRoot: dir,
+            candidate: initial,
+            evidence: null,
+            session: q9Session,
+            dependencies: q9LoopDependencies(runtime, win),
+          });
+          // Once the pending candidate exists, its authenticated terminal
+          // outbox is the sole card writer.  Before that boundary, preserve
+          // the envelope's ordinary accepted-run error/STOP card behavior.
+          ownsDurableQ9Terminal = currentQ9QualityLoop(dir) !== null
+            || currentPendingSerialCandidate(dir) !== null;
+          const settled = await settlement;
+          session.phase = "closed";
+          session.result = settled;
+          return { ok: true, value: settled };
+        } catch (error) {
+          const message = plainMessage(error);
+          session.error = message;
+          // Before persistence, no candidate exists to terminalize. Once the
+          // Q9 loop exists it owns the durable STOP/recovery path itself.
+          if (currentQ9QualityLoop(dir) === null) session.phase = "closed";
+          return { ok: false, message };
+        } finally {
+          starting.delete(key);
+          if (currentQ9QualityLoop(dir) === null) {
+            clearRunning(key);
+            controllers.delete(key);
+          }
+          settlements.delete(key);
+        }
+      })();
+      settlements.set(key, run);
+      acceptedRunOwnsGate = true;
+      if (conversationId !== null) {
+        void run.then(
+          (outcome) => {
+            if (ownsDurableQ9Terminal) return;
+            post(() => outcome.ok
+              ? composeResultCard(outcome.value, null, acceptedTaskReview)
+              : composeErrorCard(outcome.message, acceptedRequest, null, acceptedTaskReview));
+          },
+          (error: unknown) => {
+            if (!ownsDurableQ9Terminal) {
+              post(() => composeErrorCard(plainMessage(error), acceptedRequest, null, acceptedTaskReview));
+            }
+          },
+        );
+      }
+      return run;
     }
     // Evidence exists only for a real routed worker. Bind both pictures to the
     // BrowserWindow that showed the accepted project; a replacement window or
@@ -956,6 +1335,16 @@ export function registerTaskIpc(
 
   ipcMain.handle("task:cancel", (_event, dir: string): Result<null> => {
     try {
+      const q9 = currentQ9QualityLoop(dir);
+      if (q9 !== null) {
+        if (cancelQ9QualityLoop(dir)) return { ok: true, value: null };
+        return {
+          ok: false,
+          message: q9.status === "recovery-required"
+            ? `${q9.refusal ?? "Q9_RECOVERY_REQUIRED"}: Cairn could not safely terminalize this guarded run, so it did not report cancellation as complete.`
+            : "Q9_CANCEL_REFUSED: Cairn could not safely cancel this guarded run. Reopen the run screen for its current status.",
+        };
+      }
       const controller = controllers.get(canonicalProjectKey(dir));
       if (!controller) return { ok: false, message: "No task is running for this project." };
       controller.abort();
@@ -974,7 +1363,8 @@ export function registerTaskIpc(
       // A closed session becomes visible just before terminal capture. Keep its
       // run identity until that bounded settlement finishes; an eager click on
       // "Return" cannot erase the proof between capture's two identity checks.
-      if (session && session.phase === "closed" && !isTaskRunning(key)) sessions.delete(key);
+      if (session && session.phase === "closed" && !isTaskRunning(key)
+        && currentQ9QualityLoop(dir) === null) sessions.delete(key);
       return { ok: true, value: null };
     } catch {
       return { ok: false, message: "That project session is no longer available." };

@@ -10,12 +10,26 @@ import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./i
 import {
   activePendingSerialCandidates,
   installPendingSerialCandidateRecovery,
+  installPendingSerialCandidateQ9E2eTerminalPreparedHook,
   parkPendingSerialCandidatesForRestart,
 } from "./pendingcandidate.js";
 import { beginQuitDrain } from "./rungate.js";
-import { activeTaskRuns, registerTaskIpc } from "./tasks.js";
+import {
+  activeTaskRuns,
+  deliverPendingTaskResultCards,
+  registerTaskIpc,
+  restoreQ9TaskRuns,
+  type Q9TaskRuntimeV1,
+} from "./tasks.js";
 import { createCriticCalibrationOrchestrator } from "./criticcalibration.js";
 import { createCriticCalibrationE2eFake } from "./criticcalibrationfake.js";
+import {
+  createQ9FakeCriticTransport,
+  createQ9FakeScenarioDriver,
+  createQ9FakeTaskHarness,
+  q9ScenarioFromEnvironment,
+} from "./q9fake.js";
+import { q9TerminalCardInputFromPendingState } from "./qualityloop.js";
 
 if (started) app.quit();
 
@@ -46,6 +60,18 @@ if (calibrationE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAI
 }
 if (calibrationE2eRequested && calibrationE2eMode !== "respond" && calibrationE2eMode !== "hold") {
   throw new Error("CAIRN_TEST_CRITIC_CALIBRATION_MODE must be respond or hold.");
+}
+
+const q9E2eRequested = process.env.CAIRN_TEST_Q9 === "1";
+if (process.env.CAIRN_TEST_Q9 !== undefined && !q9E2eRequested) {
+  throw new Error("CAIRN_TEST_Q9 must be exactly 1 when present.");
+}
+if (q9E2eRequested && calibrationE2eRequested) {
+  throw new Error("Q8 calibration and Q9 task fakes are mutually exclusive boot modes.");
+}
+if (q9E2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "1"
+  || !testUserData || !process.env.CAIRN_OPEN || q9ScenarioFromEnvironment() === null)) {
+  throw new Error("Q9 E2E requires the complete isolated fake guard and one closed preregistered scenario.");
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -147,6 +173,7 @@ function bootstrap(): void {
   // `sending` record. Keep the instance where the quit handler can drain that
   // work; an unapproved card deliberately remains memory-only across close.
   let criticCalibration: ReturnType<typeof createCriticCalibrationOrchestrator> | null = null;
+  let q9Runtime: Q9TaskRuntimeV1 | null = null;
 
   app.whenReady().then(() => {
     setContractPath(contractPath());
@@ -165,7 +192,9 @@ function bootstrap(): void {
     // install every project gate, and reacquire exact Core locks before even
     // one task/evidence/push IPC handler can exist. An unsafe profile stays
     // entirely dark rather than catching the error and continuing.
-    const pendingBoot = installPendingSerialCandidateRecovery(app.getPath("userData"));
+    const pendingBoot = installPendingSerialCandidateRecovery(app.getPath("userData"), {
+      terminalCardForResult: ({ result, state }) => q9TerminalCardInputFromPendingState(result, state),
+    });
     if (!pendingBoot.journal.ready) {
       // An unverifiable store is already fail-closed on its own terms: every
       // journal mutation refuses, no authority can be minted, and every
@@ -180,7 +209,7 @@ function bootstrap(): void {
       );
     }
     bootstrapReady = true;
-    registerProjectIpc();
+    registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested });
     registerConductorIpc();
     registerBridgeIpc();
     criticCalibration = calibrationE2eRequested
@@ -193,13 +222,41 @@ function bootstrap(): void {
           }),
         })
       : null;
-    registerTaskIpc(() => mainWindow, criticCalibration);
+    if (q9E2eRequested) {
+      const driver = createQ9FakeScenarioDriver({ profileRoot: app.getPath("userData") });
+      const harness = driver ? createQ9FakeTaskHarness({
+        projectRoot: process.env.CAIRN_OPEN as string,
+        profileRoot: app.getPath("userData"),
+        scenarioDriver: driver,
+      }) : null;
+      if (!driver || !harness) throw new Error("Q9_E2E_RUNTIME_REFUSED");
+      q9Runtime = Object.freeze({
+        harness,
+        criticTransport: createQ9FakeCriticTransport({ driver }),
+        onCutPoint(point: Parameters<NonNullable<Q9TaskRuntimeV1["onCutPoint"]>>[0]) {
+          const selected = driver.shouldCut(point);
+          if (selected) process.exit(86);
+          return selected;
+        },
+      });
+      installPendingSerialCandidateQ9E2eTerminalPreparedHook(() => {
+        const selected = driver.shouldCut("after-terminal-prepare");
+        if (selected) process.exit(86);
+        return selected;
+      });
+    }
+    registerTaskIpc(() => mainWindow, criticCalibration, q9Runtime);
+    restoreQ9TaskRuns(q9Runtime, () => mainWindow);
     // The phone bridge (Task 143): one LAN listener serving the owner's
-    // paired phone. It starts with the app and stops at quit; if it cannot
-    // start (no home-network address, ports in use) the settings surface
-    // says so honestly and the rest of the app is unaffected.
-    void startPhoneBridge();
+    // paired phone. It starts with the normal app and stops at quit; if it
+    // cannot start (no home-network address, ports in use) the settings
+    // surface says so honestly and the rest of the app is unaffected.
+    // Guarded Q9 is a strictly local evidence fixture: it must neither open a
+    // LAN listener nor create/update the bridge device store in its isolated
+    // profile. Registration remains inert; only the stateful runtime is dark.
+    if (!q9E2eRequested) void startPhoneBridge();
     createWindow();
+    deliverPendingTaskResultCards(() => mainWindow);
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -244,6 +301,24 @@ function bootstrap(): void {
       const grace = new Promise((resolve) => setTimeout(resolve, 8_000));
       void Promise.race([settlement, grace]).then(parkAndQuit);
     };
+
+    // Approval and owner-review waits have no process or transport in flight.
+    // Drop only their process-local cards, then park the authenticated Core
+    // candidate so relaunch can reconstruct fresh one-use actions. Do not turn
+    // a harmless window close into an owner cancellation or consume a cap.
+    if (runs.allParkable && !calibrationInFlight) {
+      quitting = true;
+      if (!runs.suspendAllForRestart()) {
+        quitting = false;
+        dialog.showErrorBox(
+          "Cairn kept the app open",
+          "The waiting task changed while Cairn was preparing to restart. Nothing was cancelled or sent.",
+        );
+        return;
+      }
+      parkAndQuit();
+      return;
+    }
 
     if (runs.dirs.length === 0) {
       quitting = true;

@@ -8,8 +8,8 @@ import { createDirectTaskIntent, type RouteResult, type SerialRunResult } from "
 import { legacyCardDigest, recordCardMarker, setCardMarkerDir } from "../src/main/conductor/cardauth.js";
 import { composeDirectTaskSpecProposal } from "../src/main/conductor/qualityproposal.js";
 import { setTurnMarkerDir } from "../src/main/conductor/turnauth.js";
-import { cardBriefing, composeErrorCard, composeResultCard, postResultCard } from "../src/main/conductor/relay.js";
-import { appendTurn, conversationsDir, listConversations, newConversationId, readTurns } from "../src/main/conductor/store.js";
+import { cardBriefing, composeErrorCard, composeResultCard, postResultCard, postResultCardOnce } from "../src/main/conductor/relay.js";
+import { appendTurn, conversationsDir, listConversations, newConversationId, readHistorySnapshot, readTurns } from "../src/main/conductor/store.js";
 import { composePendingTaskReviewAuthority, taskReviewProjection } from "../src/main/ownercheck.js";
 
 // The marker store lives outside every project — in the app it is Electron's
@@ -214,7 +214,11 @@ function twoCriterionTaskSpecCard(disposition: "DONE" | "STOPPED", partial = fal
   const card = structuredClone(composeResultCard(taskSpecDoneResult()));
   const projection = card.taskSpecResult;
   if (!projection) throw new Error("test fixture must carry a Task-Spec projection");
-  projection.requiredPromises.push({ id: "c2", promise: "The required regression check still passes." });
+  projection.requiredPromises.push({
+    id: "c2",
+    promise: "The required regression check still passes.",
+    adapterAttested: !partial,
+  });
   projection.workerClaims?.criteria.push({ id: "c2", result: "The worker says c2 is satisfied." });
   if (!partial) {
     projection.adapterAttestations.push({
@@ -303,7 +307,11 @@ test("a v4 close projects one detached Task-Spec result without merging claims, 
   assert.equal(projection.requestSha256, TASK_REQUEST_SHA256);
   assert.equal(projection.taskSpecSha256, TASK_SPEC_SHA256);
   assert.equal(projection.evidencePlanSha256, EVIDENCE_PLAN_SHA256);
-  assert.deepEqual(projection.requiredPromises, [{ id: "c1", promise: "The requested visible result exists." }]);
+  assert.deepEqual(projection.requiredPromises, [{
+    id: "c1",
+    promise: "The requested visible result exists.",
+    adapterAttested: true,
+  }]);
   assert.deepEqual(projection.advisoryPreferences, [{
     id: "p1",
     dimension: "clarity",
@@ -596,13 +604,43 @@ test("every accepted task error path supplies the retained request to error-card
     "the output-only view is captured at the atomic acceptance point");
   assert.match(tasksSource, /const acceptedTaskReview = pending\.taskReview;/,
     "the output-only Q5 review is captured at the same atomic acceptance point");
-  assert.equal((tasksSource.match(/composeErrorCard\(/g) ?? []).length, 3,
-    "all three accepted setup, settled-error, and rejected-run paths stay pinned");
-  assert.equal(
-    (tasksSource.match(/composeErrorCard\([^,\n]+, acceptedRequest, (?:null|cardEvidenceRunId), acceptedTaskReview\)/g) ?? []).length,
-    3,
-    "no accepted error path may regress to null or reconstruct provenance later",
+
+  const acceptedSetup = tasksSource.slice(
+    tasksSource.indexOf('logError("task:run accepted setup"'),
+    tasksSource.indexOf("if (pending.q9Harness)"),
   );
+  assert.match(acceptedSetup,
+    /post\(\(\) => composeErrorCard\(message, acceptedRequest, null, acceptedTaskReview\)\)/,
+    "accepted setup failure keeps the retained request before either run lane exists");
+
+  const q9 = tasksSource.slice(
+    tasksSource.indexOf("if (pending.q9Harness)"),
+    tasksSource.indexOf("// Evidence exists only for a real routed worker"),
+  );
+  assert.match(q9,
+    /outcome\.ok[\s\S]*?: composeErrorCard\(outcome\.message, acceptedRequest, null, acceptedTaskReview\)/,
+    "a Q9 pre-candidate or pre-durable-terminal refusal keeps the retained request");
+  assert.match(q9,
+    /\(error: unknown\) => \{[\s\S]*?if \(!ownsDurableQ9Terminal\)[\s\S]*?composeErrorCard\(plainMessage\(error\), acceptedRequest, null, acceptedTaskReview\)/,
+    "a rejected Q9 run promise keeps the retained request until durable terminal ownership exists");
+  assert.equal((q9.match(/composeErrorCard\(/g) ?? []).length, 2,
+    "the Q9 branch has exactly its resolved-error and rejected-promise fallbacks");
+
+  const ordinary = tasksSource.slice(
+    tasksSource.indexOf("const run: Promise<Result<SerialRunResult>>", q9.length + tasksSource.indexOf("if (pending.q9Harness)")),
+    tasksSource.indexOf('ipcMain.handle("task:cancel"'),
+  );
+  assert.match(ordinary,
+    /: composeErrorCard\(outcome\.message, acceptedRequest, cardEvidenceRunId, acceptedTaskReview\)/,
+    "an ordinary settled run refusal keeps both retained request and local evidence identity");
+  assert.match(ordinary,
+    /\(error: unknown\) => post\(\(\) => composeErrorCard\(plainMessage\(error\), acceptedRequest, cardEvidenceRunId, acceptedTaskReview\)\)/,
+    "an ordinary rejected run promise keeps both retained request and local evidence identity");
+  assert.equal((ordinary.match(/composeErrorCard\(/g) ?? []).length, 2,
+    "the ordinary branch has exactly its resolved-error and rejected-promise fallbacks");
+
+  assert.equal((tasksSource.match(/composeErrorCard\(/g) ?? []).length, 5,
+    "every error-card composer is classified by one of the five accepted-run contexts above");
 });
 
 test("result-card composition refuses a malformed evidence run identity", () => {
@@ -654,13 +692,14 @@ test("a valid Task-Spec result projection round-trips whole through authenticate
   assert.equal(turn.card.taskSpecResult?.criticReady, false);
 });
 
-test("Task-Spec persistence accepts complete multi-cN DONE and partial STOPPED evidence", () => {
+test("Task-Spec persistence accepts complete, mixed-owner DONE and partial STOPPED evidence", () => {
   const permissiveStopped = twoCriterionTaskSpecCard("STOPPED", true);
   if (!permissiveStopped.taskSpecResult) throw new Error("test fixture must carry a Task-Spec projection");
   permissiveStopped.taskSpecResult.workerClaims = null;
   permissiveStopped.taskSpecResult.adapterAttestations[0].sequence = 7;
   const cases = [
     { name: "complete DONE", card: twoCriterionTaskSpecCard("DONE") },
+    { name: "mixed owner/adapter DONE", card: twoCriterionTaskSpecCard("DONE", true) },
     { name: "partial STOPPED", card: twoCriterionTaskSpecCard("STOPPED", true) },
     { name: "STOPPED with null claims and a retained gapped event", card: permissiveStopped },
   ] as const;
@@ -702,6 +741,9 @@ test("Task-Spec card persistence rejects malformed or extra authority shapes bef
   const doneWithoutAttestations = structuredClone(composeResultCard(taskSpecDoneResult()));
   if (doneWithoutAttestations.taskSpecResult) doneWithoutAttestations.taskSpecResult.adapterAttestations = [];
   const doneMissingOneAttestation = twoCriterionTaskSpecCard("DONE", true);
+  if (doneMissingOneAttestation.taskSpecResult) {
+    doneMissingOneAttestation.taskSpecResult.requiredPromises[1].adapterAttested = true;
+  }
   const doneWithoutClaims = structuredClone(composeResultCard(taskSpecDoneResult()));
   if (doneWithoutClaims.taskSpecResult) doneWithoutClaims.taskSpecResult.workerClaims = null;
   const doneWithStoppedClaim = structuredClone(composeResultCard(taskSpecDoneResult()));
@@ -1131,6 +1173,53 @@ test("a replayed copy of a genuine card renders once, and two real cards both su
   );
   assert.deepEqual(both.map((item) => item.role === "envelope" ? item.card.acceptedRequest : null),
     [ACCEPTED_REQUEST, ACCEPTED_REQUEST]);
+});
+
+test("a persisted terminal-card timestamp makes restart delivery physically exactly once (Task 220)", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-terminal-card-once-"));
+  const id = newConversationId(root);
+  const card = composeResultCard(doneResult());
+  const timestamp = "2026-08-11T15:30:00.000Z";
+
+  const first = postResultCardOnce(root, id, card, timestamp);
+  const replay = postResultCardOnce(root, id, structuredClone(card), timestamp);
+  assert.equal(first.status, "appended");
+  assert.equal(replay.status, "already-present");
+  assert.deepEqual(replay.turn, first.turn, "restart reconstructs the exact already-delivered turn");
+  assert.equal(replay.deliveredSha256, first.deliveredSha256);
+
+  const file = join(conversationsDir(root), `${id}.jsonl`);
+  const physicalCards = readFileSync(file, "utf8").split(/\r?\n/)
+    .filter((line) => line.includes('"role":"envelope"'));
+  assert.equal(physicalCards.length, 1, "the retry does not append a second physical JSONL line");
+  assert.equal(readTurns(root, id).filter((turn) => turn.role === "envelope").length, 1);
+
+  postResultCardOnce(root, id, composeResultCard(stoppedResult()), timestamp);
+  assert.equal(readFileSync(file, "utf8").split(/\r?\n/)
+    .filter((line) => line.includes('"role":"envelope"')).length, 2,
+    "a different authenticated card remains a distinct terminal event");
+});
+
+test("restart adopts one exact marker-only terminal line without duplicating it (Task 220)", () => {
+  const root = mkdtempSync(join(tmpdir(), "cairn-terminal-card-marker-cut-"));
+  const id = newConversationId(root);
+  const card = composeResultCard(stoppedResult());
+  const timestamp = "2026-08-11T15:31:00.000Z";
+  rawMarkerBackedCard(root, id, timestamp, card);
+  const before = readHistorySnapshot(root, id);
+  assert.equal(before.entries.length, 1);
+  assert.equal(before.entries[0]?.authenticatedEnvelope, false,
+    "the marker-only crash cut has not yet entered the ordered transcript");
+
+  const recovered = postResultCardOnce(root, id, structuredClone(card), timestamp);
+  assert.equal(recovered.status, "already-present");
+  const after = readHistorySnapshot(root, id);
+  assert.equal(after.entries.length, 1);
+  assert.equal(after.entries[0]?.authenticatedEnvelope, true,
+    "retry authenticates the exact pre-existing line instead of appending another");
+  const file = join(conversationsDir(root), `${id}.jsonl`);
+  assert.equal(readFileSync(file, "utf8").split(/\r?\n/)
+    .filter((line) => line.includes('"role":"envelope"')).length, 1);
 });
 
 test("the Task-Spec conductor briefing keeps bindings, hash/exit facts, worker claims, and Main's envelope in separate blocks", () => {

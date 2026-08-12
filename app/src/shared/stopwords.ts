@@ -15,7 +15,7 @@
  * SCREAMING_CASE head matching its fixed-code shape — so an unrecognized code
  * must still produce a sentence rather than being echoed raw.
  *
- * The ten `SerialStopReason` values are mirrored by `STOP_REASON_IN_PLAIN_WORDS`
+ * The `SerialStopReason` values are mirrored by `STOP_REASON_IN_PLAIN_WORDS`
  * in `core/src/records.ts`, which writes the same facts into the report;
  * `core/test/records.test.ts` asserts the two never disagree. Two copies exist
  * deliberately: the renderer imports `@cairn/core` for types only, and this
@@ -31,6 +31,11 @@ export const KNOWN_CODE_WORDS: Readonly<Record<string, string>> = {
   REAL_MODEL_CALL_NOT_AUTHORIZED: "the run was not approved to make a real, paid call",
   MODEL_REPORTED_STOPPED: "the worker stopped itself and said why",
   MODEL_RESULT_NOT_VERIFIED: "the change could not be confirmed against a saved history",
+  Q9_CRITIC_CALLS_EXHAUSTED: "the required critic did not return a usable result within its allowed calls and one retry",
+  Q9_REQUIRED_CHECK_STILL_FAILED: "an original required check still failed after the repair",
+  Q9_NATIVE_BOUNDARY_STOPPED: "an independent safety boundary required this task to stop",
+  Q9_REQUIRED_EVIDENCE_INCOMPLETE: "the required evidence was not complete enough to verify the result",
+  Q9_WORKFLOW_VERIFICATION_FAILED: "Cairn could not safely verify the guarded quality workflow",
   ADAPTER_TIMED_OUT: "the worker ran out of time",
   CANCELLED_BY_OWNER: "you stopped it yourself",
   // app-side closes

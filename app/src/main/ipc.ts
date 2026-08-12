@@ -45,7 +45,12 @@ async function preflight(): Promise<Preflight> {
   return { mock, mode: mock ? "offline-demo" : "connection-required" };
 }
 
-export function registerProjectIpc(): void {
+export function registerProjectIpc(options: Readonly<{
+  /** Guarded offline evidence runs must not perform an ambient release lookup.
+   * Main owns this boot choice; renderer/project input cannot toggle it. */
+  suppressExternalUpdateCheck?: boolean;
+}> = {}): void {
+  const suppressExternalUpdateCheck = options.suppressExternalUpdateCheck === true;
   void preflight().then((r) => console.log("[cairn] preflight:", JSON.stringify(r)));
 
   ipcMain.handle("preflight:check", () => preflight());
@@ -185,6 +190,7 @@ export function registerProjectIpc(): void {
 
   ipcMain.handle("app:updateCheck", async (): Promise<UpdateInfo> => {
     const current = app.getVersion();
+    if (suppressExternalUpdateCheck) return { current, latest: null, newer: false };
     try {
       const res = await fetch("https://api.github.com/repos/kjleblanc/cairn/releases/latest", {
         headers: { accept: "application/vnd.github+json" },

@@ -7,7 +7,8 @@ export type TaskReviewEvidenceViewV1 = Readonly<{ label: string }>;
 
 export type TaskReviewActionViewV1 =
   | Readonly<{ kind: "observe"; actionId: string }>
-  | Readonly<{ kind: "resolve"; actionId: string }>;
+  | Readonly<{ kind: "resolve"; actionId: string }>
+  | Readonly<{ kind: "review-cairn-failure"; actionId: string }>;
 
 export type TaskReviewOwnerCheckV1 =
   | Readonly<{
@@ -25,6 +26,13 @@ export type TaskReviewOwnerCheckV1 =
       supportingEvidence: readonly TaskReviewEvidenceViewV1[];
       counterEvidence: readonly TaskReviewEvidenceViewV1[];
       action: Extract<TaskReviewActionViewV1, { kind: "resolve" }> | null;
+    }>
+  | Readonly<{
+      kind: "cairn-failure";
+      status: "not-ready" | "awaiting-confirmation" | "confirmed" | "dismissed" | "cant-tell";
+      supportingEvidence: readonly TaskReviewEvidenceViewV1[];
+      counterEvidence: readonly TaskReviewEvidenceViewV1[];
+      action: Extract<TaskReviewActionViewV1, { kind: "review-cairn-failure" }> | null;
     }>;
 
 export type TaskReviewCriterionStateV1 = Readonly<{
@@ -60,6 +68,11 @@ export type TaskReviewActionRequest =
       dir: string;
       actionId: string;
       action: Readonly<{ kind: "resolve"; decision: "confirmed" | "dismissed" | "cant-tell" }>;
+    }>
+  | Readonly<{
+      dir: string;
+      actionId: string;
+      action: Readonly<{ kind: "review-cairn-failure"; decision: "confirmed" | "dismissed" | "cant-tell" }>;
     }>;
 
 type InspectedRecord = Readonly<Record<string, unknown>>;
@@ -286,7 +299,10 @@ function sameEvidence(left: readonly TaskReviewEvidenceViewV1[], right: readonly
   return left.length === right.length && left.every((row, index) => row.label === right[index]?.label);
 }
 
-function parseActionView(value: unknown, kind: "observe" | "resolve"): TaskReviewActionViewV1 | null {
+function parseActionView(
+  value: unknown,
+  kind: TaskReviewActionViewV1["kind"],
+): TaskReviewActionViewV1 | null {
   if (value === null) return null;
   const row = inspectRecord(value, ["kind", "actionId"]);
   return row && row.kind === kind && typeof row.actionId === "string" && UUID_V4.test(row.actionId)
@@ -309,6 +325,19 @@ function parseOwnerCheck(value: unknown): TaskReviewOwnerCheckV1 | null {
     return Object.freeze({
       kind: "owner-observation", status: status as "not-ready" | "waiting-owner" | "met" | "not-met" | "cant-tell",
       supportingEvidence, counterEvidence, action: action as Extract<TaskReviewActionViewV1, { kind: "observe" }> | null,
+    });
+  }
+  if (base.kind === "cairn-failure") {
+    const status = String(base.status);
+    const action = base.action === null ? null : parseActionView(base.action, "review-cairn-failure");
+    if (!["not-ready", "awaiting-confirmation", "confirmed", "dismissed", "cant-tell"].includes(status)
+      || (base.action !== null && !action) || ((status === "awaiting-confirmation") !== (action !== null))) return null;
+    return Object.freeze({
+      kind: "cairn-failure",
+      status: status as "not-ready" | "awaiting-confirmation" | "confirmed" | "dismissed" | "cant-tell",
+      supportingEvidence,
+      counterEvidence,
+      action: action as Extract<TaskReviewActionViewV1, { kind: "review-cairn-failure" }> | null,
     });
   }
   if (base.kind !== "critic-allegation") return null;
@@ -346,17 +375,19 @@ export function parseTaskReviewProjection(value: unknown): TaskReviewProjectionV
     const ownerChecks: TaskReviewOwnerCheckV1[] = [];
     let ownerObservationCount = 0;
     let criticAllegationCount = 0;
+    let cairnFailureCount = 0;
     for (const item of ownerItems) {
       const parsed = parseOwnerCheck(item);
       if (!parsed) return null;
       if (parsed.kind === "owner-observation") {
         ownerObservationCount += 1;
         if (expected.judge !== "owner" || ownerObservationCount > 1) return null;
-      } else if (expected.judge !== "critic") {
-        return null;
+      } else if (parsed.kind === "cairn-failure") {
+        cairnFailureCount += 1;
+        if (expected.judge !== "cairn" || cairnFailureCount > 1) return null;
       } else {
         criticAllegationCount += 1;
-        if (criticAllegationCount > 1) return null;
+        if (expected.judge !== "critic" || criticAllegationCount > 1) return null;
       }
       if (!sameEvidence(parsed.supportingEvidence, supportingEvidence)
         || !sameEvidence(parsed.counterEvidence, counterEvidence)) return null;
@@ -381,9 +412,14 @@ export function parseTaskReviewProjection(value: unknown): TaskReviewProjectionV
     } else if (expected.judge === "critic") {
       if (!((row.state === "pending" && row.source === null)
         || ((row.state === "met" || row.state === "cant-tell") && row.source === "critic-inspection"))) return null;
+    } else if (ownerChecks.length === 1) {
+      const check = ownerChecks[0] as Extract<TaskReviewOwnerCheckV1, { kind: "cairn-failure" }>;
+      const state = check.status === "not-ready" || check.status === "awaiting-confirmation" ? "waiting-owner"
+        : check.status === "confirmed" ? "not-met" : "cant-tell";
+      if (row.state !== state || (row.source !== "cairn-verifier" && row.source !== "adapter-execution")) return null;
     } else {
       if (ownerChecks.length !== 0 || !((row.state === "pending" && row.source === null)
-        || ((row.state === "met" || row.state === "not-met" || row.state === "cant-tell")
+        || ((row.state === "met" || row.state === "cant-tell")
           && (row.source === "cairn-verifier" || row.source === "adapter-execution" || row.source === "worker-claim")))) return null;
     }
     if ((row.state === "met" || row.state === "not-met") && supportingEvidence.length === 0) return null;
@@ -408,6 +444,16 @@ export function parseTaskReviewActionRequest(value: unknown): TaskReviewActionRe
   }
   if (action.kind === "resolve" && ["confirmed", "dismissed", "cant-tell"].includes(String(action.decision))) {
     return Object.freeze({ dir, actionId, action: Object.freeze({ kind: "resolve", decision: action.decision as "confirmed" | "dismissed" | "cant-tell" }) });
+  }
+  if (action.kind === "review-cairn-failure" && ["confirmed", "dismissed", "cant-tell"].includes(String(action.decision))) {
+    return Object.freeze({
+      dir,
+      actionId,
+      action: Object.freeze({
+        kind: "review-cairn-failure",
+        decision: action.decision as "confirmed" | "dismissed" | "cant-tell",
+      }),
+    });
   }
   return null;
 }

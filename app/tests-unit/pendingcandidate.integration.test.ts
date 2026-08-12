@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -27,6 +28,7 @@ import {
   parseQualityPlanCandidate,
   prepareSerialCandidateTerminal,
   runSerialTaskToCandidate,
+  serialCandidateQualityLoopAuthorityRequired,
   type NodePermissionModelCandidateOperationV1,
   type TaskAdapter,
 } from "@cairn/core";
@@ -34,11 +36,17 @@ import { setEvidenceMarkerDir } from "../src/main/evidence.js";
 import {
   _resetPendingSerialCandidatesForTests,
   activePendingSerialCandidates,
+  appendPendingSerialCandidateWorkflowEvent,
+  currentPendingSerialCandidate,
   installPendingSerialCandidateRecovery,
   parkPendingSerialCandidatesForRestart,
+  pendingSerialCandidateProjects,
+  pendingSerialCandidateTerminalCardDeliveries,
+  pendingSerialCandidateWorkflow,
   persistPendingSerialCandidate,
   stopPendingSerialCandidate,
 } from "../src/main/pendingcandidate.js";
+import { composeResultCard } from "../src/main/conductor/relay.js";
 import {
   _resetPendingRunsForTests,
   pendingRunAuthority,
@@ -292,6 +300,33 @@ test("a Permission-Model-contained fake cannot touch journal/marker paths and st
     assert.equal(readFileSync(join(root, "candidate-output.txt"), "utf8"), "frozen restart bytes\n");
     assert.equal(persistPendingSerialCandidate({ projectRoot: root, result, evidence: null }).ok, true);
     assert.equal(pendingRunGate(root)?.state?.candidateSha256, result.candidate.candidateSha256);
+    const current = currentPendingSerialCandidate(root);
+    assert.equal(current?.candidate, result.candidate, "the accessor returns Core's exact branded object identity");
+    assert.equal(current?.candidateIdentitySha256, pendingRunGate(root)?.state?.candidateIdentitySha256);
+    assert.equal(Object.prototype.hasOwnProperty.call(current ?? {}, "authority"), false);
+    assert.equal(pendingSerialCandidateWorkflow(root)?.activeEvidencePlanSha256, result.candidate.evidencePlanSha256);
+    const adapterIdentitySha256 = createHash("sha256").update("pending-candidate-adapter").digest("hex");
+    const sessionPayload = JSON.stringify({
+      acceptedRequest: null,
+      adapterIdentitySha256,
+      conversationId: "007",
+      evidenceRunId: null,
+      startedAt: "2026-08-11T15:00:00.000Z",
+    });
+    assert.equal(appendPendingSerialCandidateWorkflowEvent(root, {
+      kind: "session",
+      sessionSha256: createHash("sha256").update(sessionPayload).digest("hex"),
+      canonicalPayload: sessionPayload,
+      conversationId: "007",
+      startedAt: "2026-08-11T15:00:00.000Z",
+      adapterIdentitySha256,
+      candidateSha256: result.candidate.candidateSha256,
+      candidateIdentitySha256: current?.candidateIdentitySha256 as string,
+      taskSpecSha256: result.candidate.taskSpecSha256,
+      activeEvidencePlanSha256: result.candidate.evidencePlanSha256,
+      round: result.candidate.round,
+    }).ok, true);
+    assert.deepEqual(pendingSerialCandidateProjects(), [root]);
     assert.equal(existsSync(join(root, ".git", "cairn-run.lock")), true);
 
     assert.deepEqual(parkPendingSerialCandidatesForRestart(), { parked: 1, failed: 0 });
@@ -304,6 +339,10 @@ test("a Permission-Model-contained fake cannot touch journal/marker paths and st
     assert.equal(boot.recoveryRequired, 0);
     assert.equal(existsSync(join(root, ".git", "cairn-run.lock")), true);
     assert.deepEqual(activePendingSerialCandidates(), [root]);
+    const resumedLegacy = currentPendingSerialCandidate(root);
+    assert.equal(resumedLegacy?.projectRoot, root, "boot enumerates the resumed branded candidate");
+    assert.equal(serialCandidateQualityLoopAuthorityRequired(resumedLegacy?.candidate), false,
+      "Main's exact HMAC-authenticated legacy capsule retains its historical terminal authority class");
     await assert.rejects(
       () => runSerialTaskToCandidate(root, fixture.intent, {
         adapters: [adapter],
@@ -313,12 +352,42 @@ test("a Permission-Model-contained fake cannot touch journal/marker paths and st
       /SERIAL_RUN_ACTIVE/,
     );
 
-    const stopped = stopPendingSerialCandidate(root, "CANCELLED_BY_OWNER");
-    assert.equal(stopped?.journal.ok, true);
+    const stopped = stopPendingSerialCandidate(root, "CANCELLED_BY_OWNER", (actual) => {
+      const wrong = {
+        ...composeResultCard(actual),
+        stopReason: "MODEL_RESULT_NOT_VERIFIED",
+        filesChanged: ["invented-output.txt"],
+      };
+      return {
+        conversationId: "007",
+        turnTimestamp: "2026-08-11T15:00:00.000Z",
+        canonicalCard: JSON.stringify(wrong),
+      };
+    });
+    assert.equal(stopped?.journal.ok, false, "a STOP result cannot close with a stale same-disposition card");
     assert.equal(stopped?.result?.status, "stopped");
-    assert.equal(pendingRunGate(root), null);
+    assert.ok(pendingRunGate(root), "the prepared terminal stays recoverable until its actual card can be composed");
     assert.equal(existsSync(join(root, ".git", "cairn-run.lock")), false);
     assert.equal(stopPendingSerialCandidate(root), null);
+
+    _resetPendingSerialCandidatesForTests();
+    _resetPendingRunsForTests();
+    const terminalBoot = installPendingSerialCandidateRecovery(profile, {
+      terminalCardForResult: ({ result: actual }) => ({
+        conversationId: "007",
+        turnTimestamp: "2026-08-11T15:00:00.000Z",
+        canonicalCard: JSON.stringify(composeResultCard(actual)),
+      }),
+    });
+    assert.deepEqual(terminalBoot, {
+      journal: { ready: true, activeProjects: 0, recoveryRequired: false },
+      resumed: 0,
+      recoveryRequired: 0,
+    });
+    assert.equal(pendingRunGate(root), null);
+    const outbox = pendingSerialCandidateTerminalCardDeliveries();
+    assert.equal(outbox.length, 1);
+    assert.equal(JSON.parse(outbox[0]?.card.canonicalCard as string).disposition, "STOPPED");
     const rows = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8")
       .split(/\r?\n/).filter((line) => /^\| 001 \|/.test(line));
     assert.equal(rows.length, 1);

@@ -2,7 +2,8 @@ import type { SerialRunResult, TaskRequestView } from "@cairn/core";
 import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
 import type { ConductorTurn, ResultCard, TaskSpecResultProjectionV1, TaskReviewProjectionV1 } from "../../shared/ipc.js";
 import { parseTaskReviewProjection } from "../../shared/task-review.js";
-import { appendTurn } from "./store.js";
+import { appendEnvelopeTurnOnce, appendTurn } from "./store.js";
+import { cardDigest } from "./cardauth.js";
 
 /**
  * The envelope's own voice in the conversation.
@@ -77,7 +78,11 @@ function copyTaskSpecResult(record: TaskSpecRunRecord): TaskSpecResultProjection
     requestSha256: record.requestSha256,
     taskSpecSha256: record.taskSpecSha256,
     evidencePlanSha256: record.evidencePlanSha256,
-    requiredPromises: record.criteria.map((criterion) => ({ id: criterion.id, promise: criterion.promise })),
+    requiredPromises: record.criteria.map((criterion) => ({
+      id: criterion.id,
+      promise: criterion.promise,
+      adapterAttested: record.adapterAttestations.some((attestation) => attestation.criterionId === criterion.id),
+    })),
     advisoryPreferences: record.preferences.map((preference) => ({
       id: preference.id,
       dimension: preference.dimension,
@@ -332,4 +337,28 @@ export function postResultCard(dir: string, conversationId: string, card: Result
   const turn: ConductorTurn = { role: "envelope", card, ts: new Date().toISOString() };
   appendTurn(dir, conversationId, turn);
   return turn;
+}
+
+/**
+ * Restart-safe terminal-card delivery. The caller supplies the timestamp that
+ * was durably bound to the terminal receipt; retrying those same bytes returns
+ * the same turn and never appends a second physical JSONL line.
+ */
+export function postResultCardOnce(
+  dir: string,
+  conversationId: string,
+  card: ResultCard,
+  turnTimestamp: string,
+): Readonly<{
+  turn: Extract<ConductorTurn, { role: "envelope" }>;
+  status: "appended" | "already-present";
+  deliveredSha256: string;
+}> {
+  const turn = Object.freeze({ role: "envelope" as const, card, ts: turnTimestamp });
+  const status = appendEnvelopeTurnOnce(dir, conversationId, turn);
+  return Object.freeze({
+    turn,
+    status,
+    deliveredSha256: cardDigest(dir, conversationId, turnTimestamp, card),
+  });
 }

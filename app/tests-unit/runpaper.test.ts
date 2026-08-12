@@ -8,6 +8,7 @@ const renderer = (...parts: string[]) =>
 const css = renderer("app.css");
 const motion = renderer("motion.css");
 const chat = renderer("screens", "Chat.tsx");
+const taskRun = renderer("screens", "TaskRun.tsx");
 
 function rule(selector: string): string {
   const start = css.indexOf(`\n${selector} {`);
@@ -24,6 +25,33 @@ test("the project run keeps one live status node and exposes only presentation s
     "the running and terminal text no longer swap inside one persistent live-region node");
   assert.equal((chat.match(/className=\{`run-strip-state/g) ?? []).length, 1,
     "running and terminal truth can render through more than one live-region node");
+});
+
+test("disconnected restart exposes only authenticated local results and run reattachment", () => {
+  assert.match(chat,
+    /if \(!status\.connected\) \{[\s\S]*?conductorConversations\(dir\)[\s\S]*?conductorTurns\(dir, id\)[\s\S]*?\.filter\(\(turn\)[\s\S]*?turn\.role === "envelope"/,
+    "disconnected restore does not load and narrow Main's authenticated local history to envelope turns");
+  assert.match(chat,
+    /status && !status\.connected && turns\.some\(\(turn\) => turn\.role === "envelope"\)[\s\S]*?aria-label="Saved task results"[\s\S]*?turn\.role === "envelope"[\s\S]*?<ResultCardView/,
+    "authenticated result cards stay hidden when the conductor is disconnected");
+  assert.match(chat, /status && !status\.connected \? runStrip : null/,
+    "the restored run has no disconnected reattachment strip");
+
+  const disconnectedResults = chat.indexOf('aria-label="Saved task results"');
+  const connectedGate = chat.indexOf("{status?.connected ? (", disconnectedResults);
+  const ordinaryTurn = chat.indexOf('className={`bubble ${turn.role === "owner"');
+  const composer = chat.indexOf('<div className="chat-composer">');
+  assert.ok(disconnectedResults !== -1 && disconnectedResults < connectedGate,
+    "local result receipts remain inside the connection gate");
+  assert.ok(ordinaryTurn > connectedGate && composer > connectedGate,
+    "ordinary prose or mutable composer controls escaped the connection gate");
+});
+
+test("the Task Run result names every STOP cause in plain words and retains its exact code", () => {
+  assert.match(taskRun, /result\.status === "stopped"[\s\S]*?Why it stopped: \{codeInPlainWords\(result\.reason\)\}/,
+    "the direct run surface hides the authenticated terminal cause");
+  assert.match(taskRun, /Code: \{result\.reason\}/,
+    "the direct run surface drops the exact terminal code needed for diagnosis");
 });
 
 test("the run reads as a ruled paper thread instead of a rounded glass card", () => {

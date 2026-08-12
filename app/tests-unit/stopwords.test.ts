@@ -10,12 +10,15 @@ test("every known code has a plain clause that is not the code", () => {
   }
 });
 
-test("the ten serial stop reasons are all covered", () => {
+test("every serial stop reason is covered", () => {
   for (const reason of [
     "ADAPTER_FAILED", "INVALID_ADAPTER_RESULT", "PROTECTED_WORK_CHANGED",
     "RECORD_VERIFICATION_FAILED", "WORKER_CLAIMS_MISSING",
     "REAL_MODEL_CALL_NOT_AUTHORIZED", "MODEL_REPORTED_STOPPED",
-    "MODEL_RESULT_NOT_VERIFIED", "ADAPTER_TIMED_OUT", "CANCELLED_BY_OWNER",
+    "MODEL_RESULT_NOT_VERIFIED", "Q9_CRITIC_CALLS_EXHAUSTED",
+    "Q9_REQUIRED_CHECK_STILL_FAILED", "Q9_NATIVE_BOUNDARY_STOPPED",
+    "Q9_REQUIRED_EVIDENCE_INCOMPLETE", "Q9_WORKFLOW_VERIFICATION_FAILED",
+    "ADAPTER_TIMED_OUT", "CANCELLED_BY_OWNER",
   ]) {
     assert.ok(reason in KNOWN_CODE_WORDS, `no plain words for ${reason}`);
   }

@@ -29,7 +29,13 @@ test("one shared view names the source-marked plan, cN evidence, advisory pN, cr
   assert.match(view, /Whole-run limits/);
   assert.match(view, /Critic allegation/);
   assert.match(view, /allegation only; it cannot block the task unless you confirm this exact evidence/);
+  assert.match(view, /Cairn check failure/);
+  assert.match(view, /Cairn cannot request a repair unless you confirm this exact failed check/);
+  assert.match(view, /Confirming it does not approve a repair; Cairn will show a separate exact repair approval next/);
   assert.match(view, /I see it working/);
+  assert.match(view, /Confirm Cairn's failed check/);
+  assert.match(view, /Dismiss and stop/);
+  assert.match(view, /I can&apos;t tell — stop/);
   assert.match(view, /Dismiss this allegation/);
   for (const field of [
     "initialBuilderCalls", "maxRepairCalls", "maxCriticAttempts", "maxExternalEvidenceCalls",
@@ -44,7 +50,7 @@ test("Chat and manual Task Run both consume the same output-only view and closed
   assert.match(chat, /<TaskReviewView review=\{dispatch\.taskReview\}/);
   assert.match(chat, /<TaskReviewView review=\{card\.taskReview\}/);
   assert.match(taskRun, /<TaskReviewView review=\{taskReview\} heading="Final Task Spec"/);
-  assert.match(taskRun, /phase === "running" && taskReview \? <TaskReviewView/);
+  assert.match(taskRun, /phase === "running" && taskReview \? \([\s\S]*?<TaskReviewView review=\{taskReview\} heading="Accepted Task Spec"/);
   assert.match(taskRun, /phase === "result"[\s\S]*?<TaskReviewView review=\{taskReview\}/);
 
   for (const source of [chat, taskRun]) {
@@ -52,6 +58,26 @@ test("Chat and manual Task Run both consume the same output-only view and closed
     assert.match(callback, /cairn\.taskReviewAction\(request\)/);
     assert.doesNotMatch(callback, /(?:taskSpec|candidate|criterionId|finding|assessment|evidence|render|policy|seal|verdict|disposition)\s*:/iu);
   }
+});
+
+test("accepted running sessions keep owner-check actions without reviving a spent route preview", () => {
+  const taskRunPreRoute = section(taskRun, "async function applyTaskReviewChoice", "async function applyRunningTaskReviewChoice");
+  const chatPreRoute = section(chat, "async function applyTaskReviewChoice", "async function applyRunningTaskReviewChoice");
+  assert.match(taskRunPreRoute, /previewId === null/u, "manual pre-route review still requires its live preview");
+  assert.match(chatPreRoute, /expectedPreviewId === null/u, "chat pre-route review still requires its live dispatch preview");
+
+  const taskRunAccepted = section(taskRun, "async function applyRunningTaskReviewChoice", "/**\n   * The renderer chooses only");
+  const chatAccepted = section(chat, "async function applyRunningTaskReviewChoice", "async function decideRepairCall");
+  for (const [name, callback] of [["TaskRun", taskRunAccepted], ["Chat", chatAccepted]] as const) {
+    assert.match(callback, /phase !== "running"|held\?\.phase !== "running"/u, `${name} scopes the bypass to an accepted run`);
+    assert.match(callback, /cairn\.taskReviewAction\(request\)/u);
+    assert.doesNotMatch(callback, /previewId === null|expectedPreviewId|dispatch\.taskReview/u,
+      `${name} does not require the already-spent renderer preview`);
+    assert.doesNotMatch(callback, /taskSpec\s*:|candidate\s*:|criterionId\s*:|evidence\s*:/u,
+      `${name} still returns only Main's opaque action id and closed choice`);
+  }
+  assert.match(taskRun, /onAction=\{\(actionId, choice\) => void applyRunningTaskReviewChoice\(actionId, choice\)\}/u);
+  assert.match(chat, /review=\{session\.taskReview\}[\s\S]*?applyRunningTaskReviewChoice\(actionId, choice\)/u);
 });
 
 test("IPC adds only optional output review fields and one exact authority-free action request", () => {
@@ -69,6 +95,7 @@ test("IPC adds only optional output review fields and one exact authority-free a
   assert.match(action, /actionId: string/);
   assert.match(action, /kind: "observe"/);
   assert.match(action, /kind: "resolve"/);
+  assert.match(action, /kind: "review-cairn-failure"/);
   assert.doesNotMatch(action, /taskSpec|candidate|criterion|finding|assessment|evidence|render|policy|seal|verdict|disposition/iu);
 });
 

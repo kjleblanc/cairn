@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { lstatSync, opendirSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { closeSync, constants, fstatSync, lstatSync, openSync, opendirSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { TaskIntent } from "./intent.js";
 import type { EvidencePlanV1, TaskSpecReviewV1, TaskSpecV1 } from "./quality.js";
 
@@ -251,6 +252,11 @@ export type TaskAdapterCandidateWriterSupport =
       version: typeof TASK_ADAPTER_CANDIDATE_WRITER_SUPPORT_VERSION;
       scope: "node-test-only";
       enforcement: "node-v24-permission-model";
+    }>
+  | Readonly<{
+      version: typeof TASK_ADAPTER_CANDIDATE_WRITER_SUPPORT_VERSION;
+      scope: "q9-electron-e2e-only";
+      enforcement: "in-process-preregistered-fixture";
     }>;
 
 export const NODE_PERMISSION_MODEL_CANDIDATE_TEST_PROGRAM_VERSION =
@@ -292,14 +298,65 @@ export type NodePermissionModelCandidateTestAdapterInputV1 = Readonly<{
   program: NodePermissionModelCandidateTestProgramV1;
 }>;
 
+export type Q9E2eFakeCandidateAdapterInputV1 = Readonly<{
+  fixtureId: string;
+  descriptor: AdapterDescriptor;
+  projectRoot: string;
+  excludedUserDataRoot: string;
+  program: NodePermissionModelCandidateTestProgramV1;
+}>;
+
 const candidateWriterTestSupportBrand = new WeakSet<object>();
+const candidateWriterQ9E2eSupportBrand = new WeakSet<object>();
 type PermissionCandidateBinding = Readonly<{
   adapter: TaskAdapter;
   run: TaskAdapter["run"];
   projectRootReal: string;
   excludedUserDataRootReal: string;
+  fixtureId?: string;
 }>;
 const candidateWriterPermissionSupportBindings = new WeakMap<object, PermissionCandidateBinding>();
+const candidateWriterQ9E2eSupportBindings = new WeakMap<object, PermissionCandidateBinding>();
+const q9E2eAuthorizedContracts = new WeakMap<object, TaskAdapter>();
+const q9E2eHarnessFailureResults = new WeakMap<object, Readonly<{
+  adapter: TaskAdapter;
+  fixtureId: string;
+  commandSha256: string;
+}>>();
+const q9E2eCairnBlockerResults = new WeakMap<object, Readonly<{
+  adapter: TaskAdapter;
+  fixtureId: "q9-cairn-blocker-confirmation";
+  commandSha256: string;
+}>>();
+
+export const Q9_E2E_HARNESS_FAILURE_VERSION = "cairn-q9-e2e-harness-failure/v1" as const;
+export type Q9E2eHarnessFailureResultV1 = Readonly<{
+  version: typeof Q9_E2E_HARNESS_FAILURE_VERSION;
+  code: "TIMED_OUT_BEFORE_ASSERTION";
+  commandSha256: string;
+  exitCode: 124;
+  boundedOutput: "The injected Q9 harness timed out before reaching its preregistered assertion.";
+  outputSha256: string;
+}>;
+
+export const Q9_E2E_CAIRN_BLOCKER_RESULT_VERSION = "cairn-q9-e2e-cairn-blocker/v1" as const;
+export type Q9E2eCairnBlockerResultV1 = Readonly<{
+  version: typeof Q9_E2E_CAIRN_BLOCKER_RESULT_VERSION;
+  code: "CRITERION_NOT_MET";
+  commandSha256: string;
+  exitCode: 1;
+}>;
+
+export const Q9_E2E_REVISED_EVIDENCE_VERSION = "cairn-q9-e2e-revised-evidence/v1" as const;
+export type Q9E2eRevisedEvidenceV1 = Readonly<{
+  version: typeof Q9_E2E_REVISED_EVIDENCE_VERSION;
+  criterionId: `c${number}`;
+  commandSha256: string;
+  exitCode: 0;
+  boundedOutput: "The injected Q9 harness reached its preregistered assertion after the authorized timeout correction.";
+  outputSha256: string;
+}>;
+const q9E2eRevisedEvidenceBrand = new WeakSet<object>();
 
 const PERMISSION_CANDIDATE_MAX_ENTRIES = 32_768;
 const PERMISSION_CANDIDATE_MAX_OPERATIONS = 32;
@@ -368,6 +425,14 @@ function nodeTestAuthorityPresent(): boolean {
     && process.env.NODE_TEST_CONTEXT === "child-v8";
 }
 
+function q9ElectronE2eAuthorityPresent(): boolean {
+  return (typeof process.versions.electron === "string" && process.versions.electron.length > 0
+      || process.env.NODE_TEST_CONTEXT === "child-v8")
+    && process.env.CAIRN_E2E === "1"
+    && process.env.CAIRN_MOCK === "1"
+    && process.env.CAIRN_TEST_Q9 === "1";
+}
+
 /**
  * Test-harness-only mint. It deliberately says that it is not a sandbox: the
  * in-process fake exercises custody/restart logic but proves no OS writer
@@ -387,11 +452,14 @@ export function composeTaskAdapterCandidateWriterSupportForTest(): TaskAdapterCa
 
 /** Core-state-test brand check. This value is never a Q7 writer authority. */
 export function isTaskAdapterCandidateStateTestSupport(value: unknown): boolean {
-  return nodeTestAuthorityPresent() && typeof value === "object" && value !== null
-    && candidateWriterTestSupportBrand.has(value)
-    && (value as TaskAdapterCandidateWriterSupport).version === TASK_ADAPTER_CANDIDATE_WRITER_SUPPORT_VERSION
+  if (typeof value !== "object" || value === null
+    || (value as TaskAdapterCandidateWriterSupport).version !== TASK_ADAPTER_CANDIDATE_WRITER_SUPPORT_VERSION) return false;
+  return nodeTestAuthorityPresent() && candidateWriterTestSupportBrand.has(value)
     && (value as TaskAdapterCandidateWriterSupport).scope === "node-test-only"
-    && (value as TaskAdapterCandidateWriterSupport).enforcement === "not-a-sandbox";
+    && (value as TaskAdapterCandidateWriterSupport).enforcement === "not-a-sandbox"
+    || q9ElectronE2eAuthorityPresent() && candidateWriterQ9E2eSupportBrand.has(value)
+      && (value as TaskAdapterCandidateWriterSupport).scope === "q9-electron-e2e-only"
+      && (value as TaskAdapterCandidateWriterSupport).enforcement === "in-process-preregistered-fixture";
 }
 
 /** Public candidate support check; structural or non-sandbox values fail. */
@@ -754,6 +822,259 @@ export function composeNodePermissionModelCandidateAdapterForTest(
   } catch {
     return null;
   }
+}
+
+/** Electron-only Q9 fixture adapter. Its writes are a preregistered, bounded
+ * fixture program and its run method remains dark until serial.ts marks the
+ * exact frozen contract while executing the guarded state-test runner. */
+export function composeQ9E2eFakeCandidateAdapter(
+  value: Q9E2eFakeCandidateAdapterInputV1,
+): TaskAdapter | null {
+  try {
+    if (!q9ElectronE2eAuthorityPresent()) return null;
+    const record = plainRecord(value, ["descriptor", "excludedUserDataRoot", "fixtureId", "program", "projectRoot"]);
+    if (!record || typeof record.fixtureId !== "string" || !/^q9-[a-z0-9][a-z0-9-]{0,62}$/u.test(record.fixtureId)) return null;
+    const descriptor = detachCandidateTestDescriptor(record.descriptor);
+    const program = detachCandidateTestProgram(record.program);
+    const projectRootReal = canonicalCandidateTestDirectory(record.projectRoot);
+    const excludedUserDataRootReal = canonicalCandidateTestDirectory(record.excludedUserDataRoot);
+    const expectedId = `cairn-q9-e2e-${record.fixtureId}`;
+    if (!descriptor || descriptor.id !== expectedId || descriptor.provider !== "Cairn E2E Fixture"
+      || descriptor.model !== `synthetic-q9/${record.fixtureId}` || descriptor.capabilities.length !== 3
+      || !descriptor.capabilities.includes("serial-task")
+      || !descriptor.capabilities.includes("serial-task-candidate")
+      || !descriptor.capabilities.includes("offline-demo")
+      || !program || !projectRootReal || !excludedUserDataRootReal
+      || candidateTestRootContains(projectRootReal, excludedUserDataRootReal)
+      || candidateTestRootContains(excludedUserDataRootReal, projectRootReal)
+      || !permissionCandidateWritableTreeSafe(projectRootReal)) return null;
+    const detachedOperations: Array<Readonly<{ path: string; contents: string }>> = [];
+    for (const operation of program.operations) {
+      if (operation.kind !== "write" || operation.expect !== "allowed") return null;
+      const target = resolve(projectRootReal, operation.path);
+      const relativeTarget = relative(projectRootReal, target).replace(/\\/gu, "/");
+      const parts = relativeTarget.toLowerCase().split("/");
+      const parent = canonicalCandidateTestDirectory(dirname(target));
+      if (!relativeTarget || isAbsolute(relativeTarget) || relativeTarget === ".." || relativeTarget.startsWith("../")
+        || parts.includes(".git") || parts.includes(".cairn") || parts.includes("node_modules")
+        || relativeTarget.toLowerCase().startsWith("docs/ai-work/")
+        || !parent || !candidateTestRootContains(projectRootReal, parent)) return null;
+      try {
+        const current = lstatSync(target);
+        if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1) return null;
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT")) return null;
+      }
+      detachedOperations.push(Object.freeze({ path: target, contents: operation.contents }));
+    }
+    const roots = Object.freeze({ projectRootReal, excludedUserDataRootReal });
+    let adapter!: TaskAdapter;
+    const run: TaskAdapter["run"] = async (contract, signal) => {
+      if (!q9ElectronE2eAuthorityPresent() || q9E2eAuthorizedContracts.get(contract) !== adapter) {
+        throw new WorkerBoundaryError("Q9_E2E_FAKE_WRITER_NOT_AUTHORIZED");
+      }
+      q9E2eAuthorizedContracts.delete(contract);
+      if (signal?.aborted) throw new WorkerProcessError("cancelled", "Q9_E2E_FAKE_WRITER_CANCELLED", null);
+      if (contract.version !== "cairn-serial-task/v4" || !permissionCandidateWritableTreeSafe(projectRootReal)) {
+        throw new WorkerBoundaryError("Q9_E2E_FAKE_WRITER_CONTRACT_INVALID");
+      }
+      for (const operation of detachedOperations) {
+        const parent = canonicalCandidateTestDirectory(dirname(operation.path));
+        if (!parent || !candidateTestRootContains(projectRootReal, parent)) {
+          throw new WorkerBoundaryError("Q9_E2E_FAKE_WRITER_PATH_CHANGED");
+        }
+        let before: ReturnType<typeof lstatSync> | null = null;
+        try {
+          before = lstatSync(operation.path);
+          if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+            throw new WorkerBoundaryError("Q9_E2E_FAKE_WRITER_TARGET_CHANGED");
+          }
+        } catch (error) {
+          if (!(error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT")) throw error;
+        }
+        let descriptor: number | null = null;
+        try {
+          descriptor = openSync(
+            operation.path,
+            constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0)
+              | (before === null ? constants.O_EXCL : 0),
+            0o600,
+          );
+          const opened = fstatSync(descriptor);
+          if (!opened.isFile() || opened.nlink !== 1
+            || (before !== null && (opened.dev !== before.dev || opened.ino !== before.ino))) {
+            throw new WorkerBoundaryError("Q9_E2E_FAKE_WRITER_TARGET_CHANGED");
+          }
+          writeFileSync(descriptor, operation.contents, { encoding: "utf8" });
+        } finally {
+          if (descriptor !== null) closeSync(descriptor);
+        }
+      }
+      const harnessFailure = record.fixtureId === "q9-harness-revision" || record.fixtureId === "q9-harness-refusal";
+      const cairnBlocker = record.fixtureId === "q9-cairn-blocker-confirmation";
+      const result = Object.freeze({
+        kind: "worker-result/v3" as const,
+        taskNumber: contract.taskNumber,
+        requestSha256: contract.requestSha256,
+        taskSpecSha256: contract.taskSpecSha256,
+        evidencePlanSha256: contract.evidencePlanSha256,
+        status: program.result.status,
+        claimsText: program.result.claimsText,
+        evidence: program.result.evidence,
+        processEvents: Object.freeze({
+          representation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION,
+          complete: true as const,
+          events: Object.freeze(contract.evidencePlan.procedures
+            .filter((procedure) => procedure.command !== null)
+            .map((procedure, sequence) => Object.freeze({
+              sequence,
+              commandSha256: procedure.command!.sha256,
+              exitCode: sequence === 0 && harnessFailure ? 124 : sequence === 0 && cairnBlocker ? 1 : 0,
+            }))),
+        }),
+      });
+      if (harnessFailure) {
+        const commandSha256 = result.processEvents.events[0]?.commandSha256;
+        if (!commandSha256) throw new WorkerBoundaryError("Q9_E2E_HARNESS_COMMAND_MISSING");
+        q9E2eHarnessFailureResults.set(result, Object.freeze({
+          adapter, fixtureId: record.fixtureId as string, commandSha256,
+        }));
+      } else if (cairnBlocker) {
+        const commandSha256 = result.processEvents.events[0]?.commandSha256;
+        if (!commandSha256) throw new WorkerBoundaryError("Q9_E2E_CAIRN_BLOCKER_COMMAND_MISSING");
+        q9E2eCairnBlockerResults.set(result, Object.freeze({
+          adapter, fixtureId: "q9-cairn-blocker-confirmation", commandSha256,
+        }));
+      }
+      return result;
+    };
+    const support = Object.freeze({
+      version: TASK_ADAPTER_CANDIDATE_WRITER_SUPPORT_VERSION,
+      scope: "q9-electron-e2e-only" as const,
+      enforcement: "in-process-preregistered-fixture" as const,
+    });
+    adapter = Object.freeze({
+      descriptor,
+      qualitySupport: Object.freeze({ commandEventRepresentation: CANONICAL_EVIDENCE_COMMAND_EVENT_REPRESENTATION }),
+      candidateWriterSupport: support,
+      run,
+    });
+    candidateWriterQ9E2eSupportBrand.add(support);
+    candidateWriterQ9E2eSupportBindings.set(support, Object.freeze({
+      adapter, run, projectRootReal, excludedUserDataRootReal, fixtureId: record.fixtureId,
+    }));
+    return adapter;
+  } catch {
+    return null;
+  }
+}
+
+/** Read the one preregistered Q9 pre-assertion failure directly from the
+ * adapter result object. Ordinary, cloned, and non-harness results stay dark. */
+export function taskAdapterQ9E2eHarnessFailureResult(
+  adapter: unknown,
+  result: unknown,
+): Q9E2eHarnessFailureResultV1 | null {
+  if (!q9ElectronE2eAuthorityPresent() || typeof adapter !== "object" || adapter === null
+    || typeof result !== "object" || result === null) return null;
+  const binding = q9E2eHarnessFailureResults.get(result);
+  if (!binding || binding.adapter !== adapter) return null;
+  const boundedOutput = "The injected Q9 harness timed out before reaching its preregistered assertion." as const;
+  return Object.freeze({
+    version: Q9_E2E_HARNESS_FAILURE_VERSION,
+    code: "TIMED_OUT_BEFORE_ASSERTION",
+    commandSha256: binding.commandSha256,
+    exitCode: 124,
+    boundedOutput,
+    outputSha256: createHash("sha256").update(Buffer.from(boundedOutput, "utf8")).digest("hex"),
+  });
+}
+
+/** Read the sole preregistered Q9 Cairn-failure result. It permits serial to
+ * retain a pre-seal candidate with one genuine non-zero verifier attestation;
+ * ordinary, cloned, and non-Q9 adapter results remain invalid. */
+export function taskAdapterQ9E2eCairnBlockerResult(
+  adapter: unknown,
+  result: unknown,
+): Q9E2eCairnBlockerResultV1 | null {
+  if (!q9ElectronE2eAuthorityPresent() || typeof adapter !== "object" || adapter === null
+    || typeof result !== "object" || result === null) return null;
+  const binding = q9E2eCairnBlockerResults.get(result);
+  if (!binding || binding.adapter !== adapter) return null;
+  return Object.freeze({
+    version: Q9_E2E_CAIRN_BLOCKER_RESULT_VERSION,
+    code: "CRITERION_NOT_MET",
+    commandSha256: binding.commandSha256,
+    exitCode: 1,
+  });
+}
+
+/** Execute the only corrected Q9 harness procedure. This is an injected local
+ * fact, not an adapter/provider call: it has no writer, network, key, or billing
+ * capability and accepts only the exact harness fixture plus revision-one
+ * timeout command selected by Core. */
+export async function runTaskAdapterQ9E2eRevisedEvidence(
+  adapter: unknown,
+  contract: unknown,
+  criterionId: unknown,
+  signal?: AbortSignal,
+): Promise<Q9E2eRevisedEvidenceV1 | null> {
+  if (!q9ElectronE2eAuthorityPresent() || typeof adapter !== "object" || adapter === null
+    || typeof contract !== "object" || contract === null || !Object.isFrozen(contract)
+    || typeof criterionId !== "string" || !/^c(?:[1-9]|1[0-2])$/u.test(criterionId)) return null;
+  const support = Object.getOwnPropertyDescriptor(adapter, "candidateWriterSupport")?.value;
+  const binding = support && candidateWriterQ9E2eSupportBindings.get(support);
+  if (!binding || binding.adapter !== adapter
+    || (binding.fixtureId !== "q9-harness-revision" && binding.fixtureId !== "q9-harness-refusal")) return null;
+  const typed = contract as QualityBoundAdapterTaskContractV4;
+  if (typed.version !== "cairn-serial-task/v4" || typed.evidencePlan.revision !== 1
+    || signal?.aborted) return null;
+  const procedure = typed.evidencePlan.procedures.find((row) => row.criterionId === criterionId);
+  if (!procedure || procedure.kind !== "adapter-command-attestation" || !procedure.command
+    || procedure.command.timeoutMs < 60_000 || !procedure.command.expectedExitCodes.includes(0)) return null;
+  await Promise.resolve();
+  if (signal?.aborted || !q9ElectronE2eAuthorityPresent()) return null;
+  const boundedOutput = "The injected Q9 harness reached its preregistered assertion after the authorized timeout correction." as const;
+  const receipt = Object.freeze({
+    version: Q9_E2E_REVISED_EVIDENCE_VERSION,
+    criterionId: criterionId as `c${number}`,
+    commandSha256: procedure.command.sha256,
+    exitCode: 0 as const,
+    boundedOutput,
+    outputSha256: createHash("sha256").update(Buffer.from(boundedOutput, "utf8")).digest("hex"),
+  });
+  q9E2eRevisedEvidenceBrand.add(receipt);
+  return receipt;
+}
+
+export function isTaskAdapterQ9E2eRevisedEvidence(value: unknown): value is Q9E2eRevisedEvidenceV1 {
+  return typeof value === "object" && value !== null && q9E2eRevisedEvidenceBrand.has(value);
+}
+
+export function taskAdapterQ9E2eFakeCandidateBoundTo(
+  adapter: unknown,
+  projectRootReal: string,
+  excludedUserDataRootReal: string,
+): adapter is TaskAdapter {
+  if (!q9ElectronE2eAuthorityPresent() || typeof adapter !== "object" || adapter === null) return false;
+  const support = Object.getOwnPropertyDescriptor(adapter, "candidateWriterSupport")?.value;
+  const binding = support && candidateWriterQ9E2eSupportBindings.get(support);
+  return !!binding && binding.adapter === adapter
+    && binding.projectRootReal === projectRootReal
+    && binding.excludedUserDataRootReal === excludedUserDataRootReal
+    && permissionCandidateWritableTreeSafe(projectRootReal);
+}
+
+export function authorizeTaskAdapterQ9E2eCandidateRun(
+  adapter: unknown,
+  contract: unknown,
+  projectRootReal: string,
+  excludedUserDataRootReal: string,
+): boolean {
+  if (!taskAdapterQ9E2eFakeCandidateBoundTo(adapter, projectRootReal, excludedUserDataRootReal)
+    || typeof contract !== "object" || contract === null || !Object.isFrozen(contract)) return false;
+  q9E2eAuthorizedContracts.set(contract, adapter);
+  return true;
 }
 
 /** Serial's exact adapter/launcher/root-pair check. */

@@ -17,6 +17,14 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { types as nodeTypes } from "node:util";
+import {
+  authorizeSerialAuthenticatedPendingJournal,
+  registerSerialAuthenticatedPendingJournalVerifier,
+  type SerialAuthenticatedPendingJournalAuthority,
+  type SerialAuthenticatedPendingJournalBinding,
+} from "#cairn-main-pending";
+import { cardDigest } from "./conductor/cardauth.js";
+import { readHistorySnapshot } from "./conductor/store.js";
 
 export const PENDING_RUN_STATE_VERSION = "cairn-pending-run-state/v1" as const;
 export const PENDING_RUN_GATE_VERSION = "cairn-pending-run-gate/v1" as const;
@@ -26,6 +34,13 @@ export const PENDING_RUN_HIGH_WATER_VERSION = "cairn-pending-run-high-water/v1" 
 export const PENDING_RUN_CLOSE_VERSION = "cairn-pending-run-close/v1" as const;
 export const PENDING_RUN_INVENTORY_VERSION = "cairn-pending-run-inventory/v1" as const;
 export const PENDING_RUN_INVENTORY_ANCHOR_VERSION = "cairn-pending-run-inventory-anchor/v1" as const;
+export const PENDING_RUN_WORKFLOW_VERSION = "cairn-pending-run-workflow/v1" as const;
+export const PENDING_RUN_WORKFLOW_EVENT_VERSION = "cairn-pending-run-workflow-event/v1" as const;
+export const PENDING_RUN_TERMINAL_CARD_VERSION = "cairn-pending-run-terminal-card/v1" as const;
+export const PENDING_RUN_TERMINAL_CARD_DELIVERY_VERSION = "cairn-pending-run-terminal-card-delivery/v1" as const;
+export const PENDING_RUN_HARNESS_DECISION_VERSION = "cairn-pending-run-harness-decision/v1" as const;
+export const PENDING_RUN_HARNESS_RERUN_VERSION = "cairn-pending-run-harness-rerun/v1" as const;
+export const PENDING_RUN_CAIRN_FAILURE_DECISION_VERSION = "cairn-pending-run-cairn-failure-decision/v1" as const;
 const PENDING_RUN_PROFILE_HIGH_WATER_VERSION = "cairn-pending-run-profile-high-water/v1" as const;
 
 export const PENDING_RUN_LIMITS = Object.freeze({
@@ -36,6 +51,12 @@ export const PENDING_RUN_LIMITS = Object.freeze({
   runDirectories: 128,
   displayOutcomeCharacters: 500,
   routeTextCharacters: 200,
+  workflowPayloadBytes: 512 * 1024,
+  // A valid ResultCard may carry all twelve bounded Task-Spec criteria and
+  // preferences plus attestations and worker claims. Keep this well below the
+  // journal cap while admitting every schema-valid terminal projection.
+  terminalCardBytes: 256 * 1024,
+  workflowEvents: 48,
   revisions: 32,
 } as const);
 
@@ -50,12 +71,19 @@ const REVISION_DIR_NAME = "revisions";
 const CAPSULE_DIR_NAME = "capsules";
 const HIGH_WATER_NAME = "high-water.json";
 const CLOSE_NAME = "closed.json";
+const CARD_DELIVERED_NAME = "terminal-card-delivered.json";
 const INVENTORY_NAME = "active-runs.json";
 const INVENTORY_ANCHOR_NAME = "inventory-anchor.json";
 const INVENTORY_STAGE_NAME = "active-runs.next.json";
+// These records embed the bounded terminal-card envelope during two-phase
+// close. Account for its identity/authentication fields as well as the card.
+const TERMINAL_RECORD_BYTES = PENDING_RUN_LIMITS.terminalCardBytes + 64 * 1024;
 const REVISION_AUTH_DOMAIN = "cairn-pending-run-revision-auth/v1";
 const HIGH_WATER_AUTH_DOMAIN = "cairn-pending-run-high-water-auth/v1";
 const CLOSE_AUTH_DOMAIN = "cairn-pending-run-close-auth/v1";
+const CARD_DELIVERY_AUTH_DOMAIN = "cairn-pending-run-card-delivery-auth/v1";
+const CARD_DELIVERY_ID_DOMAIN = "cairn-pending-run-card-delivery-id/v1";
+const WORKFLOW_EVENT_DOMAIN = "cairn-pending-run-workflow-event-sha/v1";
 const INVENTORY_AUTH_DOMAIN = "cairn-pending-run-inventory-auth/v1";
 const INVENTORY_ANCHOR_AUTH_DOMAIN = "cairn-pending-run-inventory-anchor-auth/v1";
 const PROFILE_HIGH_WATER_AUTH_DOMAIN = "cairn-pending-run-profile-high-water-auth/v1";
@@ -63,8 +91,10 @@ const FORBIDDEN_VISIBLE_CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007
 
 export type PendingRunPhaseV1 =
   | "awaiting-critic"
+  | "awaiting-critic-result"
   | "awaiting-owner-resolution"
   | "awaiting-repair"
+  | "awaiting-repair-result"
   | "ready-to-seal"
   | "terminal-prepared";
 
@@ -94,6 +124,222 @@ export type PendingRunTerminalActionV1 = Readonly<{
   capsuleSha256: string;
 }>;
 
+export type PendingRunOperationKindV1 = "repair" | "critic";
+export type PendingRunOperationStatusV1 =
+  | "reserved"
+  | "sending"
+  | "answered"
+  | "unavailable"
+  | "declined"
+  | "cancelled"
+  | "interrupted";
+export type PendingRunDecisionOutcomeV1 = "approved" | "task-stopped" | "continued-without-critic";
+
+type PendingRunWorkflowEventBaseV1 = Readonly<{
+  version: typeof PENDING_RUN_WORKFLOW_EVENT_VERSION;
+  sequence: number;
+  previousEventSha256: string | null;
+  eventSha256: string;
+}>;
+
+export type PendingRunOperationEventV1 = PendingRunWorkflowEventBaseV1 & Readonly<{
+  kind: "operation";
+  operationKind: PendingRunOperationKindV1;
+  operationId: string;
+  status: PendingRunOperationStatusV1;
+  previewId: string;
+  previewSha256: string;
+  authorizationSha256: string;
+  routeReceiptSha256: string;
+  requestSha256: string;
+  candidateSha256: string;
+  candidateIdentitySha256: string;
+  taskSpecSha256: string;
+  activeEvidencePlanSha256: string;
+  round: 0 | 1;
+  attempt: number;
+  retryOfOperationId: string | null;
+  outcomeSha256: string | null;
+}>;
+
+/** The durable owner choice that must precede a Q9 call reservation. It is
+ * written while the exact approval card is still current; only after this
+ * event commits may Main consume the card and recover its one-use grant. */
+export type PendingRunDecisionEventV1 = PendingRunWorkflowEventBaseV1 & Readonly<{
+  kind: "decision";
+  decisionKind: PendingRunOperationKindV1;
+  approvalId: string;
+  operationId: string;
+  outcome: PendingRunDecisionOutcomeV1;
+  decidedAt: string;
+  disclosureSha256: string;
+  previewSha256: string;
+  authorizationSha256: string | null;
+  routeReceiptSha256: string;
+  requestSha256: string | null;
+  candidateSha256: string;
+  candidateIdentitySha256: string;
+  taskSpecSha256: string;
+  activeEvidencePlanSha256: string;
+  round: 0 | 1;
+  attempt: number;
+  retryOfOperationId: string | null;
+}>;
+
+export type PendingRunAuthorityEventV1 = PendingRunWorkflowEventBaseV1 & Readonly<{
+  kind: "authority";
+  authorityKind: "assessment" | "owner-observation" | "owner-resolution" | "cairn-failure-decision"
+    | "harness-decision" | "harness-authorization" | "harness-rerun";
+  authoritySha256: string;
+  canonicalPayload: string;
+  assessmentSha256: string | null;
+  candidateSha256: string;
+  candidateIdentitySha256: string;
+  taskSpecSha256: string;
+  activeEvidencePlanSha256: string;
+  round: 0 | 1;
+}>;
+
+/** Main's durable owner decision over one exact Cairn-judged failed result.
+ * `confirmed` keeps inert audit custody of the Core confirmation that was
+ * consumed live; journaled JSON is never rebranded into authority after
+ * restart. The two refusal outcomes are explicit STOP decisions and can never
+ * mint a repair authority. */
+export type PendingRunCairnFailureDecisionPayloadV1 = Readonly<{
+  version: typeof PENDING_RUN_CAIRN_FAILURE_DECISION_VERSION;
+  actionId: string;
+  outcome: "confirmed" | "dismissed" | "cant-tell";
+  criterionId: `c${number}`;
+  failureConditionId: string;
+  criterionResultSha256: string;
+  evidenceRefsSeen: readonly string[];
+  actionNonce: string;
+  decidedAt: string;
+  ownerActionReceiptSha256: string;
+  confirmationSha256: string | null;
+  confirmationCanonicalPayload: string | null;
+}>;
+
+export type PendingRunHarnessDecisionPayloadV1 = Readonly<{
+  version: typeof PENDING_RUN_HARNESS_DECISION_VERSION;
+  approvalId: string;
+  outcome: "approved" | "task-stopped";
+  failureSha256: string;
+  /** Canonical, bounded Core failure custody, including the exact failed output. */
+  failureCanonicalPayload: string;
+  previewSha256: string;
+  authorizationSha256: string | null;
+  decidedAt: string;
+}>;
+
+/** The exact Core capsule transition produced by the sole guarded revision-one
+ * evidence rerun. Product/candidate identity does not change; only Core's
+ * authenticated attestation custody is refreshed. */
+export type PendingRunHarnessRerunPayloadV1 = Readonly<{
+  version: typeof PENDING_RUN_HARNESS_RERUN_VERSION;
+  fromCapsuleSha256: string;
+  toCapsuleSha256: string;
+  candidateIdentitySha256: string;
+  activeEvidencePlanSha256: string;
+}>;
+
+export type PendingRunEvidencePlanEventV1 = PendingRunWorkflowEventBaseV1 & Readonly<{
+  kind: "evidence-plan-revision";
+  fromEvidencePlanSha256: string;
+  toEvidencePlanSha256: string;
+  authorizationSha256: string;
+  failedOutputSha256: string;
+}>;
+
+export type PendingRunSessionEventV1 = PendingRunWorkflowEventBaseV1 & Readonly<{
+  kind: "session";
+  sessionSha256: string;
+  canonicalPayload: string;
+  conversationId: string | null;
+  startedAt: string;
+  adapterIdentitySha256: string;
+  candidateSha256: string;
+  candidateIdentitySha256: string;
+  taskSpecSha256: string;
+  activeEvidencePlanSha256: string;
+  round: 0 | 1;
+}>;
+
+export type PendingRunWorkflowEventV1 =
+  | PendingRunOperationEventV1
+  | PendingRunDecisionEventV1
+  | PendingRunAuthorityEventV1
+  | PendingRunEvidencePlanEventV1
+  | PendingRunSessionEventV1;
+
+export type PendingRunOperationEventInputV1 = Readonly<Omit<PendingRunOperationEventV1,
+  "version" | "sequence" | "previousEventSha256" | "eventSha256">>;
+export type PendingRunDecisionEventInputV1 = Readonly<Omit<PendingRunDecisionEventV1,
+  "version" | "sequence" | "previousEventSha256" | "eventSha256">>;
+export type PendingRunAuthorityEventInputV1 = Readonly<Omit<PendingRunAuthorityEventV1,
+  "version" | "sequence" | "previousEventSha256" | "eventSha256">>;
+export type PendingRunEvidencePlanEventInputV1 = Readonly<Omit<PendingRunEvidencePlanEventV1,
+  "version" | "sequence" | "previousEventSha256" | "eventSha256">>;
+export type PendingRunSessionEventInputV1 = Readonly<Omit<PendingRunSessionEventV1,
+  "version" | "sequence" | "previousEventSha256" | "eventSha256">>;
+export type PendingRunWorkflowEventInputV1 =
+  | PendingRunOperationEventInputV1
+  | PendingRunDecisionEventInputV1
+  | PendingRunAuthorityEventInputV1
+  | PendingRunEvidencePlanEventInputV1
+  | PendingRunSessionEventInputV1;
+
+export type PendingRunWorkflowV1 = Readonly<{
+  version: typeof PENDING_RUN_WORKFLOW_VERSION;
+  initialEvidencePlanSha256: string;
+  activeEvidencePlanSha256: string;
+  unavailableRetryUsed: 0 | 1;
+  events: readonly PendingRunWorkflowEventV1[];
+}>;
+
+export type PendingRunWorkflowProjectionV1 = Readonly<{
+  version: typeof PENDING_RUN_WORKFLOW_VERSION;
+  initialEvidencePlanSha256: string;
+  activeEvidencePlanSha256: string;
+  unavailableRetryUsed: boolean;
+  repairOperations: number;
+  criticOperations: number;
+  events: readonly PendingRunWorkflowEventV1[];
+  session: PendingRunSessionEventV1 | null;
+  interruptedOperationIds: readonly string[];
+}>;
+
+export type PendingRunTerminalCardInputV1 = Readonly<{
+  conversationId: string;
+  turnTimestamp: string;
+  canonicalCard: string;
+}>;
+
+export type PendingRunTerminalCardV1 = Readonly<{
+  version: typeof PENDING_RUN_TERMINAL_CARD_VERSION;
+  deliveryIdSha256: string;
+  projectHash: string;
+  runId: string;
+  actionId: string;
+  terminalReceiptSha256: string;
+  conversationId: string;
+  conversationSha256: string;
+  turnTimestamp: string;
+  canonicalCard: string;
+  cardSha256: string;
+}>;
+
+export type PendingRunTerminalCardDeliveryV1 = Readonly<{
+  version: typeof PENDING_RUN_TERMINAL_CARD_DELIVERY_VERSION;
+  deliveryIdSha256: string;
+  deliveredSha256: string;
+}>;
+
+export type PendingRunTerminalCardOutboxV1 = Readonly<{
+  projectRoot: string;
+  card: PendingRunTerminalCardV1;
+}>;
+
 export type PendingRunStateV1 = Readonly<{
   version: typeof PENDING_RUN_STATE_VERSION;
   displayOutcome: string;
@@ -107,6 +353,8 @@ export type PendingRunStateV1 = Readonly<{
   taskSpecSha256: string;
   evidencePlanSha256: string;
   candidateSha256: string;
+  /** Absent only on journals written before Q9. */
+  candidateIdentitySha256?: string;
   capsuleSha256: string;
   bundleSha256s: readonly string[];
   evidenceRunId: string | null;
@@ -115,6 +363,10 @@ export type PendingRunStateV1 = Readonly<{
   route: PendingRunRouteReceiptV1;
   counters: PendingRunCountersV1;
   terminalAction: PendingRunTerminalActionV1 | null;
+  /** Optional pre-execution outbox payload; close adds the terminal receipt. */
+  terminalCardDraft?: PendingRunTerminalCardInputV1;
+  /** Absent only on journals written before Q9. New candidates always carry it. */
+  workflow?: PendingRunWorkflowV1;
 }>;
 
 export type PendingRunCapsuleEnvelopeV1 = Readonly<{
@@ -148,6 +400,7 @@ export type PendingRunAuthorityV1 = Readonly<{
 
 export type PendingRunRecoveryInputV1 = Readonly<{
   authority: PendingRunAuthorityV1;
+  journalAuthority: SerialAuthenticatedPendingJournalAuthority;
   projectRoot: string;
   capsule: Readonly<{
     version: typeof PENDING_RUN_CAPSULE_VERSION;
@@ -183,6 +436,8 @@ type LivePendingRun = {
   directory: string | null;
   closedReceiptSha256: string | null;
   closedActionId: string | null;
+  closedTerminalCard: PendingRunTerminalCardV1 | null;
+  closedCardDeliveredSha256: string | null;
   journalBytes: number;
   reservedJournalBytes: number;
 };
@@ -224,6 +479,16 @@ type PendingRunCloseRecordV1 = Readonly<{
   actionId: string;
   actionKind: "finalize" | "stop";
   terminalReceiptSha256: string;
+  terminalCard?: PendingRunTerminalCardV1;
+  authSha256: string;
+}>;
+
+type PendingRunTerminalCardDeliveryRecordV1 = Readonly<{
+  version: typeof PENDING_RUN_TERMINAL_CARD_DELIVERY_VERSION;
+  projectHash: string;
+  runId: string;
+  deliveryIdSha256: string;
+  deliveredSha256: string;
   authSha256: string;
 }>;
 
@@ -254,6 +519,7 @@ type PendingRunInventoryCloseIntentV1 = Readonly<{
   actionId: string;
   actionKind: "finalize" | "stop";
   terminalReceiptSha256: string;
+  terminalCard?: PendingRunTerminalCardV1;
 }>;
 
 type PendingRunInventoryAnchorPendingV1 = Readonly<{
@@ -277,6 +543,8 @@ type PendingRunProfileHighWaterRecordV1 = Readonly<{
 }>;
 
 const liveByProjectHash = new Map<string, LivePendingRun>();
+const terminalCardByDeliveryId = new Map<string, Readonly<{ run: LivePendingRun; card: PendingRunTerminalCardV1 }>>();
+const deliveredCardByDeliveryId = new Map<string, string>();
 const authorityBindings = new WeakMap<object, LivePendingRun>();
 let configuredProfileRoot: string | null = null;
 let configuredStoreRoot: string | null = null;
@@ -285,6 +553,7 @@ let mainAuthKey: Buffer | null = null;
 let reservedJournalBytes = 0;
 let interruptAfterInventoryIntentForTests = false;
 let interruptAfterCloseIntentForTests = false;
+let interruptAfterCardDeliveryWriteForTests = false;
 
 function inside(parent: string, child: string): boolean {
   const value = relative(parent, child);
@@ -382,12 +651,597 @@ function counter(value: unknown, maximum: number): PendingRunCallCounterV1 | nul
   return Object.freeze({ spent: record.spent, remaining: record.remaining });
 }
 
-function parseState(value: unknown, capsuleSha256?: string): PendingRunStateV1 | null {
+function workflowEventSha(value: Omit<PendingRunWorkflowEventV1, "eventSha256">): string {
+  return digest(canonicalJson([WORKFLOW_EVENT_DOMAIN, value]));
+}
+
+function boundedCanonicalPayload(value: unknown, maximumBytes = PENDING_RUN_LIMITS.workflowPayloadBytes): value is string {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") < 2 || Buffer.byteLength(value, "utf8") > maximumBytes) return false;
+  try {
+    return canonicalJson(JSON.parse(value)) === value;
+  } catch {
+    return false;
+  }
+}
+
+function exactIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || value.length !== 24) return false;
+  try {
+    return new Date(value).toISOString() === value;
+  } catch {
+    return false;
+  }
+}
+
+function parseHarnessDecisionPayload(value: string): PendingRunHarnessDecisionPayloadV1 | null {
+  try {
+    const record = exactDataRecord(JSON.parse(value), [
+      "version", "approvalId", "outcome", "failureSha256", "failureCanonicalPayload", "previewSha256",
+      "authorizationSha256", "decidedAt",
+    ]);
+    const failure = typeof record?.failureCanonicalPayload === "string"
+      && boundedCanonicalPayload(record.failureCanonicalPayload)
+      ? exactDataRecord(JSON.parse(record.failureCanonicalPayload), [
+        "version", "projectHash", "runId", "candidateSha256", "taskSpecSha256", "evidencePlanSha256",
+        "criterionId", "commandSha256", "code", "exitCode", "boundedOutput", "outputSha256", "evidenceRef",
+        "failureSha256",
+      ]) : null;
+    const failureWithoutSha = failure ? {
+      version: failure.version,
+      projectHash: failure.projectHash,
+      runId: failure.runId,
+      candidateSha256: failure.candidateSha256,
+      taskSpecSha256: failure.taskSpecSha256,
+      evidencePlanSha256: failure.evidencePlanSha256,
+      criterionId: failure.criterionId,
+      commandSha256: failure.commandSha256,
+      code: failure.code,
+      exitCode: failure.exitCode,
+      boundedOutput: failure.boundedOutput,
+      outputSha256: failure.outputSha256,
+      evidenceRef: failure.evidenceRef,
+    } : null;
+    if (!record || record.version !== PENDING_RUN_HARNESS_DECISION_VERSION
+      || typeof record.approvalId !== "string" || !UUID_V4.test(record.approvalId)
+      || (record.outcome !== "approved" && record.outcome !== "task-stopped")
+      || typeof record.failureSha256 !== "string" || !SHA256.test(record.failureSha256)
+      || typeof record.failureCanonicalPayload !== "string"
+      || !failure || failure.version !== "cairn-serial-q9-harness-failure/v1"
+      || typeof failure.projectHash !== "string" || !SHA256.test(failure.projectHash)
+      || typeof failure.runId !== "string" || !UUID_V4.test(failure.runId)
+      || [failure.candidateSha256, failure.taskSpecSha256, failure.evidencePlanSha256, failure.commandSha256,
+        failure.outputSha256, failure.failureSha256].some((item) => typeof item !== "string" || !SHA256.test(item))
+      || typeof failure.criterionId !== "string" || !/^c(?:[1-9]|1[0-2])$/u.test(failure.criterionId)
+      || failure.code !== "TIMED_OUT_BEFORE_ASSERTION" || failure.exitCode !== 124
+      || typeof failure.boundedOutput !== "string" || Buffer.byteLength(failure.boundedOutput, "utf8") > 32 * 1024
+      || digest(failure.boundedOutput) !== failure.outputSha256
+      || typeof failure.evidenceRef !== "string" || !/^q9-harness-[a-f0-9]{24}$/u.test(failure.evidenceRef)
+      || failure.failureSha256 !== record.failureSha256
+      || digest(JSON.stringify(failureWithoutSha)) !== failure.failureSha256
+      || typeof record.previewSha256 !== "string" || !SHA256.test(record.previewSha256)
+      || (record.authorizationSha256 !== null
+        && (typeof record.authorizationSha256 !== "string" || !SHA256.test(record.authorizationSha256)))
+      || ((record.outcome === "approved") !== (record.authorizationSha256 !== null))
+      || !exactIsoTimestamp(record.decidedAt)) return null;
+    return Object.freeze({
+      version: PENDING_RUN_HARNESS_DECISION_VERSION,
+      approvalId: record.approvalId,
+      outcome: record.outcome,
+      failureSha256: record.failureSha256,
+      failureCanonicalPayload: record.failureCanonicalPayload,
+      previewSha256: record.previewSha256,
+      authorizationSha256: record.authorizationSha256,
+      decidedAt: record.decidedAt,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseCairnFailureDecisionPayload(value: string): PendingRunCairnFailureDecisionPayloadV1 | null {
+  try {
+    const record = exactDataRecord(JSON.parse(value), [
+      "version", "actionId", "outcome", "criterionId", "failureConditionId", "criterionResultSha256",
+      "evidenceRefsSeen", "actionNonce", "decidedAt", "ownerActionReceiptSha256", "confirmationSha256",
+      "confirmationCanonicalPayload",
+    ]);
+    const evidenceRefs = record ? denseArray(record.evidenceRefsSeen, 12) : null;
+    if (!record || record.version !== PENDING_RUN_CAIRN_FAILURE_DECISION_VERSION
+      || typeof record.actionId !== "string" || !UUID_V4.test(record.actionId)
+      || !["confirmed", "dismissed", "cant-tell"].includes(String(record.outcome))
+      || typeof record.criterionId !== "string" || !/^c(?:[1-9]|1[0-2])$/u.test(record.criterionId)
+      || !visible(record.failureConditionId, PENDING_RUN_LIMITS.routeTextCharacters)
+      || typeof record.criterionResultSha256 !== "string" || !SHA256.test(record.criterionResultSha256)
+      || !evidenceRefs || evidenceRefs.length === 0
+      || evidenceRefs.some((item) => !visible(item, PENDING_RUN_LIMITS.routeTextCharacters))
+      || new Set(evidenceRefs as string[]).size !== evidenceRefs.length
+      || typeof record.actionNonce !== "string" || !UUID_V4.test(record.actionNonce)
+      || !exactIsoTimestamp(record.decidedAt)
+      || typeof record.ownerActionReceiptSha256 !== "string" || !SHA256.test(record.ownerActionReceiptSha256)
+      || (record.confirmationSha256 !== null
+        && (typeof record.confirmationSha256 !== "string" || !SHA256.test(record.confirmationSha256)))
+      || (record.confirmationCanonicalPayload !== null
+        && (typeof record.confirmationCanonicalPayload !== "string"
+          || Buffer.byteLength(record.confirmationCanonicalPayload, "utf8") < 2
+          || Buffer.byteLength(record.confirmationCanonicalPayload, "utf8") > PENDING_RUN_LIMITS.workflowPayloadBytes
+          || JSON.stringify(JSON.parse(record.confirmationCanonicalPayload)) !== record.confirmationCanonicalPayload))
+      || ((record.outcome === "confirmed") !== (record.confirmationSha256 !== null))
+      || ((record.outcome === "confirmed") !== (record.confirmationCanonicalPayload !== null))) return null;
+    if (record.outcome === "confirmed") {
+      const confirmation = exactDataRecord(JSON.parse(record.confirmationCanonicalPayload as string), [
+        "version", "projectHash", "runId", "taskSpecSha256", "evidencePlanSha256", "candidateSha256",
+        "policyContextSha256", "criterionId", "failureConditionId", "failureConditionSha256",
+        "criterionResultSha256", "evidenceRefsSeen", "decision", "actionNonce", "confirmedAt",
+        "ownerActionReceiptSha256", "confirmationSha256",
+      ]);
+      const confirmationEvidence = confirmation ? denseArray(confirmation.evidenceRefsSeen, 12) : null;
+      if (!confirmation || confirmation.version !== "cairn-owner-cairn-failure-confirmation/v1"
+        || confirmation.criterionId !== record.criterionId
+        || confirmation.failureConditionId !== record.failureConditionId
+        || confirmation.criterionResultSha256 !== record.criterionResultSha256
+        || confirmation.decision !== "confirmed" || confirmation.actionNonce !== record.actionNonce
+        || confirmation.confirmedAt !== record.decidedAt
+        || confirmation.ownerActionReceiptSha256 !== record.ownerActionReceiptSha256
+        || confirmation.confirmationSha256 !== record.confirmationSha256
+        || !confirmationEvidence
+        || confirmationEvidence.length !== evidenceRefs.length
+        || !confirmationEvidence.every((item, index) => item === evidenceRefs[index])) return null;
+    }
+    return Object.freeze({
+      version: PENDING_RUN_CAIRN_FAILURE_DECISION_VERSION,
+      actionId: record.actionId,
+      outcome: record.outcome as PendingRunCairnFailureDecisionPayloadV1["outcome"],
+      criterionId: record.criterionId as `c${number}`,
+      failureConditionId: record.failureConditionId as string,
+      criterionResultSha256: record.criterionResultSha256,
+      evidenceRefsSeen: Object.freeze(evidenceRefs as string[]),
+      actionNonce: record.actionNonce,
+      decidedAt: record.decidedAt,
+      ownerActionReceiptSha256: record.ownerActionReceiptSha256,
+      confirmationSha256: record.confirmationSha256 as string | null,
+      confirmationCanonicalPayload: record.confirmationCanonicalPayload as string | null,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseHarnessRerunPayload(value: string): PendingRunHarnessRerunPayloadV1 | null {
+  try {
+    const record = exactDataRecord(JSON.parse(value), [
+      "version", "fromCapsuleSha256", "toCapsuleSha256", "candidateIdentitySha256", "activeEvidencePlanSha256",
+    ]);
+    if (!record || record.version !== PENDING_RUN_HARNESS_RERUN_VERSION
+      || typeof record.fromCapsuleSha256 !== "string" || !SHA256.test(record.fromCapsuleSha256)
+      || typeof record.toCapsuleSha256 !== "string" || !SHA256.test(record.toCapsuleSha256)
+      || typeof record.candidateIdentitySha256 !== "string" || !SHA256.test(record.candidateIdentitySha256)
+      || typeof record.activeEvidencePlanSha256 !== "string" || !SHA256.test(record.activeEvidencePlanSha256)
+      || record.fromCapsuleSha256 === record.toCapsuleSha256) return null;
+    return Object.freeze({
+      version: PENDING_RUN_HARNESS_RERUN_VERSION,
+      fromCapsuleSha256: record.fromCapsuleSha256,
+      toCapsuleSha256: record.toCapsuleSha256,
+      candidateIdentitySha256: record.candidateIdentitySha256,
+      activeEvidencePlanSha256: record.activeEvidencePlanSha256,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function parseTerminalCardDraft(value: unknown): PendingRunTerminalCardInputV1 | null {
+  const input = exactDataRecord(value, ["conversationId", "turnTimestamp", "canonicalCard"]);
+  return input && visible(input.conversationId, PENDING_RUN_LIMITS.routeTextCharacters)
+    && exactIsoTimestamp(input.turnTimestamp)
+    && boundedCanonicalPayload(input.canonicalCard, PENDING_RUN_LIMITS.terminalCardBytes)
+    ? Object.freeze({
+      conversationId: input.conversationId,
+      turnTimestamp: input.turnTimestamp,
+      canonicalCard: input.canonicalCard,
+    }) : null;
+}
+
+function workflowOperationBindingsEqual(left: PendingRunOperationEventV1, right: PendingRunOperationEventV1): boolean {
+  return left.operationKind === right.operationKind && left.operationId === right.operationId
+    && left.previewId === right.previewId && left.previewSha256 === right.previewSha256
+    && left.authorizationSha256 === right.authorizationSha256
+    && left.routeReceiptSha256 === right.routeReceiptSha256 && left.requestSha256 === right.requestSha256
+    && left.candidateSha256 === right.candidateSha256 && left.candidateIdentitySha256 === right.candidateIdentitySha256
+    && left.taskSpecSha256 === right.taskSpecSha256
+    && left.activeEvidencePlanSha256 === right.activeEvidencePlanSha256 && left.round === right.round
+    && left.attempt === right.attempt && left.retryOfOperationId === right.retryOfOperationId;
+}
+
+function workflowDecisionCoversOperation(
+  decision: PendingRunDecisionEventV1,
+  operation: PendingRunOperationEventV1,
+): boolean {
+  return decision.outcome === "approved" && decision.decisionKind === operation.operationKind
+    && decision.operationId === operation.operationId && decision.approvalId === operation.previewId
+    && decision.previewSha256 === operation.previewSha256
+    && decision.authorizationSha256 === operation.authorizationSha256
+    && decision.routeReceiptSha256 === operation.routeReceiptSha256
+    && decision.requestSha256 === operation.requestSha256
+    && decision.candidateSha256 === operation.candidateSha256
+    && decision.taskSpecSha256 === operation.taskSpecSha256
+    && decision.activeEvidencePlanSha256 === operation.activeEvidencePlanSha256
+    && decision.round === operation.round && decision.attempt === operation.attempt
+    && decision.retryOfOperationId === operation.retryOfOperationId;
+}
+
+function operationTransition(previous: PendingRunOperationStatusV1, next: PendingRunOperationStatusV1): boolean {
+  if (previous === "reserved") return next === "sending" || next === "declined" || next === "cancelled" || next === "interrupted";
+  if (previous === "sending") return next === "answered" || next === "unavailable" || next === "cancelled" || next === "interrupted";
+  return false;
+}
+
+function parseWorkflowEvent(
+  value: unknown,
+  sequence: number,
+  previousEventSha256: string | null,
+): PendingRunWorkflowEventV1 | null {
+  let common: Readonly<Record<string, unknown>> | null = null;
+  try {
+    common = value !== null && typeof value === "object" ? exactDataRecord(value, Object.keys(value)) : null;
+  } catch {
+    return null;
+  }
+  if (!common || common.version !== PENDING_RUN_WORKFLOW_EVENT_VERSION || common.sequence !== sequence
+    || common.previousEventSha256 !== previousEventSha256
+    || typeof common.eventSha256 !== "string" || !SHA256.test(common.eventSha256)) return null;
+  let withoutSha: Omit<PendingRunWorkflowEventV1, "eventSha256">;
+  let parsed: PendingRunWorkflowEventV1;
+  if (common.kind === "operation") {
+    const event = exactDataRecord(value, [
+      "version", "sequence", "previousEventSha256", "eventSha256", "kind", "operationKind", "operationId", "status",
+      "previewId", "previewSha256", "authorizationSha256", "routeReceiptSha256", "requestSha256", "candidateSha256",
+      "candidateIdentitySha256", "taskSpecSha256", "activeEvidencePlanSha256", "round", "attempt", "retryOfOperationId", "outcomeSha256",
+    ]);
+    if (!event || (event.operationKind !== "repair" && event.operationKind !== "critic")
+      || typeof event.operationId !== "string" || !UUID_V4.test(event.operationId)
+      || !["reserved", "sending", "answered", "unavailable", "declined", "cancelled", "interrupted"].includes(String(event.status))
+      || typeof event.previewId !== "string" || !UUID_V4.test(event.previewId)
+      || [event.previewSha256, event.authorizationSha256, event.routeReceiptSha256, event.requestSha256,
+        event.candidateSha256, event.candidateIdentitySha256, event.taskSpecSha256, event.activeEvidencePlanSha256]
+        .some((item) => typeof item !== "string" || !SHA256.test(item))
+      || (event.round !== 0 && event.round !== 1)
+      || !safeInteger(event.attempt, 1, 3)
+      || (event.retryOfOperationId !== null && (typeof event.retryOfOperationId !== "string" || !UUID_V4.test(event.retryOfOperationId)))
+      || (event.outcomeSha256 !== null && (typeof event.outcomeSha256 !== "string" || !SHA256.test(event.outcomeSha256)))
+      || (["reserved", "sending"].includes(String(event.status)) !== (event.outcomeSha256 === null))) return null;
+    withoutSha = Object.freeze({
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, kind: "operation",
+      operationKind: event.operationKind, operationId: event.operationId, status: event.status,
+      previewId: event.previewId, previewSha256: event.previewSha256, authorizationSha256: event.authorizationSha256,
+      routeReceiptSha256: event.routeReceiptSha256, requestSha256: event.requestSha256,
+      candidateSha256: event.candidateSha256, candidateIdentitySha256: event.candidateIdentitySha256,
+      taskSpecSha256: event.taskSpecSha256,
+      activeEvidencePlanSha256: event.activeEvidencePlanSha256, round: event.round, attempt: event.attempt,
+      retryOfOperationId: event.retryOfOperationId, outcomeSha256: event.outcomeSha256,
+    }) as Omit<PendingRunOperationEventV1, "eventSha256">;
+    parsed = Object.freeze({ ...withoutSha, eventSha256: event.eventSha256 }) as PendingRunOperationEventV1;
+  } else if (common.kind === "decision") {
+    const event = exactDataRecord(value, [
+      "version", "sequence", "previousEventSha256", "eventSha256", "kind", "decisionKind", "approvalId",
+      "operationId", "outcome", "decidedAt", "disclosureSha256", "previewSha256", "authorizationSha256",
+      "routeReceiptSha256", "requestSha256", "candidateSha256", "candidateIdentitySha256", "taskSpecSha256",
+      "activeEvidencePlanSha256", "round", "attempt", "retryOfOperationId",
+    ]);
+    if (!event || (event.decisionKind !== "repair" && event.decisionKind !== "critic")
+      || typeof event.approvalId !== "string" || !UUID_V4.test(event.approvalId)
+      || typeof event.operationId !== "string" || !UUID_V4.test(event.operationId)
+      || !["approved", "task-stopped", "continued-without-critic"].includes(String(event.outcome))
+      || (event.decisionKind === "repair" && event.outcome === "continued-without-critic")
+      || !exactIsoTimestamp(event.decidedAt)
+      || [event.disclosureSha256, event.previewSha256, event.routeReceiptSha256, event.candidateSha256,
+        event.candidateIdentitySha256, event.taskSpecSha256, event.activeEvidencePlanSha256]
+        .some((item) => typeof item !== "string" || !SHA256.test(item))
+      || (event.authorizationSha256 !== null
+        && (typeof event.authorizationSha256 !== "string" || !SHA256.test(event.authorizationSha256)))
+      || (event.requestSha256 !== null && (typeof event.requestSha256 !== "string" || !SHA256.test(event.requestSha256)))
+      || ((event.outcome === "approved" || event.decisionKind === "critic")
+        && (event.authorizationSha256 === null || event.requestSha256 === null))
+      || (event.decisionKind === "repair" && event.outcome !== "approved"
+        && (event.authorizationSha256 !== null || event.requestSha256 !== null))
+      || (event.round !== 0 && event.round !== 1)
+      || !safeInteger(event.attempt, 1, 3)
+      || (event.decisionKind === "repair" && (event.attempt !== 1 || event.retryOfOperationId !== null))
+      || (event.retryOfOperationId !== null
+        && (typeof event.retryOfOperationId !== "string" || !UUID_V4.test(event.retryOfOperationId)))) return null;
+    withoutSha = Object.freeze({
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, kind: "decision",
+      decisionKind: event.decisionKind, approvalId: event.approvalId, operationId: event.operationId,
+      outcome: event.outcome, decidedAt: event.decidedAt, disclosureSha256: event.disclosureSha256,
+      previewSha256: event.previewSha256, authorizationSha256: event.authorizationSha256,
+      routeReceiptSha256: event.routeReceiptSha256, requestSha256: event.requestSha256,
+      candidateSha256: event.candidateSha256, candidateIdentitySha256: event.candidateIdentitySha256,
+      taskSpecSha256: event.taskSpecSha256, activeEvidencePlanSha256: event.activeEvidencePlanSha256,
+      round: event.round, attempt: event.attempt, retryOfOperationId: event.retryOfOperationId,
+    }) as Omit<PendingRunDecisionEventV1, "eventSha256">;
+    parsed = Object.freeze({ ...withoutSha, eventSha256: event.eventSha256 }) as PendingRunDecisionEventV1;
+  } else if (common.kind === "authority") {
+    const event = exactDataRecord(value, [
+      "version", "sequence", "previousEventSha256", "eventSha256", "kind", "authorityKind", "authoritySha256",
+      "canonicalPayload", "assessmentSha256", "candidateSha256", "candidateIdentitySha256", "taskSpecSha256",
+      "activeEvidencePlanSha256", "round",
+    ]);
+    if (!event || !["assessment", "owner-observation", "owner-resolution", "cairn-failure-decision", "harness-decision", "harness-authorization", "harness-rerun"].includes(String(event.authorityKind))
+      || [event.authoritySha256, event.candidateSha256, event.candidateIdentitySha256, event.taskSpecSha256, event.activeEvidencePlanSha256]
+        .some((item) => typeof item !== "string" || !SHA256.test(item))
+      || !boundedCanonicalPayload(event.canonicalPayload) || digest(event.canonicalPayload) !== event.authoritySha256
+      || (event.authorityKind === "cairn-failure-decision" && !parseCairnFailureDecisionPayload(event.canonicalPayload))
+      || (event.authorityKind === "cairn-failure-decision" && event.round !== 0)
+      || (event.authorityKind === "harness-decision" && !parseHarnessDecisionPayload(event.canonicalPayload))
+      || (event.authorityKind === "harness-rerun" && !parseHarnessRerunPayload(event.canonicalPayload))
+      || (event.assessmentSha256 !== null && (typeof event.assessmentSha256 !== "string" || !SHA256.test(event.assessmentSha256)))
+      || (event.authorityKind === "owner-resolution" ? event.assessmentSha256 === null : event.assessmentSha256 !== null)
+      || (event.round !== 0 && event.round !== 1)) return null;
+    withoutSha = Object.freeze({
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, kind: "authority",
+      authorityKind: event.authorityKind, authoritySha256: event.authoritySha256, canonicalPayload: event.canonicalPayload,
+      assessmentSha256: event.assessmentSha256,
+      candidateSha256: event.candidateSha256, candidateIdentitySha256: event.candidateIdentitySha256,
+      taskSpecSha256: event.taskSpecSha256,
+      activeEvidencePlanSha256: event.activeEvidencePlanSha256, round: event.round,
+    }) as Omit<PendingRunAuthorityEventV1, "eventSha256">;
+    parsed = Object.freeze({ ...withoutSha, eventSha256: event.eventSha256 }) as PendingRunAuthorityEventV1;
+  } else if (common.kind === "session") {
+    const event = exactDataRecord(value, [
+      "version", "sequence", "previousEventSha256", "eventSha256", "kind", "sessionSha256", "canonicalPayload",
+      "conversationId", "startedAt", "adapterIdentitySha256", "candidateSha256", "candidateIdentitySha256",
+      "taskSpecSha256", "activeEvidencePlanSha256", "round",
+    ]);
+    if (!event || typeof event.sessionSha256 !== "string" || !SHA256.test(event.sessionSha256)
+      || !boundedCanonicalPayload(event.canonicalPayload) || digest(event.canonicalPayload) !== event.sessionSha256
+      || (event.conversationId !== null && !visible(event.conversationId, PENDING_RUN_LIMITS.routeTextCharacters))
+      || !exactIsoTimestamp(event.startedAt)
+      || [event.adapterIdentitySha256, event.candidateSha256, event.candidateIdentitySha256,
+        event.taskSpecSha256, event.activeEvidencePlanSha256]
+        .some((item) => typeof item !== "string" || !SHA256.test(item))
+      || (event.round !== 0 && event.round !== 1)) return null;
+    withoutSha = Object.freeze({
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, kind: "session",
+      sessionSha256: event.sessionSha256, canonicalPayload: event.canonicalPayload, conversationId: event.conversationId,
+      startedAt: event.startedAt, adapterIdentitySha256: event.adapterIdentitySha256,
+      candidateSha256: event.candidateSha256, candidateIdentitySha256: event.candidateIdentitySha256,
+      taskSpecSha256: event.taskSpecSha256, activeEvidencePlanSha256: event.activeEvidencePlanSha256, round: event.round,
+    }) as Omit<PendingRunSessionEventV1, "eventSha256">;
+    parsed = Object.freeze({ ...withoutSha, eventSha256: event.eventSha256 }) as PendingRunSessionEventV1;
+  } else if (common.kind === "evidence-plan-revision") {
+    const event = exactDataRecord(value, [
+      "version", "sequence", "previousEventSha256", "eventSha256", "kind", "fromEvidencePlanSha256",
+      "toEvidencePlanSha256", "authorizationSha256", "failedOutputSha256",
+    ]);
+    if (!event || [event.fromEvidencePlanSha256, event.toEvidencePlanSha256, event.authorizationSha256, event.failedOutputSha256]
+      .some((item) => typeof item !== "string" || !SHA256.test(item))) return null;
+    withoutSha = Object.freeze({
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, kind: "evidence-plan-revision",
+      fromEvidencePlanSha256: event.fromEvidencePlanSha256, toEvidencePlanSha256: event.toEvidencePlanSha256,
+      authorizationSha256: event.authorizationSha256, failedOutputSha256: event.failedOutputSha256,
+    }) as Omit<PendingRunEvidencePlanEventV1, "eventSha256">;
+    parsed = Object.freeze({ ...withoutSha, eventSha256: event.eventSha256 }) as PendingRunEvidencePlanEventV1;
+  } else return null;
+  return workflowEventSha(withoutSha) === common.eventSha256 ? parsed : null;
+}
+
+function parseWorkflow(value: unknown, stateEvidencePlanSha256: string): PendingRunWorkflowV1 | null {
   const record = exactDataRecord(value, [
+    "version", "initialEvidencePlanSha256", "activeEvidencePlanSha256", "unavailableRetryUsed", "events",
+  ]);
+  if (!record || record.version !== PENDING_RUN_WORKFLOW_VERSION
+    || record.initialEvidencePlanSha256 !== stateEvidencePlanSha256
+    || typeof record.activeEvidencePlanSha256 !== "string" || !SHA256.test(record.activeEvidencePlanSha256)
+    || (record.unavailableRetryUsed !== 0 && record.unavailableRetryUsed !== 1)) return null;
+  const values = denseArray(record.events, PENDING_RUN_LIMITS.workflowEvents);
+  if (!values) return null;
+  const events: PendingRunWorkflowEventV1[] = [];
+  const operations = new Map<string, PendingRunOperationEventV1>();
+  const decisions = new Map<string, PendingRunDecisionEventV1>();
+  const decisionApprovalIds = new Set<string>();
+  const assessmentDigests = new Set<string>();
+  const harnessAuthorizationDigests = new Set<string>();
+  const cairnFailureDecisionCriteria = new Set<string>();
+  const cairnFailureDecisionActionIds = new Set<string>();
+  const cairnFailureDecisionActionNonces = new Set<string>();
+  const cairnFailureDecisionReceipts = new Set<string>();
+  const cairnFailureConfirmationDigests = new Set<string>();
+  const authorityDigests = new Set<string>();
+  const eventDigests = new Set<string>();
+  let activePlan = stateEvidencePlanSha256;
+  let retryUsed: 0 | 1 = 0;
+  let repairOperations = 0;
+  let criticOperations = 0;
+  let planRevisions = 0;
+  let sessionSeen = false;
+  let harnessRerunSeen = false;
+  let harnessDecision: Readonly<{
+    event: PendingRunAuthorityEventV1;
+    payload: PendingRunHarnessDecisionPayloadV1;
+  }> | null = null;
+  let previousSha256: string | null = null;
+  for (let index = 0; index < values.length; index += 1) {
+    const event = parseWorkflowEvent(values[index], index + 1, previousSha256);
+    if (!event || eventDigests.has(event.eventSha256)) return null;
+    if (harnessDecision?.payload.outcome === "task-stopped") return null;
+    eventDigests.add(event.eventSha256);
+    if (event.kind === "operation") {
+      if (event.activeEvidencePlanSha256 !== activePlan) return null;
+      const prior = operations.get(event.operationId);
+      if (prior) {
+        if (!workflowOperationBindingsEqual(prior, event) || !operationTransition(prior.status, event.status)) return null;
+      } else {
+        if ([...operations.values()].some((operation) => operation.status === "reserved" || operation.status === "sending")) return null;
+        const decision = decisions.get(event.operationId);
+        if (!decision || !workflowDecisionCoversOperation(decision, event)) return null;
+        if ([...operations.values()].some((operation) => operation.previewId === event.previewId
+          || operation.previewSha256 === event.previewSha256
+          || operation.authorizationSha256 === event.authorizationSha256
+          || operation.routeReceiptSha256 === event.routeReceiptSha256
+          || operation.requestSha256 === event.requestSha256
+          || operation.candidateIdentitySha256 === event.candidateIdentitySha256)) return null;
+        if (event.status !== "reserved") return null;
+        const expectedAttempt = event.operationKind === "repair" ? repairOperations + 1 : criticOperations + 1;
+        if (event.attempt !== expectedAttempt) return null;
+        if (event.operationKind === "repair") {
+          repairOperations += 1;
+          if (repairOperations > 1 || event.attempt !== 1 || event.retryOfOperationId !== null) return null;
+        } else {
+          const latestCritic = [...operations.values()].filter((operation) => operation.operationKind === "critic"
+            && operation.round === event.round && operation.candidateSha256 === event.candidateSha256
+            && operation.taskSpecSha256 === event.taskSpecSha256
+            && operation.activeEvidencePlanSha256 === event.activeEvidencePlanSha256).at(-1);
+          const latestCriticNeedsRetry = latestCritic?.status === "unavailable" || latestCritic?.status === "interrupted";
+          if (latestCriticNeedsRetry !== (event.retryOfOperationId !== null)
+            || (latestCriticNeedsRetry && event.retryOfOperationId !== latestCritic?.operationId)) return null;
+          criticOperations += 1;
+          if (criticOperations > 3) return null;
+          if (event.retryOfOperationId !== null) {
+            if (retryUsed === 1) return null;
+            retryUsed = 1;
+          }
+        }
+      }
+      operations.set(event.operationId, event);
+    } else if (event.kind === "decision") {
+      if (event.activeEvidencePlanSha256 !== activePlan || decisions.has(event.operationId)
+        || decisionApprovalIds.has(event.approvalId)
+        || [...operations.values()].some((operation) => operation.operationKind === event.decisionKind
+          && operation.status === "cancelled")
+        || [...decisions.values()].some((decision) => decision.disclosureSha256 === event.disclosureSha256
+          || decision.previewSha256 === event.previewSha256
+          || (event.authorizationSha256 !== null && decision.authorizationSha256 === event.authorizationSha256)
+          || decision.routeReceiptSha256 === event.routeReceiptSha256
+          || (event.requestSha256 !== null && decision.requestSha256 === event.requestSha256))
+        || [...decisions.values()].some((decision) => decision.outcome === "approved" && !operations.has(decision.operationId))
+        || [...decisions.values()].some((decision) => decision.decisionKind === event.decisionKind
+          && decision.outcome !== "approved")) return null;
+      const expectedAttempt = event.decisionKind === "repair" ? repairOperations + 1 : criticOperations + 1;
+      if (event.attempt !== expectedAttempt) return null;
+      if (event.decisionKind === "repair") {
+        if (repairOperations !== 0 || [...decisions.values()].some((decision) => decision.decisionKind === "repair")) return null;
+      } else {
+        const latestCritic = [...operations.values()].filter((operation) => operation.operationKind === "critic"
+          && operation.round === event.round && operation.candidateSha256 === event.candidateSha256
+          && operation.taskSpecSha256 === event.taskSpecSha256
+          && operation.activeEvidencePlanSha256 === event.activeEvidencePlanSha256).at(-1);
+        const latestCriticNeedsRetry = latestCritic?.status === "unavailable" || latestCritic?.status === "interrupted";
+        if (latestCriticNeedsRetry !== (event.retryOfOperationId !== null)
+          || (latestCriticNeedsRetry && event.retryOfOperationId !== latestCritic?.operationId)
+          || (event.retryOfOperationId !== null && retryUsed === 1)) return null;
+      }
+      decisions.set(event.operationId, event);
+      decisionApprovalIds.add(event.approvalId);
+    } else if (event.kind === "authority") {
+      if (event.activeEvidencePlanSha256 !== activePlan) return null;
+      if (authorityDigests.has(event.authoritySha256)) return null;
+      authorityDigests.add(event.authoritySha256);
+      if (event.authorityKind === "assessment") assessmentDigests.add(event.authoritySha256);
+      else if (event.authorityKind === "owner-resolution") {
+        const assessment = event.assessmentSha256 as string;
+        if (!assessmentDigests.has(assessment)) return null;
+      } else if (event.authorityKind === "cairn-failure-decision") {
+        const payload = parseCairnFailureDecisionPayload(event.canonicalPayload);
+        if (!payload || cairnFailureDecisionCriteria.has(payload.criterionId)
+          || cairnFailureDecisionActionIds.has(payload.actionId)
+          || cairnFailureDecisionActionNonces.has(payload.actionNonce)
+          || cairnFailureDecisionReceipts.has(payload.ownerActionReceiptSha256)
+          || (payload.confirmationSha256 !== null
+            && cairnFailureConfirmationDigests.has(payload.confirmationSha256))) return null;
+        if (payload.outcome === "confirmed") {
+          const confirmation = exactDataRecord(JSON.parse(payload.confirmationCanonicalPayload as string), [
+            "version", "projectHash", "runId", "taskSpecSha256", "evidencePlanSha256", "candidateSha256",
+            "policyContextSha256", "criterionId", "failureConditionId", "failureConditionSha256",
+            "criterionResultSha256", "evidenceRefsSeen", "decision", "actionNonce", "confirmedAt",
+            "ownerActionReceiptSha256", "confirmationSha256",
+          ]);
+          if (!confirmation || confirmation.candidateSha256 !== event.candidateSha256
+            || confirmation.taskSpecSha256 !== event.taskSpecSha256
+            || confirmation.evidencePlanSha256 !== event.activeEvidencePlanSha256) return null;
+        }
+        cairnFailureDecisionCriteria.add(payload.criterionId);
+        cairnFailureDecisionActionIds.add(payload.actionId);
+        cairnFailureDecisionActionNonces.add(payload.actionNonce);
+        cairnFailureDecisionReceipts.add(payload.ownerActionReceiptSha256);
+        if (payload.confirmationSha256 !== null) cairnFailureConfirmationDigests.add(payload.confirmationSha256);
+      } else if (event.authorityKind === "harness-decision") {
+        const payload = parseHarnessDecisionPayload(event.canonicalPayload);
+        if (!payload || harnessDecision !== null || harnessAuthorizationDigests.size !== 0 || planRevisions !== 0) return null;
+        harnessDecision = Object.freeze({ event, payload });
+      } else if (event.authorityKind === "harness-authorization") {
+        const decision = harnessDecision;
+        if (!decision || decision.payload.outcome !== "approved"
+          || decision.payload.authorizationSha256 !== event.authoritySha256
+          || harnessAuthorizationDigests.size !== 0
+          || event.candidateSha256 !== decision.event.candidateSha256
+          || event.candidateIdentitySha256 !== decision.event.candidateIdentitySha256
+          || event.taskSpecSha256 !== decision.event.taskSpecSha256
+          || event.activeEvidencePlanSha256 !== decision.event.activeEvidencePlanSha256
+          || event.round !== decision.event.round) return null;
+        harnessAuthorizationDigests.add(event.authoritySha256);
+      } else if (event.authorityKind === "harness-rerun") {
+        const payload = parseHarnessRerunPayload(event.canonicalPayload);
+        const inFlight = [...operations.values()].some((operation) => operation.status === "reserved" || operation.status === "sending");
+        const undecidedOperation = [...decisions.values()].some((decision) => !operations.has(decision.operationId));
+        if (!payload || harnessRerunSeen || planRevisions !== 1 || inFlight || undecidedOperation
+          || harnessDecision?.payload.outcome !== "approved" || harnessAuthorizationDigests.size !== 1
+          || payload.candidateIdentitySha256 !== event.candidateIdentitySha256
+          || payload.activeEvidencePlanSha256 !== activePlan
+          || event.activeEvidencePlanSha256 !== activePlan
+          || event.taskSpecSha256 !== harnessDecision.event.taskSpecSha256
+          || event.round !== harnessDecision.event.round) return null;
+        harnessRerunSeen = true;
+      }
+    } else if (event.kind === "session") {
+      if (sessionSeen || event.activeEvidencePlanSha256 !== activePlan) return null;
+      sessionSeen = true;
+    } else {
+      const inFlight = [...operations.values()].some((operation) => operation.status === "reserved" || operation.status === "sending");
+      const undecidedOperation = [...decisions.values()].some((decision) => !operations.has(decision.operationId));
+      if (planRevisions !== 0 || inFlight || undecidedOperation
+        || harnessDecision?.payload.outcome !== "approved"
+        || event.authorizationSha256 !== harnessDecision.payload.authorizationSha256
+        || event.fromEvidencePlanSha256 !== activePlan
+        || event.toEvidencePlanSha256 === activePlan
+        || !harnessAuthorizationDigests.has(event.authorizationSha256)) return null;
+      planRevisions = 1;
+      activePlan = event.toEvidencePlanSha256;
+    }
+    events.push(event);
+    previousSha256 = event.eventSha256;
+  }
+  if (activePlan !== record.activeEvidencePlanSha256 || retryUsed !== record.unavailableRetryUsed) return null;
+  return Object.freeze({
+    version: PENDING_RUN_WORKFLOW_VERSION,
+    initialEvidencePlanSha256: stateEvidencePlanSha256,
+    activeEvidencePlanSha256: activePlan,
+    unavailableRetryUsed: retryUsed,
+    events: Object.freeze(events),
+  });
+}
+
+function parseState(value: unknown, capsuleSha256?: string): PendingRunStateV1 | null {
+  let hasWorkflow = false;
+  let hasCandidateIdentity = false;
+  let hasTerminalCardDraft = false;
+  try {
+    hasWorkflow = value !== null && typeof value === "object"
+      && Object.prototype.hasOwnProperty.call(value, "workflow");
+    hasCandidateIdentity = value !== null && typeof value === "object"
+      && Object.prototype.hasOwnProperty.call(value, "candidateIdentitySha256");
+    hasTerminalCardDraft = value !== null && typeof value === "object"
+      && Object.prototype.hasOwnProperty.call(value, "terminalCardDraft");
+  } catch {
+    return null;
+  }
+  const keys = [
     "version", "displayOutcome", "taskNumber", "phase", "criticMode", "generation", "round", "baseHead", "gitStateSha256",
     "taskSpecSha256", "evidencePlanSha256", "candidateSha256", "capsuleSha256", "bundleSha256s", "evidenceRunId",
     "evidenceStateSha256", "evidenceRevision", "route", "counters", "terminalAction",
-  ]);
+  ];
+  if (hasCandidateIdentity) keys.push("candidateIdentitySha256");
+  if (hasTerminalCardDraft) keys.push("terminalCardDraft");
+  if (hasWorkflow) keys.push("workflow");
+  const record = exactDataRecord(value, keys);
   if (!record || record.version !== PENDING_RUN_STATE_VERSION || !visible(record.displayOutcome, PENDING_RUN_LIMITS.displayOutcomeCharacters)
     || !safeInteger(record.taskNumber, 1, 999_999)
     || !safeInteger(record.generation, 0, PENDING_RUN_LIMITS.revisions)
@@ -396,12 +1250,15 @@ function parseState(value: unknown, capsuleSha256?: string): PendingRunStateV1 |
     || typeof record.taskSpecSha256 !== "string" || !SHA256.test(record.taskSpecSha256)
     || typeof record.evidencePlanSha256 !== "string" || !SHA256.test(record.evidencePlanSha256)
     || typeof record.candidateSha256 !== "string" || !SHA256.test(record.candidateSha256)
+    || hasCandidateIdentity !== hasWorkflow
+    || (hasCandidateIdentity && (typeof record.candidateIdentitySha256 !== "string" || !SHA256.test(record.candidateIdentitySha256)))
     || typeof record.capsuleSha256 !== "string" || !SHA256.test(record.capsuleSha256)
     || (capsuleSha256 !== undefined && record.capsuleSha256 !== capsuleSha256)
     || !safeInteger(record.evidenceRevision, 0, PENDING_RUN_LIMITS.revisions)) return null;
-  if (!["awaiting-critic", "awaiting-owner-resolution", "awaiting-repair", "ready-to-seal", "terminal-prepared"].includes(String(record.phase))) return null;
+  if (!["awaiting-critic", "awaiting-critic-result", "awaiting-owner-resolution", "awaiting-repair", "awaiting-repair-result",
+    "ready-to-seal", "terminal-prepared"].includes(String(record.phase))) return null;
   if (record.criticMode !== "required" && record.criticMode !== "optional" && record.criticMode !== "off") return null;
-  if (record.criticMode === "off" && record.phase === "awaiting-critic") return null;
+  if (record.criticMode === "off" && (record.phase === "awaiting-critic" || record.phase === "awaiting-critic-result")) return null;
   const bundles = denseArray(record.bundleSha256s, 2);
   if (!bundles || bundles.length !== Number(record.round) + 1 || bundles.some((item) => typeof item !== "string" || !SHA256.test(item))) return null;
   if (record.evidenceRunId !== null && (typeof record.evidenceRunId !== "string" || !UUID_V4.test(record.evidenceRunId))) return null;
@@ -434,7 +1291,31 @@ function parseState(value: unknown, capsuleSha256?: string): PendingRunStateV1 |
       capsuleSha256: action.capsuleSha256,
     });
   } else if (record.terminalAction !== null) return null;
-  return Object.freeze({
+  const terminalCardDraft = hasTerminalCardDraft ? parseTerminalCardDraft(record.terminalCardDraft) : undefined;
+  if (hasTerminalCardDraft && (record.phase !== "terminal-prepared" || !terminalCardDraft)) return null;
+  const workflow = hasWorkflow ? parseWorkflow(record.workflow, record.evidencePlanSha256 as string) : undefined;
+  if (hasWorkflow && !workflow) return null;
+  if (workflow) {
+    const latestByOperation = new Map<string, PendingRunOperationEventV1>();
+    const reservedKinds = new Map<string, PendingRunOperationKindV1>();
+    for (const event of workflow.events) if (event.kind === "operation") {
+      latestByOperation.set(event.operationId, event);
+      if (event.status === "reserved") reservedKinds.set(event.operationId, event.operationKind);
+    }
+    if ([...reservedKinds.values()].filter((kind) => kind === "repair").length !== repair.spent
+      || [...reservedKinds.values()].filter((kind) => kind === "critic").length !== critic.spent) return null;
+    const inFlight = [...latestByOperation.values()].filter((event) => event.status === "reserved" || event.status === "sending");
+    const latestOperation = [...workflow.events].reverse().find((event): event is PendingRunOperationEventV1 => event.kind === "operation");
+    const resultKind = record.phase === "awaiting-repair-result" ? "repair"
+      : record.phase === "awaiting-critic-result" ? "critic" : null;
+    if (resultKind === null ? inFlight.length !== 0
+      : !latestOperation || latestOperation.operationKind !== resultKind
+        || !["reserved", "sending", "interrupted", "cancelled",
+          ...(resultKind === "repair" ? ["unavailable" as const] : [])].includes(latestOperation.status)
+        || latestOperation.candidateIdentitySha256 !== record.candidateIdentitySha256
+        || inFlight.length > 1) return null;
+  }
+  const parsed = {
     version: PENDING_RUN_STATE_VERSION,
     displayOutcome: record.displayOutcome as string,
     taskNumber: record.taskNumber,
@@ -447,6 +1328,7 @@ function parseState(value: unknown, capsuleSha256?: string): PendingRunStateV1 |
     taskSpecSha256: record.taskSpecSha256,
     evidencePlanSha256: record.evidencePlanSha256,
     candidateSha256: record.candidateSha256,
+    ...(hasCandidateIdentity ? { candidateIdentitySha256: record.candidateIdentitySha256 as string } : {}),
     capsuleSha256: record.capsuleSha256,
     bundleSha256s: Object.freeze(bundles as string[]),
     evidenceRunId: record.evidenceRunId as string | null,
@@ -455,7 +1337,10 @@ function parseState(value: unknown, capsuleSha256?: string): PendingRunStateV1 |
     route: Object.freeze({ adapterLabel: route.adapterLabel, provider: route.provider, model: route.model, receiptSha256: route.receiptSha256 }),
     counters: Object.freeze({ builder, repair, critic, externalEvidence }),
     terminalAction,
-  } as PendingRunStateV1);
+    ...(terminalCardDraft ? { terminalCardDraft } : {}),
+    ...(workflow ? { workflow } : {}),
+  } as PendingRunStateV1;
+  return Object.freeze(parsed);
 }
 
 function projection(run: LivePendingRun): PendingRunGateProjectionV1 {
@@ -484,6 +1369,8 @@ function recoveryRun(identity: ProjectIdentity, runId = ""): LivePendingRun {
     directory: null,
     closedReceiptSha256: null,
     closedActionId: null,
+    closedTerminalCard: null,
+    closedCardDeliveredSha256: null,
     journalBytes: 0,
     reservedJournalBytes: 0,
   };
@@ -864,7 +1751,66 @@ function parseHighWater(bytes: Buffer, projectHash: string, runId: string): Pend
   }
 }
 
-function composeClose(run: LivePendingRun, action: PendingRunTerminalActionV1, receipt: string): PendingRunCloseRecordV1 {
+function composeTerminalCardIdentity(
+  projectHash: string,
+  runId: string,
+  actionId: string,
+  terminalReceiptSha256: string,
+  value: unknown,
+): PendingRunTerminalCardV1 | null {
+  const input = parseTerminalCardDraft(value);
+  if (!input) return null;
+  const conversationSha256 = digest(input.conversationId);
+  const cardSha256 = digest(input.canonicalCard);
+  const deliveryIdSha256 = digest(canonicalJson([
+    CARD_DELIVERY_ID_DOMAIN, projectHash, runId, actionId, terminalReceiptSha256,
+    conversationSha256, input.turnTimestamp, cardSha256,
+  ]));
+  return Object.freeze({
+    version: PENDING_RUN_TERMINAL_CARD_VERSION,
+    deliveryIdSha256,
+    projectHash,
+    runId,
+    actionId,
+    terminalReceiptSha256,
+    conversationId: input.conversationId,
+    conversationSha256,
+    turnTimestamp: input.turnTimestamp,
+    canonicalCard: input.canonicalCard,
+    cardSha256,
+  });
+}
+
+function parseTerminalCardForBindings(
+  value: unknown,
+  projectHash: string,
+  runId: string,
+  actionId: string,
+  receipt: string,
+): PendingRunTerminalCardV1 | null {
+  const card = exactDataRecord(value, [
+    "version", "deliveryIdSha256", "projectHash", "runId", "actionId", "terminalReceiptSha256", "conversationId",
+    "conversationSha256", "turnTimestamp", "canonicalCard", "cardSha256",
+  ]);
+  if (!card || card.version !== PENDING_RUN_TERMINAL_CARD_VERSION || card.projectHash !== projectHash
+    || card.runId !== runId || card.actionId !== actionId || card.terminalReceiptSha256 !== receipt
+    || typeof card.deliveryIdSha256 !== "string" || !SHA256.test(card.deliveryIdSha256)
+    || typeof card.conversationSha256 !== "string" || !SHA256.test(card.conversationSha256)
+    || typeof card.cardSha256 !== "string" || !SHA256.test(card.cardSha256)) return null;
+  const recomposed = composeTerminalCardIdentity(projectHash, runId, actionId, receipt, {
+    conversationId: card.conversationId,
+    turnTimestamp: card.turnTimestamp,
+    canonicalCard: card.canonicalCard,
+  });
+  return recomposed && canonicalJson(recomposed) === canonicalJson(card) ? recomposed : null;
+}
+
+function composeClose(
+  run: LivePendingRun,
+  action: PendingRunTerminalActionV1,
+  receipt: string,
+  terminalCard: PendingRunTerminalCardV1 | null,
+): PendingRunCloseRecordV1 {
   const payload = Object.freeze({
     version: PENDING_RUN_CLOSE_VERSION,
     projectHash: run.identity.projectHash,
@@ -874,15 +1820,20 @@ function composeClose(run: LivePendingRun, action: PendingRunTerminalActionV1, r
     actionId: action.actionId,
     actionKind: action.kind,
     terminalReceiptSha256: receipt,
+    ...(terminalCard ? { terminalCard } : {}),
   });
   return Object.freeze({ ...payload, authSha256: authenticated(CLOSE_AUTH_DOMAIN, payload) });
 }
 
 function parseClose(bytes: Buffer, run: LivePendingRun): PendingRunCloseRecordV1 | null {
   try {
-    const value = exactDataRecord(JSON.parse(bytes.toString("utf8")), [
+    const raw = JSON.parse(bytes.toString("utf8")) as unknown;
+    const hasTerminalCard = raw !== null && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "terminalCard");
+    const keys = [
       "version", "projectHash", "runId", "revision", "revisionSha256", "actionId", "actionKind", "terminalReceiptSha256", "authSha256",
-    ]);
+    ];
+    if (hasTerminalCard) keys.push("terminalCard");
+    const value = exactDataRecord(raw, keys);
     if (!value || value.version !== PENDING_RUN_CLOSE_VERSION || value.projectHash !== run.identity.projectHash
       || value.runId !== run.runId || value.revision !== run.revision || value.revisionSha256 !== run.revisionSha256
       || typeof value.actionId !== "string" || !UUID_V4.test(value.actionId)
@@ -891,6 +1842,10 @@ function parseClose(bytes: Buffer, run: LivePendingRun): PendingRunCloseRecordV1
       || typeof value.authSha256 !== "string" || !SHA256.test(value.authSha256)) return null;
     const action = run.state?.terminalAction;
     if (!action || action.actionId !== value.actionId || action.kind !== value.actionKind) return null;
+    const terminalCard = hasTerminalCard ? parseTerminalCardForBindings(
+      value.terminalCard, run.identity.projectHash, run.runId, action.actionId, value.terminalReceiptSha256 as string,
+    ) : null;
+    if (hasTerminalCard && !terminalCard) return null;
     const payload = Object.freeze({
       version: PENDING_RUN_CLOSE_VERSION,
       projectHash: run.identity.projectHash,
@@ -900,8 +1855,43 @@ function parseClose(bytes: Buffer, run: LivePendingRun): PendingRunCloseRecordV1
       actionId: value.actionId,
       actionKind: value.actionKind,
       terminalReceiptSha256: value.terminalReceiptSha256,
+      ...(terminalCard ? { terminalCard } : {}),
     });
     const record = Object.freeze({ ...payload, authSha256: authenticated(CLOSE_AUTH_DOMAIN, payload) });
+    return equalDigest(value.authSha256, record.authSha256) && encodedRecord(record).equals(bytes) ? record : null;
+  } catch {
+    return null;
+  }
+}
+
+function composeCardDelivery(
+  card: PendingRunTerminalCardV1,
+  deliveredSha256: string,
+): PendingRunTerminalCardDeliveryRecordV1 {
+  const payload = Object.freeze({
+    version: PENDING_RUN_TERMINAL_CARD_DELIVERY_VERSION,
+    projectHash: card.projectHash,
+    runId: card.runId,
+    deliveryIdSha256: card.deliveryIdSha256,
+    deliveredSha256,
+  });
+  return Object.freeze({ ...payload, authSha256: authenticated(CARD_DELIVERY_AUTH_DOMAIN, payload) });
+}
+
+function parseCardDelivery(
+  bytes: Buffer,
+  card: PendingRunTerminalCardV1,
+): PendingRunTerminalCardDeliveryRecordV1 | null {
+  try {
+    const value = exactDataRecord(JSON.parse(bytes.toString("utf8")), [
+      "version", "projectHash", "runId", "deliveryIdSha256", "deliveredSha256", "authSha256",
+    ]);
+    if (!value || value.version !== PENDING_RUN_TERMINAL_CARD_DELIVERY_VERSION
+      || value.projectHash !== card.projectHash || value.runId !== card.runId
+      || value.deliveryIdSha256 !== card.deliveryIdSha256
+      || typeof value.deliveredSha256 !== "string" || !SHA256.test(value.deliveredSha256)
+      || typeof value.authSha256 !== "string" || !SHA256.test(value.authSha256)) return null;
+    const record = composeCardDelivery(card, value.deliveredSha256);
     return equalDigest(value.authSha256, record.authSha256) && encodedRecord(record).equals(bytes) ? record : null;
   } catch {
     return null;
@@ -1043,9 +2033,17 @@ function parseInventoryAnchor(bytes: Buffer): PendingRunInventoryAnchorRecordV1 
     let pending: PendingRunInventoryAnchorPendingV1 | null = null;
     if (value.pending !== null) {
       const rawPending = exactDataRecord(value.pending, ["generation", "inventorySha256", "close"]);
-      const close = rawPending?.close === null ? null : exactDataRecord(rawPending?.close, [
+      const closeHasTerminalCard = rawPending?.close !== null && typeof rawPending?.close === "object"
+        && Object.prototype.hasOwnProperty.call(rawPending.close, "terminalCard");
+      const closeKeys = [
         "projectHash", "runId", "revision", "revisionSha256", "actionId", "actionKind", "terminalReceiptSha256",
-      ]);
+      ];
+      if (closeHasTerminalCard) closeKeys.push("terminalCard");
+      const close = rawPending?.close === null ? null : exactDataRecord(rawPending?.close, closeKeys);
+      const terminalCard = closeHasTerminalCard && close ? parseTerminalCardForBindings(
+        close.terminalCard, close.projectHash as string, close.runId as string, close.actionId as string,
+        close.terminalReceiptSha256 as string,
+      ) : null;
       if (!rawPending || !safeInteger(rawPending.generation, 0, 1_000_000_000)
         || typeof rawPending.inventorySha256 !== "string" || !SHA256.test(rawPending.inventorySha256)
         || (rawPending.close !== null && (!close || typeof close.projectHash !== "string" || !PROJECT_DIRECTORY.test(close.projectHash)
@@ -1054,7 +2052,8 @@ function parseInventoryAnchor(bytes: Buffer): PendingRunInventoryAnchorRecordV1 
           || typeof close.revisionSha256 !== "string" || !SHA256.test(close.revisionSha256)
           || typeof close.actionId !== "string" || !UUID_V4.test(close.actionId)
           || (close.actionKind !== "finalize" && close.actionKind !== "stop")
-          || typeof close.terminalReceiptSha256 !== "string" || !SHA256.test(close.terminalReceiptSha256)))) return null;
+          || typeof close.terminalReceiptSha256 !== "string" || !SHA256.test(close.terminalReceiptSha256)
+          || (closeHasTerminalCard && !terminalCard)))) return null;
       pending = Object.freeze({
         generation: rawPending.generation,
         inventorySha256: rawPending.inventorySha256,
@@ -1066,6 +2065,7 @@ function parseInventoryAnchor(bytes: Buffer): PendingRunInventoryAnchorRecordV1 
           actionId: close.actionId as string,
           actionKind: close.actionKind as "finalize" | "stop",
           terminalReceiptSha256: close.terminalReceiptSha256 as string,
+          ...(terminalCard ? { terminalCard } : {}),
         }),
       });
     }
@@ -1095,12 +2095,13 @@ function ensurePendingInventoryClose(intent: PendingRunInventoryCloseIntentV1): 
     || scanned.run.state.terminalAction.actionId !== intent.actionId
     || scanned.run.state.terminalAction.kind !== intent.actionKind) return false;
   if (!scanned.closed) {
-    const close = composeClose(scanned.run, scanned.run.state.terminalAction, intent.terminalReceiptSha256);
+    const close = composeClose(scanned.run, scanned.run.state.terminalAction, intent.terminalReceiptSha256, intent.terminalCard ?? null);
     if (!writeNewFile(join(directory, CLOSE_NAME), encodedRecord(close))) return false;
     scanned = scanRun(directory, intent.projectHash, intent.runId);
   }
   return scanned?.closed === true && scanned.run.closedActionId === intent.actionId
-    && scanned.run.closedReceiptSha256 === intent.terminalReceiptSha256;
+    && scanned.run.closedReceiptSha256 === intent.terminalReceiptSha256
+    && canonicalJson(scanned.run.closedTerminalCard) === canonicalJson(intent.terminalCard ?? null);
 }
 
 function currentInventory(): AnchoredInventory | null {
@@ -1110,7 +2111,7 @@ function currentInventory(): AnchoredInventory | null {
   const stagePath = join(configuredStoreRoot, INVENTORY_STAGE_NAME);
   const profileHighWaterPath = join(configuredProfileRoot, PROFILE_HIGH_WATER_NAME);
   let inventoryFile = readBoundFile(inventoryPath, 256 * 1024);
-  let anchorFile = readBoundFile(anchorPath, 32 * 1024);
+  let anchorFile = readBoundFile(anchorPath, TERMINAL_RECORD_BYTES);
   let profileHighWaterFile = readBoundFile(profileHighWaterPath, 32 * 1024);
   let record = inventoryFile && parseInventory(inventoryFile.bytes);
   const anchor = anchorFile && parseInventoryAnchor(anchorFile.bytes);
@@ -1159,7 +2160,7 @@ function currentInventory(): AnchoredInventory | null {
     || !sameInventoryPoint(profileHighWater.committed, anchor.pending)) return null;
   const settled = composeInventoryAnchor(anchor.pending, null);
   if (!replaceFile(anchorPath, anchorFile.bytes, encodedRecord(settled))) return null;
-  anchorFile = readBoundFile(anchorPath, 32 * 1024);
+  anchorFile = readBoundFile(anchorPath, TERMINAL_RECORD_BYTES);
   const settledFile = anchorFile;
   const settledRecord = settledFile && parseInventoryAnchor(settledFile.bytes);
   return settledFile && settledRecord && settledRecord.pending === null && sameInventoryPoint(point, settledRecord.committed)
@@ -1228,9 +2229,10 @@ function scanRun(
   if (configuredStoreRoot === null || !safeDirectory(directory, dirname(directory))) return null;
   if (!Number.isSafeInteger(maximumJournalBytes) || maximumJournalBytes < 1) return null;
   const scanLimit = Math.min(maximumJournalBytes, PENDING_RUN_LIMITS.journalBytes);
-  const names = exactDirectoryNames(directory, 4);
-  if (!names || names.some((name) => ![CAPSULE_DIR_NAME, REVISION_DIR_NAME, HIGH_WATER_NAME, CLOSE_NAME].includes(name))
+  const names = exactDirectoryNames(directory, 5);
+  if (!names || names.some((name) => ![CAPSULE_DIR_NAME, REVISION_DIR_NAME, HIGH_WATER_NAME, CLOSE_NAME, CARD_DELIVERED_NAME].includes(name))
     || !names.includes(CAPSULE_DIR_NAME) || !names.includes(REVISION_DIR_NAME) || !names.includes(HIGH_WATER_NAME)
+    || (names.includes(CARD_DELIVERED_NAME) && !names.includes(CLOSE_NAME))
     || !safeDirectory(join(directory, CAPSULE_DIR_NAME), directory) || !safeDirectory(join(directory, REVISION_DIR_NAME), directory)) return null;
   let totalBytes = 0;
   const readJournalFile = (path: string, fileLimit: number): BoundFile | null => {
@@ -1254,7 +2256,7 @@ function scanRun(
   for (let revision = 1; revision <= highWater.revision; revision += 1) {
     const expectedName = `${String(revision).padStart(8, "0")}.json`;
     if (revisionNames[revision - 1] !== expectedName || !REVISION_FILE.test(expectedName)) return null;
-    const file = readJournalFile(revisionPath(directory, revision), 512 * 1024);
+    const file = readJournalFile(revisionPath(directory, revision), 4 * 1024 * 1024);
     if (!file) return null;
     const parsed = parseRevisionBytes(file.bytes, projectHash, runId, revision);
     if (!parsed || parsed.record.previousRevisionSha256 !== previousSha256
@@ -1291,18 +2293,28 @@ function scanRun(
     directory,
     closedReceiptSha256: null,
     closedActionId: null,
+    closedTerminalCard: null,
+    closedCardDeliveredSha256: null,
     journalBytes: 0,
     reservedJournalBytes: 0,
   };
   run.authority = mintAuthority(run);
   let closed = false;
   if (names.includes(CLOSE_NAME)) {
-    const closeFile = readJournalFile(join(directory, CLOSE_NAME), 32 * 1024);
+    const closeFile = readJournalFile(join(directory, CLOSE_NAME), TERMINAL_RECORD_BYTES);
     const close = closeFile && parseClose(closeFile.bytes, run);
     if (!close) return null;
     if (totalBytes > PENDING_RUN_LIMITS.journalBytes) return null;
     run.closedReceiptSha256 = close.terminalReceiptSha256;
     run.closedActionId = close.actionId;
+    run.closedTerminalCard = close.terminalCard ?? null;
+    if (names.includes(CARD_DELIVERED_NAME)) {
+      if (!run.closedTerminalCard) return null;
+      const deliveryFile = readJournalFile(join(directory, CARD_DELIVERED_NAME), 32 * 1024);
+      const delivery = deliveryFile && parseCardDelivery(deliveryFile.bytes, run.closedTerminalCard);
+      if (!delivery) return null;
+      run.closedCardDeliveredSha256 = delivery.deliveredSha256;
+    }
     closed = true;
   }
   if (totalBytes > maximumJournalBytes) return null;
@@ -1383,6 +2395,8 @@ function installScannedRuns(): Map<string, LivePendingRun> | null {
   const topology = boundedStoreTopology();
   if (!inventory || !topology) return null;
   const scannedRuns = new Map<string, LivePendingRun>();
+  terminalCardByDeliveryId.clear();
+  deliveredCardByDeliveryId.clear();
   const scannedByKey = new Map<string, ScannedRun>();
   const activeEntries: PendingRunInventoryEntryV1[] = [];
   let scannedBytes = 0;
@@ -1395,6 +2409,13 @@ function installScannedRuns(): Map<string, LivePendingRun> | null {
       scannedBytes += scanned.journalBytes;
       if (scannedBytes > PENDING_RUN_LIMITS.scannedJournalBytes) return null;
       scannedByKey.set(`${project.projectHash}/${runId}`, scanned);
+      const card = scanned.run.closedTerminalCard;
+      if (scanned.closed && card) {
+        if (terminalCardByDeliveryId.has(card.deliveryIdSha256) || deliveredCardByDeliveryId.has(card.deliveryIdSha256)) return null;
+        if (scanned.run.closedCardDeliveredSha256 === null) {
+          terminalCardByDeliveryId.set(card.deliveryIdSha256, Object.freeze({ run: scanned.run, card }));
+        } else deliveredCardByDeliveryId.set(card.deliveryIdSha256, scanned.run.closedCardDeliveredSha256);
+      }
       if (!scanned.closed) {
         if (active !== null) return null;
         active = scanned.run;
@@ -1526,7 +2547,62 @@ function installVerifiedRevision(
   return "installed";
 }
 
-function stateSuccessor(previous: PendingRunStateV1, next: PendingRunStateV1): boolean {
+function workflowAppendSuccessor(previous: PendingRunWorkflowV1, next: PendingRunWorkflowV1): boolean {
+  if (next.events.length !== previous.events.length + 1
+    || next.initialEvidencePlanSha256 !== previous.initialEvidencePlanSha256
+    || previous.events.some((event, index) => canonicalJson(event) !== canonicalJson(next.events[index]))) return false;
+  return next.events.at(-1)?.previousEventSha256 === (previous.events.at(-1)?.eventSha256 ?? null);
+}
+
+function stateWithoutWorkflow(state: PendingRunStateV1): Omit<PendingRunStateV1, "workflow"> {
+  const { workflow: _workflow, ...rest } = state;
+  return rest;
+}
+
+function stateSuccessor(previous: PendingRunStateV1, next: PendingRunStateV1, allowAtomicWorkflow = false): boolean {
+  const previousWorkflow = previous.workflow;
+  const nextWorkflow = next.workflow;
+  const sameWorkflow = previousWorkflow === undefined && nextWorkflow === undefined
+    || previousWorkflow !== undefined && nextWorkflow !== undefined && canonicalJson(previousWorkflow) === canonicalJson(nextWorkflow);
+  const appendedWorkflow = previousWorkflow !== undefined && nextWorkflow !== undefined
+    && workflowAppendSuccessor(previousWorkflow, nextWorkflow);
+  if (!sameWorkflow && !appendedWorkflow) return false;
+  const sameCoreState = canonicalJson(stateWithoutWorkflow(previous)) === canonicalJson(stateWithoutWorkflow(next));
+  if (appendedWorkflow && sameCoreState) {
+    const event = nextWorkflow?.events.at(-1);
+    return event?.kind !== "evidence-plan-revision"
+      && !(event?.kind === "authority" && event.authorityKind === "harness-rerun");
+  }
+  if (appendedWorkflow && !allowAtomicWorkflow) return false;
+  let atomicOperation: PendingRunOperationEventV1 | null = null;
+  let atomicEvidencePlan: PendingRunEvidencePlanEventV1 | null = null;
+  let atomicHarnessRerun: Readonly<{
+    event: PendingRunAuthorityEventV1;
+    payload: PendingRunHarnessRerunPayloadV1;
+  }> | null = null;
+  if (appendedWorkflow) {
+    const event = nextWorkflow?.events.at(-1);
+    if (!event) return false;
+    if (event.kind === "evidence-plan-revision") {
+      atomicEvidencePlan = event;
+    } else if (event.kind === "authority" && event.authorityKind === "harness-rerun") {
+      const payload = parseHarnessRerunPayload(event.canonicalPayload);
+      if (!payload) return false;
+      atomicHarnessRerun = Object.freeze({ event, payload });
+    } else if (event.kind !== "operation" || event.taskSpecSha256 !== previous.taskSpecSha256
+      || event.activeEvidencePlanSha256 !== previousWorkflow?.activeEvidencePlanSha256) return false;
+    if (event.kind === "evidence-plan-revision") {
+      if (event.fromEvidencePlanSha256 !== previousWorkflow?.activeEvidencePlanSha256
+        || nextWorkflow?.activeEvidencePlanSha256 !== event.toEvidencePlanSha256) return false;
+    } else if (event.kind === "operation") {
+    atomicOperation = event;
+    const reservation = event.status === "reserved";
+    if (!reservation && !["answered", "unavailable", "cancelled"].includes(event.status)) return false;
+    if (event.candidateSha256 !== (reservation ? next.candidateSha256 : previous.candidateSha256)
+      || event.candidateIdentitySha256 !== (reservation ? next.candidateIdentitySha256 : previous.candidateIdentitySha256)
+      || event.round !== (reservation ? next.round : previous.round)) return false;
+    }
+  }
   if (next.phase === "terminal-prepared" || next.terminalAction !== null
     || next.displayOutcome !== previous.displayOutcome || next.taskNumber !== previous.taskNumber
     || next.baseHead !== previous.baseHead || next.taskSpecSha256 !== previous.taskSpecSha256
@@ -1544,10 +2620,70 @@ function stateSuccessor(previous: PendingRunStateV1, next: PendingRunStateV1): b
     || (repairDelta !== 0 && repairDelta !== 1) || (criticDelta !== 0 && criticDelta !== 1)
     || (evidenceDelta !== 0 && evidenceDelta !== 1) || (repairDelta === 1 && criticDelta === 1)
     || (previous.evidenceRunId !== null && next.evidenceRunId !== previous.evidenceRunId)) return false;
-
   const candidateChanged = next.candidateSha256 !== previous.candidateSha256;
   const capsuleChanged = next.capsuleSha256 !== previous.capsuleSha256;
   const gitStateChanged = next.gitStateSha256 !== previous.gitStateSha256;
+  const attachedEvidence = previous.evidenceRunId === null && next.evidenceRunId !== null;
+  const evidenceChanged = next.evidenceStateSha256 !== previous.evidenceStateSha256;
+  if (atomicEvidencePlan) {
+    return generationDelta === 1 && roundDelta === 0 && repairDelta === 0 && criticDelta === 0
+      && next.phase === previous.phase && candidateChanged && capsuleChanged && gitStateChanged
+      && previous.candidateIdentitySha256 !== next.candidateIdentitySha256
+      && canonicalJson(next.bundleSha256s) === canonicalJson(previous.bundleSha256s)
+      && !attachedEvidence && evidenceDelta === 0 && !evidenceChanged;
+  }
+  if (atomicHarnessRerun) {
+    if (!previousWorkflow) return false;
+    const { event, payload } = atomicHarnessRerun;
+    return previousWorkflow.activeEvidencePlanSha256 !== previousWorkflow.initialEvidencePlanSha256
+      && (previous.phase === "ready-to-seal" || previous.phase === "awaiting-critic")
+      && next.phase === previous.phase && generationDelta === 0 && roundDelta === 0
+      && repairDelta === 0 && criticDelta === 0 && evidenceDelta === 0
+      && !candidateChanged && capsuleChanged && !gitStateChanged && !attachedEvidence && !evidenceChanged
+      && previous.candidateIdentitySha256 === next.candidateIdentitySha256
+      && canonicalJson(next.bundleSha256s) === canonicalJson(previous.bundleSha256s)
+      && event.candidateSha256 === previous.candidateSha256
+      && event.candidateIdentitySha256 === previous.candidateIdentitySha256
+      && event.taskSpecSha256 === previous.taskSpecSha256
+      && event.activeEvidencePlanSha256 === previousWorkflow.activeEvidencePlanSha256
+      && event.round === previous.round
+      && payload.fromCapsuleSha256 === previous.capsuleSha256
+      && payload.toCapsuleSha256 === next.capsuleSha256
+      && payload.candidateIdentitySha256 === previous.candidateIdentitySha256
+      && payload.activeEvidencePlanSha256 === previousWorkflow.activeEvidencePlanSha256;
+  }
+  if (atomicOperation) {
+    const reservation = atomicOperation.status === "reserved";
+    const expectedPreviousPhase = atomicOperation.operationKind === "repair" ? "awaiting-repair" : "awaiting-critic";
+    const resultPhase = atomicOperation.operationKind === "repair" ? "awaiting-repair-result" : "awaiting-critic-result";
+    const candidateIdentityChanged = previous.candidateIdentitySha256 !== next.candidateIdentitySha256;
+    if (reservation) {
+      return previous.phase === expectedPreviousPhase && next.phase === resultPhase
+        && generationDelta === 1 && roundDelta === 0 && !candidateChanged && capsuleChanged && candidateIdentityChanged
+        && canonicalJson(next.bundleSha256s) === canonicalJson(previous.bundleSha256s)
+        && !attachedEvidence && evidenceDelta === 0 && !evidenceChanged
+        && (atomicOperation.operationKind === "repair"
+          ? repairDelta === 1 && criticDelta === 0
+          : criticDelta === 1 && repairDelta === 0);
+    }
+    if (previous.phase !== resultPhase || generationDelta !== 1 || !capsuleChanged || !candidateIdentityChanged
+      || repairDelta !== 0 || criticDelta !== 0 || attachedEvidence || evidenceDelta !== 0 || evidenceChanged) return false;
+    if (atomicOperation.status !== "answered") {
+      if (atomicOperation.operationKind === "repair") return false;
+      return next.phase === expectedPreviousPhase && roundDelta === 0 && !candidateChanged
+        && canonicalJson(next.bundleSha256s) === canonicalJson(previous.bundleSha256s);
+    }
+    if (atomicOperation.operationKind === "repair") {
+      return roundDelta === 1 && candidateChanged
+        && next.bundleSha256s.length === previous.bundleSha256s.length + 1
+        && previous.bundleSha256s.every((sha, index) => next.bundleSha256s[index] === sha)
+        && (previous.criticMode === "off" ? next.phase === "ready-to-seal" : next.phase === "awaiting-critic");
+    }
+    return roundDelta === 0 && !candidateChanged
+      && canonicalJson(next.bundleSha256s) === canonicalJson(previous.bundleSha256s)
+      && ["ready-to-seal", "awaiting-owner-resolution", "awaiting-repair"].includes(next.phase);
+  }
+
   // Core phase transitions mint a new candidate generation and evidence-state
   // digest while deliberately retaining the product candidate digest. Only a
   // successful repair replacement (round 0 -> 1) changes candidateSha256.
@@ -1558,8 +2694,6 @@ function stateSuccessor(previous: PendingRunStateV1, next: PendingRunStateV1): b
     : canonicalJson(next.bundleSha256s) !== canonicalJson(previous.bundleSha256s))) return false;
   if (previous.bundleSha256s.some((sha, index) => next.bundleSha256s[index] !== sha)) return false;
 
-  const attachedEvidence = previous.evidenceRunId === null && next.evidenceRunId !== null;
-  const evidenceChanged = next.evidenceStateSha256 !== previous.evidenceStateSha256;
   if (attachedEvidence) {
     if (!evidenceChanged || evidenceDelta !== 0) return false;
   } else if ((evidenceDelta === 1) !== evidenceChanged) return false;
@@ -1584,6 +2718,29 @@ function stateSuccessor(previous: PendingRunStateV1, next: PendingRunStateV1): b
     case "awaiting-repair":
       return repairDelta === 1 && criticDelta === 0
         && (previous.criticMode === "off" ? next.phase === "ready-to-seal" : next.phase === "awaiting-critic");
+    case "awaiting-critic-result": {
+      // Boot has already made the uncertain send terminal in the authenticated
+      // workflow. Permit exactly the matching Core process-crash settlement,
+      // without another workflow event or counter spend. A plain result-phase
+      // candidate cannot use this branch, and the next call must cite this
+      // interrupted operation as its one unavailable retry predecessor.
+      const latest = new Map<string, PendingRunOperationEventV1>();
+      for (const event of previousWorkflow?.events ?? []) {
+        if (event.kind === "operation") latest.set(event.operationId, event);
+      }
+      const interrupted = [...latest.values()]
+        .filter((event) => event.operationKind === "critic").at(-1);
+      return interrupted?.status === "interrupted"
+        && interrupted.candidateSha256 === previous.candidateSha256
+        && interrupted.candidateIdentitySha256 === previous.candidateIdentitySha256
+        && interrupted.taskSpecSha256 === previous.taskSpecSha256
+        && interrupted.activeEvidencePlanSha256 === previousWorkflow?.activeEvidencePlanSha256
+        && interrupted.round === previous.round
+        && interrupted.attempt === previous.counters.critic.spent
+        && next.phase === "awaiting-critic" && roundDelta === 0 && !candidateChanged
+        && repairDelta === 0 && criticDelta === 0
+        && canonicalJson(next.bundleSha256s) === canonicalJson(previous.bundleSha256s);
+    }
     case "ready-to-seal":
       return next.phase === "awaiting-repair" && repairDelta === 0 && criticDelta === 0;
     default:
@@ -1607,12 +2764,181 @@ function exactCurrentRun(run: LivePendingRun, allowPrepared = false): ScannedRun
   return scanned;
 }
 
+const pendingJournalVerifierInstalled = registerSerialAuthenticatedPendingJournalVerifier((
+  authority: unknown,
+  expected: SerialAuthenticatedPendingJournalBinding,
+): boolean => {
+  const run = boundAuthority(authority);
+  const coreProjectRootSha256 = run ? createHash("sha256")
+    .update(process.platform === "win32" ? run.identity.canonicalRoot.toLowerCase() : run.identity.canonicalRoot, "utf8")
+    .digest("hex") : null;
+  const state = run?.state;
+  if (!run || !state || run.runId !== expected.runId || coreProjectRootSha256 !== expected.projectRootSha256
+    || run.revision !== expected.revision || state.candidateSha256 !== expected.candidateSha256
+    || state.capsuleSha256 !== expected.capsuleSha256
+    || (state.phase === "terminal-prepared") !== expected.prepared) return false;
+  const current = exactCurrentRun(run, expected.prepared);
+  return current !== null && current.run.state?.capsuleSha256 === expected.capsuleSha256;
+});
+if (!pendingJournalVerifierInstalled) {
+  throw new Error("PENDING_RUN_CORE_VERIFIER_ALREADY_INSTALLED");
+}
+
 function markRecovery(run: LivePendingRun): void {
   run.status = "recovery-required";
 }
 
 export function parsePendingRunState(value: unknown, capsuleSha256?: string): PendingRunStateV1 | null {
   return parseState(value, capsuleSha256);
+}
+
+export function initialPendingRunWorkflow(initialEvidencePlanSha256: string): PendingRunWorkflowV1 | null {
+  if (typeof initialEvidencePlanSha256 !== "string" || !SHA256.test(initialEvidencePlanSha256)) return null;
+  return Object.freeze({
+    version: PENDING_RUN_WORKFLOW_VERSION,
+    initialEvidencePlanSha256,
+    activeEvidencePlanSha256: initialEvidencePlanSha256,
+    unavailableRetryUsed: 0,
+    events: Object.freeze([]),
+  });
+}
+
+function composeWorkflowEvent(
+  inputValue: unknown,
+  sequence: number,
+  previousEventSha256: string | null,
+): PendingRunWorkflowEventV1 | null {
+  const operation = exactDataRecord(inputValue, [
+    "kind", "operationKind", "operationId", "status", "previewId", "previewSha256", "authorizationSha256",
+    "routeReceiptSha256", "requestSha256", "candidateSha256", "candidateIdentitySha256", "taskSpecSha256", "activeEvidencePlanSha256",
+    "round", "attempt", "retryOfOperationId", "outcomeSha256",
+  ]);
+  const decision = operation ? null : exactDataRecord(inputValue, [
+    "kind", "decisionKind", "approvalId", "operationId", "outcome", "decidedAt", "disclosureSha256",
+    "previewSha256", "authorizationSha256", "routeReceiptSha256", "requestSha256", "candidateSha256",
+    "candidateIdentitySha256", "taskSpecSha256", "activeEvidencePlanSha256", "round", "attempt", "retryOfOperationId",
+  ]);
+  const authority = operation || decision ? null : exactDataRecord(inputValue, [
+    "kind", "authorityKind", "authoritySha256", "canonicalPayload", "assessmentSha256", "candidateSha256",
+    "candidateIdentitySha256", "taskSpecSha256", "activeEvidencePlanSha256", "round",
+  ]);
+  const session = operation || decision || authority ? null : exactDataRecord(inputValue, [
+    "kind", "sessionSha256", "canonicalPayload", "conversationId", "startedAt", "adapterIdentitySha256",
+    "candidateSha256", "candidateIdentitySha256", "taskSpecSha256", "activeEvidencePlanSha256", "round",
+  ]);
+  const evidencePlan = operation || decision || authority || session ? null : exactDataRecord(inputValue, [
+    "kind", "fromEvidencePlanSha256", "toEvidencePlanSha256", "authorizationSha256", "failedOutputSha256",
+  ]);
+  let raw: Record<string, unknown>;
+  if (operation?.kind === "operation") {
+    raw = {
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, eventSha256: "0".repeat(64),
+      kind: "operation", operationKind: operation.operationKind, operationId: operation.operationId, status: operation.status,
+      previewId: operation.previewId, previewSha256: operation.previewSha256, authorizationSha256: operation.authorizationSha256,
+      routeReceiptSha256: operation.routeReceiptSha256, requestSha256: operation.requestSha256,
+      candidateSha256: operation.candidateSha256, candidateIdentitySha256: operation.candidateIdentitySha256,
+      taskSpecSha256: operation.taskSpecSha256,
+      activeEvidencePlanSha256: operation.activeEvidencePlanSha256, round: operation.round, attempt: operation.attempt,
+      retryOfOperationId: operation.retryOfOperationId, outcomeSha256: operation.outcomeSha256,
+    };
+  } else if (decision?.kind === "decision") {
+    raw = {
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, eventSha256: "0".repeat(64),
+      kind: "decision", decisionKind: decision.decisionKind, approvalId: decision.approvalId,
+      operationId: decision.operationId, outcome: decision.outcome, decidedAt: decision.decidedAt,
+      disclosureSha256: decision.disclosureSha256, previewSha256: decision.previewSha256,
+      authorizationSha256: decision.authorizationSha256, routeReceiptSha256: decision.routeReceiptSha256,
+      requestSha256: decision.requestSha256, candidateSha256: decision.candidateSha256,
+      candidateIdentitySha256: decision.candidateIdentitySha256, taskSpecSha256: decision.taskSpecSha256,
+      activeEvidencePlanSha256: decision.activeEvidencePlanSha256, round: decision.round,
+      attempt: decision.attempt, retryOfOperationId: decision.retryOfOperationId,
+    };
+  } else if (authority?.kind === "authority") {
+    raw = {
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, eventSha256: "0".repeat(64),
+      kind: "authority", authorityKind: authority.authorityKind, authoritySha256: authority.authoritySha256,
+      canonicalPayload: authority.canonicalPayload, assessmentSha256: authority.assessmentSha256,
+      candidateSha256: authority.candidateSha256, candidateIdentitySha256: authority.candidateIdentitySha256,
+      taskSpecSha256: authority.taskSpecSha256,
+      activeEvidencePlanSha256: authority.activeEvidencePlanSha256, round: authority.round,
+    };
+  } else if (session?.kind === "session") {
+    raw = {
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, eventSha256: "0".repeat(64),
+      kind: "session", sessionSha256: session.sessionSha256, canonicalPayload: session.canonicalPayload,
+      conversationId: session.conversationId, startedAt: session.startedAt,
+      adapterIdentitySha256: session.adapterIdentitySha256, candidateSha256: session.candidateSha256,
+      candidateIdentitySha256: session.candidateIdentitySha256, taskSpecSha256: session.taskSpecSha256,
+      activeEvidencePlanSha256: session.activeEvidencePlanSha256, round: session.round,
+    };
+  } else if (evidencePlan?.kind === "evidence-plan-revision") {
+    raw = {
+      version: PENDING_RUN_WORKFLOW_EVENT_VERSION, sequence, previousEventSha256, eventSha256: "0".repeat(64),
+      kind: "evidence-plan-revision", fromEvidencePlanSha256: evidencePlan.fromEvidencePlanSha256,
+      toEvidencePlanSha256: evidencePlan.toEvidencePlanSha256, authorizationSha256: evidencePlan.authorizationSha256,
+      failedOutputSha256: evidencePlan.failedOutputSha256,
+    };
+  } else return null;
+  const { eventSha256: _discarded, ...withoutSha } = raw;
+  raw.eventSha256 = workflowEventSha(withoutSha as Omit<PendingRunWorkflowEventV1, "eventSha256">);
+  return parseWorkflowEvent(raw, sequence, previousEventSha256);
+}
+
+/** Pure successor used by Main before the authenticated revision is written. */
+export function appendPendingRunWorkflowEvent(
+  stateValue: unknown,
+  input: PendingRunWorkflowEventInputV1,
+): PendingRunStateV1 | null {
+  const state = parseState(stateValue);
+  if (!state?.workflow || state.phase === "terminal-prepared") return null;
+  const workflow = state.workflow;
+  const previousEventSha256 = workflow.events.at(-1)?.eventSha256 ?? null;
+  const event = composeWorkflowEvent(input, workflow.events.length + 1, previousEventSha256);
+  // Changing the active evidence plan without replacing Core's branded
+  // candidate would create a split-brain plan. That event is accepted only by
+  // appendPendingRunCandidateWorkflowRevision's combined successor.
+  if (!event || event.kind === "evidence-plan-revision") return null;
+  if (event.kind === "operation" || event.kind === "decision" || event.kind === "authority" || event.kind === "session") {
+    if (event.candidateSha256 !== state.candidateSha256 || event.taskSpecSha256 !== state.taskSpecSha256
+      || event.candidateIdentitySha256 !== state.candidateIdentitySha256
+      || event.activeEvidencePlanSha256 !== workflow.activeEvidencePlanSha256 || event.round !== state.round) return null;
+  }
+  const proposed = Object.freeze({
+    version: PENDING_RUN_WORKFLOW_VERSION,
+    initialEvidencePlanSha256: workflow.initialEvidencePlanSha256,
+    activeEvidencePlanSha256: workflow.activeEvidencePlanSha256,
+    unavailableRetryUsed: event.kind === "operation" && event.retryOfOperationId !== null
+      ? 1 : workflow.unavailableRetryUsed,
+    events: Object.freeze([...workflow.events, event]),
+  });
+  const checked = parseWorkflow(proposed, state.evidencePlanSha256);
+  return checked ? parseState({ ...state, workflow: checked }) : null;
+}
+
+export function pendingRunWorkflowProjection(stateValue: unknown): PendingRunWorkflowProjectionV1 | null {
+  const state = parseState(stateValue);
+  const workflow = state?.workflow;
+  if (!workflow) return null;
+  const latest = new Map<string, PendingRunOperationEventV1>();
+  const spentOperationKinds = new Map<string, PendingRunOperationKindV1>();
+  for (const event of workflow.events) {
+    if (event.kind === "operation") {
+      latest.set(event.operationId, event);
+      if (event.status === "reserved") spentOperationKinds.set(event.operationId, event.operationKind);
+    }
+  }
+  return Object.freeze({
+    version: PENDING_RUN_WORKFLOW_VERSION,
+    initialEvidencePlanSha256: workflow.initialEvidencePlanSha256,
+    activeEvidencePlanSha256: workflow.activeEvidencePlanSha256,
+    unavailableRetryUsed: workflow.unavailableRetryUsed === 1,
+    repairOperations: [...spentOperationKinds.values()].filter((kind) => kind === "repair").length,
+    criticOperations: [...spentOperationKinds.values()].filter((kind) => kind === "critic").length,
+    events: workflow.events,
+    session: workflow.events.find((event): event is PendingRunSessionEventV1 => event.kind === "session") ?? null,
+    interruptedOperationIds: Object.freeze([...latest.values()]
+      .filter((event) => event.status === "interrupted").map((event) => event.operationId)),
+  });
 }
 
 export function projectPendingRunHash(projectRoot: string): string | null {
@@ -1764,8 +3090,23 @@ export function pendingRunRecoveryInputs(): readonly PendingRunRecoveryInputV1[]
       markRecovery(run);
       continue;
     }
+    const journalAuthority = authorizeSerialAuthenticatedPendingJournal(run.authority, {
+      capsuleSha256: state.capsuleSha256,
+      projectRootSha256: createHash("sha256")
+        .update(process.platform === "win32" ? run.identity.canonicalRoot.toLowerCase() : run.identity.canonicalRoot, "utf8")
+        .digest("hex"),
+      runId: run.runId,
+      candidateSha256: state.candidateSha256,
+      revision: run.revision,
+      prepared: false,
+    });
+    if (!journalAuthority) {
+      markRecovery(run);
+      continue;
+    }
     output.push(Object.freeze({
       authority: run.authority,
+      journalAuthority,
       projectRoot: run.identity.canonicalRoot,
       capsule: Object.freeze({
         version: PENDING_RUN_CAPSULE_VERSION,
@@ -1793,8 +3134,23 @@ export function pendingRunPreparedTerminalInputs(): readonly PendingRunRecoveryI
       markRecovery(run);
       continue;
     }
+    const journalAuthority = authorizeSerialAuthenticatedPendingJournal(run.authority, {
+      capsuleSha256: state.capsuleSha256,
+      projectRootSha256: createHash("sha256")
+        .update(process.platform === "win32" ? run.identity.canonicalRoot.toLowerCase() : run.identity.canonicalRoot, "utf8")
+        .digest("hex"),
+      runId: run.runId,
+      candidateSha256: state.candidateSha256,
+      revision: run.revision,
+      prepared: true,
+    });
+    if (!journalAuthority) {
+      markRecovery(run);
+      continue;
+    }
     output.push(Object.freeze({
       authority: run.authority,
+      journalAuthority,
       projectRoot: run.identity.canonicalRoot,
       capsule: Object.freeze({
         version: PENDING_RUN_CAPSULE_VERSION,
@@ -1834,23 +3190,205 @@ export function appendPendingRunRevision(
   return Object.freeze({ ok: true, value: projection(run) });
 }
 
+/** Append one Q9 custody event without changing Core's candidate capsule. */
+export function appendPendingRunWorkflowRevision(
+  authority: unknown,
+  expectedRevision: number,
+  event: PendingRunWorkflowEventInputV1,
+): PendingRunMutationResultV1 {
+  if (globallyUnsafe) return failure("PENDING_RUN_STORE_UNAVAILABLE");
+  const run = boundAuthority(authority);
+  if (!run || run.status !== "pending" || run.revision !== expectedRevision || !run.state
+    || !run.capsule || run.state.phase === "terminal-prepared") return failure("PENDING_RUN_AUTHORITY_STALE");
+  const current = exactCurrentRun(run);
+  if (!current) {
+    markRecovery(run);
+    return failure("PENDING_RUN_JOURNAL_CHANGED");
+  }
+  const state = appendPendingRunWorkflowEvent(run.state, event);
+  if (!state || !stateSuccessor(run.state, state)) return failure("PENDING_RUN_WORKFLOW_EVENT_INVALID");
+  const installed = installVerifiedRevision(run, state, current.capsuleBytes);
+  if (installed !== "installed") {
+    if (installed === "capacity") return failure("PENDING_RUN_CAPACITY_REACHED");
+    markRecovery(run);
+    return failure("PENDING_RUN_PERSIST_FAILED");
+  }
+  return Object.freeze({ ok: true, value: projection(run) });
+}
+
+/** One deliberate transaction: a single terminal call outcome and the exact
+ * Core candidate it produced enter the authenticated journal together. */
+export function appendPendingRunCandidateWorkflowRevision(
+  authority: unknown,
+  expectedRevision: number,
+  stateValue: unknown,
+  capsuleBytes: Uint8Array,
+  event: PendingRunWorkflowEventInputV1,
+): PendingRunMutationResultV1 {
+  if (globallyUnsafe) return failure("PENDING_RUN_STORE_UNAVAILABLE");
+  const run = boundAuthority(authority);
+  if (!run || run.status !== "pending" || run.revision !== expectedRevision || !run.state
+    || !run.state.workflow || run.state.phase === "terminal-prepared") return failure("PENDING_RUN_AUTHORITY_STALE");
+  const current = exactCurrentRun(run);
+  if (!current) {
+    markRecovery(run);
+    return failure("PENDING_RUN_JOURNAL_CHANGED");
+  }
+  const bytes = safeBytes(capsuleBytes);
+  const rawState = bytes && exactDataRecord(stateValue, [
+    "version", "displayOutcome", "taskNumber", "phase", "criticMode", "generation", "round", "baseHead", "gitStateSha256",
+    "taskSpecSha256", "evidencePlanSha256", "candidateSha256", "candidateIdentitySha256", "capsuleSha256", "bundleSha256s", "evidenceRunId",
+    "evidenceStateSha256", "evidenceRevision", "route", "counters", "terminalAction", "workflow",
+  ]);
+  if (!bytes || !rawState) return failure("PENDING_RUN_STATE_INVALID");
+  const workflow = run.state.workflow;
+  const composedEvent = composeWorkflowEvent(event, workflow.events.length + 1, workflow.events.at(-1)?.eventSha256 ?? null);
+  if (!composedEvent) return failure("PENDING_RUN_WORKFLOW_EVENT_INVALID");
+  const isReservation = composedEvent.kind === "operation" && composedEvent.status === "reserved"
+    && !workflow.events.some((prior) => prior.kind === "operation" && prior.operationId === composedEvent.operationId);
+  const binding = isReservation ? rawState : run.state;
+  if (composedEvent.kind === "operation" || composedEvent.kind === "authority") {
+    if (composedEvent.candidateSha256 !== binding.candidateSha256
+      || composedEvent.candidateIdentitySha256 !== binding.candidateIdentitySha256
+      || composedEvent.taskSpecSha256 !== binding.taskSpecSha256
+      || composedEvent.round !== binding.round
+      || composedEvent.activeEvidencePlanSha256 !== workflow.activeEvidencePlanSha256) {
+      return failure("PENDING_RUN_WORKFLOW_EVENT_INVALID");
+    }
+  }
+  const proposedWorkflow = Object.freeze({
+    version: PENDING_RUN_WORKFLOW_VERSION,
+    initialEvidencePlanSha256: workflow.initialEvidencePlanSha256,
+    activeEvidencePlanSha256: composedEvent.kind === "evidence-plan-revision"
+      ? composedEvent.toEvidencePlanSha256 : workflow.activeEvidencePlanSha256,
+    unavailableRetryUsed: composedEvent.kind === "operation" && composedEvent.retryOfOperationId !== null
+      ? 1 : workflow.unavailableRetryUsed,
+    events: Object.freeze([...workflow.events, composedEvent]),
+  });
+  const checkedWorkflow = parseWorkflow(proposedWorkflow, run.state.evidencePlanSha256);
+  if (!checkedWorkflow) return failure("PENDING_RUN_WORKFLOW_EVENT_INVALID");
+  const state = parseState({ ...rawState, workflow: checkedWorkflow }, digest(bytes));
+  if (!state || !stateSuccessor(run.state, state, true)) return failure("PENDING_RUN_STATE_INVALID");
+  const installed = installVerifiedRevision(run, state, bytes);
+  if (installed !== "installed") {
+    if (installed === "capacity") return failure("PENDING_RUN_CAPACITY_REACHED");
+    markRecovery(run);
+    return failure("PENDING_RUN_PERSIST_FAILED");
+  }
+  return Object.freeze({ ok: true, value: projection(run) });
+}
+
+/** Atomically checkpoint the one revision-one Q9 harness rerun. Core returns
+ * the same product candidate and generation by design; the capsule alone gains
+ * authenticated attestation custody, so a dedicated workflow event prevents a
+ * generic same-generation capsule replacement from becoming legal. */
+export function appendPendingRunHarnessRerunRevision(
+  authority: unknown,
+  expectedRevision: number,
+  stateValue: unknown,
+  capsuleBytes: Uint8Array,
+): PendingRunMutationResultV1 {
+  const run = boundAuthority(authority);
+  const previous = run?.state;
+  const workflow = previous?.workflow;
+  const rawState = exactDataRecord(stateValue, [
+    "version", "displayOutcome", "taskNumber", "phase", "criticMode", "generation", "round", "baseHead", "gitStateSha256",
+    "taskSpecSha256", "evidencePlanSha256", "candidateSha256", "candidateIdentitySha256", "capsuleSha256", "bundleSha256s", "evidenceRunId",
+    "evidenceStateSha256", "evidenceRevision", "route", "counters", "terminalAction", "workflow",
+  ]);
+  if (!run || run.revision !== expectedRevision || !previous || !workflow || !rawState
+    || typeof previous.candidateIdentitySha256 !== "string" || !SHA256.test(previous.candidateIdentitySha256)
+    || typeof rawState.capsuleSha256 !== "string" || !SHA256.test(rawState.capsuleSha256)
+    || rawState.capsuleSha256 === previous.capsuleSha256) {
+    return failure("PENDING_RUN_HARNESS_RERUN_INVALID");
+  }
+  const payload: PendingRunHarnessRerunPayloadV1 = Object.freeze({
+    version: PENDING_RUN_HARNESS_RERUN_VERSION,
+    fromCapsuleSha256: previous.capsuleSha256,
+    toCapsuleSha256: rawState.capsuleSha256,
+    candidateIdentitySha256: previous.candidateIdentitySha256,
+    activeEvidencePlanSha256: workflow.activeEvidencePlanSha256,
+  });
+  const canonicalPayload = canonicalJson(payload);
+  return appendPendingRunCandidateWorkflowRevision(
+    authority,
+    expectedRevision,
+    stateValue,
+    capsuleBytes,
+    Object.freeze({
+      kind: "authority",
+      authorityKind: "harness-rerun",
+      authoritySha256: digest(canonicalPayload),
+      canonicalPayload,
+      assessmentSha256: null,
+      candidateSha256: previous.candidateSha256,
+      candidateIdentitySha256: previous.candidateIdentitySha256,
+      taskSpecSha256: previous.taskSpecSha256,
+      activeEvidencePlanSha256: workflow.activeEvidencePlanSha256,
+      round: previous.round,
+    }),
+  );
+}
+
+/** Boot converts the sole in-flight reservation into a durable terminal event.
+ * It never re-sends or invents a fresh attempt. */
+export function interruptPendingRunOperationForRecovery(
+  authority: unknown,
+  expectedRevision: number,
+): PendingRunMutationResultV1 | null {
+  const run = boundAuthority(authority);
+  const events = run?.state?.workflow?.events;
+  if (!run || run.revision !== expectedRevision || !events) return null;
+  const latest = new Map<string, PendingRunOperationEventV1>();
+  for (const event of events) if (event.kind === "operation") latest.set(event.operationId, event);
+  const inFlight = [...latest.values()].filter((event) => event.status === "reserved" || event.status === "sending");
+  if (inFlight.length === 0) return null;
+  if (inFlight.length !== 1) {
+    markRecovery(run);
+    return failure("PENDING_RUN_WORKFLOW_EVENT_INVALID");
+  }
+  const operation = inFlight[0] as PendingRunOperationEventV1;
+  return appendPendingRunWorkflowRevision(run.authority, expectedRevision, Object.freeze({
+    kind: "operation",
+    operationKind: operation.operationKind,
+    operationId: operation.operationId,
+    status: "interrupted",
+    previewId: operation.previewId,
+    previewSha256: operation.previewSha256,
+    authorizationSha256: operation.authorizationSha256,
+    routeReceiptSha256: operation.routeReceiptSha256,
+    requestSha256: operation.requestSha256,
+    candidateSha256: operation.candidateSha256,
+    candidateIdentitySha256: operation.candidateIdentitySha256,
+    taskSpecSha256: operation.taskSpecSha256,
+    activeEvidencePlanSha256: operation.activeEvidencePlanSha256,
+    round: operation.round,
+    attempt: operation.attempt,
+    retryOfOperationId: operation.retryOfOperationId,
+    outcomeSha256: digest(canonicalJson(["cairn-pending-run-recovery-interrupted/v1", operation.eventSha256])),
+  }));
+}
+
 export function preparePendingRunTerminal(
   authority: unknown,
   expectedRevision: number,
   actionValue: unknown,
   capsuleBytes: Uint8Array,
+  terminalCardValue?: PendingRunTerminalCardInputV1,
 ): PendingRunMutationResultV1 {
   if (globallyUnsafe) return failure("PENDING_RUN_STORE_UNAVAILABLE");
   const run = boundAuthority(authority);
   const actionInput = exactDataRecord(actionValue, ["actionId", "kind", "candidateSha256", "capsuleSha256"]);
   const bytes = safeBytes(capsuleBytes);
   const capsuleSha256 = bytes ? digest(bytes) : null;
+  const terminalCardDraft = terminalCardValue === undefined ? null : parseTerminalCardDraft(terminalCardValue);
   if (!run || run.status !== "pending" || run.revision !== expectedRevision || !run.state || !run.capsule
     || run.state.phase === "terminal-prepared" || !actionInput || !bytes || capsuleSha256 === null
     || typeof actionInput.actionId !== "string" || !UUID_V4.test(actionInput.actionId)
     || (actionInput.kind !== "finalize" && actionInput.kind !== "stop")
     || actionInput.candidateSha256 !== run.state.candidateSha256
     || actionInput.capsuleSha256 !== capsuleSha256
+    || (terminalCardValue !== undefined && terminalCardDraft === null)
     || (actionInput.kind === "finalize" && run.state.phase !== "ready-to-seal")) return failure("PENDING_RUN_AUTHORITY_STALE");
   const current = exactCurrentRun(run);
   if (!current) {
@@ -1868,6 +3406,7 @@ export function preparePendingRunTerminal(
     phase: "terminal-prepared",
     capsuleSha256,
     terminalAction: action,
+    ...(terminalCardDraft ? { terminalCardDraft } : {}),
   }, capsuleSha256);
   if (!prepared) {
     markRecovery(run);
@@ -1888,11 +3427,16 @@ export function closePendingRun(
   expectedRevision: number,
   actionId: string,
   terminalReceiptSha256: string,
+  terminalCardValue?: PendingRunTerminalCardInputV1,
 ): PendingRunMutationResultV1 {
   if (globallyUnsafe) return failure("PENDING_RUN_STORE_UNAVAILABLE");
   const existing = boundAuthority(authority, true);
   if (existing?.closedReceiptSha256 !== null && existing?.closedReceiptSha256 !== undefined) {
+    const replayDraft = terminalCardValue ?? existing.state?.terminalCardDraft;
+    const replayCard = replayDraft === undefined || !existing.state?.terminalAction ? null
+      : composeTerminalCardIdentity(existing.identity.projectHash, existing.runId, actionId, terminalReceiptSha256, replayDraft);
     return existing.closedActionId === actionId && existing.closedReceiptSha256 === terminalReceiptSha256
+      && canonicalJson(existing.closedTerminalCard) === canonicalJson(replayCard)
       ? Object.freeze({ ok: true, value: projection(existing) })
       : failure("PENDING_RUN_CLOSE_MISMATCH");
   }
@@ -1901,6 +3445,14 @@ export function closePendingRun(
     || !run.state.terminalAction || run.state.terminalAction.actionId !== actionId
     || typeof terminalReceiptSha256 !== "string" || !SHA256.test(terminalReceiptSha256)
     || !run.directory) return failure("PENDING_RUN_AUTHORITY_STALE");
+  if (terminalCardValue !== undefined && run.state.terminalCardDraft !== undefined
+    && canonicalJson(terminalCardValue) !== canonicalJson(run.state.terminalCardDraft)) {
+    return failure("PENDING_RUN_TERMINAL_CARD_INVALID");
+  }
+  const effectiveTerminalCard = terminalCardValue ?? run.state.terminalCardDraft;
+  const terminalCard = effectiveTerminalCard === undefined ? null
+    : composeTerminalCardIdentity(run.identity.projectHash, run.runId, actionId, terminalReceiptSha256, effectiveTerminalCard);
+  if (effectiveTerminalCard !== undefined && !terminalCard) return failure("PENDING_RUN_TERMINAL_CARD_INVALID");
   let scanned = scanRun(run.directory, run.identity.projectHash, run.runId);
   if (!scanned) return failure("PENDING_RUN_AUTHORITY_STALE");
   const inventoryBefore = currentInventory();
@@ -1909,7 +3461,8 @@ export function closePendingRun(
   if (!scanned) return failure("PENDING_RUN_CLOSE_FAILED");
   if (!scanned.closed && !exactCurrentRun(run, true)) return failure("PENDING_RUN_AUTHORITY_STALE");
   if (scanned.closed && (scanned.run.closedReceiptSha256 !== terminalReceiptSha256
-    || scanned.run.closedActionId !== actionId)) return failure("PENDING_RUN_CLOSE_FAILED");
+    || scanned.run.closedActionId !== actionId
+    || canonicalJson(scanned.run.closedTerminalCard) !== canonicalJson(terminalCard))) return failure("PENDING_RUN_CLOSE_FAILED");
   if (!reserveRunJournalBytes(run, scanned.journalBytes)) return failure("PENDING_RUN_CAPACITY_REACHED");
   run.journalBytes = scanned.journalBytes;
   const closeIntent = Object.freeze({
@@ -1920,9 +3473,11 @@ export function closePendingRun(
     actionId,
     actionKind: run.state.terminalAction.kind,
     terminalReceiptSha256,
+    ...(terminalCard ? { terminalCard } : {}),
   }) as PendingRunInventoryCloseIntentV1;
   if (scanned.closed && (scanned.run.closedReceiptSha256 !== terminalReceiptSha256
-    || scanned.run.closedActionId !== actionId)) return failure("PENDING_RUN_CLOSE_FAILED");
+    || scanned.run.closedActionId !== actionId
+    || canonicalJson(scanned.run.closedTerminalCard) !== canonicalJson(terminalCard))) return failure("PENDING_RUN_CLOSE_FAILED");
   const matchingBefore = inventoryBefore.record.entries.filter(
     (entry) => entry.projectHash === run.identity.projectHash && entry.runId === run.runId,
   );
@@ -1931,7 +3486,7 @@ export function closePendingRun(
     if (matchingBefore[0]?.revision !== run.revision || matchingBefore[0]?.revisionSha256 !== run.revisionSha256) {
       return failure("PENDING_RUN_CLOSE_FAILED");
     }
-    const closeBytes = encodedRecord(composeClose(run, run.state.terminalAction, terminalReceiptSha256));
+    const closeBytes = encodedRecord(composeClose(run, run.state.terminalAction, terminalReceiptSha256, terminalCard));
     if (!reserveRunJournalBytes(run, scanned.journalBytes + closeBytes.byteLength)) {
       return failure("PENDING_RUN_CAPACITY_REACHED");
     }
@@ -1959,17 +3514,86 @@ export function closePendingRun(
   }
   scanned = scanRun(run.directory, run.identity.projectHash, run.runId);
   if (!scanned?.closed || scanned.run.closedReceiptSha256 !== terminalReceiptSha256
-    || scanned.run.closedActionId !== actionId) return failure("PENDING_RUN_CLOSE_FAILED");
+    || scanned.run.closedActionId !== actionId
+    || canonicalJson(scanned.run.closedTerminalCard) !== canonicalJson(terminalCard)) return failure("PENDING_RUN_CLOSE_FAILED");
   if (!settleClosedRunJournalBytes(run, scanned.journalBytes)) return failure("PENDING_RUN_CLOSE_FAILED");
   run.closedReceiptSha256 = terminalReceiptSha256;
   run.closedActionId = actionId;
+  run.closedTerminalCard = terminalCard;
+  if (terminalCard) terminalCardByDeliveryId.set(terminalCard.deliveryIdSha256, Object.freeze({ run, card: terminalCard }));
   if (liveByProjectHash.get(run.identity.projectHash) === run) liveByProjectHash.delete(run.identity.projectHash);
   return Object.freeze({ ok: true, value: projection(run) });
+}
+
+/** Closed outboxes deliberately outlive the active-project gate. The payload
+ * is authenticated by closed.json and can be enumerated again after restart. */
+export function pendingRunTerminalCardDeliveries(): readonly PendingRunTerminalCardOutboxV1[] {
+  if (globallyUnsafe) return Object.freeze([]);
+  return Object.freeze([...terminalCardByDeliveryId.values()].map((entry) => Object.freeze({
+    projectRoot: entry.run.identity.canonicalRoot,
+    card: entry.card,
+  })).sort((left, right) => left.card.deliveryIdSha256.localeCompare(right.card.deliveryIdSha256)));
+}
+
+/** Mark one exact, already-closed outbox as observed in the conversation
+ * store. The caller supplies that store's deterministic turn digest. */
+export function recordPendingRunTerminalCardDelivery(value: unknown): boolean {
+  if (globallyUnsafe) return false;
+  const input = exactDataRecord(value, ["version", "deliveryIdSha256", "deliveredSha256"]);
+  if (!input || input.version !== PENDING_RUN_TERMINAL_CARD_DELIVERY_VERSION
+    || typeof input.deliveryIdSha256 !== "string" || !SHA256.test(input.deliveryIdSha256)
+    || typeof input.deliveredSha256 !== "string" || !SHA256.test(input.deliveredSha256)) return false;
+  const known = deliveredCardByDeliveryId.get(input.deliveryIdSha256);
+  if (known !== undefined) return known === input.deliveredSha256;
+  const entry = terminalCardByDeliveryId.get(input.deliveryIdSha256);
+  const run = entry?.run;
+  if (!entry || !run?.directory || run.closedReceiptSha256 !== entry.card.terminalReceiptSha256) return false;
+  let deliveredSha256: string;
+  try {
+    const parsedCard = JSON.parse(entry.card.canonicalCard);
+    const history = readHistorySnapshot(run.identity.canonicalRoot, entry.card.conversationId);
+    const exactTurn = history.entries.find((historyEntry) => historyEntry.authenticatedEnvelope
+      && historyEntry.turn.role === "envelope"
+      && historyEntry.turn.ts === entry.card.turnTimestamp
+      && canonicalJson(historyEntry.turn.card) === entry.card.canonicalCard);
+    if (!exactTurn || exactTurn.turn.role !== "envelope") return false;
+    deliveredSha256 = cardDigest(
+      run.identity.canonicalRoot,
+      entry.card.conversationId,
+      entry.card.turnTimestamp,
+      parsedCard,
+    );
+    if (input.deliveredSha256 !== deliveredSha256) return false;
+  } catch {
+    return false;
+  }
+  let scanned = scanRun(run.directory, run.identity.projectHash, run.runId);
+  if (!scanned?.closed || canonicalJson(scanned.run.closedTerminalCard) !== canonicalJson(entry.card)) return false;
+  if (scanned.run.closedCardDeliveredSha256 !== null) {
+    if (scanned.run.closedCardDeliveredSha256 !== deliveredSha256) return false;
+  } else {
+    const bytes = encodedRecord(composeCardDelivery(entry.card, deliveredSha256));
+    if (!reserveRunJournalBytes(run, scanned.journalBytes + bytes.byteLength)
+      || !writeNewFile(join(run.directory, CARD_DELIVERED_NAME), bytes)) return false;
+    if (interruptAfterCardDeliveryWriteForTests) {
+      interruptAfterCardDeliveryWriteForTests = false;
+      return false;
+    }
+    scanned = scanRun(run.directory, run.identity.projectHash, run.runId);
+    if (!scanned?.closed || scanned.run.closedCardDeliveredSha256 !== deliveredSha256) return false;
+  }
+  if (!settleClosedRunJournalBytes(run, scanned.journalBytes)) return false;
+  run.closedCardDeliveredSha256 = deliveredSha256;
+  terminalCardByDeliveryId.delete(entry.card.deliveryIdSha256);
+  deliveredCardByDeliveryId.set(entry.card.deliveryIdSha256, deliveredSha256);
+  return true;
 }
 
 export function _resetPendingRunsForTests(): void {
   if (!process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== "test") return;
   liveByProjectHash.clear();
+  terminalCardByDeliveryId.clear();
+  deliveredCardByDeliveryId.clear();
   configuredProfileRoot = null;
   configuredStoreRoot = null;
   globallyUnsafe = false;
@@ -1977,6 +3601,7 @@ export function _resetPendingRunsForTests(): void {
   reservedJournalBytes = 0;
   interruptAfterInventoryIntentForTests = false;
   interruptAfterCloseIntentForTests = false;
+  interruptAfterCardDeliveryWriteForTests = false;
 }
 
 /** Deterministic crash-cut seam. It is inert outside Node's test runner and
@@ -1993,5 +3618,13 @@ export function _interruptPendingRunAfterInventoryIntentForTests(): boolean {
 export function _interruptPendingRunAfterCloseIntentForTests(): boolean {
   if (!process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== "test") return false;
   interruptAfterCloseIntentForTests = true;
+  return true;
+}
+
+/** Crash-cut after the authenticated delivered marker reaches disk but before
+ * process memory observes it. A retry or restart must converge on that marker. */
+export function _interruptPendingRunAfterCardDeliveryWriteForTests(): boolean {
+  if (!process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== "test") return false;
+  interruptAfterCardDeliveryWriteForTests = true;
   return true;
 }

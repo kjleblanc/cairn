@@ -10,6 +10,8 @@ export const CRITIC_CALL_PURPOSE_TEXT =
   "Independent inspection against the promises below. It cannot read or edit the project, or declare DONE.";
 export const CRITIC_CALL_SYNTHETIC_PURPOSE_TEXT =
   "Independent inspection of the preregistered synthetic fixture identified on this card. It cannot read or edit the project, or declare DONE.";
+export const CRITIC_CALL_SYNTHETIC_TASK_PURPOSE_TEXT =
+  "Independent inspection of the exact task candidate identified on this synthetic call card. It cannot read or edit the project, or declare DONE.";
 /** What the critic never receives. Every entry is about the packet the model
  * reads. The provider key is deliberately NOT in this list: it is sent, as the
  * header that signs the request, and saying otherwise on an approval screen
@@ -38,21 +40,37 @@ export const CRITIC_CALL_SYNTHETIC_NOT_SENT = Object.freeze([
 export const CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT =
   "No saved provider key is used. This synthetic calibration call can reach only the injected in-process fake, and nothing is billed.";
 
-export type CriticCallKindV1 = "provider" | "synthetic-calibration";
+export const CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT = Object.freeze([
+  "tools of any kind",
+  "live project filesystem contents outside the frozen synthetic task packet",
+  "any data to an external service",
+  "images or other binary files",
+  "untracked or ignored files",
+  "links",
+  "generated or dependency areas",
+] as const);
+
+export const CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT =
+  "No saved provider key is used. This synthetic task call can reach only the guarded injected in-process fake. It performs no project-filesystem read or external-service call; no network, billing, or quota is used.";
+
+export type CriticCallKindV1 = "provider" | "synthetic-calibration" | "synthetic-task";
 
 export const CRITIC_CALL_NOT_SENT_BY_KIND: Readonly<Record<CriticCallKindV1, readonly string[]>> = Object.freeze({
   provider: CRITIC_CALL_NOT_SENT,
   "synthetic-calibration": CRITIC_CALL_SYNTHETIC_NOT_SENT,
+  "synthetic-task": CRITIC_CALL_SYNTHETIC_TASK_NOT_SENT,
 });
 
 export const CRITIC_CALL_CREDENTIAL_TEXT_BY_KIND: Readonly<Record<CriticCallKindV1, string>> = Object.freeze({
   provider: CRITIC_CALL_CREDENTIAL_TEXT,
   "synthetic-calibration": CRITIC_CALL_SYNTHETIC_CREDENTIAL_TEXT,
+  "synthetic-task": CRITIC_CALL_SYNTHETIC_TASK_CREDENTIAL_TEXT,
 });
 
 export const CRITIC_CALL_PURPOSE_BY_KIND: Readonly<Record<CriticCallKindV1, string>> = Object.freeze({
   provider: CRITIC_CALL_PURPOSE_TEXT,
   "synthetic-calibration": CRITIC_CALL_SYNTHETIC_PURPOSE_TEXT,
+  "synthetic-task": CRITIC_CALL_SYNTHETIC_TASK_PURPOSE_TEXT,
 });
 
 /** The consent this call runs under, restated where the owner can see it. */
@@ -110,6 +128,16 @@ export type CriticCallCalibrationViewV1 = Readonly<{
   text: readonly Readonly<{ path: string; sha256: string; content: string }>[];
 }>;
 
+/** Exact task-call identity derived from one branded Core authorization. */
+export type CriticCallSyntheticTaskViewV1 = Readonly<{
+  runId: string;
+  candidateSha256: string;
+  round: 0 | 1;
+  packetSha256: string;
+  requestSha256: string;
+  requestBodySha256: string;
+}>;
+
 export const PLAN_METADATA_KEYS = Object.freeze([
   "checks", "preferences", "references", "evidenceItems", "priorFindings", "comparisonTrials",
 ] as const);
@@ -163,6 +191,8 @@ export type CriticCallDisclosureV1 = Readonly<{
   /** Present only on the exact inert synthetic route. It lets the owner match
    * this card to the preregistered schedule and inspect every sent text byte. */
   calibration: CriticCallCalibrationViewV1 | null;
+  /** Present only for the guarded Q9 in-process task fake. */
+  syntheticTask: CriticCallSyntheticTaskViewV1 | null;
   /** The exact size of the whole canonical request, file contents included. */
   totalRequestCharacters: number;
   fileCap: number;
@@ -207,6 +237,10 @@ export function canonicalCriticCallDisclosure(value: CriticCallDisclosureV1): st
       value.calibration.fixtureCount, value.calibration.fixtureSha256, value.calibration.packetSha256,
       value.calibration.requestSha256, value.calibration.requestBodySha256,
       value.calibration.text.map((row) => [row.path, row.sha256, row.content]),
+    ],
+    value.syntheticTask === null ? null : [
+      value.syntheticTask.runId, value.syntheticTask.candidateSha256, value.syntheticTask.round,
+      value.syntheticTask.packetSha256, value.syntheticTask.requestSha256, value.syntheticTask.requestBodySha256,
     ],
     value.totalRequestCharacters,
     value.fileCap, value.perFileCharacterCap,

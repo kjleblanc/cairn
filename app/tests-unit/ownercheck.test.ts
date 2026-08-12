@@ -36,7 +36,7 @@ import {
   mainOwnerEvidence,
   taskReviewProjection,
 } from "../src/main/ownercheck.js";
-import { canonicalProjectKey } from "../src/main/conductor/turnauth.js";
+import { canonicalProjectPath } from "../src/main/conductor/turnauth.js";
 import { parseTaskReviewProjection } from "../src/shared/task-review.js";
 
 const DIR = process.cwd();
@@ -49,7 +49,8 @@ function sha256(value: string): string {
 }
 
 function projectHash(dir = DIR): string {
-  return sha256(canonicalProjectKey(dir));
+  const real = canonicalProjectPath(dir);
+  return sha256(process.platform === "win32" ? real.toLowerCase() : real);
 }
 
 function clone<T>(value: T): T {
@@ -366,7 +367,9 @@ test("pending review is a branded plan-only projection with no action or seal au
   assertNoAuthorityFields(projection);
   assert.equal(taskReviewProjection(clone(authority)), null, "a structural authority clone is powerless");
   assert.equal(composePendingTaskReviewAuthority(DIR, clone(spec)), null, "a structural Task Spec clone is powerless");
-  assert.deepEqual(mainOwnerEvidence(authority), { ownerObservations: [], ownerResolutions: [] });
+  assert.deepEqual(mainOwnerEvidence(authority), {
+    ownerObservations: [], ownerResolutions: [], cairnFailureDecisions: [], cairnFailureConfirmations: [],
+  });
 });
 
 test("candidate review refuses cross-scope and incomplete or forged evidence inputs", () => {
@@ -508,6 +511,215 @@ test("owner observation actions are exact, one-use, cross-project safe, and rege
   assert.equal(taskReviewProjection(authority), null);
   assert.equal(mainOwnerEvidence(authority), null);
   assert.equal(invalidateTaskReviewAuthority(authority), false);
+});
+
+test("a Cairn-judged failed check waits for its own owner confirmation before repair authority exists", () => {
+  const spec = taskSpec("off");
+  const plan = evidencePlan(spec);
+  const failed = Object.freeze({ ...resultC3(plan), status: "not-met" as const });
+  const authority = composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan),
+    criterionResults: [failed],
+  });
+  assert.ok(authority);
+  const initial = taskReviewProjection(authority);
+  assert.ok(initial);
+  const criterion = initial.criteria.find((row) => row.id === "c3");
+  assert.equal(criterion?.state, "waiting-owner");
+  assert.equal(criterion?.source, "cairn-verifier");
+  assert.equal(criterion?.ownerChecks[0]?.kind, "cairn-failure");
+  assert.equal(criterion?.ownerChecks[0]?.status, "not-ready");
+  assert.equal(criterion?.ownerChecks[0]?.action, null,
+    "the Cairn confirmation waits until every policy-context-changing owner row is answered");
+  let projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: actionFor(initial, "c2").actionId,
+    action: { kind: "observe", decision: "met" },
+  });
+  assert.ok(projection);
+  projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: actionFor(projection, "c4").actionId,
+    action: { kind: "observe", decision: "met" },
+  });
+  assert.ok(projection);
+  const ready = projection.criteria.find((row) => row.id === "c3");
+  assert.equal(ready?.ownerChecks[0]?.status, "awaiting-confirmation");
+  const action = actionFor(projection, "c3");
+  assert.equal(action.kind, "review-cairn-failure");
+  assert.ok(parseTaskReviewProjection(initial));
+  assert.equal(applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: action.actionId,
+    action: { kind: "resolve", decision: "confirmed" },
+  }), null, "critic resolution cannot stand in for the distinct Cairn confirmation");
+  const confirmed = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: action.actionId,
+    action: { kind: "review-cairn-failure", decision: "confirmed" },
+  });
+  assert.ok(confirmed, "an invalid kind does not consume the exact confirmation action");
+  assert.equal(confirmed.criteria.find((row) => row.id === "c3")?.ownerChecks[0]?.status, "confirmed");
+  const evidence = mainOwnerEvidence(authority);
+  assert.ok(evidence);
+  assert.equal(evidence.cairnFailureDecisions.length, 1);
+  assert.equal(evidence.cairnFailureConfirmations.length, 1);
+  assert.equal(evidence.cairnFailureDecisions[0]?.outcome, "confirmed");
+  assert.equal(evidence.cairnFailureDecisions[0]?.confirmation, evidence.cairnFailureConfirmations[0]);
+});
+
+test("a Cairn failure stays non-actionable behind unresolved or cant-tell owner evidence", () => {
+  const spec = taskSpec("off");
+  const plan = evidencePlan(spec);
+  const failed = Object.freeze({ ...resultC3(plan), status: "not-met" as const });
+  const authority = composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan),
+    criterionResults: [failed],
+  });
+  assert.ok(authority);
+  let projection = taskReviewProjection(authority);
+  assert.ok(projection);
+  const c2 = actionFor(projection, "c2");
+  projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: c2.actionId,
+    action: { kind: "observe", decision: "cant-tell" },
+  });
+  assert.ok(projection);
+  const c4 = actionFor(projection, "c4");
+  projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: c4.actionId,
+    action: { kind: "observe", decision: "met" },
+  });
+  assert.ok(projection);
+  const cairn = projection.criteria.find((row) => row.id === "c3")?.ownerChecks[0];
+  assert.equal(cairn?.kind, "cairn-failure");
+  assert.equal(cairn?.status, "not-ready");
+  assert.equal(cairn?.action, null,
+    "an owner cant-tell row cannot be treated as complete repair eligibility");
+});
+
+test("a mixed critic allegation is resolved before Cairn can confirm its separate blocker", () => {
+  const { spec, plan, assessment } = assessmentBundle();
+  const failed = Object.freeze({ ...resultC3(plan), status: "not-met" as const });
+  const authority = composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan, assessment),
+    criterionResults: [failed],
+  });
+  assert.ok(authority);
+  let projection = taskReviewProjection(authority);
+  assert.ok(projection);
+  const cairnBefore = projection.criteria.find((row) => row.id === "c3")?.ownerChecks[0];
+  assert.equal(cairnBefore?.kind, "cairn-failure");
+  assert.equal(cairnBefore?.status, "not-ready");
+  assert.equal(cairnBefore?.action, null);
+  const critic = actionFor(projection, "c1");
+  assert.equal(critic.kind, "resolve");
+  projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: critic.actionId,
+    action: { kind: "resolve", decision: "dismissed" },
+  });
+  assert.ok(projection);
+  for (const criterionId of ["c2", "c4"] as const) {
+    const action = actionFor(projection, criterionId);
+    projection = applyTaskReviewAction(authority, {
+      dir: DIR,
+      actionId: action.actionId,
+      action: { kind: "observe", decision: "met" },
+    });
+    assert.ok(projection);
+  }
+  const cairnAfter = projection.criteria.find((row) => row.id === "c3")?.ownerChecks[0];
+  assert.equal(cairnAfter?.kind, "cairn-failure");
+  assert.equal(cairnAfter?.status, "awaiting-confirmation");
+  assert.equal(cairnAfter?.action?.kind, "review-cairn-failure");
+
+  const cantTellAuthority = composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan, assessment),
+    criterionResults: [failed],
+  });
+  assert.ok(cantTellAuthority);
+  let cantTellProjection = taskReviewProjection(cantTellAuthority);
+  assert.ok(cantTellProjection);
+  const cantTellCritic = actionFor(cantTellProjection, "c1");
+  cantTellProjection = applyTaskReviewAction(cantTellAuthority, {
+    dir: DIR,
+    actionId: cantTellCritic.actionId,
+    action: { kind: "resolve", decision: "cant-tell" },
+  });
+  assert.ok(cantTellProjection);
+  for (const criterionId of ["c2", "c4"] as const) {
+    const action = actionFor(cantTellProjection, criterionId);
+    cantTellProjection = applyTaskReviewAction(cantTellAuthority, {
+      dir: DIR,
+      actionId: action.actionId,
+      action: { kind: "observe", decision: "met" },
+    });
+    assert.ok(cantTellProjection);
+  }
+  const cantTellCairn = cantTellProjection.criteria.find((row) => row.id === "c3")?.ownerChecks[0];
+  assert.equal(cantTellCairn?.kind, "cairn-failure");
+  assert.equal(cantTellCairn?.status, "not-ready");
+  assert.equal(cantTellCairn?.action, null,
+    "critic cant-tell cannot expose the later Cairn confirmation");
+});
+
+test("authenticated owner seed rehydrates two answered rows without reviving stale actions", () => {
+  const spec = taskSpec("required");
+  const plan = evidencePlan(spec);
+  const authority = composeCandidateTaskReviewAuthority(candidateRaw(spec, plan));
+  assert.ok(authority);
+  let projection = taskReviewProjection(authority);
+  assert.ok(projection);
+  const c2 = actionFor(projection, "c2");
+  projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: c2.actionId,
+    action: { kind: "observe", decision: "met" },
+  });
+  assert.ok(projection);
+  const c4 = actionFor(projection, "c4");
+  projection = applyTaskReviewAction(authority, {
+    dir: DIR,
+    actionId: c4.actionId,
+    action: { kind: "observe", decision: "not-met" },
+  });
+  assert.ok(projection);
+  const seedOwnerEvidence = mainOwnerEvidence(authority);
+  assert.ok(seedOwnerEvidence);
+  assert.equal(seedOwnerEvidence.ownerObservations.length, 2);
+
+  const restored = composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan),
+    seedOwnerEvidence,
+  });
+  assert.ok(restored);
+  const restoredProjection = taskReviewProjection(restored);
+  assert.ok(restoredProjection);
+  const c2Restored = restoredProjection.criteria.find((criterion) => criterion.id === "c2");
+  const c4Restored = restoredProjection.criteria.find((criterion) => criterion.id === "c4");
+  assert.ok(c2Restored?.ownerChecks[0]);
+  assert.ok(c4Restored?.ownerChecks[0]);
+  assert.equal(c2Restored.ownerChecks[0].action, null, "c2 remains answered after Main restart rehydration");
+  assert.equal(c4Restored.ownerChecks[0].action, null, "c4 remains answered after Main restart rehydration");
+  assert.deepEqual(mainOwnerEvidence(restored), seedOwnerEvidence);
+  const cloneRevalidated = composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan),
+    seedOwnerEvidence: clone(seedOwnerEvidence),
+  });
+  assert.ok(cloneRevalidated, "authenticated JSON rows are revalidated through current Core policy context");
+  assert.deepEqual(mainOwnerEvidence(cloneRevalidated), seedOwnerEvidence);
+  const tampered = clone(seedOwnerEvidence) as unknown as {
+    ownerObservations: Array<Record<string, unknown>>;
+    ownerResolutions: unknown[];
+  };
+  tampered.ownerObservations[0] = { ...tampered.ownerObservations[0], candidateSha256: "e".repeat(64) };
+  assert.equal(composeCandidateTaskReviewAuthority({
+    ...candidateRaw(spec, plan),
+    seedOwnerEvidence: tampered,
+  }), null, "a row that fails exact current-candidate revalidation cannot seed Main authority");
 });
 
 test("owner rows complete without an assessment under required, optional, and off critic modes while pN stays advisory", () => {

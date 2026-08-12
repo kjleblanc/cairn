@@ -168,7 +168,7 @@ function evidenceList(title: string, rows: readonly TaskReviewEvidenceViewV1[]) 
 
 function stateLabel(state: TaskReviewProjectionV1["criteria"][number]["state"]): string {
   if (state === "pending") return "Evidence has not answered this promise yet";
-  if (state === "waiting-owner") return "Waiting for your observation";
+  if (state === "waiting-owner") return "Waiting for your decision";
   if (state === "met") return "Evidence says this promise is met";
   if (state === "not-met") return "Evidence says this promise is not met";
   return "The evidence cannot tell";
@@ -209,6 +209,28 @@ export function TaskReviewView({ review, heading = "Accepted Task Spec and evide
                       <Pill onClick={() => onAction(check.action!.actionId, { kind: "observe", decision: "met" })}>I see it working</Pill>
                       <Pill onClick={() => onAction(check.action!.actionId, { kind: "observe", decision: "not-met" })}>I see it failing</Pill>
                       <Pill kind="quiet" onClick={() => onAction(check.action!.actionId, { kind: "observe", decision: "cant-tell" })}>I can&apos;t tell</Pill>
+                    </div>
+                  ) : null}
+                </div>
+              ) : check.kind === "cairn-failure" ? (
+                <div key={`cairn-${index}`} className="task-review-owner-check">
+                  <p><strong>Cairn check failure — {check.status === "not-ready"
+                    ? "finish the other owner checks first"
+                    : check.status === "awaiting-confirmation" ? "waiting for your review" : check.status}</strong></p>
+                  <p className="small muted">Cairn cannot request a repair unless you confirm this exact failed check. Confirming it does not approve a repair; Cairn will show a separate exact repair approval next.</p>
+                  {evidenceList("Failed-check evidence shown", check.supportingEvidence)}
+                  {evidenceList("Counterevidence shown", check.counterEvidence)}
+                  {check.action && onAction ? (
+                    <div className="row">
+                      <Pill onClick={() => onAction(check.action!.actionId, {
+                        kind: "review-cairn-failure", decision: "confirmed",
+                      })}>{"Confirm Cairn's failed check"}</Pill>
+                      <Pill onClick={() => onAction(check.action!.actionId, {
+                        kind: "review-cairn-failure", decision: "dismissed",
+                      })}>Dismiss and stop</Pill>
+                      <Pill kind="quiet" onClick={() => onAction(check.action!.actionId, {
+                        kind: "review-cairn-failure", decision: "cant-tell",
+                      })}>I can&apos;t tell — stop</Pill>
                     </div>
                   ) : null}
                 </div>
