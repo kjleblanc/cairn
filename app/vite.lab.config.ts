@@ -62,6 +62,7 @@ export default defineConfig({
         chatmock: "lab/chatmock.html",
         worldboard: "lab/worldboard.html",
         castboard: "lab/castboard.html",
+        builderproposal: "lab/builderproposal.html",
       },
     },
   },

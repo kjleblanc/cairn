@@ -588,3 +588,16 @@ export function builderTurnResponseSha256(value: unknown): string | null {
   const canonical = canonicalBuilderTurnResponse(value);
   return canonical === null ? null : sha256Utf8(canonical);
 }
+
+/** Proves that one genuine response was parsed against this exact live
+ * context object. Equal canonical bytes or digests are deliberately
+ * insufficient: separately composed contexts remain separate custody. */
+export function builderTurnResponseMatchesContext(
+  contextValue: unknown,
+  responseValue: unknown,
+): boolean {
+  return contextValue !== null && typeof contextValue === "object"
+    && responseValue !== null && typeof responseValue === "object"
+    && contextBrands.has(contextValue)
+    && responseBindings.get(responseValue) === contextValue;
+}

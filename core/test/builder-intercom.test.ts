@@ -22,6 +22,7 @@ import {
   BUILDER_TURN_CONTEXT_VERSION,
   BUILDER_TURN_RESPONSE_VERSION,
   builderTurnContextSha256,
+  builderTurnResponseMatchesContext,
   builderTurnResponseSha256,
   canonicalBuilderTurnContext,
   canonicalBuilderTurnResponse,
@@ -293,6 +294,44 @@ test("builder intercom: exact turn and replacement are detached, frozen, canonic
   assert.equal(canonicalBuilderTurnResponse(clone(parsed)), null);
   assert.equal(builderTurnResponseSha256(clone(parsed)), null);
   assert.deepEqual(raw, replacementRaw(ctx), "parsing performed no mutation of caller data");
+});
+
+test("builder intercom: a response matches only the exact live context that parsed it", () => {
+  const first = context();
+  const second = context();
+  assert.equal(builderTurnContextSha256(first), builderTurnContextSha256(second),
+    "the fixture must exercise two distinct live contexts with identical canonical bytes");
+  assert.notEqual(first, second);
+
+  const firstRaw = replacementRaw(first);
+  const secondRaw = replacementRaw(second);
+  const firstResponse = parseBuilderTurnResponse(first, firstRaw);
+  const secondResponse = parseBuilderTurnResponse(second, secondRaw);
+  assert.ok(firstResponse);
+  assert.ok(secondResponse);
+  assert.equal(builderTurnResponseMatchesContext(first, firstResponse), true);
+  assert.equal(builderTurnResponseMatchesContext(second, secondResponse), true);
+  assert.equal(builderTurnResponseMatchesContext(first, secondResponse), false);
+  assert.equal(builderTurnResponseMatchesContext(second, firstResponse), false);
+
+  assert.equal(builderTurnResponseMatchesContext(first, firstRaw), false);
+  assert.equal(builderTurnResponseMatchesContext(clone(first), firstResponse), false);
+  assert.equal(builderTurnResponseMatchesContext(first, clone(firstResponse)), false);
+  assert.equal(builderTurnResponseMatchesContext(new Proxy(first, {}), firstResponse), false);
+  assert.equal(builderTurnResponseMatchesContext(first, new Proxy(firstResponse, {})), false);
+
+  let getterRead = false;
+  const getterOwned = {};
+  Object.defineProperty(getterOwned, "contextSha256", {
+    enumerable: true,
+    get() {
+      getterRead = true;
+      return builderTurnContextSha256(first);
+    },
+  });
+  assert.equal(builderTurnResponseMatchesContext(first, getterOwned), false);
+  assert.equal(builderTurnResponseMatchesContext(getterOwned, firstResponse), false);
+  assert.equal(getterRead, false, "identity checking must not inspect attacker-owned properties");
 });
 
 test("builder intercom: context refuses stale, ambiguous, unsafe, widened, and accessor-owned inputs", () => {
@@ -601,6 +640,7 @@ test("builder intercom: package surface exposes pure data operations and no Buil
     "BUILDER_TURN_CONTEXT_VERSION",
     "BUILDER_TURN_RESPONSE_VERSION",
     "builderTurnContextSha256",
+    "builderTurnResponseMatchesContext",
     "builderTurnResponseSha256",
     "canonicalBuilderTurnContext",
     "canonicalBuilderTurnResponse",

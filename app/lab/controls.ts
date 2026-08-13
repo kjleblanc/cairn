@@ -46,5 +46,11 @@ export function mountControls(): void {
   lookboard.textContent = "Look board";
   lookboard.title = "compare three unified scene directions";
   panel.appendChild(lookboard);
+  const builderProposals = document.createElement("a");
+  builderProposals.className = "lab-controls-button lab-controls-link";
+  builderProposals.href = "/lab/builderproposal.html";
+  builderProposals.textContent = "Builder proposals";
+  builderProposals.title = "review two synthetic proposal-only Builder examples";
+  panel.appendChild(builderProposals);
   document.body.appendChild(panel);
 }

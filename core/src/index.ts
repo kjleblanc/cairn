@@ -6,6 +6,7 @@ export {
   BUILDER_TURN_CONTEXT_VERSION,
   BUILDER_TURN_RESPONSE_VERSION,
   builderTurnContextSha256,
+  builderTurnResponseMatchesContext,
   builderTurnResponseSha256,
   canonicalBuilderTurnContext,
   canonicalBuilderTurnResponse,
