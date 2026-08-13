@@ -55,9 +55,12 @@ transport. No dependency is added.
   `STOPPED`; it does not weaken the calibration bar.
 - The first live critic capability uses the connected conductor's one-shot
   transport with no tool schema and sends only the canonical packet. Codex Exec
-  read-only is not packet-read containment. V1 Builder/repair is restricted to
-  a writer adapter whose enforced write sandbox excludes `userData`; today's
-  Kimi adapter does not qualify.
+  read-only is not packet-read containment. V1 Builder/repair uses Task 224's
+  tool-free proposal-only turn; it receives no local tool or writer, and only
+  a separately proved Cairn selector/applier may later write an exact approved
+  proposal. Any verifier or future command-capable runner still requires a
+  causally proved hard boundary that excludes `userData` and every unapproved
+  local or network capability; today's Kimi adapter does not qualify.
 - V1 critic packets stay inside the current connected-conductor consent: text
   only; at most eight eligible Git-tracked files, 8,000 characters each and
   32,000 total; all existing ignored/link/binary/dependency/generated/
@@ -659,6 +662,25 @@ or a model can move the rubric between rounds.
 > remains legacy `serial-task`, and the verifier precursor has not started. No
 > model, provider, credential, Internet request, paid call, dependency, push,
 > or deployment occurred.
+
+> **Proposal-only Builder precursor status (2026-08-13): DONE as Task 224.**
+> Cairn chose the safer form of the owner-proposed Builder intercom: the
+> future quality Builder is one pure-inference, tool-free turn over an exact
+> selected packet, and its output is inert proposal data rather than
+> permission. Core now freezes one provider-independent offline protocol that
+> binds the branded Task Spec, Evidence Plan, base Git state, consent and
+> selected tracked text. A response can only propose bounded full-text
+> replacements for those exact rows or ask through one of five closed
+> capability categories. It cannot apply, execute, fetch, select a command,
+> choose a verifier, use a credential, or mint approval. The production route,
+> activation registry and normal Codex adapter remain dark. Separate later
+> tasks must prove the tracked-text selector and patch applier, durable
+> owner-approved capability brokers, isolated verifier vocabulary, tool-free
+> provider transport and production route before live calibration resumes.
+> Task 223's loopback failure remains a hard boundary for every future local
+> process that can execute project code. No model, provider, credential,
+> network request, paid call, dependency, permission change, push or
+> deployment occurred.
 
 **Visible outcome:** the owner sees real evidence that the selected critic
 abstains on uncertainty, ignores prompt injection, resists order bias in the

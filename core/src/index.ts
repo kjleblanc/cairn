@@ -1,4 +1,26 @@
 export * from "./codex.js";
+export {
+  BUILDER_CAPABILITY_REQUEST_CATEGORIES,
+  BUILDER_INTERCOM_LIMITS,
+  BUILDER_SELECTOR_PROVENANCE_VERSION,
+  BUILDER_TURN_CONTEXT_VERSION,
+  BUILDER_TURN_RESPONSE_VERSION,
+  builderTurnContextSha256,
+  builderTurnResponseSha256,
+  canonicalBuilderTurnContext,
+  canonicalBuilderTurnResponse,
+  composeBuilderTurnContext,
+  parseBuilderTurnResponse,
+  type BuilderCapabilityRequestCategoryV1,
+  type BuilderCapabilityRequestResponseV1,
+  type BuilderCapabilityRequestV1,
+  type BuilderReplacementProposalRowV1,
+  type BuilderReplacementProposalV1,
+  type BuilderSelectedTrackedTextV1,
+  type BuilderSelectedTextProvenanceV1,
+  type BuilderTurnContextV1,
+  type BuilderTurnResponseV1,
+} from "./builder-intercom.js";
 // Candidate creation and the raw terminal reservation token stay internal to
 // Core's serial runner. Package consumers receive only the staged lifecycle
 // decisions plus serial.ts's prepared terminal transaction; they cannot
