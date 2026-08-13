@@ -13,6 +13,7 @@
   "include": [
     "src/main/adapters.ts",
     "src/main/atomicwrite.ts",
+    "src/main/builderreservation.ts",
     "src/main/evidence.ts",
     "src/main/ownercheck.ts",
     "src/main/evidencecapture.ts",
