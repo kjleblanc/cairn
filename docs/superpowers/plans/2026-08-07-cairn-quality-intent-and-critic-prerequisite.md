@@ -642,6 +642,24 @@ or a model can move the rubric between rounds.
 > only then can AI-owned launcher and verifier-harness implementation begin.
 > No credential, provider, network, paid call, or external write was used.
 
+> **Windows confinement precursor status (2026-08-12): STOPPED as Task 223
+> after the owner-approved causal probe.** The owner delegated the choice;
+> Cairn chose a Windows-first Builder and a later Main-owned bounded verifier
+> vocabulary. An app-owned
+> Codex 0.145.0 permission profile parsed successfully, and its elevated
+> offline probe allowed the one project write while denying writes to
+> `.git`, `.agents`, `.codex`, Electron `userData`, sibling/outside roots,
+> implicit temp, and `C:\Windows\Temp`. The same child nevertheless opened a
+> raw TCP connection to a preregistered loopback-only control listener despite
+> both `network.enabled=false` and `--sandbox-state-disable-network`. The exact
+> disposable fixture was removed. Because localhost can expose privileged
+> developer services, the result cannot honestly be narrowed to "no Internet";
+> closing it requires a separately reviewed OS network boundary. The dormant
+> implementation/probe was removed, activation remains empty, normal Codex
+> remains legacy `serial-task`, and the verifier precursor has not started. No
+> model, provider, credential, Internet request, paid call, dependency, push,
+> or deployment occurred.
+
 **Visible outcome:** the owner sees real evidence that the selected critic
 abstains on uncertainty, ignores prompt injection, resists order bias in the
 declared fixture set, surfaces planted frozen-condition failures for confirmation,
