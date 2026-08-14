@@ -28,6 +28,8 @@ const SYNTHETIC_BEFORE = "export const greeting = '<script>syntheticBefore()</sc
 const SYNTHETIC_AFTER = "export const greeting = '<img src=x onerror=syntheticAfter()>';\n";
 const TASK232_RUN_ID = "23223223-2232-4232-8232-232232232232";
 const TASK232_TURN_ID = "32232322-2322-4322-8322-322323322323";
+const TASK233_RUN_ID = "23323323-3233-4233-8233-233233233233";
+const TASK233_TURN_ID = "32332323-3233-4323-8323-323323323233";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -134,6 +136,23 @@ export function task232FixedTrackedTextRequestForTests() {
     taskNumber: 900_232,
     runId: TASK232_RUN_ID,
     turnId: TASK232_TURN_ID,
+    connectionConsentVersion: "selected-text-v1",
+    taskSpec,
+    evidencePlan,
+    selectedProjectRelativePaths: Object.freeze([SYNTHETIC_PATH]),
+  });
+}
+
+/** Task 233 changes only the run/turn/task coordinates. The selected path,
+ * intent, quality plan, and evidence plan stay the reviewed fixed synthetic
+ * data; project identity, Git state, bytes, hashes, and provenance are still
+ * derived only by the live selector. */
+export function task233FixedTrackedTextRequestForTests() {
+  const { taskSpec, evidencePlan } = authorities();
+  return Object.freeze({
+    taskNumber: 900_233,
+    runId: TASK233_RUN_ID,
+    turnId: TASK233_TURN_ID,
     connectionConsentVersion: "selected-text-v1",
     taskSpec,
     evidencePlan,

@@ -547,6 +547,7 @@ function unexpectedProductConsumers(extra: readonly { relativePath: string; text
   const allowed = new Set([
     "main/builderproposalreview.ts",
     "main/builderproposalreviewfixture.ts",
+    "main/builderlivereviewroutefixture.ts",
     "main/builderreviewroutefixture.ts",
     "main/conductor/builderreviewauth.ts",
     "main/conductor/store.ts",
@@ -710,13 +711,29 @@ function assertFixtureGuardSafe(value: string): void {
   assert.match(value, /const builderReviewE2eRequested = process\.env\.CAIRN_TEST_BUILDER_TRACKED_TEXT === "task232-fixed-v1";/u);
   assert.match(value, /process\.env\.CAIRN_TEST_BUILDER_TRACKED_TEXT !== undefined && !builderReviewE2eRequested/u);
   assert.match(value, /builderReviewE2eRequested && \(process\.env\.CAIRN_E2E !== "1" \|\| process\.env\.CAIRN_MOCK !== "1"\s*\|\| task232E2eProjectRoot === null \|\| task232E2eProfileRoot === null\)/u);
-  assert.match(value, /builderReviewE2eRequested && \(q9E2eRequested \|\| calibrationE2eRequested\)/u);
-  assert.match(value, /suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested/u);
-  assert.match(value, /if \(!q9E2eRequested && !builderReviewE2eRequested\) void startPhoneBridge\(\);/u);
+  assert.match(value, /const builderLiveE2eRequested =\s*process\.env\.CAIRN_TEST_BUILDER_LIVE === "task233-openrouter-kimi-k2-novita-v1";/u);
+  assert.match(value, /builderLiveE2eRequested && task233LivePhase !== "call" && task233LivePhase !== "restore"/u);
+  assert.match(value, /builderLiveE2eRequested && \(process\.env\.CAIRN_E2E !== "1" \|\| process\.env\.CAIRN_MOCK !== "0"\s*\|\| task233E2eProjectRoot === null \|\| task233E2eProfileRoot === null\)/u);
+  assert.match(value, /\(builderReviewE2eRequested \|\| builderLiveE2eRequested\)\s*&& \(q9E2eRequested \|\| calibrationE2eRequested\)/u);
+  assert.match(value, /builderReviewE2eRequested && builderLiveE2eRequested/u);
+  assert.match(value, /suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested \|\| builderLiveE2eRequested/u);
+  assert.match(value, /suppressExternalOpen: builderLiveE2eRequested/u);
+  assert.match(value, /registerConductorIpc\(\{ suppressOAuth: builderLiveE2eRequested \}\)/u);
+  assert.match(value, /if \(!q9E2eRequested && !builderReviewE2eRequested && !builderLiveE2eRequested\) \{\s*void startPhoneBridge\(\);\s*\}/u);
   const guarded = value.indexOf("if (builderReviewE2eRequested) {");
   const hook = value.indexOf("__CAIRN_TASK232_APPEND_BUILDER_REVIEW__", guarded);
   const createWindow = value.indexOf("createWindow();", guarded);
   assert.ok(guarded >= 0 && hook > guarded && createWindow > hook);
+  const liveGuarded = value.indexOf('if (builderLiveE2eRequested && task233LivePhase === "call") {');
+  const liveHook = value.indexOf("__CAIRN_TASK233_RUN_APPROVED_LIVE_BUILDER__", liveGuarded);
+  const liveSpent = value.indexOf("used = true;", liveHook);
+  const livePrepare = value.indexOf("prepareTask233LiveBuilderReview(projectRoot)", liveSpent);
+  const liveSend = value.indexOf("sendTask233ApprovedLiveBuilderTurn(", livePrepare);
+  const liveAppend = value.indexOf("appendTask233LiveBuilderReview(", liveSend);
+  assert.ok(liveGuarded >= 0 && liveHook > liveGuarded && liveSpent > liveHook
+    && livePrepare > liveSpent && liveSend > livePrepare && liveAppend > liveSend);
+  assert.equal((value.match(/mainWindow\.webContents\.send\("conductor:delta", \{/gu) ?? []).length, 2,
+    "the fake and approved-live routes must each emit exactly one neutral turn delta");
   assert.match(value, /mainWindow\.webContents\.send\("conductor:delta", \{\s*dir: projectRoot,[\s\S]*?kind: "turn",\s*turn: appended\.turn,/u);
 }
 
@@ -742,6 +759,7 @@ function assertFixtureModuleSafe(value: string): void {
   ], "the fixed fixture may import only its exact pure composition and append symbols");
   assert.deepEqual(surface.filter((entry) => entry.startsWith("export:")), [
     "export:FunctionDeclaration:task232FixedTrackedTextRequestForTests",
+    "export:FunctionDeclaration:task233FixedTrackedTextRequestForTests",
     "export:FunctionDeclaration:task231FixedBuilderPairForTests",
     "export:FunctionDeclaration:appendTask231SyntheticBuilderReview",
   ]);
@@ -918,6 +936,7 @@ test("component, composer and production integration expose only the closed disp
     "the role literal may appear only at the exact custody, omission, type and desktop render boundaries");
   assert.deepEqual(authoritySymbolConsumers("recordBuilderReviewMarker", "main/conductor/builderreviewauth.ts"), ["main/conductor/store.ts"]);
   assert.deepEqual(authoritySymbolConsumers("appendBuilderReviewTurn", "main/conductor/store.ts"), [
+    "main/builderlivereviewroutefixture.ts",
     "main/builderproposalreviewfixture.ts",
     "main/builderreviewroutefixture.ts",
   ]);
@@ -1141,7 +1160,7 @@ test("causal source mutants prove custody, literal rendering, no-action and inte
       relativePath: "main/rogue-builder-consumer.ts",
       text: 'import * as store from "./conductor/store.js"; void store.appendBuilderReviewTurn;',
     }],
-  ), ["main/builderproposalreviewfixture.ts", "main/builderreviewroutefixture.ts", "main/rogue-builder-consumer.ts"]);
+  ), ["main/builderlivereviewroutefixture.ts", "main/builderproposalreviewfixture.ts", "main/builderreviewroutefixture.ts", "main/rogue-builder-consumer.ts"]);
 
   const service = source("src/main/conductor/service.ts");
   const providerLeak = service.replace('if (turn.role === "builder-review") return [];',
@@ -1159,14 +1178,14 @@ test("causal source mutants prove custody, literal rendering, no-action and inte
 
   const main = source("src/main/main.ts");
   const ambientNetwork = main.replace(
-    "suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested",
-    "suppressExternalUpdateCheck: q9E2eRequested /* mutant */",
+    "suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested || builderLiveE2eRequested",
+    "suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested /* mutant */",
   );
   assert.notEqual(ambientNetwork, main);
   assert.throws(() => assertFixtureGuardSafe(ambientNetwork));
   const lanListener = main.replace(
-    "if (!q9E2eRequested && !builderReviewE2eRequested) void startPhoneBridge();",
-    "if (!q9E2eRequested) void startPhoneBridge(); // mutant",
+    "if (!q9E2eRequested && !builderReviewE2eRequested && !builderLiveE2eRequested) {",
+    "if (!q9E2eRequested && !builderReviewE2eRequested) { // mutant",
   );
   assert.notEqual(lanListener, main);
   assert.throws(() => assertFixtureGuardSafe(lanListener));

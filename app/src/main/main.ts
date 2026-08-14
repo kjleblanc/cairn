@@ -10,6 +10,11 @@ import { setBuilderReviewMarkerDir } from "./conductor/builderreviewauth.js";
 import { setTurnMarkerDir } from "./conductor/turnauth.js";
 import { createTask232FakeBuilderTransport, sendTask232FakeBuilderTurn } from "./builderfaketransport.js";
 import { appendTask232SyntheticBuilderReview, prepareTask232SyntheticBuilderReview } from "./builderreviewroutefixture.js";
+import {
+  appendTask233LiveBuilderReview,
+  prepareTask233LiveBuilderReview,
+} from "./builderlivereviewroutefixture.js";
+import { sendTask233ApprovedLiveBuilderTurn } from "./conductor/service.js";
 import { setEvidenceMarkerDir } from "./evidence.js";
 import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import {
@@ -39,6 +44,7 @@ import { q9TerminalCardInputFromPendingState } from "./qualityloop.js";
 if (started) app.quit();
 
 type Task232OwnedDisposableDirectory = Readonly<{ path: string; dev: bigint; ino: bigint }>;
+type Task233OwnedDisposableDirectory = Readonly<{ path: string; dev: bigint; ino: bigint }>;
 
 function task232OwnedDisposableDirectory(
   value: unknown,
@@ -72,6 +78,38 @@ function task232OwnedDisposableDirectoryStillExact(value: Task232OwnedDisposable
   }
 }
 
+function task233OwnedDisposableDirectory(
+  value: unknown,
+  kind: "project" | "profile",
+): Task233OwnedDisposableDirectory | null {
+  try {
+    if (typeof value !== "string" || value.length === 0 || value.includes("\0")) return null;
+    const lexical = path.resolve(value);
+    const real = realpathSync.native(lexical);
+    const tempRoot = realpathSync.native(tmpdir());
+    const stat = lstatSync(real, { bigint: true });
+    const temp = lstatSync(tempRoot, { bigint: true });
+    const name = path.basename(real);
+    return lexical === real && path.dirname(real) === tempRoot
+      && new RegExp("^cairn-task233-" + kind + "-[A-Za-z0-9]{6}$", "u").test(name)
+      && stat.isDirectory() && !stat.isSymbolicLink() && stat.dev === temp.dev && stat.ino > 0n
+      ? Object.freeze({ path: real, dev: stat.dev, ino: stat.ino })
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function task233OwnedDisposableDirectoryStillExact(value: Task233OwnedDisposableDirectory | null): boolean {
+  try {
+    if (value === null || realpathSync.native(value.path) !== value.path) return false;
+    const stat = lstatSync(value.path, { bigint: true });
+    return stat.isDirectory() && !stat.isSymbolicLink() && stat.dev === value.dev && stat.ino === value.ino;
+  } catch {
+    return false;
+  }
+}
+
 // Retire Task 231's direct producer and admit only Task 232's exact marker.
 // Its project and profile must be fresh direct children of the OS temporary
 // directory with the exact mkdtemp-owned names used by the guarded proof.
@@ -93,13 +131,38 @@ if (builderReviewE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.C
   throw new Error("Builder review E2E requires its complete isolated fake guard and exact owned disposable project/profile.");
 }
 
+const builderLiveE2eRequested =
+  process.env.CAIRN_TEST_BUILDER_LIVE === "task233-openrouter-kimi-k2-novita-v1";
+if (process.env.CAIRN_TEST_BUILDER_LIVE !== undefined && !builderLiveE2eRequested) {
+  throw new Error("CAIRN_TEST_BUILDER_LIVE must be exactly task233-openrouter-kimi-k2-novita-v1 when present.");
+}
+const task233LivePhase = process.env.CAIRN_TEST_BUILDER_LIVE_PHASE;
+if (builderLiveE2eRequested && task233LivePhase !== "call" && task233LivePhase !== "restore") {
+  throw new Error("Task 233 live Builder phase must be exactly call or restore.");
+}
+if (!builderLiveE2eRequested && task233LivePhase !== undefined) {
+  throw new Error("CAIRN_TEST_BUILDER_LIVE_PHASE requires the exact Task 233 live marker.");
+}
+const task233E2eProjectRoot = builderLiveE2eRequested
+  ? task233OwnedDisposableDirectory(process.env.CAIRN_OPEN, "project")
+  : null;
+const task233E2eProfileRoot = builderLiveE2eRequested
+  ? task233OwnedDisposableDirectory(process.env.CAIRN_TEST_USER_DATA, "profile")
+  : null;
+if (builderLiveE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "0"
+  || task233E2eProjectRoot === null || task233E2eProfileRoot === null)) {
+  throw new Error("Task 233 live Builder E2E requires its exact real-call guard and owned disposable project/profile.");
+}
+
 // Test-only userData isolation. Electron's default profile may contain the
 // owner's encrypted conductor connection and remembered projects, so an E2E
 // suite must never borrow it. The positive marker prevents an ordinary app
 // launch from being redirected by one stray environment variable.
 const testUserData = builderReviewE2eRequested
   ? task232E2eProfileRoot?.path
-  : process.env.CAIRN_TEST_USER_DATA;
+  : builderLiveE2eRequested
+    ? task233E2eProfileRoot?.path
+    : process.env.CAIRN_TEST_USER_DATA;
 if (testUserData) {
   if (process.env.CAIRN_E2E !== "1") {
     throw new Error("CAIRN_TEST_USER_DATA requires CAIRN_E2E=1.");
@@ -139,8 +202,12 @@ if (q9E2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !
 // Task 232's only producer is one exact, one-shot Main hook for the validated
 // disposable-Git Electron proof. Ordinary launches have no selector IPC,
 // renderer control, or direct Task 231 producer.
-if (builderReviewE2eRequested && (q9E2eRequested || calibrationE2eRequested)) {
-  throw new Error("Builder review, Q8 calibration, and Q9 task fakes are mutually exclusive boot modes.");
+if ((builderReviewE2eRequested || builderLiveE2eRequested)
+  && (q9E2eRequested || calibrationE2eRequested)) {
+  throw new Error("Builder review, live Builder, Q8 calibration, and Q9 task modes are mutually exclusive.");
+}
+if (builderReviewE2eRequested && builderLiveE2eRequested) {
+  throw new Error("Task 232 fake and Task 233 live Builder modes are mutually exclusive.");
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -177,7 +244,11 @@ export function createWindow(): BrowserWindow {
   // same gate as CAIRN_TEST_USER_DATA above, set only by the suite's
   // isolated-profile fixture) so no ordinary launch can be parked by a stray
   // variable.
-  const e2e = process.env.CAIRN_E2E === "1";
+  // Task 233's call phase is the one guarded E2E run the owner must see and
+  // control personally to enter the credential through Cairn's official UI.
+  // Its cold-restore phase parks offscreen like every other automated run.
+  const e2e = process.env.CAIRN_E2E === "1"
+    && !(builderLiveE2eRequested && task233LivePhase === "call");
   const win = new BrowserWindow({
     width: 1320,
     height: 820,
@@ -281,8 +352,11 @@ function bootstrap(): void {
       );
     }
     bootstrapReady = true;
-    registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested });
-    registerConductorIpc();
+    registerProjectIpc({
+      suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested || builderLiveE2eRequested,
+      suppressExternalOpen: builderLiveE2eRequested,
+    });
+    registerConductorIpc({ suppressOAuth: builderLiveE2eRequested });
     registerBridgeIpc();
     criticCalibration = calibrationE2eRequested
       ? createCriticCalibrationOrchestrator({
@@ -354,6 +428,58 @@ function bootstrap(): void {
         });
       };
     }
+    if (builderLiveE2eRequested && task233LivePhase === "call") {
+      let used = false;
+      const projectRoot = (task233E2eProjectRoot as Task233OwnedDisposableDirectory).path;
+      (globalThis as typeof globalThis & {
+        __CAIRN_TASK233_RUN_APPROVED_LIVE_BUILDER__?: () => Promise<
+          | Readonly<{
+              ok: true;
+              conversationId: string;
+              displayTurnId: string;
+              receipt: import("./builderlivetransport.js").Task233LiveBuilderReceiptV1;
+            }>
+          | Readonly<{
+              ok: false;
+              failure: import("./builderlivetransport.js").Task233LiveBuilderFailureV1;
+            }>
+        >;
+      }).__CAIRN_TASK233_RUN_APPROVED_LIVE_BUILDER__ = async () => {
+        if (used) throw new Error("TASK233_LIVE_FIXTURE_ALREADY_USED");
+        if (mainWindow === null || mainWindow.isDestroyed()) {
+          throw new Error("TASK233_LIVE_FIXTURE_WINDOW_UNAVAILABLE");
+        }
+        used = true;
+        if (!task233OwnedDisposableDirectoryStillExact(task233E2eProjectRoot)
+          || !task233OwnedDisposableDirectoryStillExact(task233E2eProfileRoot)) {
+          throw new Error("TASK233_LIVE_FIXTURE_OWNERSHIP_CHANGED");
+        }
+        const prepared = prepareTask233LiveBuilderReview(projectRoot);
+        const call = await sendTask233ApprovedLiveBuilderTurn(
+          projectRoot,
+          prepared.transport,
+          prepared.selection.context,
+        );
+        if (!call.ok) return Object.freeze({ ok: false as const, failure: call.failure });
+        if (!task233OwnedDisposableDirectoryStillExact(task233E2eProjectRoot)
+          || !task233OwnedDisposableDirectoryStillExact(task233E2eProfileRoot)) {
+          throw new Error("TASK233_LIVE_FIXTURE_OWNERSHIP_CHANGED");
+        }
+        const appended = appendTask233LiveBuilderReview(projectRoot, prepared, call.answer);
+        mainWindow.webContents.send("conductor:delta", {
+          dir: projectRoot,
+          conversationId: appended.conversationId,
+          kind: "turn",
+          turn: appended.turn,
+        });
+        return Object.freeze({
+          ok: true as const,
+          conversationId: appended.conversationId,
+          displayTurnId: appended.turn.displayTurnId,
+          receipt: call.answer.receipt,
+        });
+      };
+    }
     // The phone bridge (Task 143): one LAN listener serving the owner's
     // paired phone. It starts with the normal app and stops at quit; if it
     // cannot start (no home-network address, ports in use) the settings
@@ -361,7 +487,9 @@ function bootstrap(): void {
     // Guarded Q9 is a strictly local evidence fixture: it must neither open a
     // LAN listener nor create/update the bridge device store in its isolated
     // profile. Registration remains inert; only the stateful runtime is dark.
-    if (!q9E2eRequested && !builderReviewE2eRequested) void startPhoneBridge();
+    if (!q9E2eRequested && !builderReviewE2eRequested && !builderLiveE2eRequested) {
+      void startPhoneBridge();
+    }
     createWindow();
     deliverPendingTaskResultCards(() => mainWindow);
     app.on("activate", () => {

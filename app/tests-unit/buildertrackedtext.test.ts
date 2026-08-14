@@ -576,7 +576,7 @@ test("source guards and load-bearing mutants close selector, identity, fake-only
   );
   assert.notEqual(ordinaryLaunch, main);
   assert.throws(() => assertMainGuardSafe(ordinaryLaunch));
-  const unownedProject = main.replace("path.dirname(real) === tempRoot", "true /* mutant: any directory */");
+  const unownedProject = main.replaceAll("path.dirname(real) === tempRoot", "true /* mutant: any directory */");
   assert.notEqual(unownedProject, main);
   assert.throws(() => assertMainGuardSafe(unownedProject));
   const replacedOwnership = main.replace(
@@ -587,12 +587,15 @@ test("source guards and load-bearing mutants close selector, identity, fake-only
   assert.throws(() => assertMainGuardSafe(replacedOwnership));
 
   assert.deepEqual(sourceConsumers("captureBuilderTrackedTextSelection", "main/buildertrackedtext.ts"), [
+    "main/builderlivereviewroutefixture.ts",
     "main/builderreviewroutefixture.ts",
   ]);
   assert.deepEqual(sourceConsumers("builderTrackedTextSelectionMatchesContext", "main/buildertrackedtext.ts"), [
+    "main/builderlivereviewroutefixture.ts",
     "main/builderreviewroutefixture.ts",
   ]);
   assert.deepEqual(sourceConsumers("builderTrackedTextSelectionStillExact", "main/buildertrackedtext.ts"), [
+    "main/builderlivereviewroutefixture.ts",
     "main/builderreviewroutefixture.ts",
   ]);
   assert.deepEqual(sourceConsumers("createTask232FakeBuilderTransport", "main/builderfaketransport.ts"), ["main/main.ts"]);
@@ -607,7 +610,7 @@ test("source guards and load-bearing mutants close selector, identity, fake-only
   assert.deepEqual(sourceConsumers("captureBuilderTrackedTextSelection", "main/buildertrackedtext.ts", [{
     path: "renderer/rogue.tsx",
     text: "void captureBuilderTrackedTextSelection;",
-  }]), ["main/builderreviewroutefixture.ts", "renderer/rogue.tsx"]);
+  }]), ["main/builderlivereviewroutefixture.ts", "main/builderreviewroutefixture.ts", "renderer/rogue.tsx"]);
 });
 
 test("fixed request identities are stable but cannot act through clones or serialized records", () => {

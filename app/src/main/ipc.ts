@@ -49,8 +49,12 @@ export function registerProjectIpc(options: Readonly<{
   /** Guarded offline evidence runs must not perform an ambient release lookup.
    * Main owns this boot choice; renderer/project input cannot toggle it. */
   suppressExternalUpdateCheck?: boolean;
+  /** Task 233's exact approved-call proof must not open a browser or any
+   * alternate account/key surface while the owner uses the pasted-key path. */
+  suppressExternalOpen?: boolean;
 }> = {}): void {
   const suppressExternalUpdateCheck = options.suppressExternalUpdateCheck === true;
+  const suppressExternalOpen = options.suppressExternalOpen === true;
   void preflight().then((r) => console.log("[cairn] preflight:", JSON.stringify(r)));
 
   ipcMain.handle("preflight:check", () => preflight());
@@ -207,6 +211,7 @@ export function registerProjectIpc(options: Readonly<{
   });
 
   ipcMain.handle("app:openExternal", async (_e, url: string) => {
+    if (suppressExternalOpen) return;
     // Task 030 added the openrouter.ai prefix so the connect card's "Where
     // do I get a key?" walkthrough can open the Keys page directly.
     if (!/^https:\/\/(github\.com\/kjleblanc\/|kjleblanc\.github\.io\/|openrouter\.ai\/)/.test(url)) return;
@@ -248,7 +253,11 @@ export function registerProjectIpc(options: Readonly<{
  * unconditionally from `main.ts` — these channels are always reachable; the
  * chat screen that reaches them is the app's home view for a governed
  * project (0.1.0), with no separate flag gating whether it shows. */
-export function registerConductorIpc(): void {
+export function registerConductorIpc(options: Readonly<{
+  /** Exact Task 233 evidence mode admits only the owner's pasted-key route. */
+  suppressOAuth?: boolean;
+}> = {}): void {
+  const suppressOAuth = options.suppressOAuth === true;
   ipcMain.handle("conductor:status", (): ConductorStatus => conductorService.status());
 
   ipcMain.handle("conductor:consentCard", (_e, baseUrl: string, model: string): Result<ConductorConsentCard> => {
@@ -284,6 +293,9 @@ export function registerConductorIpc(): void {
   });
 
   ipcMain.handle("conductor:oauthBegin", (event, request: ConductorOAuthRequest): Promise<Result<{ authUrl: string }>> => {
+    if (suppressOAuth) {
+      return Promise.resolve({ ok: false, message: "This guarded proof accepts only the approved pasted-key connection." });
+    }
     try {
       return conductorService.beginOAuth(request, (oauthEvent: ConductorOAuthEvent) => {
         emitBridgeSync(); // terminal failures can be indeterminate and require recovery

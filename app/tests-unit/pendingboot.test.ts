@@ -12,8 +12,8 @@ test("pending recovery is installed before every IPC, bridge, or window boundary
   const recovery = main.indexOf("installPendingSerialCandidateRecovery(app.getPath(\"userData\"), {");
   assert.ok(recovery > main.indexOf("setEvidenceMarkerDir(app.getPath(\"userData\"))"));
   for (const boundary of [
-    "registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested })",
-    "registerConductorIpc()",
+    "registerProjectIpc({",
+    "registerConductorIpc({ suppressOAuth: builderLiveE2eRequested })",
     "registerBridgeIpc()",
     "registerTaskIpc(() => mainWindow, criticCalibration, q9Runtime)",
     "void startPhoneBridge()",
@@ -52,7 +52,7 @@ test("an unverifiable pending store gates every project instead of refusing to s
   const bootstrap = main.slice(main.indexOf("function bootstrap()"));
   const branchStart = bootstrap.indexOf("if (!pendingBoot.journal.ready)");
   assert.ok(branchStart > 0, "boot must still notice an unverifiable journal");
-  const projectIpc = "registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested })";
+  const projectIpc = "registerProjectIpc({";
   const branch = bootstrap.slice(branchStart, bootstrap.indexOf(projectIpc));
   // A poisoned store already refuses every mutation and gates every project
   // through the globally-unsafe sentinel, so quitting here would turn one
@@ -100,12 +100,16 @@ test("candidate routing remains guarded Q9-only and adds no verdict IPC", () => 
     "guarded Q9 reserve/send cuts must hard-exit only through the boot-selected driver");
   assert.match(main, /installPendingSerialCandidateQ9E2eTerminalPreparedHook\([\s\S]*const selected = driver\.shouldCut\("after-terminal-prepare"\);[\s\S]*if \(selected\) process\.exit\(86\);[\s\S]*return selected;/u,
     "the terminal cut must occur only after durable preparation");
-  assert.match(main, /if \(!q9E2eRequested && !builderReviewE2eRequested\) void startPhoneBridge\(\);/u,
-    "guarded Q9 or Builder-review boot must not open the LAN bridge or initialize its device store");
+  assert.match(main, /if \(!q9E2eRequested && !builderReviewE2eRequested && !builderLiveE2eRequested\) \{\s*void startPhoneBridge\(\);\s*\}/u,
+    "guarded Q9, Builder-review, or approved live-Builder boot must not open the LAN bridge or initialize its device store");
   assert.equal((main.match(/startPhoneBridge\(\)/gu) ?? []).length, 1,
     "no second unguarded phone-bridge start may bypass the Q9 boot guard");
-  assert.match(main, /registerProjectIpc\(\{ suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested \}\);/u,
-    "only Main's exact guarded Q9 or Builder-review boot may suppress the ambient update lookup");
+  assert.match(main, /registerProjectIpc\(\{\s*suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested \|\| builderLiveE2eRequested,\s*suppressExternalOpen: builderLiveE2eRequested,\s*\}\);/u,
+    "only Main's exact guarded Q9, Builder-review, or approved live-Builder boot may suppress the ambient update lookup");
+  assert.match(main, /suppressExternalOpen: builderLiveE2eRequested/u,
+    "only the exact approved live-Builder boot must suppress every browser-opening surface");
+  assert.match(main, /registerConductorIpc\(\{ suppressOAuth: builderLiveE2eRequested \}\);/u,
+    "the exact approved live-Builder boot must close the alternate OAuth route");
   const projectIpc = source("ipc.ts");
   const update = projectIpc.slice(
     projectIpc.indexOf('ipcMain.handle("app:updateCheck"'),
@@ -116,6 +120,17 @@ test("candidate routing remains guarded Q9-only and adds no verdict IPC", () => 
   assert.ok(suppression >= 0 && githubFetch > suppression,
     "guarded Q9 update handling must return before the GitHub fetch boundary");
   assert.match(update, /if \(suppressExternalUpdateCheck\) return \{ current, latest: null, newer: false \};/u);
+  const externalOpen = projectIpc.slice(
+    projectIpc.indexOf('ipcMain.handle("app:openExternal"'),
+    projectIpc.indexOf('ipcMain.handle("push:preview"'),
+  );
+  assert.match(externalOpen, /if \(suppressExternalOpen\) return;[\s\S]*shell\.openExternal\(url\)/u);
+  const conductorIpc = source("ipc.ts").slice(source("ipc.ts").indexOf("export function registerConductorIpc"));
+  const oauth = conductorIpc.slice(
+    conductorIpc.indexOf('ipcMain.handle("conductor:oauthBegin"'),
+    conductorIpc.indexOf('ipcMain.handle("conductor:oauthCancel"'),
+  );
+  assert.match(oauth, /if \(suppressOAuth\) \{\s*return Promise\.resolve\(\{ ok: false,[\s\S]*\}\);\s*\}[\s\S]*conductorService\.beginOAuth/u);
   assert.match(source("qualityloop.ts"), /checkpointWithEvent\(loop, reserved\.candidate, base\)[\s\S]{0,180}if \(cutPoint\(loop, "after-reserve"\)\) return;/u);
   assert.match(source("qualityloop.ts"), /if \(cutPoint\(loop, "after-send"\)\) return;/u);
   assert.equal((source("pendingcandidate.ts").match(/if \(q9E2eTerminalPrepared\(projectRoot\)\)/gu) ?? []).length, 2,

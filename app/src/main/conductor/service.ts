@@ -1,4 +1,4 @@
-import { shell } from "electron";
+import { app, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { types as nodeTypes } from "node:util";
 import {
@@ -71,6 +71,14 @@ import {
   type ConductorQualityProposalV1,
 } from "./qualityproposal.js";
 import { criticActivationStatus } from "../criticactivation.js";
+import { reserveTask233LiveSpend } from "../builderliveapproval.js";
+import {
+  sendTask233LiveBuilderTurn,
+  task233LiveRequestBodySha256,
+  type Task233LiveBuilderCallResultV1,
+  type Task233LiveBuilderTransportV1,
+} from "../builderlivetransport.js";
+import type { BuilderTurnContextV1 } from "@cairn/core";
 
 const CONNECT_NOT_AUTHORIZED = "CONDUCTOR_CONNECT_NOT_AUTHORIZED";
 const OAUTH_NOT_AUTHORIZED = "CONDUCTOR_OAUTH_NOT_AUTHORIZED";
@@ -841,6 +849,57 @@ export function current(dir: string): ConductorStreamSnapshot | null {
  * block persists the partial turn and emits the stopped delta. */
 export function stop(dir: string): void {
   controllers.get(actionKey(dir))?.controller.abort();
+}
+
+/**
+ * Task 233's only credential seam. Main first proves the current project grant,
+ * exact pasted-key OpenRouter/Kimi seat, and one fixed transport/context. It
+ * then creates the profile's irreversible spend marker, decrypts only inside
+ * this scope, and invokes the dedicated no-retry transport. Neither the key
+ * nor a credential-reading callback crosses the service boundary.
+ */
+export async function sendTask233ApprovedLiveBuilderTurn(
+  projectRoot: string,
+  transport: Task233LiveBuilderTransportV1,
+  context: BuilderTurnContextV1,
+): Promise<Task233LiveBuilderCallResultV1> {
+  const projectExpectation = selectedProjectExpectation(projectRoot);
+  if (currentProjectRoot === null || projectExpectation === null
+    || isQuitDraining() || taskRunningForProject(currentProjectRoot)
+    || controllers.has(actionKey(currentProjectRoot))) {
+    throw new Error("TASK233_LIVE_CONNECTION_REFUSED");
+  }
+  const dir = currentProjectRoot;
+  const loaded = keystore.readConnection(dir, projectExpectation);
+  if (loaded.kind !== "ready") throw new Error("TASK233_LIVE_CONNECTION_REFUSED");
+  const conn = loaded.value;
+  if (!hasCurrentConsent(conn) || !conn.projectAuthorized
+    || conn.baseUrl !== OPENROUTER_BASE_URL
+    || conn.model !== "moonshotai/kimi-k2"
+    || conn.authenticationOrigin !== "pasted-api-key"
+    || conn.credential.kind !== "inline-encrypted"
+    || !keystore.revalidateConnection(conn, dir, projectExpectation)) {
+    throw new Error("TASK233_LIVE_CONNECTION_REFUSED");
+  }
+  const requestBodySha256 = task233LiveRequestBodySha256(transport, context);
+  if (requestBodySha256 === null) throw new Error("TASK233_LIVE_TRANSPORT_REFUSED");
+  const spend = reserveTask233LiveSpend(app.getPath("userData"), context, requestBodySha256);
+  if (spend === null || !keystore.revalidateConnection(conn, dir, projectExpectation)) {
+    throw new Error("TASK233_LIVE_SPEND_REFUSED");
+  }
+
+  let apiKey = "";
+  try {
+    apiKey = keystore.decryptedKey(conn);
+    const result = await sendTask233LiveBuilderTurn(transport, context, spend, apiKey);
+    if (result === null) throw new Error("TASK233_LIVE_TRANSPORT_REFUSED");
+    if (!keystore.revalidateConnection(conn, dir, projectExpectation)) {
+      throw new Error("TASK233_LIVE_CONNECTION_CHANGED_AFTER_CALL");
+    }
+    return result;
+  } finally {
+    apiKey = "";
+  }
 }
 
 /** Starts (or continues) a conversation for `dir`. Returns immediately with
