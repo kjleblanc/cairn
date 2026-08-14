@@ -194,6 +194,7 @@ export {
   runSerialTaskToCandidateForStateTest,
   rerunSerialCandidateQ9RevisedEvidence,
   serialTaskSpecQualityBinding,
+  SERIAL_UNSEALED_CANDIDATE_VERSION,
   type RecordCommit,
   type SerialActivity,
   type SerialCandidateRunOptions,
@@ -205,5 +206,7 @@ export {
   type SerialStage,
   type SerialStopReason,
   type SerialTaskSpecAuthorityV1,
+  type SerialUnsealedCandidateChoiceV1,
+  type SerialUnsealedCandidateV1,
 } from "./serial.js";
 export * from "./steps.js";

@@ -29,7 +29,13 @@ import type {
   CriticCallDecisionV1,
   RepairCallDecisionV1,
   Q9HarnessRevisionDecisionV1,
+  UnsealedCandidateDecisionV1,
 } from "../shared/ipc.js";
+import {
+  closeUnsealedCandidateIfCurrent,
+  decideUnsealedCandidate,
+  openUnsealedCandidateCheckpoint,
+} from "./unsealedcandidate.js";
 import { parseTaskReviewActionRequest } from "../shared/task-review.js";
 import type { TaskSpecProposalPreviewV1 } from "../shared/quality-preview.js";
 import { composeErrorCard, composeResultCard, postResultCard, postResultCardOnce } from "./conductor/relay.js";
@@ -795,6 +801,26 @@ export function registerTaskIpc(
     }
   });
 
+  // The owner's answer to one unsealed candidate. Continuing authorizes nothing
+  // new: the run is already open, already approved, and already past its worker
+  // call, so this only releases it into the close it was headed for. Stopping
+  // takes Core's honest STOPPED door. Either way Main decides nothing about the
+  // result itself.
+  ipcMain.handle("task:candidate-decide", (_event, unsafeRequest: unknown): Result<UnsealedCandidateDecisionV1> => {
+    try {
+      const outcome = decideUnsealedCandidate(unsafeRequest);
+      return outcome.ok
+        ? { ok: true, value: outcome.decision }
+        : { ok: false, message: `${outcome.code}: Cairn is not waiting on that unsealed candidate.` };
+    } catch (error) {
+      logError("task:candidate-decide", error);
+      return {
+        ok: false,
+        message: "UNSEALED_CANDIDATE_UNKNOWN_CHECKPOINT: That unsealed candidate is no longer waiting.",
+      };
+    }
+  });
+
   ipcMain.handle("critic:calibration-open", (_event, unsafeRequest: unknown) => {
     const request = parseCriticCalibrationOpenRequest(unsafeRequest);
     if (request === null) {
@@ -1238,6 +1264,40 @@ export function registerTaskIpc(
               const payload: TaskActivityEvent = { dir, activity };
               win()?.webContents.send("task:activity", payload);
             },
+          },
+          // Task 235: the pre-terminal pause. Core has finished the worker and
+          // its own checks and holds the run open — lock, snapshot, adapter and
+          // all — while the owner reads what happened.
+          //
+          // Main adds no authority here. It publishes a display projection on
+          // the session the renderer already polls, waits, and hands back one
+          // word. Core emitted its "waiting" activity immediately before this
+          // call, so the renderer's existing activity refresh (and its
+          // once-a-second poll while the run is live) surface the candidate
+          // without a new push channel.
+          onUnsealedCandidate: async (candidate, signal) => {
+            // Nobody to ask, or a candidate Cairn cannot vouch for: stop
+            // honestly rather than seal something the owner never saw.
+            const contents = win()?.webContents ?? null;
+            if (contents === null || contents.isDestroyed()) return "stop";
+            const opened = openUnsealedCandidateCheckpoint({ dir, candidate });
+            if (opened === null) return "stop";
+            const held = sessions.get(key);
+            if (held) held.unsealedCandidate = opened.projection;
+            // Cairn is still alive in both of these cases, so both close the
+            // pause the honest way — an authored STOPPED, never a DONE.
+            const close = (): void => { closeUnsealedCandidateIfCurrent(dir, opened.projection); };
+            if (signal?.aborted) close();
+            else signal?.addEventListener("abort", close, { once: true });
+            contents.once("destroyed", close);
+            try {
+              return await opened.settled;
+            } finally {
+              signal?.removeEventListener("abort", close);
+              if (!contents.isDestroyed()) contents.off("destroyed", close);
+              const current = sessions.get(key);
+              if (current?.unsealedCandidate === opened.projection) delete current.unsealedCandidate;
+            }
           },
         });
         const safeValue = value.status === "connection-required" && detected.status

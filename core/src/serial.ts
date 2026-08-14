@@ -93,6 +93,7 @@ import {
   taskRequestView,
   type TaskIntent,
   type TaskIntentSourceInput,
+  type TaskRequestView,
 } from "./intent.js";
 import {
   ADAPTER_COMMAND_ATTESTATION_VERSION,
@@ -168,7 +169,58 @@ export interface SerialRunOptions {
   signal?: AbortSignal;
   /** Staged Q4 authority. Omitted keeps the live v3 route byte-for-byte. */
   taskSpecAuthority?: SerialTaskSpecAuthorityV1;
+  /**
+   * One process-local pause before this run authors anything terminal. It is
+   * offered once, after the worker result, claims, and Git checks have all
+   * passed and before the report, log row, commit, and result exist — so the
+   * caller can show the owner an unsealed candidate and answer `continue` or
+   * `stop`.
+   *
+   * The run stays open across the wait: same lock, same starting snapshot,
+   * same adapter, same abort signal. Omitting it keeps the current terminal
+   * close byte-for-byte, which is why it is optional rather than a new
+   * required stage.
+   *
+   * A rejection propagates: the run throws, nothing terminal is written, and
+   * the workspace is left dirty for inspection. It is deliberately NOT
+   * swallowed into a DONE.
+   */
+  onUnsealedCandidate?: (
+    candidate: SerialUnsealedCandidateV1,
+    signal: AbortSignal | undefined,
+  ) => Promise<SerialUnsealedCandidateChoiceV1>;
 }
+
+export const SERIAL_UNSEALED_CANDIDATE_VERSION = "cairn-serial-unsealed-candidate/v1" as const;
+
+/**
+ * What the owner is shown at the pre-terminal pause. Deliberately a bounded
+ * display projection, not an authority: it carries no lock, adapter, snapshot,
+ * or capability, so passing it to a renderer hands out nothing that could seal,
+ * commit, or resume the run. Everything decisive stays inside the still-open
+ * runner.
+ *
+ * `changedPaths` is Git's own answer (the same bounded set every record uses),
+ * never the worker's list. `claims` is the worker speaking and is labelled that
+ * way wherever it is displayed.
+ */
+export type SerialUnsealedCandidateV1 = Readonly<{
+  version: typeof SERIAL_UNSEALED_CANDIDATE_VERSION;
+  taskNumber: number;
+  /** Output-only projection of the request this run accepted. */
+  acceptedRequest: TaskRequestView;
+  /** Inert notes kept with that request; never owner-attributed requirements. */
+  requestContext: readonly string[];
+  route: Readonly<{ adapterId: string; adapterLabel: string; provider: string; model: string }>;
+  /** From Git, never from claims. */
+  changedPaths: readonly string[];
+  /** The worker's own account, or null when it left none Cairn could read. */
+  claims: WorkerClaims | null;
+  /** The bounded numeric evidence line, or null. */
+  evidenceSummary: string | null;
+}>;
+
+export type SerialUnsealedCandidateChoiceV1 = "continue" | "stop";
 
 export interface SerialCandidateRunOptions {
   adapters: readonly TaskAdapter[];
@@ -899,7 +951,11 @@ export type SerialStopReason =
   | "Q9_REQUIRED_EVIDENCE_INCOMPLETE"
   | "Q9_WORKFLOW_VERIFICATION_FAILED"
   | "ADAPTER_TIMED_OUT"
-  | "CANCELLED_BY_OWNER";
+  | "CANCELLED_BY_OWNER"
+  /** Task 235: the owner read the unsealed candidate and kept the work instead
+   * of letting Cairn finish. Distinct from CANCELLED_BY_OWNER, which means the
+   * worker was interrupted and produced no result to look at. */
+  | "OWNER_STOPPED_AT_CANDIDATE";
 
 interface GitSnapshot {
   head: string;
@@ -7261,6 +7317,47 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
       if (guarded) return guarded;
 
       if (stopReason) return closeStopped(stopReason);
+
+      // Task 235 — the one pre-terminal pause. Everything decisive has already
+      // passed: the worker result parsed, its claims read, protected work
+      // verified byte-identical, and the owned records proved exactly as Cairn
+      // left them. Nothing terminal exists yet — no report, no log row, no
+      // commit, no result — so the caller can put a genuinely unsealed
+      // candidate in front of the owner here and nowhere else.
+      //
+      // The run stays OPEN across this await: same lock, same start snapshot,
+      // same chosen adapter, same abort signal. That is what makes the pause a
+      // checkpoint rather than a handoff — no second writer can take the run,
+      // and the close below is the same close a checkpoint-free run reaches.
+      //
+      // Fail closed on the answer: only an exact "continue" seals. Anything
+      // else — a stop, or a caller that returned something unexpected — takes
+      // the honest STOPPED door, which commits nothing and retains the edits.
+      if (options.onUnsealedCandidate) {
+        emit(activities, options.events, {
+          stage: "Check",
+          state: "working",
+          detail: "The worker changed files. Waiting for your decision before Cairn finishes the task.",
+        });
+        const choice = await options.onUnsealedCandidate(Object.freeze({
+          version: SERIAL_UNSEALED_CANDIDATE_VERSION,
+          taskNumber,
+          ...acceptedRequestForRecord(contract),
+          route: Object.freeze({
+            adapterId: contract.route.adapterId,
+            adapterLabel: contract.route.adapterLabel,
+            provider: contract.route.provider,
+            model: contract.route.model,
+          }),
+          // Git's own bounded answer, the same one the terminal record will
+          // carry, so the candidate and the result never disagree about what
+          // changed.
+          changedPaths: changedSetForRecord(projectRoot),
+          claims,
+          evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+        }), options.signal);
+        if (choice !== "continue") return closeStopped("OWNER_STOPPED_AT_CANDIDATE");
+      }
 
       // DONE path — the claims say DONE, the process completed, and protected
       // work is byte-identical. Cairn writes the records and owns the commit.

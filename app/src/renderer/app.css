@@ -2462,3 +2462,54 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .critic-call-file { min-width: 0; overflow-wrap: anywhere; color: var(--lantern-ink); font-size: .76rem; }
 .critic-call-count, .critic-call-hash { color: var(--lantern-soft); font-size: .72rem; white-space: nowrap; }
 .critic-call-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+
+/* The unsealed candidate: a run that is waiting, not a run that is finished.
+   Amber rather than the critic's cyan, so a paused task never reads at a
+   glance like a settled one. */
+.unsealed-candidate {
+  margin: 12px 0 0; padding: 11px 0 2px 12px;
+  border-left: 2px solid var(--garden-amber); min-width: 0;
+}
+.unsealed-candidate-title {
+  margin: 0 0 8px; color: var(--lantern-ink);
+  font-size: .86rem; font-weight: 650; letter-spacing: .01em;
+}
+.unsealed-candidate-sentence {
+  margin: 0 0 10px; padding: 8px 10px; line-height: 1.5;
+  border-radius: 8px; background: var(--garden-amber-soft);
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.unsealed-candidate-sentence strong { color: var(--garden-amber); }
+.unsealed-candidate-section-title {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  margin: 10px 0 4px; color: var(--lantern-soft);
+  font-size: .75rem; font-weight: 600; letter-spacing: .025em;
+}
+/* Who is speaking, on every evidence block, in the same place every time. */
+.unsealed-candidate-provenance {
+  color: var(--lantern-soft); font-size: .7rem; font-weight: 400; letter-spacing: .02em;
+}
+.unsealed-candidate-outcome,
+.unsealed-candidate-evidence,
+.unsealed-candidate-claims-said,
+.unsealed-candidate-claims-text,
+.unsealed-candidate-empty {
+  margin: 0; padding: 4px 0; line-height: 1.45;
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.unsealed-candidate-evidence, .unsealed-candidate-empty { color: var(--lantern-soft); font-size: .76rem; }
+.unsealed-candidate-claims-said strong { color: var(--garden-amber); }
+.unsealed-candidate-requirements,
+.unsealed-candidate-paths,
+.unsealed-candidate-claims-list,
+.unsealed-candidate-pending-list {
+  margin: 0; padding: 2px 0 6px 18px; line-height: 1.5;
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.unsealed-candidate-paths li { font-size: .76rem; }
+.unsealed-candidate-pending-list { color: var(--lantern-soft); font-size: .76rem; }
+.unsealed-candidate-changes, .unsealed-candidate-claims, .unsealed-candidate-pending,
+.unsealed-candidate-request {
+  border-top: 1px solid rgb(246 236 225 / 9%); padding-top: 2px;
+}
+.unsealed-candidate-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }

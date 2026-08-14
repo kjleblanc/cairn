@@ -4580,3 +4580,148 @@ test("private commentary settles into contained paper next steps and one sends a
     await app.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Task 235 (restoration Slice 1): the unsealed candidate, through the ORDINARY
+// Chat route. The fixture conductor answers chat and the fake-codex PATH shim
+// answers the run — both at seams that already exist — while every byte of
+// IPC, main and renderer behaviour is the production one. No Q9 flag, no
+// task-numbered marker, no alternate product entrance.
+// ---------------------------------------------------------------------------
+
+function headOf(project: string): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: project, encoding: "utf8" }).trim();
+}
+
+function workerSpawnCount(marker: string): number {
+  return existsSync(marker)
+    ? readFileSync(marker, "utf8").split("\n").filter((line) => line.length > 0).length
+    : 0;
+}
+
+const CANDIDATE_SHOT = join(tmpdir(), "cairn-task-235-unsealed-candidate.png");
+const CANDIDATE_CONTEXT_SHOT = join(tmpdir(), "cairn-task-235-unsealed-candidate-window.png");
+
+test("ordinary Chat pauses at an unsealed candidate, writes nothing terminal, then continues into the current close", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-unsealed-continue-"));
+  scaffold(project);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const logPath = join(project, "docs", "ai-work", "LOG.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    const startHead = headOf(project);
+    const startLog = readFileSync(logPath, "utf8");
+    await dispatchOneRealCall(win);
+
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 30_000 });
+
+    // c1 — the request, Git's real changed paths, the worker's attributed
+    // claims, and one unmistakable nonterminal sentence.
+    await expect(candidate).toContainText("Cairn has not declared this task complete");
+    await expect(candidate).toContainText("Change the page title");
+    await expect(candidate).toContainText("visible.txt");
+    await expect(candidate).toContainText("Added the visible result.");
+    await expect(candidate).toContainText("reported, not checked");
+    await expect(candidate).toContainText("checked by Cairn");
+    // The worker's own verdict is shown AS the worker's, not as Cairn's.
+    await expect(candidate).toContainText("Codex Exec says: DONE");
+
+    // c2 — nothing terminal exists yet. The brief is the only task record.
+    expect(existsSync(reportPath)).toBe(false);
+    expect(readFileSync(logPath, "utf8")).toBe(startLog);
+    expect(headOf(project)).toBe(startHead);
+    await expect(win.locator(".result-card")).toHaveCount(0);
+    expect(readdirSync(join(project, "docs", "ai-work", "tasks"))).toEqual(["001-brief.md"]);
+    // The worker really did change the project; this is a live pause, not a mock.
+    expect(existsSync(join(project, "visible.txt"))).toBe(true);
+
+    // c8 — the picture the owner judges. It must show the WHOLE card: a
+    // capture that crops away the changed files, the worker's claims, or the
+    // two choices cannot support a judgment about whether the pause reads as
+    // unfinished. Give it room, then capture the card itself.
+    await win.setViewportSize({ width: 1440, height: 1800 });
+    await expect(candidate.getByRole("button", { name: "Continue to Cairn's current checks" })).toBeVisible();
+    await candidate.scrollIntoViewIfNeeded();
+    await candidate.screenshot({ path: CANDIDATE_SHOT });
+    await win.screenshot({ path: CANDIDATE_CONTEXT_SHOT });
+
+    // c3 — Continue resumes the existing terminal path, exactly once.
+    await candidate.getByRole("button", { name: "Continue to Cairn's current checks" }).click();
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
+    await expect(candidate).toHaveCount(0);
+    expect(existsSync(reportPath)).toBe(true);
+    expect(readFileSync(reportPath, "utf8")).toContain("Disposition: **DONE**");
+    expect(readFileSync(logPath, "utf8")).not.toBe(startLog);
+    expect(headOf(project)).not.toBe(startHead);
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+  } finally {
+    await app.close();
+  }
+});
+
+test("stopping at the unsealed candidate writes an honest STOPPED record, commits nothing, and keeps the work", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-unsealed-stop-"));
+  scaffold(project);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    const startHead = headOf(project);
+    await dispatchOneRealCall(win);
+
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 30_000 });
+
+    // c4 — a controlled stop while Cairn is alive closes honestly.
+    await candidate.getByRole("button", { name: "Stop and keep the work for inspection" }).click();
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
+    await expect(candidate).toHaveCount(0);
+
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **STOPPED**");
+    expect(report).toContain("OWNER_STOPPED_AT_CANDIDATE");
+    // Said in words the owner can read, never as a bare code.
+    await expect(win.locator(".result-card")).toContainText(
+      "you looked at the worker's changes and kept them without finishing the task");
+
+    // Nothing was committed, and the worker's edits are still there to inspect.
+    expect(headOf(project)).toBe(startHead);
+    expect(execFileSync("git", ["diff", "--cached", "--name-only"], { cwd: project, encoding: "utf8" }).trim()).toBe("");
+    expect(readFileSync(join(project, "visible.txt"), "utf8")).toContain("model-authored result");
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+  } finally {
+    await app.close();
+  }
+});
+
+test("cancelling while the unsealed candidate waits closes the run without a DONE", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-unsealed-cancel-"));
+  scaffold(project);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    const startHead = headOf(project);
+    await dispatchOneRealCall(win);
+    await expect(win.locator(".unsealed-candidate")).toBeVisible({ timeout: 30_000 });
+
+    // c5 — the existing Stop control reaches a waiting checkpoint. Cairn is
+    // still alive, so it closes honestly; it must never forge a DONE.
+    await win.evaluate(async (dir) => { await window.cairn.taskCancel(dir); }, project);
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 30_000 });
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **STOPPED**");
+    expect(report).not.toContain("Disposition: **DONE**");
+    expect(headOf(project)).toBe(startHead);
+  } finally {
+    await app.close();
+  }
+});

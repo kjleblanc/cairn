@@ -144,6 +144,7 @@ import {
   type SerialRunOptions,
   type SerialCandidateRunOptions,
   type SerialCandidateWriterIsolationV1,
+  type SerialUnsealedCandidateV1,
 } from "../src/serial.js";
 import {
   authorizeSerialAuthenticatedPendingJournal,
@@ -7349,4 +7350,219 @@ test("Q6 a throwing activity observer cannot strand an unreachable candidate loc
   assert.equal(existsSync(lockPath(root)), false);
   const next = await runSerialTaskWithIntent(root, fixture.intent, { adapters: [] });
   assert.equal(next.status, "connection-required", "the in-process root guard was released too");
+});
+
+// ---------------------------------------------------------------------------
+// Task 235 (restoration Slice 1): the unsealed-candidate checkpoint.
+//
+// One process-local pause inside the SAME run, after the worker result, claims
+// and Git validation and before any terminal record, commit, or result. The
+// runner keeps its starting snapshot, lock, adapter and abort signal while it
+// waits. `continue` resumes the existing close untouched; `stop` closes
+// honestly while Cairn is still alive.
+// ---------------------------------------------------------------------------
+
+/** The shared worker fake for every checkpoint case: one real product edit and
+ * one readable claims fence whose disposition is a valid DONE, so the run
+ * reaches the checkpoint by the ordinary success route rather than a stop. */
+function checkpointAdapter(root: string, raw: string, ran?: { count: number }): TaskAdapter {
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run() {
+      if (ran) ran.count += 1;
+      writeFileSync(join(root, "visible.txt"), "model-authored result\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 2, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Added a visible result.",
+          changes: ["visible.txt - created"], checks: [{ name: "read back", result: "matches" }],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES",
+        }),
+      };
+    },
+  };
+  return createCodexExecAdapter(root, { installed: true, connected: true }, authorizeCodexExec(root, raw), fake);
+}
+
+const CHECKPOINT_REQUEST = "Add one visible result";
+
+test("the checkpoint carries the worker's real changed paths and its attributed claims", async () => {
+  const root = project();
+  let seen: SerialUnsealedCandidateV1 | null = null;
+  const result = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+    async onUnsealedCandidate(candidate) {
+      seen = candidate;
+      return "continue";
+    },
+  });
+
+  assert.equal(result.status, "done");
+  assert.ok(seen, "the checkpoint ran");
+  const candidate = seen as SerialUnsealedCandidateV1;
+  assert.equal(candidate.taskNumber, 1);
+  assert.equal(candidate.acceptedRequest.outcome.text, CHECKPOINT_REQUEST);
+  // Git's answer, never the worker's own list of changes. It is the SAME
+  // bounded set the terminal record carries — Cairn's own brief included,
+  // because the brief is untracked at this point — so the candidate and the
+  // result can never give the owner two different answers to "what changed".
+  assert.deepEqual([...candidate.changedPaths], ["docs/ai-work/tasks/001-brief.md", "visible.txt"]);
+  if (result.status !== "done") return;
+  assert.deepEqual([...candidate.changedPaths], [...result.composed.filesChanged]);
+  assert.equal(candidate.claims?.summary, "Added a visible result.");
+  assert.equal(candidate.route.adapterLabel, "Codex Exec");
+});
+
+test("no report, log row, or commit exists while the checkpoint is open", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  let atCheckpoint: { report: boolean; log: string; head: string; records: string[] } | null = null;
+  await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+    async onUnsealedCandidate() {
+      atCheckpoint = {
+        report: existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")),
+        log: readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"),
+        head: git(root, ["rev-parse", "HEAD"]),
+        records: requireTaskNames(root),
+      };
+      return "continue";
+    },
+  });
+
+  assert.ok(atCheckpoint, "the checkpoint ran");
+  const observed = atCheckpoint as { report: boolean; log: string; head: string; records: string[] };
+  assert.equal(observed.report, false, "no report exists yet");
+  assert.equal(observed.log, LOG_HEADER, "no log row exists yet");
+  assert.equal(observed.head, beforeHead, "nothing is committed yet");
+  // The runner writes the brief before the worker, so it is the ONE task record
+  // the owner may already see at the checkpoint.
+  assert.deepEqual(observed.records, ["001-brief.md"]);
+});
+
+test("continue resumes the existing terminal close with exactly one worker call", async () => {
+  const plainRoot = project();
+  const plainRan = { count: 0 };
+  const plain = await runSerialTask(plainRoot, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(plainRoot, CHECKPOINT_REQUEST, plainRan)],
+  });
+
+  const root = project();
+  const ran = { count: 0 };
+  let offered = 0;
+  const resumed = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST, ran)],
+    async onUnsealedCandidate() {
+      offered += 1;
+      return "continue";
+    },
+  });
+
+  assert.equal(offered, 1, "the checkpoint is offered exactly once");
+  assert.equal(ran.count, 1, "continue does not invoke the worker a second time");
+  assert.equal(ran.count, plainRan.count);
+  assert.equal(resumed.status, "done");
+  assert.equal(plain.status, "done");
+  if (resumed.status !== "done" || plain.status !== "done") return;
+  // The whole point of the seam: the close it resumes into is the current one.
+  assert.equal(resumed.reportText, plain.reportText);
+  assert.deepEqual(resumed.row, plain.row);
+  assert.equal(resumed.commit.status, plain.commit.status);
+  assert.deepEqual(resumed.composed, plain.composed);
+});
+
+test("stopping at the checkpoint writes an honest STOPPED record and commits nothing", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const result = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+    async onUnsealedCandidate() {
+      return "stop";
+    },
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "OWNER_STOPPED_AT_CANDIDATE");
+  assert.equal(result.disposition, "STOPPED");
+  assert.equal(result.commit.status, "skipped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead, "a stop commits nothing");
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "", "a stop stages nothing");
+  // The worker's edits stay exactly where they are, for inspection.
+  assert.equal(readFileSync(join(root, "visible.txt"), "utf8"), "model-authored result\n");
+  assert.match(result.reportText, /Disposition: \*\*STOPPED\*\*/);
+  const log = readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8");
+  assert.equal(log.trimEnd().split("\n").length, 3, "exactly one row was appended");
+});
+
+test("a throwing checkpoint cannot leave a DONE record, log row, or commit behind", async () => {
+  const root = project();
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  await assert.rejects(
+    () => runSerialTask(root, CHECKPOINT_REQUEST, {
+      adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+      async onUnsealedCandidate() {
+        throw new Error("the renderer went away");
+      },
+    }),
+    /the renderer went away/,
+  );
+
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), false);
+  assert.equal(readFileSync(join(root, "docs", "ai-work", "LOG.md"), "utf8"), LOG_HEADER);
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead);
+  // The workspace is left dirty and inspectable, exactly as an abrupt loss would.
+  assert.equal(existsSync(join(root, "visible.txt")), true);
+});
+
+test("a throwing checkpoint still releases the run so the next task is not refused", async () => {
+  const root = project();
+  await assert.rejects(
+    () => runSerialTask(root, CHECKPOINT_REQUEST, {
+      adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+      async onUnsealedCandidate() {
+        throw new Error("the renderer went away");
+      },
+    }),
+    /the renderer went away/,
+  );
+  assert.equal(existsSync(lockPath(root)), false);
+  const next = await runSerialTaskWithIntent(root, directRequest(CHECKPOINT_REQUEST), { adapters: [] });
+  assert.equal(next.status, "connection-required", "the in-process root guard was released too");
+});
+
+test("the original run lock is still held while the checkpoint waits", async () => {
+  const root = project();
+  let heldAtCheckpoint: boolean | null = null;
+  let refusedAtCheckpoint: string | null = null;
+  await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+    async onUnsealedCandidate() {
+      heldAtCheckpoint = existsSync(lockPath(root));
+      try {
+        acquireRunLock(root).release();
+        refusedAtCheckpoint = null;
+      } catch (error) {
+        refusedAtCheckpoint = (error as Error).message;
+      }
+      return "continue";
+    },
+  });
+
+  assert.equal(heldAtCheckpoint, true, "the lock file is still the original run's");
+  assert.match(refusedAtCheckpoint ?? "", /SERIAL_RUN_ACTIVE/,
+    "a competing task cannot take the run while the checkpoint is open");
+});
+
+test("a run with no checkpoint keeps the current terminal close untouched", async () => {
+  const root = project();
+  const result = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST)],
+  });
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.equal(result.commit.status, "created");
+  assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), true);
 });

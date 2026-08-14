@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1, UnsealedCandidateChoice, UnsealedCandidateProjectionV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -18,6 +18,7 @@ import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoic
 import { CriticCallCard } from "../components/CriticCall";
 import { RepairCallCard } from "../components/RepairCall";
 import { HarnessRevisionCard } from "../components/HarnessRevision";
+import { UnsealedCandidateCard } from "../components/UnsealedCandidate";
 import { Pill } from "../components/Ui";
 
 /** Tracks one in-flight `send()`. `id` starts out as whatever conversation
@@ -619,6 +620,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const [criticCallBusy, setCriticCallBusy] = useState(false);
   const [repairCallBusy, setRepairCallBusy] = useState(false);
   const [harnessRevisionBusy, setHarnessRevisionBusy] = useState(false);
+  const [unsealedCandidateBusy, setUnsealedCandidateBusy] = useState(false);
   const [calibrationCall, setCalibrationCall] = useState<CriticCallDisclosureV1 | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const dispatchHeadingId = useId();
@@ -1718,6 +1720,41 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     }
   }
 
+  /** Answer the one unsealed candidate this project is paused on. The renderer
+   * returns only the pause's own id and one of the choices that pause listed;
+   * it reconstructs nothing and decides nothing about the result. */
+  async function chooseUnsealedCandidate(
+    candidate: UnsealedCandidateProjectionV1,
+    choice: UnsealedCandidateChoice,
+  ): Promise<void> {
+    const held = session;
+    if (unsealedCandidateBusy || held?.phase !== "running" || held.unsealedCandidate !== candidate
+      || !candidate.choices.includes(choice)) return;
+    setUnsealedCandidateBusy(true);
+    let recorded = false;
+    try {
+      const response = await cairn.unsealedCandidateDecide({
+        dir,
+        checkpointId: candidate.checkpointId,
+        choice,
+      });
+      if (!response.ok) { setError(response.message); return; }
+      recorded = true;
+      setError(null);
+      setSession((current) => current?.phase === "running" && current.startedAt === held.startedAt
+        && current.unsealedCandidate?.checkpointId === candidate.checkpointId
+        ? { ...current, unsealedCandidate: undefined }
+        : current);
+      await refreshSession();
+    } catch {
+      setError(recorded
+        ? "That choice was recorded, but Cairn could not refresh the running session."
+        : "Cairn could not record that choice about the unsealed candidate.");
+    } finally {
+      setUnsealedCandidateBusy(false);
+    }
+  }
+
   async function decideHarnessRevision(request: Q9HarnessRevisionDecisionRequest): Promise<void> {
     const held = session;
     if (harnessRevisionBusy || held?.phase !== "running" || held.harnessRevision === undefined
@@ -2108,6 +2145,13 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   revision={session.harnessRevision}
                   busy={harnessRevisionBusy}
                   onDecide={(request) => void decideHarnessRevision(request)}
+                />
+              ) : null}
+              {session?.phase === "running" && session.unsealedCandidate ? (
+                <UnsealedCandidateCard
+                  candidate={session.unsealedCandidate}
+                  busy={unsealedCandidateBusy}
+                  onChoose={(choice) => void chooseUnsealedCandidate(session.unsealedCandidate!, choice)}
                 />
               ) : null}
               {dispatch && dispatch.phase !== "settling" ? (

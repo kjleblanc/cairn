@@ -5,6 +5,11 @@ import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-rev
 import type { CriticCallDecisionRequest, CriticCallDecisionV1, CriticCallDisclosureV1 } from "./critic-call.js";
 import type { RepairCallDecisionRequest, RepairCallDecisionV1, RepairCallDisclosureV1 } from "./repair-call.js";
 import type {
+  UnsealedCandidateDecisionRequest,
+  UnsealedCandidateDecisionV1,
+  UnsealedCandidateProjectionV1,
+} from "./unsealed-candidate.js";
+import type {
   Q9HarnessRevisionDecisionRequest,
   Q9HarnessRevisionDecisionV1,
   Q9HarnessRevisionDisclosureV1,
@@ -32,6 +37,12 @@ export type {
   Q9HarnessRevisionDecisionV1,
   Q9HarnessRevisionDisclosureV1,
 } from "./harness-revision.js";
+export type {
+  UnsealedCandidateChoice,
+  UnsealedCandidateDecisionRequest,
+  UnsealedCandidateDecisionV1,
+  UnsealedCandidateProjectionV1,
+} from "./unsealed-candidate.js";
 
 export type {
   AccountLabelProvenance,
@@ -198,6 +209,9 @@ export type RunSessionSnapshot = {
   repairCall?: RepairCallDisclosureV1;
   /** Output-only, guarded mechanical harness-revision choice. */
   harnessRevision?: Q9HarnessRevisionDisclosureV1;
+  /** Output-only unsealed candidate: the worker has changed files and Cairn is
+   * waiting, before any record or commit, for permission to finish. */
+  unsealedCandidate?: UnsealedCandidateProjectionV1;
 };
 
 /** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
@@ -495,6 +509,10 @@ export interface CairnApi {
   /** Decide the one exact guarded harness correction; no executable bytes or
    * revision authority ever cross into the renderer. */
   harnessRevisionDecide(request: Q9HarnessRevisionDecisionRequest): Promise<Result<Q9HarnessRevisionDecisionV1>>;
+  /** Answer the one unsealed candidate this project is paused on. Output only:
+   * the reply says what was chosen. Continuing grants nothing new — it lets the
+   * run Cairn is already holding reach the close it was already headed for. */
+  unsealedCandidateDecide(request: UnsealedCandidateDecisionRequest): Promise<Result<UnsealedCandidateDecisionV1>>;
   /** Guarded Q8 seam. Normal production has no injected fake and refuses the
    * open before any card or profile write exists. */
   criticCalibrationOpen(request: CriticCalibrationOpenRequestV1): Promise<Result<CriticCalibrationSnapshotV1>>;
