@@ -39,6 +39,7 @@ export const KNOWN_CODE_WORDS: Readonly<Record<string, string>> = {
   ADAPTER_TIMED_OUT: "the worker ran out of time",
   CANCELLED_BY_OWNER: "you stopped it yourself",
   OWNER_STOPPED_AT_CANDIDATE: "you looked at the worker's changes and kept them without finishing the task",
+  TASK_PROMISE_NOT_MET: "at least one thing this task promised was not shown to be done",
   // app-side closes
   CONNECTION_REQUIRED: "no assistant is connected yet, so nothing could run",
   CONDUCTOR_CONNECT_NOT_AUTHORIZED: "connecting was not approved, so it did not happen",

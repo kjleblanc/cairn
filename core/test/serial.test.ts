@@ -146,6 +146,7 @@ import {
   type SerialCandidateWriterIsolationV1,
   type SerialUnsealedCandidateV1,
 } from "../src/serial.js";
+import { composeSerialTaskPromises } from "../src/taskcard.js";
 import {
   authorizeSerialAuthenticatedPendingJournal,
   reconcileSerialCandidateTerminalFromAuthenticatedPending,
@@ -7565,4 +7566,196 @@ test("a run with no checkpoint keeps the current terminal close untouched", asyn
   if (result.status !== "done") return;
   assert.equal(result.commit.status, "created");
   assert.equal(existsSync(join(root, "docs", "ai-work", "tasks", "001-report.md")), true);
+});
+
+// ---------------------------------------------------------------------------
+// Task 237 — the Task Card's promises, answered in three separate voices.
+// ---------------------------------------------------------------------------
+
+/** A worker that records the contract it was handed and answers the rows it was told about. */
+function promiseAdapter(
+  root: string,
+  seen: { contract: AdapterTaskContract | null },
+  workerChecks: readonly { name: string; result: string }[] = [],
+): TaskAdapter {
+  return {
+    descriptor: {
+      id: "promise-worker", label: "Promise Worker", provider: "Fixture Provider",
+      model: "fixture-1", connected: true, capabilities: ["serial-task"], priority: 50,
+    },
+    async run(contract) {
+      seen.contract = contract;
+      writeFileSync(join(root, "visible.txt"), "worker output\n");
+      return {
+        kind: "worker-result/v2",
+        taskNumber: contract.taskNumber,
+        requestSha256: contract.requestSha256,
+        status: "completed",
+        claimsText: claimsFence({
+          disposition: "DONE", summary: "Did the work.",
+          changes: ["visible.txt - created"],
+          checks: [...workerChecks],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+        }),
+        evidence: { fileChanges: 1 },
+      } as never;
+    },
+  };
+}
+
+function ownerObservedPromises(intent: TaskIntent) {
+  const promises = composeSerialTaskPromises(intent, [
+    { kind: "owner-observation" },
+    { kind: "owner-observation" },
+  ]);
+  assert.ok(promises);
+  return promises;
+}
+
+test("the worker's contract and brief carry every displayed promise row", async () => {
+  const root = project();
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen)],
+    taskPromises: ownerObservedPromises(intent),
+    async onUnsealedCandidate() {
+      return { choice: "continue", ownerAnswers: { c1: "met", c2: "met" } };
+    },
+  });
+
+  assert.equal(seen.contract?.version, "cairn-serial-task/v3");
+  assert.deepEqual(
+    seen.contract?.promises?.rows.map((row) => row.id),
+    ["c1", "c2"],
+  );
+  assert.deepEqual(
+    seen.contract?.promises?.rows.map((row) => row.text),
+    ["Books sort by word count", "Use these exact word counts"],
+  );
+  const brief = readFileSync(join(root, "docs", "ai-work", "tasks", "001-brief.md"), "utf8");
+  assert.match(brief, /c1: Books sort by word count/);
+  assert.match(brief, /c2: Use these exact word counts/);
+  assert.equal(result.status, "done");
+});
+
+/** Give a fixture project one real, fast check of its own. */
+function withCheckScript(root: string, body: string): void {
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture", scripts: { typecheck: body } }), "utf8");
+}
+
+function checkedThenObserved(intent: TaskIntent) {
+  const promises = composeSerialTaskPromises(intent, [
+    { kind: "cairn-check", checkId: "typecheck" },
+    { kind: "owner-observation" },
+  ]);
+  assert.ok(promises);
+  return promises;
+}
+
+test("an unanswered owner row cannot seal DONE, however loudly the worker claims it", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(0)\"");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen, [
+      { name: "c1", result: "typecheck passes, I ran it" },
+      { name: "c2", result: "the counts are exact, I checked" },
+    ])],
+    taskPromises: checkedThenObserved(intent),
+    // The owner pressed continue without answering the row only they can judge.
+    async onUnsealedCandidate() { return { choice: "continue", ownerAnswers: {} }; },
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "TASK_PROMISE_NOT_MET");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), git(root, ["rev-parse", "HEAD"]));
+  assert.doesNotMatch(result.reportText, /Disposition: DONE/);
+});
+
+test("Cairn's own failing check stops the run even when the worker says it passed", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(1)\"");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  let candidateAnswers: readonly { id: string; cairn: unknown; worker: string | null }[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen, [{ name: "c1", result: "typecheck passes, honest" }])],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate(candidate) {
+      candidateAnswers = candidate.answers;
+      return { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "TASK_PROMISE_NOT_MET");
+  // The two voices were shown side by side and disagreed, and Cairn's won.
+  assert.equal(candidateAnswers[0]?.worker, "typecheck passes, honest");
+  assert.equal((candidateAnswers[0]?.cairn as { status: string } | null)?.status, "failed");
+});
+
+test("every row answered by Cairn and the owner together seals DONE", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(0)\"");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  let candidateAnswers: readonly { id: string; cairn: unknown; owner: string }[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen, [{ name: "c1", result: "ran it" }])],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate(candidate) {
+      candidateAnswers = candidate.answers;
+      return { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(result.status, "done");
+  // On the card the owner row was still pending: the card is where it is answered.
+  assert.equal(candidateAnswers[1]?.owner, "pending");
+  assert.equal((candidateAnswers[0]?.cairn as { status: string } | null)?.status, "passed");
+});
+
+test("a row the owner refuses stops the run", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(0)\"");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() { return { choice: "continue", ownerAnswers: { c2: "not-met" } }; },
+  });
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "TASK_PROMISE_NOT_MET");
+});
+
+test("Cairn runs only the checks the owner selected", async () => {
+  const root = project();
+  // The project declares three; only `typecheck` is selected by a row. Each
+  // records that it ran, so an unselected check cannot run unnoticed.
+  for (const name of ["typecheck", "build", "unit"]) {
+    const marker = JSON.stringify(`${name}\n`);
+    writeFileSync(join(root, `mark-${name}.js`), `require("fs").appendFileSync("ran.txt", ${marker});`, "utf8");
+  }
+  writeFileSync(join(root, "package.json"), JSON.stringify({
+    name: "fixture",
+    scripts: {
+      typecheck: "node mark-typecheck.js",
+      build: "node mark-build.js",
+      "test:unit": "node mark-unit.js",
+    },
+  }), "utf8");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() { return { choice: "continue", ownerAnswers: { c2: "met" } }; },
+  });
+  assert.equal(readFileSync(join(root, "ran.txt"), "utf8"), "typecheck\n");
 });

@@ -4,6 +4,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, opendirSync, real
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { TaskIntent } from "./intent.js";
 import type { EvidencePlanV1, TaskSpecReviewV1, TaskSpecV1 } from "./quality.js";
+import type { SerialTaskPromisesV1 } from "./taskcard.js";
 
 export interface AdapterDescriptor {
   id: string;
@@ -39,10 +40,18 @@ interface AdapterTaskContractCommon {
   stopConditions: readonly string[];
 }
 
-/** The live intent-only contract. Its shape and wire literal remain unchanged. */
+/**
+ * The live intent-only contract. Its shape and wire literal remain unchanged.
+ *
+ * Task 237 adds `promises`, and it is optional on purpose: a run given none is
+ * byte-for-byte the run this contract has always described. When present it
+ * carries the exact rows the owner was shown before dispatch, so the worker
+ * answers the same promises the owner accepted — never a restatement of them.
+ */
 export interface LegacyAdapterTaskContractV3 extends AdapterTaskContractCommon {
   version: "cairn-serial-task/v3";
   checks: readonly string[];
+  promises?: SerialTaskPromisesV1;
 }
 
 /**

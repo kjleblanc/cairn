@@ -96,6 +96,16 @@ import {
   type TaskRequestView,
 } from "./intent.js";
 import {
+  composeSerialTaskPromiseAnswers,
+  projectCheckMenu,
+  runProjectCheck,
+  serialTaskPromisesSatisfied,
+  type SerialProjectCheckResultV1,
+  type SerialTaskPromiseAnswerV1,
+  type SerialTaskPromiseOwnerAnswerV1,
+  type SerialTaskPromisesV1,
+} from "./taskcard.js";
+import {
   ADAPTER_COMMAND_ATTESTATION_VERSION,
   ENVELOPE_RESULT_VERSION,
   TASK_SPEC_RUN_RECORD_VERSION,
@@ -170,6 +180,14 @@ export interface SerialRunOptions {
   /** Staged Q4 authority. Omitted keeps the live v3 route byte-for-byte. */
   taskSpecAuthority?: SerialTaskSpecAuthorityV1;
   /**
+   * The exact rows the owner was shown before dispatch. Optional for the same
+   * reason `onUnsealedCandidate` is: a run given none reaches the current close
+   * unchanged. When present, the run carries them to the worker, runs each
+   * `cairn-check` row's command itself after the worker, and refuses to seal
+   * DONE until every row is actually answered.
+   */
+  taskPromises?: SerialTaskPromisesV1;
+  /**
    * One process-local pause before this run authors anything terminal. It is
    * offered once, after the worker result, claims, and Git checks have all
    * passed and before the report, log row, commit, and result exist — so the
@@ -218,9 +236,49 @@ export type SerialUnsealedCandidateV1 = Readonly<{
   claims: WorkerClaims | null;
   /** The bounded numeric evidence line, or null. */
   evidenceSummary: string | null;
+  /**
+   * Every displayed promise, answered in three separate voices: what Cairn ran
+   * and found, what the worker said, and what the owner still owes. Empty when
+   * the run carried no promises, which is the Slice 1 shape unchanged.
+   */
+  answers: readonly SerialTaskPromiseAnswerV1[];
 }>;
 
-export type SerialUnsealedCandidateChoiceV1 = "continue" | "stop";
+/**
+ * The bare words remain valid so a caller with nothing to report keeps working
+ * exactly as before. The object form is how the owner's own row judgments come
+ * back; anything else at all is read as `stop`.
+ */
+export type SerialUnsealedCandidateChoiceV1 =
+  | "continue"
+  | "stop"
+  | Readonly<{
+      choice: "continue";
+      ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>>;
+    }>;
+
+/** Fail closed: only an exact continue, in either accepted shape, seals. */
+function unsealedCandidateContinuation(
+  value: unknown,
+): Readonly<{ ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>> }> | null {
+  if (value === "continue") return Object.freeze({ ownerAnswers: Object.freeze({}) });
+  if (value === null || typeof value !== "object") return null;
+  const record = value as { choice?: unknown; ownerAnswers?: unknown };
+  if (record.choice !== "continue") return null;
+  const given = record.ownerAnswers;
+  if (given === null || typeof given !== "object" || Array.isArray(given)) return null;
+  const answers: Record<string, SerialTaskPromiseOwnerAnswerV1> = Object.create(null) as Record<
+    string,
+    SerialTaskPromiseOwnerAnswerV1
+  >;
+  for (const key of Object.keys(given)) {
+    const answer = (given as Record<string, unknown>)[key];
+    // An unrecognised word is not an answer. Dropping it leaves the row
+    // `pending`, which cannot seal — never silently "met".
+    if (answer === "met" || answer === "not-met") answers[key] = answer;
+  }
+  return Object.freeze({ ownerAnswers: Object.freeze(answers) });
+}
 
 export interface SerialCandidateRunOptions {
   adapters: readonly TaskAdapter[];
@@ -955,7 +1013,12 @@ export type SerialStopReason =
   /** Task 235: the owner read the unsealed candidate and kept the work instead
    * of letting Cairn finish. Distinct from CANCELLED_BY_OWNER, which means the
    * worker was interrupted and produced no result to look at. */
-  | "OWNER_STOPPED_AT_CANDIDATE";
+  | "OWNER_STOPPED_AT_CANDIDATE"
+  /** Task 237: the worker finished, but at least one promise the owner accepted
+   * was not shown to be kept — Cairn's own check did not pass, or the owner did
+   * not confirm a row only they can judge. The worker's own account is never
+   * what settles this. */
+  | "TASK_PROMISE_NOT_MET";
 
 interface GitSnapshot {
   head: string;
@@ -1312,6 +1375,27 @@ function indentTaskSpecBriefData(value: string): string {
   return value.replace(/\r\n|\r|\n/g, (lineBreak) => `${lineBreak}  `);
 }
 
+/**
+ * The promises the owner accepted, written into the brief exactly as they were
+ * displayed, with who answers each one. Empty when the run carried none, which
+ * leaves the brief byte-for-byte what it was before Task 237.
+ */
+function promisesSection(contract: AdapterTaskContract): string {
+  const promises = contract.version === "cairn-serial-task/v3" ? contract.promises : undefined;
+  if (!promises || promises.rows.length === 0) return "";
+  const rows = promises.rows.map((row) => {
+    const answerer = row.verification.kind === "cairn-check"
+      ? `Cairn checks this by running \`${row.verification.checkId}\``
+      : "You look at this yourself";
+    return `- ${row.id}: ${indentTaskSpecBriefData(row.text)}\n  - ${answerer}`;
+  }).join("\n");
+  return `
+## Promises the owner accepted — every cN must be answered
+
+${rows}
+`;
+}
+
 function briefText(contract: AdapterTaskContract, demo: boolean): string {
   const status = contract.protectedGit.dirty ? "existing changes protected" : "clean";
   const label = contract.route.adapterLabel;
@@ -1397,7 +1481,7 @@ Supported outcome: ${contract.supportedOutcome}
 Lane: **Standard** — ${lane}.
 
 ${renderAcceptedTaskRequest(contract.intent)}
-
+${promisesSection(contract)}
 ## Route
 
 - Adapter: ${contract.route.adapterLabel}
@@ -7041,6 +7125,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         "Protected Git work changes unexpectedly.",
         "Any task record cannot be verified exactly.",
       ],
+      ...(options.taskPromises ? { promises: options.taskPromises } : {}),
     } satisfies AdapterTaskContract;
     const contract: AdapterTaskContract = taskSpecAuthority ? {
       ...legacyContract,
@@ -7211,6 +7296,12 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
 
       // A STOPPED close: Cairn authors honest STOPPED records from whatever
       // claims (if any) survived, keeps the retained evidence, commits nothing.
+      // Task 237 — declared here so the stop path below can carry the rows too.
+      // A STOPPED result must be able to say which promise went unanswered.
+      const checkResults: SerialProjectCheckResultV1[] = [];
+      let ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>> = Object.freeze({});
+      let promiseAnswers: readonly SerialTaskPromiseAnswerV1[] = Object.freeze([]);
+
       const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
         emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).` });
         const records = cairnWorkerRecords(
@@ -7333,6 +7424,43 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
       // Fail closed on the answer: only an exact "continue" seals. Anything
       // else — a stop, or a caller that returned something unexpected — takes
       // the honest STOPPED door, which commits nothing and retains the edits.
+      // Task 237 — Cairn runs its OWN checks here, before anyone is asked
+      // anything. Still inside the open run: same lock, same snapshot, same
+      // abort signal. Whatever commands the worker says it ran stay claims; only
+      // what happens on these lines is Cairn's own finding.
+      const promises = contract.version === "cairn-serial-task/v3" ? contract.promises : undefined;
+      const workerChecks = claims ? claims.checks : [];
+      if (promises) {
+        const menu = projectCheckMenu(projectRoot);
+        const selected = [...new Set(promises.rows.flatMap((row) =>
+          row.verification.kind === "cairn-check" ? [row.verification.checkId] : []))];
+        for (const checkId of selected) {
+          const check = menu.find((entry) => entry.id === checkId);
+          // A check the project can no longer answer leaves its row without a
+          // result, which cannot seal. Cairn does not substitute another.
+          if (!check) continue;
+          emit(activities, options.events, {
+            stage: "Check", state: "working", detail: `Cairn is running ${check.label} (${check.command}).`,
+          });
+          const result = await runProjectCheck(projectRoot, check, {
+            signal: options.signal,
+            onElapsed: (elapsedMs) => emit(activities, options.events, {
+              stage: "Check", state: "working",
+              detail: `${check.label} — still running, ${Math.round(elapsedMs / 1000)}s so far.`,
+            }),
+          });
+          checkResults.push(result);
+          emit(activities, options.events, {
+            stage: "Check", state: "working",
+            detail: result.status === "passed"
+              ? `${check.label} passed (${Math.round(result.durationMs / 1000)}s).`
+              : result.status === "failed"
+                ? `${check.label} failed (${check.command}).`
+                : `${check.label} did not finish in time; Cairn stopped it.`,
+          });
+        }
+      }
+
       if (options.onUnsealedCandidate) {
         emit(activities, options.events, {
           stage: "Check",
@@ -7355,8 +7483,25 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
           changedPaths: changedSetForRecord(projectRoot),
           claims,
           evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+          // Shown with every owner row still `pending`: the card is where the
+          // owner answers them, so it cannot arrive pre-answered.
+          answers: promises
+            ? composeSerialTaskPromiseAnswers(promises, { checkResults, workerChecks, ownerAnswers: {} })
+            : Object.freeze([]),
         }), options.signal);
-        if (choice !== "continue") return closeStopped("OWNER_STOPPED_AT_CANDIDATE");
+        const continuation = unsealedCandidateContinuation(choice);
+        if (!continuation) return closeStopped("OWNER_STOPPED_AT_CANDIDATE");
+        ownerAnswers = continuation.ownerAnswers;
+      }
+
+      // The DONE gate. A row is answered by Cairn's passing check or by the
+      // owner's own word, and by nothing else — a worker that swore every
+      // promise was kept cannot move this.
+      if (promises) {
+        promiseAnswers = composeSerialTaskPromiseAnswers(promises, {
+          checkResults, workerChecks, ownerAnswers,
+        });
+        if (!serialTaskPromisesSatisfied(promiseAnswers)) return closeStopped("TASK_PROMISE_NOT_MET");
       }
 
       // DONE path — the claims say DONE, the process completed, and protected
