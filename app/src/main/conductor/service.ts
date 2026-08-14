@@ -1127,6 +1127,39 @@ function replyContextMessage(context: OwnerReplyContext): ConductorTransportMess
   };
 }
 
+/**
+ * Positive provider-context projection for saved conversation history.
+ *
+ * Builder reviews are authenticated for local desktop display only. Keeping
+ * this as one pure, directly tested boundary prevents a new conversation role
+ * from falling through as Cairn prose and widening the model's data scope.
+ */
+export function providerHistoryMessages(historySnapshot: ConductorHistorySnapshot): ConductorTransportMessage[] {
+  return historySnapshot.entries.flatMap(({
+    turn,
+    replyContext,
+    authenticatedOwner,
+    authenticatedCairn,
+    authenticatedEnvelope,
+  }): ConductorTransportMessage[] => {
+    if (turn.role === "builder-review") return [];
+    if (turn.role === "envelope") return authenticatedEnvelope
+      ? [{ role: "system", content: cardBriefing(turn.card) }]
+      : [];
+    if (turn.role === "owner") {
+      if (!authenticatedOwner) return [];
+      return [
+        ...(replyContext === null ? [] : [replyContextMessage(replyContext)]),
+        { role: "user", content: turn.text },
+      ];
+    }
+    if (turn.role === "cairn") return authenticatedCairn
+      ? [{ role: "assistant", content: turn.text }]
+      : [];
+    return [];
+  });
+}
+
 function passiveQuestionText(text: string, question: string): string {
   if (text.includes(question)) return text;
   return text.trim() ? `${text.trim()}\n\n${question}` : question;
@@ -1305,19 +1338,7 @@ async function streamTurn(
       // carries the report's own separation — verified facts under one label,
       // the worker's claims under another — so the model can never read a
       // claim as something Cairn verified.
-      ...historySnapshot.entries.flatMap(({ turn, replyContext, authenticatedOwner, authenticatedCairn, authenticatedEnvelope }): ConductorTransportMessage[] => {
-        if (turn.role === "envelope") return authenticatedEnvelope
-          ? [{ role: "system", content: cardBriefing(turn.card) }]
-          : [];
-        if (turn.role === "owner") {
-          if (!authenticatedOwner) return [];
-          return [
-            ...(replyContext === null ? [] : [replyContextMessage(replyContext)]),
-            { role: "user", content: turn.text },
-          ];
-        }
-        return authenticatedCairn ? [{ role: "assistant", content: turn.text }] : [];
-      }),
+      ...providerHistoryMessages(historySnapshot),
       // The envelope's instruction goes LAST, after the card it is about, so
       // "the card above" names the message immediately above it.
       ...(kind === "commentary" ? [{ role: "system", content: COMMENTARY_INSTRUCTION } satisfies ConductorTransportMessage] : []),

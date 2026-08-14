@@ -1,6 +1,6 @@
 import type { SerialRunResult, TaskRequestView } from "@cairn/core";
 import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
-import type { ConductorTurn, ResultCard, TaskSpecResultProjectionV1, TaskReviewProjectionV1 } from "../../shared/ipc.js";
+import type { ConductorEnvelopeTurn, ConductorTurn, ResultCard, TaskSpecResultProjectionV1, TaskReviewProjectionV1 } from "../../shared/ipc.js";
 import { parseTaskReviewProjection } from "../../shared/task-review.js";
 import { appendEnvelopeTurnOnce, appendTurn } from "./store.js";
 import { cardDigest } from "./cardauth.js";
@@ -333,8 +333,8 @@ export function cardBriefing(card: ResultCard): string {
  * turn it wrote. It sends no delta: neither this module nor the service owns a
  * window, so the caller — which does — sends it.
  */
-export function postResultCard(dir: string, conversationId: string, card: ResultCard): ConductorTurn {
-  const turn: ConductorTurn = { role: "envelope", card, ts: new Date().toISOString() };
+export function postResultCard(dir: string, conversationId: string, card: ResultCard): ConductorEnvelopeTurn {
+  const turn: ConductorEnvelopeTurn = { role: "envelope", card, ts: new Date().toISOString() };
   appendTurn(dir, conversationId, turn);
   return turn;
 }

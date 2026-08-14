@@ -497,6 +497,10 @@ function assertComponentSourceSafe(value: string): void {
   assert.doesNotMatch(value, /\bon[A-Z][A-Za-z0-9]*\s*=|\bref\s*=|\{\.\.\.|\b(?:tabIndex|contentEditable|htmlFor|href|src|action|formAction|target|download|role)\s*=/u);
   assert.doesNotMatch(value, /\b(?:window|document|location|navigator|globalThis)\b|\b(?:open|navigate|assign|replace)\s*\(/u);
   assert.doesNotMatch(value, /\b(?:addEventListener|removeEventListener|dispatchEvent|setAttribute|createElement|getElementById|querySelector|ownerDocument|defaultView)\b|\[\s*["']on[A-Za-z0-9]+["']\s*\]/u);
+  assert.doesNotMatch(value, /aria-label=\{`[^`]*\$\{(?:row|review)\./u,
+    "untrusted Builder text must stay in React text children, never an attribute");
+  assert.doesNotMatch(value, /key=\{(?:row|review|label|value)\./u,
+    "untrusted Builder strings must not drive reconciliation identity");
   assert.doesNotMatch(value, /\b(?:import\s*\(|require\s*\(|process\.getBuiltinModule\s*\(|import\.meta\.glob(?:Eager)?\s*\()/u);
   assert.doesNotMatch(value, /\beval\s*\(|\b(?:new\s+)?Function\s*\(/u);
   assert.doesNotMatch(
@@ -542,8 +546,14 @@ function unexpectedProductConsumers(extra: readonly { relativePath: string; text
   const srcRoot = resolve(APP_ROOT, "src");
   const allowed = new Set([
     "main/builderproposalreview.ts",
+    "main/builderproposalreviewfixture.ts",
+    "main/conductor/builderreviewauth.ts",
+    "main/conductor/store.ts",
+    "main/main.ts",
     "renderer/components/BuilderProposalReview.tsx",
+    "renderer/screens/Chat.tsx",
     "shared/builder-proposal-review.ts",
+    "shared/ipc.ts",
   ]);
   const candidates = [
     ...treeFiles(srcRoot).map((path) => ({
@@ -557,6 +567,183 @@ function unexpectedProductConsumers(extra: readonly { relativePath: string; text
     .filter((item) => /BuilderProposalReview|composeBuilderProposalReview|builderproposalreview|builder-proposal-review|import\.meta\.glob|require\.context/u.test(item.text))
     .map((item) => item.relativePath)
     .sort();
+}
+
+function unexpectedBuilderRoleConsumers(extra: readonly { relativePath: string; text: string }[] = []): string[] {
+  const srcRoot = resolve(APP_ROOT, "src");
+  const allowed = new Set([
+    "main/conductor/builderreviewauth.ts",
+    "main/conductor/service.ts",
+    "main/conductor/store.ts",
+    "main/conductor/turnauth.ts",
+    "renderer/screens/Chat.tsx",
+    "renderer/screens/Workspace.tsx",
+    "shared/ipc.ts",
+  ]);
+  return [
+    ...treeFiles(srcRoot).map((path) => ({
+      relativePath: relative(srcRoot, path).replaceAll("\\", "/"),
+      text: readFileSync(path, "utf8"),
+    })),
+    ...extra,
+  ].filter((item) => !allowed.has(item.relativePath))
+    .filter((item) => /["']builder-review["']|cairn-builder-review-(?:turn|marker)/u.test(item.text))
+    .map((item) => item.relativePath)
+    .sort();
+}
+
+function authoritySymbolConsumers(
+  symbol: string,
+  definitionPath: string,
+  extra: readonly { relativePath: string; text: string }[] = [],
+): string[] {
+  const srcRoot = resolve(APP_ROOT, "src");
+  const pattern = new RegExp(`\\b${symbol}\\b`, "u");
+  return [
+    ...treeFiles(srcRoot).map((path) => ({
+      relativePath: relative(srcRoot, path).replaceAll("\\", "/"),
+      text: readFileSync(path, "utf8"),
+    })),
+    ...extra,
+  ]
+    .filter((item) => item.relativePath !== definitionPath && pattern.test(item.text))
+    .map((item) => item.relativePath)
+    .sort();
+}
+
+function assertBuilderStoreCustodySafe(value: string): void {
+  assert.match(value, /if \(turn\.role === "builder-review"\) \{\s*throw new Error\("BUILDER_REVIEW_APPEND_FORBIDDEN/u);
+  assert.equal((value.match(/composeBuilderProposalReview\(context, response\)/gu) ?? []).length, 1);
+  assert.match(value, /captureBuilderReviewProject\(root\)/u);
+  assert.match(value, /context\.projectHash !== project\.projectHash/u);
+  assert.match(value, /builderReviewProjectStillExact\(root, project\)/u);
+  assert.match(value, /consumedBuilderResponses\.has\(response as object\)/u);
+  const marker = value.indexOf("recordBuilderReviewMarker(project.snapshot.canonicalRoot, id, turn, project)");
+  const order = value.indexOf("recordStrictTranscriptEventMarker(", marker);
+  const transcript = value.indexOf("appendJsonLine(project.snapshot.canonicalRoot, id, turn, project)", marker);
+  assert.ok(marker >= 0 && order > marker && transcript > order,
+    "external Builder custody and strict ordering must precede project JSONL");
+  assert.match(value, /recordStrictTranscriptEventMarker\(\s*project\.snapshot\.canonicalRoot,\s*"builder-review",\s*digest,\s*project\.snapshot\.canonicalRoot\.replace\(\/\\\\\/g, "\/"\),\s*\);/u,
+    "the strict event ledger destination must use the captured canonical project key");
+  assert.match(value, /appendJsonLine\(project\.snapshot\.canonicalRoot, id, turn, project\);\s*if \(!builderReviewProjectStillExact\(root, project\)\)/u,
+    "the specialized append must pin and recheck the exact captured project identity");
+  assert.match(value, /throw new ConversationAppendUncertainError\(\s*new Error\("BUILDER_REVIEW_PROJECT_CHANGED:[^\n]+after persistence/u,
+    "a post-fsync identity failure must retain may-have-persisted semantics");
+  assert.match(value, /const rechecked = lstatSync\(path, \{ bigint: true \}\);[\s\S]*?!sameIdentity\(opened, rechecked\)/u,
+    "the descriptor must match a path identity observed after the project recheck");
+  assert.match(value, /recordBuilderReviewMarker\(project\.snapshot\.canonicalRoot, id, turn, project\)/u,
+    "marker custody must use the already captured project binding");
+  assert.match(value, /builderMarkerCounts\.get\(digest\) === 1/u);
+  assert.match(value, /physicalBuilderCounts\.get\(digest\) === 1/u);
+  assert.match(value, /physicalBuilderIdCounts\.get\(turn\?\.displayTurnId \?\? ""\) === 1/u);
+  assert.match(value, /strictTranscriptCounts\.get\(event\) === 1/u);
+}
+
+function assertBuilderAuthCustodySafe(value: string): void {
+  const start = value.indexOf("export function recordBuilderReviewMarker(");
+  const end = value.indexOf("export function builderReviewMarkerSequence", start);
+  assert.ok(start >= 0 && end > start);
+  const body = value.slice(start, end);
+  assert.match(body, /project: BuilderReviewProjectBinding/u);
+  assert.match(body, /projectBindings\.has\(project as object\)/u);
+  assert.match(body, /builderReviewTurnDigestForProject\(project\.snapshot, conversationId, turnValue\)/u);
+  assert.match(body, /const stableCanonicalProjectKey = project\.snapshot\.canonicalRoot\.replace\(\/\\\\\/g, "\/"\);/u);
+  assert.match(body, /markerFile\(dir, true, stableCanonicalProjectKey\)/u,
+    "marker custody must not route its ledger through a transient project alias");
+  assert.doesNotMatch(body, /builderReviewTurnDigest\(dir/u,
+    "marker creation must not recompute identity from a transient project root");
+}
+
+function assertProviderOmissionSafe(value: string): void {
+  assert.match(value, /export function providerHistoryMessages\(historySnapshot: ConductorHistorySnapshot\)/u);
+  assert.equal((value.match(/if \(turn\.role === "builder-review"\) return \[\];/gu) ?? []).length, 1);
+  assert.equal((value.match(/\.\.\.providerHistoryMessages\(historySnapshot\)/gu) ?? []).length, 1);
+}
+
+function assertBridgeAllowlistSafe(value: string): void {
+  assert.match(value, /type BridgeVisibleTurn = Extract<ConductorTurn, \{ role: "owner" \| "cairn" \| "envelope" \}>;/u);
+  assert.match(value, /return turns\.filter\(\(turn\): turn is BridgeVisibleTurn =>\s*turn\.role === "owner" \|\| turn\.role === "cairn" \|\| turn\.role === "envelope"\);/u);
+  assert.equal((value.match(/turns: bridgeVisibleTurns\(opts\.service\.turns\(project\.dir, id\)\)/gu) ?? []).length, 1);
+}
+
+function assertChatNeutralTurnSafe(value: string): void {
+  assert.match(value, /import \{ BuilderProposalReview \} from "\.\.\/components\/BuilderProposalReview";/u);
+  assert.match(value, /function conductorDeltaRoleIsSafe\(event: ConductorDelta\): boolean/u);
+  assert.match(value, /if \(!conductorDeltaRoleIsSafe\(event\)\) return;/u);
+  assert.match(value, /if \(event\.kind === "done"\) return turn\?\.role === "cairn";/u);
+  assert.match(value, /if \(event\.kind === "error"\) return turn === undefined \|\| turn\.role === "cairn";/u);
+  assert.match(value, /if \(event\.kind === "delta" \|\| event\.kind === "replace"\) return turn === undefined;\s*return false;/u);
+  const start = value.indexOf('if (event.kind === "turn") {');
+  const end = value.indexOf('if (event.kind === "envelope") {', start);
+  assert.ok(start >= 0 && end > start, "the neutral turn branch must precede envelope/stream handling");
+  const branch = value.slice(start, end);
+  assert.match(branch, /event\.turn\?\.role !== "builder-review"/u);
+  assert.doesNotMatch(branch, /\b(?:applyAction|reconcileAction|setAction|setDispatch|setSession|setStreaming|setCommentary|setPushFlow|setRetryRequest|refreshStatus)\s*\(/u);
+  assert.doesNotMatch(branch, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage|indexedDB|open|navigate|assign|replace)\b|\bcairn\s*\./u);
+  assert.doesNotMatch(branch, /conversationVersionRef/u);
+  assert.match(branch, /builderTurnVersionRef\.current \+= 1;/u);
+  assert.match(value, /if \(builderTurnVersionRef\.current !== restoreBuilderTurnVersion\) \{\s*setTurns\(\(current\) => mergeSavedTurns\(saved, current\)\);\s*\} else \{\s*setTurns\(saved\);/u);
+  assert.match(value, /if \(status === null\) \{ setRestoringConversation\(true\); return; \}/u,
+    "the visual ready marker must remain pending until a real restore branch completes");
+  assert.match(value, /const latestNonBuilderTurnIndex = turns\.reduce\([\s\S]*?turn\.role === "builder-review" \? found : i/u);
+  assert.match(value, /turn\.role === "cairn" && i === latestNonBuilderTurnIndex && turn\.followups/u);
+  assert.match(value, /turn\.role === "builder-review" \? \(\s*<BuilderProposalReview key=\{turn\.displayTurnId\} review=\{turn\.review\} \/>/u);
+}
+
+function assertIpcBuilderRoleSafe(value: string): void {
+  assert.match(value, /export interface ConductorBuilderReviewTurn \{\s*role: "builder-review";\s*version: "cairn-builder-review-turn\/v1";/u);
+  assert.match(value, /export type ConductorDelta =/u);
+  assert.match(value, /kind: "turn";\s*turn: ConductorBuilderReviewTurn;/u);
+  assert.match(value, /kind: "envelope";\s*turn: ConductorEnvelopeTurn;/u);
+  assert.match(value, /kind: "done";\s*turn: ConductorChatTurn & \{ role: "cairn" \};/u);
+  assert.match(value, /kind: "error";\s*turn\?: ConductorChatTurn & \{ role: "cairn" \};/u);
+  const start = value.indexOf("export interface ConductorBuilderReviewTurn");
+  const end = value.indexOf("\n}", start);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(value.slice(start, end), /card:|disposition:|actionId:|callback:|grant:|reservation:/u);
+}
+
+function assertFixtureGuardSafe(value: string): void {
+  assert.match(value, /const builderReviewE2eRequested = process\.env\.CAIRN_TEST_BUILDER_REVIEW === "1";/u);
+  assert.match(value, /builderReviewE2eRequested && \(process\.env\.CAIRN_E2E !== "1" \|\| process\.env\.CAIRN_MOCK !== "1"\s*\|\| !testUserData \|\| !process\.env\.CAIRN_OPEN\)/u);
+  assert.match(value, /builderReviewE2eRequested && \(q9E2eRequested \|\| calibrationE2eRequested\)/u);
+  assert.match(value, /suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested/u);
+  assert.match(value, /if \(!q9E2eRequested && !builderReviewE2eRequested\) void startPhoneBridge\(\);/u);
+  const guarded = value.indexOf("if (builderReviewE2eRequested) {");
+  const hook = value.indexOf("__CAIRN_TASK231_APPEND_BUILDER_REVIEW__", guarded);
+  const createWindow = value.indexOf("createWindow();", guarded);
+  assert.ok(guarded >= 0 && hook > guarded && createWindow > hook);
+  assert.match(value, /mainWindow\.webContents\.send\("conductor:delta", \{\s*dir: projectRoot,[\s\S]*?kind: "turn",\s*turn: appended\.turn,/u);
+}
+
+function assertFixtureModuleSafe(value: string): void {
+  const file = parsedSource(value, ts.ScriptKind.TS);
+  const modules = file.statements
+    .filter(ts.isImportDeclaration)
+    .map((statement) => ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : "<dynamic>");
+  assert.deepEqual(modules, [
+    "node:crypto",
+    "@cairn/core",
+    "../shared/ipc.js",
+    "./conductor/builderreviewauth.js",
+    "./conductor/store.js",
+  ]);
+  const surface = moduleSurface(value, ts.ScriptKind.TS);
+  assert.deepEqual(surface.filter((entry) => entry.startsWith("import:")), [
+    "import:node:crypto:createHash",
+    "import:@cairn/core:BUILDER_SELECTOR_PROVENANCE_VERSION,BUILDER_TURN_CONTEXT_VERSION,BUILDER_TURN_RESPONSE_VERSION,EVIDENCE_PLAN_CANDIDATE_VERSION,QUALITY_PLAN_VERSION,bindInitialEvidencePlan,bindTaskIntent,bindTaskSpec,builderTurnContextSha256,composeBuilderTurnContext,parseBuilderTurnResponse,parseQualityPlanCandidate,parseTaskIntentCandidate,type TaskIntentSourceInput",
+    "import:../shared/ipc.js:type ConductorBuilderReviewTurn",
+    "import:./conductor/builderreviewauth.js:captureBuilderReviewProject",
+    "import:./conductor/store.js:appendBuilderReviewTurn,newConversationId",
+  ], "the fixed fixture may import only its exact pure composition and append symbols");
+  assert.deepEqual(surface.filter((entry) => entry.startsWith("export:")), [
+    "export:FunctionDeclaration:task231FixedBuilderPairForTests",
+    "export:FunctionDeclaration:appendTask231SyntheticBuilderReview",
+  ]);
+  assertNoHiddenModuleAuthority(value, ts.ScriptKind.TS);
+  assert.doesNotMatch(value, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|navigator|ipcMain|ipcRenderer|BrowserWindow|shell|console)\b/u);
+  assert.doesNotMatch(value, /node:(?:http|https|http2|net|dns|tls|dgram|child_process|worker_threads)|\b(?:spawn|exec|fork|openExternal)\w*\s*\(|\bprocess\.env\b/u);
+  assert.doesNotMatch(value, /conductor\/transports|provider|apiKey|Bearer /iu);
 }
 
 test("proposal composer accepts only one exact live Task 224 context/response binding", () => {
@@ -701,7 +888,7 @@ test("hostile Builder text is literal escaped SSR with no markup, navigation, fo
   }
 });
 
-test("component and composer sources expose one display prop, exact imports and no effect seam", () => {
+test("component, composer and production integration expose only the closed display route", () => {
   const composer = source("src/main/builderproposalreview.ts");
   const component = source("src/renderer/components/BuilderProposalReview.tsx");
   const shared = source("src/shared/builder-proposal-review.ts");
@@ -713,24 +900,46 @@ test("component and composer sources expose one display prop, exact imports and 
     "BUILDER_PROPOSAL_REVIEW_BOUNDARY",
     "BUILDER_PROPOSAL_REVIEW_VERSION",
   ], "the shared runtime namespace must contain only the three inert constants");
-  assert.doesNotMatch(source("src/renderer/app.css"), /builder-proposal-/u,
-    "lab-only proposal styling must not enter the production renderer stylesheet");
+  assert.match(source("src/renderer/app.css"), /\.builder-proposal-review\s*\{/u,
+    "the real Chat bundle must style the existing review component");
+  assert.match(source("src/renderer/app.css"), /@media \(max-width: 820px\)[\s\S]*?\.builder-proposal-comparison/u,
+    "the production card must collapse safely at compact width");
   assert.match(source("lab/builderproposal.css"), /\.builder-proposal-review\s*\{/u,
-    "the dedicated visual lab owns the proposal card styling");
+    "the dedicated visual lab remains a positive component harness");
 
   assert.deepEqual(unexpectedProductConsumers(), [],
-    "only the dark composer/type/component definitions may name the review projection under app/src");
+    "only the exact Task 231 production display/custody allowlist may name the review projection under app/src");
+  assert.deepEqual(unexpectedBuilderRoleConsumers(), [],
+    "the role literal may appear only at the exact custody, omission, type and desktop render boundaries");
+  assert.deepEqual(authoritySymbolConsumers("recordBuilderReviewMarker", "main/conductor/builderreviewauth.ts"), ["main/conductor/store.ts"]);
+  assert.deepEqual(authoritySymbolConsumers("appendBuilderReviewTurn", "main/conductor/store.ts"), ["main/builderproposalreviewfixture.ts"]);
+  assert.deepEqual(authoritySymbolConsumers("appendTask231SyntheticBuilderReview", "main/builderproposalreviewfixture.ts"), ["main/main.ts"]);
+  assert.deepEqual(authoritySymbolConsumers("composeBuilderProposalReview", "main/builderproposalreview.ts"), ["main/conductor/store.ts"]);
+  assertBuilderStoreCustodySafe(source("src/main/conductor/store.ts"));
+  assertBuilderAuthCustodySafe(source("src/main/conductor/builderreviewauth.ts"));
+  assertProviderOmissionSafe(source("src/main/conductor/service.ts"));
+  assertBridgeAllowlistSafe(source("src/main/bridge/server.ts"));
+  assertChatNeutralTurnSafe(source("src/renderer/screens/Chat.tsx"));
+  assertIpcBuilderRoleSafe(source("src/shared/ipc.ts"));
+  assertFixtureGuardSafe(source("src/main/main.ts"));
+  assertFixtureModuleSafe(source("src/main/builderproposalreviewfixture.ts"));
+  assert.match(source("src/renderer/screens/Workspace.tsx"), /if \(event\.kind === "turn" \|\| payloadTurn\?\.role === "builder-review"\) return;\s*refresh\(\);/u,
+    "the append-only turn must not fan out into project/task/runtime/status reads");
+  assert.doesNotMatch(source("src/preload.ts"), /BuilderProposalReview|builder-review|builderproposalreview|builder-proposal-review/u,
+    "generic conversation IPC needs no Builder-only preload surface");
   const coreIndex = readFileSync(resolve(REPOSITORY_ROOT, "core", "src", "index.ts"), "utf8");
   assert.doesNotMatch(coreIndex, /BuilderProposalReview|composeBuilderProposalReview|builder-proposal-review/u);
   for (const entry of [
-    "src/main/main.ts", "src/preload.ts", "src/shared/ipc.ts", "src/renderer/main.tsx",
-    "src/renderer/screens/Chat.tsx", "src/main/conductor/store.ts",
+    "src/preload.ts", "src/main/tasks.ts", "src/main/pendingrun.ts",
+    "src/main/builderreservation.ts", "src/main/criticactivation.ts",
+    "src/main/workeridentity.ts", "src/main/conductor/relay.ts",
+    "src/main/conductor/transports/types.ts", "src/main/conductor/transports/openai-compatible.ts",
   ]) {
     assert.doesNotMatch(source(entry), /BuilderProposalReview|composeBuilderProposalReview|builderproposalreview|builder-proposal-review/u, entry);
   }
 });
 
-test("causal source mutants prove custody, literal rendering, no-action and product-dark guards are load-bearing", () => {
+test("causal source mutants prove custody, literal rendering, no-action and integration guards are load-bearing", () => {
   const composer = source("src/main/builderproposalreview.ts");
   const component = source("src/renderer/components/BuilderProposalReview.tsx");
   const shared = source("src/shared/builder-proposal-review.ts");
@@ -776,6 +985,13 @@ test("causal source mutants prove custody, literal rendering, no-action and prod
   );
   assert.notEqual(associatedLabel, component);
   assert.throws(() => assertComponentSourceSafe(associatedLabel));
+
+  const builderTextAttribute = component.replace(
+    'aria-label="Before selected text"',
+    'aria-label={`Before text for ${row.projectRelativePath}`}',
+  );
+  assert.notEqual(builderTextAttribute, component);
+  assert.throws(() => assertComponentSourceSafe(builderTextAttribute));
 
   const sideEffectImport = `import "node:fs";\n${component}`;
   assert.throws(() => assertComponentSourceSafe(sideEffectImport), /Expected values to be strictly deep-equal/u);
@@ -826,6 +1042,142 @@ test("causal source mutants prove custody, literal rendering, no-action and prod
   const commonJsExport = `${shared}\n(module.exports as Record<string, unknown>).proposalAction = () => undefined;`;
   assert.throws(() => assertSharedSourceSafe(commonJsExport), /runtime module authority is forbidden/u);
 
+  const store = source("src/main/conductor/store.ts");
+  const noExternalMarkerCheck = store.replace(
+    "&& builderMarkerCounts.get(digest) === 1",
+    "&& true /* mutant: project JSONL authenticates itself */",
+  );
+  assert.notEqual(noExternalMarkerCheck, store);
+  assert.throws(() => assertBuilderStoreCustodySafe(noExternalMarkerCheck));
+
+  const unpinnedProjectAppend = store.replace(
+    "appendJsonLine(project.snapshot.canonicalRoot, id, turn, project);",
+    "appendJsonLine(project.snapshot.canonicalRoot, id, turn); // mutant: destination identity unpinned",
+  );
+  assert.notEqual(unpinnedProjectAppend, store);
+  assert.throws(() => assertBuilderStoreCustodySafe(unpinnedProjectAppend));
+
+  const staleConversationPath = store.replace(
+    "|| !sameIdentity(opened, current) || !sameIdentity(opened, rechecked)",
+    "|| !sameIdentity(opened, current) /* mutant: no post-project path identity */",
+  );
+  assert.notEqual(staleConversationPath, store);
+  assert.throws(() => assertBuilderStoreCustodySafe(staleConversationPath));
+
+  const auth = source("src/main/conductor/builderreviewauth.ts");
+  const mutableMarkerIdentity = auth.replace(
+    "builderReviewTurnDigestForProject(project.snapshot, conversationId, turnValue)",
+    "builderReviewTurnDigest(dir, conversationId, turnValue) /* mutant: transient root wins */",
+  );
+  assert.notEqual(mutableMarkerIdentity, auth);
+  assert.throws(() => assertBuilderAuthCustodySafe(mutableMarkerIdentity));
+  const mutableMarkerDestination = auth.replace(
+    "markerFile(dir, true, stableCanonicalProjectKey)",
+    "markerFile(dir, true) /* mutant: transient alias chooses marker ledger */",
+  );
+  assert.notEqual(mutableMarkerDestination, auth);
+  assert.throws(() => assertBuilderAuthCustodySafe(mutableMarkerDestination));
+
+  const mutableEventDestination = store.replace(
+    '    project.snapshot.canonicalRoot.replace(/\\\\/g, "/"),',
+    "    undefined, // mutant: transient alias chooses event ledger",
+  );
+  assert.notEqual(mutableEventDestination, store);
+  assert.throws(() => assertBuilderStoreCustodySafe(mutableEventDestination));
+
+  const ipc = source("src/shared/ipc.ts");
+  const terminalRole = ipc.replace('role: "builder-review";', 'role: "envelope"; // mutant: terminal role');
+  assert.notEqual(terminalRole, ipc);
+  assert.throws(() => assertIpcBuilderRoleSafe(terminalRole));
+
+  const chat = source("src/renderer/screens/Chat.tsx");
+  const routedThroughDone = chat.replace('if (event.kind === "turn") {', 'if (event.kind === "done") { // mutant');
+  assert.notEqual(routedThroughDone, chat);
+  assert.throws(() => assertChatNeutralTurnSafe(routedThroughDone));
+  const actionEffect = chat.replace(
+    "builderTurnVersionRef.current += 1;\n      setTurns",
+    "builderTurnVersionRef.current += 1;\n      void reconcileAction(event.conversationId); // mutant\n      setTurns",
+  );
+  assert.notEqual(actionEffect, chat);
+  assert.throws(() => assertChatNeutralTurnSafe(actionEffect));
+  const storageEffect = chat.replace(
+    "builderTurnVersionRef.current += 1;\n      setTurns",
+    'builderTurnVersionRef.current += 1;\n      localStorage.setItem("builder-review", event.conversationId); // mutant\n      setTurns',
+  );
+  assert.notEqual(storageEffect, chat);
+  assert.throws(() => assertChatNeutralTurnSafe(storageEffect));
+  const unknownAsError = chat.replace(
+    'if (event.kind === "delta" || event.kind === "replace") return turn === undefined;\n  return false;',
+    'if (event.kind === "delta" || event.kind === "replace") return turn === undefined;\n  return turn === undefined; // mutant: unknown falls into error settlement',
+  );
+  assert.notEqual(unknownAsError, chat);
+  assert.throws(() => assertChatNeutralTurnSafe(unknownAsError));
+  const prematureRestoreReady = chat.replace(
+    "if (status === null) { setRestoringConversation(true); return; }",
+    "if (status === null) { setRestoringConversation(false); return; } // mutant: ready before restore",
+  );
+  assert.notEqual(prematureRestoreReady, chat);
+  assert.throws(() => assertChatNeutralTurnSafe(prematureRestoreReady));
+
+  const followupsRetired = chat.replace(
+    'turn.role === "cairn" && i === latestNonBuilderTurnIndex && turn.followups',
+    'turn.role === "cairn" && i === turns.length - 1 && turn.followups',
+  );
+  assert.notEqual(followupsRetired, chat);
+  assert.throws(() => assertChatNeutralTurnSafe(followupsRetired));
+
+  assert.deepEqual(authoritySymbolConsumers(
+    "appendBuilderReviewTurn",
+    "main/conductor/store.ts",
+    [{
+      relativePath: "main/rogue-builder-consumer.ts",
+      text: 'import * as store from "./conductor/store.js"; void store.appendBuilderReviewTurn;',
+    }],
+  ), ["main/builderproposalreviewfixture.ts", "main/rogue-builder-consumer.ts"]);
+
+  const service = source("src/main/conductor/service.ts");
+  const providerLeak = service.replace('if (turn.role === "builder-review") return [];',
+    'if (turn.role === "builder-review") return [{ role: "user", content: JSON.stringify(turn.review) }];');
+  assert.notEqual(providerLeak, service);
+  assert.throws(() => assertProviderOmissionSafe(providerLeak));
+
+  const bridge = source("src/main/bridge/server.ts");
+  const phoneLeak = bridge.replace(
+    'turn.role === "owner" || turn.role === "cairn" || turn.role === "envelope"',
+    'turn.role === "owner" || turn.role === "cairn" || turn.role === "envelope" || turn.role === "builder-review"',
+  );
+  assert.notEqual(phoneLeak, bridge);
+  assert.throws(() => assertBridgeAllowlistSafe(phoneLeak));
+
+  const main = source("src/main/main.ts");
+  const ambientNetwork = main.replace(
+    "suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested",
+    "suppressExternalUpdateCheck: q9E2eRequested /* mutant */",
+  );
+  assert.notEqual(ambientNetwork, main);
+  assert.throws(() => assertFixtureGuardSafe(ambientNetwork));
+  const lanListener = main.replace(
+    "if (!q9E2eRequested && !builderReviewE2eRequested) void startPhoneBridge();",
+    "if (!q9E2eRequested) void startPhoneBridge(); // mutant",
+  );
+  assert.notEqual(lanListener, main);
+  assert.throws(() => assertFixtureGuardSafe(lanListener));
+  const removedLiveDelta = main.replace('mainWindow.webContents.send("conductor:delta", {',
+    'mainWindow.webContents.send("conductor:removed", { // mutant: no live conversation delta');
+  assert.notEqual(removedLiveDelta, main);
+  assert.throws(() => assertFixtureGuardSafe(removedLiveDelta));
+
+  const fixture = source("src/main/builderproposalreviewfixture.ts");
+  const mainNetwork = `import "node:http";\n${fixture}\nvoid fetch("https://invalid.example");`;
+  assert.throws(() => assertFixtureModuleSafe(mainNetwork));
+  const sameModuleEffect = fixture.replace(
+    "import { appendBuilderReviewTurn, newConversationId } from \"./conductor/store.js\";",
+    "import { appendBuilderReviewTurn, ensureCairnExcluded, newConversationId } from \"./conductor/store.js\";\nvoid ensureCairnExcluded;",
+  );
+  assert.notEqual(sameModuleEffect, fixture);
+  assert.throws(() => assertFixtureModuleSafe(sameModuleEffect),
+    "an effectful symbol from an otherwise allowed module must fail the exact fixture surface");
+
   assert.deepEqual(unexpectedProductConsumers([{
     relativePath: "renderer/main.tsx",
     text: 'import { BuilderProposalReview } from "./components/BuilderProposalReview.js";',
@@ -834,4 +1186,8 @@ test("causal source mutants prove custody, literal rendering, no-action and prod
     relativePath: "renderer/main.tsx",
     text: 'void import.meta.glob("./components/*.tsx", { eager: true });',
   }]), ["renderer/main.tsx"], "a broad eager production import cannot smuggle the dark component into the bundle");
+  assert.deepEqual(unexpectedBuilderRoleConsumers([{
+    relativePath: "main/criticactivation.ts",
+    text: 'import type { ConductorTurn } from "../shared/ipc.js";\nexport const leak = (turn: ConductorTurn) => turn.role === "builder-review" ? turn.review : null;',
+  }]), ["main/criticactivation.ts"], "a union-only role consumer cannot bypass the exact import graph");
 });

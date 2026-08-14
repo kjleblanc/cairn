@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
+import { BuilderProposalReview } from "../components/BuilderProposalReview";
 import { ConnectCard } from "../components/ConnectCard";
 import { DisclosureConfirm } from "../components/DisclosureConfirm";
 import { ResultEvidence } from "../components/EvidenceAlbum";
@@ -148,19 +149,36 @@ function aheadPhrase(ahead: number): string {
  * main both persisted and emitted. */
 function mergeSavedTurns(saved: readonly ConductorTurn[], current: readonly ConductorTurn[]): ConductorTurn[] {
   const merged = [...saved];
-  const present = new Set(saved.map((turn) => JSON.stringify(turn)));
   for (const turn of current) {
-    const key = JSON.stringify(turn);
-    if (present.has(key)) continue;
-    present.add(key);
+    if (merged.some((candidate) => sameConversationTurn(candidate, turn))) continue;
     merged.push(turn);
   }
   return merged;
 }
 
+function sameConversationTurn(left: ConductorTurn, right: ConductorTurn): boolean {
+  if (left.role === "builder-review" || right.role === "builder-review") {
+    return left.role === "builder-review" && right.role === "builder-review"
+      && left.displayTurnId === right.displayTurnId;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function appendTurnOnce(turns: readonly ConductorTurn[], turn: ConductorTurn): ConductorTurn[] {
-  const key = JSON.stringify(turn);
-  return turns.some((current) => JSON.stringify(current) === key) ? [...turns] : [...turns, turn];
+  return turns.some((current) => sameConversationTurn(current, turn)) ? [...turns] : [...turns, turn];
+}
+
+/** Runtime counterpart to the shared discriminated union. IPC originates in
+ * Main, but a role/kind mismatch must still be rejected before any renderer
+ * state change if an old or malformed process payload reaches this bundle. */
+function conductorDeltaRoleIsSafe(event: ConductorDelta): boolean {
+  const turn = (event as { turn?: ConductorTurn }).turn;
+  if (event.kind === "turn") return turn?.role === "builder-review";
+  if (event.kind === "envelope") return turn?.role === "envelope";
+  if (event.kind === "done") return turn?.role === "cairn";
+  if (event.kind === "error") return turn === undefined || turn.role === "cairn";
+  if (event.kind === "delta" || event.kind === "replace") return turn === undefined;
+  return false;
 }
 
 /** Main keeps the exact question in the Cairn turn so it survives after its
@@ -593,6 +611,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // a send or accepted delta owns newer conversation/turn state and an older
   // mount snapshot may only merge history into that state, never replace it.
   const conversationVersionRef = useRef(0);
+  // Builder reviews are append-only display evidence. Track their restore
+  // races separately so preserving the card can never enter the ordinary
+  // delta branch that reconciles actions, streams, retries, or task state.
+  const builderTurnVersionRef = useRef(0);
   const [dispatch, setDispatch] = useState<Dispatch | null>(null);
   const [criticCallBusy, setCriticCallBusy] = useState(false);
   const [repairCallBusy, setRepairCallBusy] = useState(false);
@@ -782,10 +804,14 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // component's mount lifetime: switching projects may unmount Chat without
   // cancelling a reply, and returning reattaches to its accumulated text.
   useEffect(() => {
-    if (status === null) { setRestoringConversation(false); return; }
+    // Status resolves asynchronously. Keep restoration pending until one of
+    // the connected/disconnected branches below has completed its real saved
+    // history read; a transient null-status render is not a restored state.
+    if (status === null) { setRestoringConversation(true); return; }
     if (!status.connected) {
       let live = true;
       const restoreVersion = conversationVersionRef.current;
+      const restoreBuilderTurnVersion = builderTurnVersionRef.current;
       setRestoringConversation(true);
       // A disconnected conductor grants no prose, action, stream, or composer
       // authority. Read-only history remains available, however, and Main's
@@ -802,7 +828,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         try {
           const list = await cairn.conductorConversations(dir);
           if (!live || conversationVersionRef.current !== restoreVersion) return;
-          const id = session?.conversationId ?? list.at(-1)?.id ?? null;
+          const builderDeltaWon = builderTurnVersionRef.current !== restoreBuilderTurnVersion;
+          const id = (builderDeltaWon ? conversationIdRef.current : null)
+            ?? session?.conversationId ?? list.at(-1)?.id ?? null;
           if (id === null) {
             setConvId(null);
             setTurns([]);
@@ -812,12 +840,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
           // authenticated terminal delta racing this read can merge forward.
           setConvId(id);
           const saved = (await cairn.conductorTurns(dir, id))
-            .filter((turn): turn is Extract<ConductorTurn, { role: "envelope" }> => turn.role === "envelope");
+            .filter((turn): turn is Extract<ConductorTurn, { role: "envelope" | "builder-review" }> =>
+              turn.role === "envelope" || turn.role === "builder-review");
           if (!live || conversationIdRef.current !== id) return;
-          if (conversationVersionRef.current !== restoreVersion) {
+          if (conversationVersionRef.current !== restoreVersion
+            || builderTurnVersionRef.current !== restoreBuilderTurnVersion) {
             setTurns((current) => mergeSavedTurns(
               saved,
-              current.filter((turn): turn is Extract<ConductorTurn, { role: "envelope" }> => turn.role === "envelope"),
+              current.filter((turn): turn is Extract<ConductorTurn, { role: "envelope" | "builder-review" }> =>
+                turn.role === "envelope" || turn.role === "builder-review"),
             ));
           } else {
             setTurns(saved);
@@ -830,6 +861,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     }
     let live = true;
     const restoreVersion = conversationVersionRef.current;
+    const restoreBuilderTurnVersion = builderTurnVersionRef.current;
     const restoredActionVersion = actionVersionRef.current;
     setRestoringConversation(true);
     void (async () => {
@@ -883,7 +915,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
           return;
         }
 
-        setTurns(saved);
+        if (builderTurnVersionRef.current !== restoreBuilderTurnVersion) {
+          setTurns((current) => mergeSavedTurns(saved, current));
+        } else {
+          setTurns(saved);
+        }
         if (actionVersionRef.current === restoredActionVersion) {
           applyAction(restoredAction);
         }
@@ -980,6 +1016,22 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
 
   useEffect(() => cairn.onConductorDelta((event: ConductorDelta) => {
     if (event.dir !== dir) return;
+    if (!conductorDeltaRoleIsSafe(event)) return;
+
+    // Authenticated Builder review evidence is a complete append-only turn,
+    // never part of a reply stream or terminal envelope. It changes only the
+    // visible turn list: no action reconciliation, stream, retry, task, push,
+    // composer, dispatch or status state follows from its arrival.
+    if (event.kind === "turn") {
+      if (event.turn?.role !== "builder-review") return;
+      const disconnectedLocalEvidence = status?.connected === false;
+      if (conversationIdRef.current !== event.conversationId && !disconnectedLocalEvidence) return;
+      const adoptsDifferentConversation = disconnectedLocalEvidence && conversationIdRef.current !== event.conversationId;
+      if (adoptsDifferentConversation) setConvId(event.conversationId);
+      builderTurnVersionRef.current += 1;
+      setTurns((turns) => adoptsDifferentConversation ? [event.turn as ConductorTurn] : appendTurnOnce(turns, event.turn as ConductorTurn));
+      return;
+    }
 
     // A result card is not part of any reply stream. It belongs to the ONE
     // conversation whose id rode the run request, so it is posted only while
@@ -1799,11 +1851,18 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     void cairn.taskPreviewDiscard(dir, request.previewId ?? undefined);
   }
 
-  const lastReply = [...turns].reverse().find((t) => t.role === "cairn") ?? null;
+  const lastReply = [...turns].reverse().find(
+    (turn): turn is ConductorChatTurn & { role: "cairn" } => turn.role === "cairn",
+  ) ?? null;
   // Fold away the past (Task 155): the turn index of the newest result card.
   // Every older card renders as a one-line chip that toggles its card back
   // into view; only this one stays expanded on its own.
   const latestCardIndex = turns.reduce((found, turn, i) => (turn.role === "envelope" ? i : found), -1);
+  // Builder evidence is not a new interactive word. It must not retire the
+  // latest Cairn follow-ups, while an owner message or result card still does.
+  const latestNonBuilderTurnIndex = turns.reduce(
+    (found, turn, i) => (turn.role === "builder-review" ? found : i), -1,
+  );
   // Needs-you dot (Task 155): tucked away, the chip says when something
   // inside waits on the owner — a proposed task to decide, a dispatch to
   // confirm, or a push to approve.
@@ -1886,7 +1945,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
 
   const column = (
       <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " chat-column-villager" : ""}`}
-        role={embedded ? "dialog" : undefined} aria-label={embedded ? "Conversation with Cairn" : undefined}>
+        role={embedded ? "dialog" : undefined} aria-label={embedded ? "Conversation with Cairn" : undefined}
+        data-conversation-restore={restoringConversation ? "pending" : "settled"}>
         <div className="row spread chat-topbar">
           <Pill kind="quiet" onClick={onBack}>← Project home</Pill>
           {status?.connected ? (
@@ -1909,14 +1969,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
           />
         ) : null}
         {status && !status.connected ? <ConnectCard status={status} onConnected={() => void refreshStatus()} /> : null}
-        {status && !status.connected && turns.some((turn) => turn.role === "envelope") ? (
-          <div className="chat-messages chat-local-results" aria-label="Saved task results">
-            {/* Main authenticates persisted envelope turns before returning
-              * them. Disconnected mode deliberately renders only those cards:
-              * no owner/Cairn prose, actions, streams, push controls, or
-              * composer authority crosses the connection boundary. */}
+        {status && !status.connected && turns.some((turn) => turn.role === "envelope" || turn.role === "builder-review") ? (
+          <div className="chat-messages chat-local-results" aria-label="Saved conversation evidence">
+            {/* Main authenticates both local evidence roles before returning
+              * them. Disconnected mode still excludes owner/Cairn prose,
+              * actions, streams, push controls and composer authority. */}
             {turns.map((turn, i) => turn.role === "envelope" ? (
               <ResultCardView key={i} card={turn.card} dir={dir} onOpenRun={onOpenRun} />
+            ) : turn.role === "builder-review" ? (
+              <BuilderProposalReview key={turn.displayTurnId} review={turn.review} />
             ) : null)}
             <div ref={endRef} />
           </div>
@@ -1962,6 +2023,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                       onDecline={() => setPushFlow((f) => (f !== null && f.phase === "confirm" ? { ...f, phase: "chip", result: null } : f))} />
                   ) : null}
                 </Fragment>
+              ) : turn.role === "builder-review" ? (
+                <BuilderProposalReview key={turn.displayTurnId} review={turn.review} />
               ) : (
                 <Fragment key={i}>
                   <div className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}${
@@ -1984,7 +2047,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                     * an ordinary send(): it queues, refuses, and retries exactly
                     * like typed text, and it can never dispatch anything by
                     * itself — the proposal card and its gates still decide. */}
-                  {turn.role === "cairn" && i === turns.length - 1 && turn.followups && turn.followups.length > 0 ? (
+                  {turn.role === "cairn" && i === latestNonBuilderTurnIndex && turn.followups && turn.followups.length > 0 ? (
                     <div className="followups" ref={followupsRef} data-followups-state="ready" role="group" aria-label="Cairn's suggestions for what to do next">
                       <div className="followups-heading">
                         <p className="followups-label">Where we could go next</p>

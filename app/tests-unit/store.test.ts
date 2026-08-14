@@ -11,11 +11,12 @@ import { recordTurnMarker, setTurnMarkerDir } from "../src/main/conductor/turnau
 
 const turn = (role: "owner" | "cairn", text: string) => ({ role, text, ts: "2026-07-23T12:00:00.000Z" });
 
-/** A turn is now either something said or a result card the envelope wrote.
- * These tests are about what was said, so a card would be a visible marker
- * rather than a silent gap. */
+/** These tests are about spoken history. Structured envelope and Builder
+ * review turns stay visible as explicit markers rather than silent gaps. */
 const spokenTexts = (root: string, id: string): string[] =>
-  readTurns(root, id).map((item) => (item.role === "envelope" ? "(result card)" : item.text));
+  readTurns(root, id).map((item) => item.role === "envelope"
+    ? "(result card)"
+    : item.role === "builder-review" ? "(builder review)" : item.text);
 
 function gitInit(root: string): void {
   execFileSync("git", ["init", "-q"], { cwd: root });

@@ -1,13 +1,12 @@
 import { useState } from "react";
-import type { ConductorStatus, ConductorTurn } from "../../shared/ipc";
+import type { ConductorChatTurn, ConductorStatus } from "../../shared/ipc";
 import { cairn } from "../api";
 import { Pill } from "./Ui";
 
 // Only a Cairn REPLY has a token count or a cost. An envelope turn is Cairn's
 // runtime speaking, not the provider, and it carries neither — so it is not a
 // "last reply" this line can describe.
-function replyLine(turn: ConductorTurn): string | null {
-  if (turn.role !== "cairn") return null;
+function replyLine(turn: ConductorChatTurn & { role: "cairn" }): string | null {
   if (turn.tokens === undefined && turn.costUsd === undefined) return null;
   const parts: string[] = [];
   if (turn.tokens !== undefined) parts.push(`${turn.tokens} tokens`);
@@ -20,7 +19,7 @@ function replyLine(turn: ConductorTurn): string | null {
  * re-consent needed) or disconnect (wipes the stored key). */
 export function BodyPill({ status, lastReply, onModelSaved, onDisconnected }: {
   status: ConductorStatus;
-  lastReply: ConductorTurn | null;
+  lastReply: (ConductorChatTurn & { role: "cairn" }) | null;
   onModelSaved: (model: string) => void;
   onDisconnected: () => void;
 }) {

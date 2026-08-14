@@ -4,9 +4,22 @@ import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdi
 import { isAbsolute, join, relative } from "node:path";
 import { types as nodeTypes } from "node:util";
 import { isEvidenceRunId, TASK_SPEC_RESULT_PROJECTION_VERSION } from "../../shared/ipc.js";
-import type { ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
+import { BUILDER_PROPOSAL_REVIEW_BOUNDARY } from "../../shared/builder-proposal-review.js";
+import type { ConductorBuilderReviewTurn, ConductorChatTurn, ConductorTurn, ResultCard } from "../../shared/ipc.js";
 import { parseTaskReviewProjection } from "../../shared/task-review.js";
-import type { TaskIntentSourceInput } from "@cairn/core";
+import type { BuilderTurnContextV1, BuilderTurnResponseV1, TaskIntentSourceInput } from "@cairn/core";
+import { composeBuilderProposalReview } from "../builderproposalreview.js";
+import {
+  BUILDER_REVIEW_TURN_VERSION,
+  builderReviewDisplayTurnIdCandidate,
+  builderReviewProjectStillExact,
+  builderReviewMarkerSequence,
+  builderReviewTurnDigest,
+  captureBuilderReviewProject,
+  parseBuilderReviewTurn,
+  recordBuilderReviewMarker,
+  type BuilderReviewProjectBinding,
+} from "./builderreviewauth.js";
 import { cardDigest, cardDigestCandidates, cardMarkers, recordCardMarker } from "./cardauth.js";
 import { sanitizeFollowups } from "./followups.js";
 import { assertConversationId, isConversationId } from "./conversation-id.js";
@@ -16,9 +29,11 @@ import {
   canonicalProjectPath,
   isOwnerTurnId,
   recordCairnTurnMarker,
+  recordStrictTranscriptEventMarker,
   recordTranscriptEventMarker,
   recordTurnMarker,
   reserveConversationId,
+  strictTranscriptEventSequence,
   transcriptEventSequence,
   turnDigest,
   turnMarkerSequence,
@@ -39,6 +54,8 @@ const TASK_SPEC_ROW_CAP = 12;
 const TASK_SPEC_ATTESTATION_CAP = 12;
 const TASK_SPEC_CHANGE_CAP = 50;
 const SHA256 = /^[a-f0-9]{64}$/;
+const JSON_STRING_TOKEN = /"(?:\\["\\/bfnrt]|\\u[0-9a-fA-F]{4}|[^"\\\u0000-\u001f])*"/gu;
+const consumedBuilderResponses = new WeakSet<object>();
 
 /** Once an append syscall starts, a later error cannot honestly prove that no
  * bytes reached disk. Callers that gate one-time authority must distinguish
@@ -65,12 +82,54 @@ function sameIdentity(left: { dev: bigint; ino: bigint }, right: { dev: bigint; 
   return left.dev === right.dev && left.ino !== 0n && right.ino !== 0n && left.ino === right.ino;
 }
 
+/** Conservatively recognize an opaque display-id claim without trusting the
+ * whole JSON line. Even a malformed or duplicate-key project-written line
+ * makes that id ambiguous and suppresses the genuine Builder review. */
+function rawBuilderDisplayIdClaims(line: string): readonly string[] {
+  const claims: string[] = [];
+  JSON_STRING_TOKEN.lastIndex = 0;
+  let key: RegExpExecArray | null;
+  while ((key = JSON_STRING_TOKEN.exec(line)) !== null) {
+    let decodedKey: unknown;
+    try { decodedKey = JSON.parse(key[0]); } catch { continue; }
+    if (decodedKey !== "displayTurnId") continue;
+    const keyEnd = key.index + key[0].length;
+    let valueStart = keyEnd;
+    while (line[valueStart] === " " || line[valueStart] === "\t" || line[valueStart] === "\r" || line[valueStart] === "\n") valueStart += 1;
+    if (line[valueStart] !== ":") continue;
+    valueStart += 1;
+    while (line[valueStart] === " " || line[valueStart] === "\t" || line[valueStart] === "\r" || line[valueStart] === "\n") valueStart += 1;
+    JSON_STRING_TOKEN.lastIndex = valueStart;
+    const value = JSON_STRING_TOKEN.exec(line);
+    if (!value || value.index !== valueStart) {
+      JSON_STRING_TOKEN.lastIndex = keyEnd;
+      continue;
+    }
+    try {
+      const decoded = JSON.parse(value[0]);
+      if (typeof decoded === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(decoded)) {
+        claims.push(decoded);
+      }
+    } catch { /* a malformed string is not an opaque-id claim */ }
+  }
+  return claims;
+}
+
 /** Walk only Cairn's two fixed project-owned directories. Missing segments
  * are created one at a time; existing links/junctions never get followed. */
-function safeConversationsDir(root: string, create: boolean): string | null {
+function safeConversationsDir(
+  root: string,
+  create: boolean,
+  expectedProject: BuilderReviewProjectBinding | null = null,
+): string | null {
   try {
     const project = realpathSync.native(canonicalProjectPath(root));
-    if (!lstatSync(project).isDirectory()) throw new Error("unsafe");
+    const projectStat = lstatSync(project, { bigint: true });
+    if (!projectStat.isDirectory()
+      || (expectedProject !== null && (project !== expectedProject.snapshot.canonicalRoot
+        || !sameIdentity(projectStat, { dev: expectedProject.snapshot.deviceId, ino: expectedProject.snapshot.fileId })))) {
+      throw new Error("unsafe");
+    }
     let current = project;
     for (const segment of [".cairn", "conversations"] as const) {
       const candidate = join(current, segment);
@@ -84,6 +143,7 @@ function safeConversationsDir(root: string, create: boolean): string | null {
       if (!inside(project, real)) throw new Error("unsafe");
       current = real;
     }
+    if (expectedProject !== null && !builderReviewProjectStillExact(root, expectedProject)) throw new Error("unsafe");
     return current;
   } catch (error) {
     if (!create && error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -93,9 +153,17 @@ function safeConversationsDir(root: string, create: boolean): string | null {
 
 type SafeConversation = { descriptor: number; path: string; directory: string };
 
-function openConversation(root: string, id: string, create: boolean): SafeConversation | null {
+function openConversation(
+  root: string,
+  id: string,
+  create: boolean,
+  expectedProject: BuilderReviewProjectBinding | null = null,
+): SafeConversation | null {
   assertConversationId(id);
-  const directory = safeConversationsDir(root, create);
+  if (expectedProject !== null && !builderReviewProjectStillExact(root, expectedProject)) {
+    throw new Error("CONDUCTOR_HISTORY_UNSAFE: Cairn refused a changed Builder-review project.");
+  }
+  const directory = safeConversationsDir(root, create, expectedProject);
   if (directory === null) return null;
   const path = join(directory, `${id}.jsonl`);
   const existed = existsSync(path);
@@ -113,9 +181,12 @@ function openConversation(root: string, id: string, create: boolean): SafeConver
     descriptor = openSync(path, flags, 0o600);
     const opened = fstatSync(descriptor, { bigint: true });
     const current = lstatSync(path, { bigint: true });
-    const checkedDirectory = safeConversationsDir(root, false);
+    const checkedDirectory = safeConversationsDir(root, false, expectedProject);
+    const rechecked = lstatSync(path, { bigint: true });
     if (checkedDirectory !== directory || !opened.isFile() || !current.isFile() || current.isSymbolicLink()
-      || opened.nlink !== 1n || current.nlink !== 1n || !sameIdentity(opened, current)
+      || !rechecked.isFile() || rechecked.isSymbolicLink()
+      || opened.nlink !== 1n || current.nlink !== 1n || rechecked.nlink !== 1n
+      || !sameIdentity(opened, current) || !sameIdentity(opened, rechecked)
       || !inside(directory, realpathSync.native(path)) || opened.size > BigInt(CONVERSATION_BYTE_CAP)) {
       throw new Error("unsafe");
     }
@@ -130,14 +201,28 @@ function openConversation(root: string, id: string, create: boolean): SafeConver
 
 /** Append through the exact descriptor whose path and link identity were
  * checked. A crash-partial tail is isolated before the complete new line. */
-function appendJsonLine(root: string, id: string, value: unknown): void {
-  const opened = openConversation(root, id, true);
+function appendJsonLine(
+  root: string,
+  id: string,
+  value: unknown,
+  expectedProject: BuilderReviewProjectBinding | null = null,
+): void {
+  const opened = openConversation(root, id, true, expectedProject);
   if (opened === null) throw new Error("CONDUCTOR_HISTORY_UNSAFE");
   const { descriptor } = opened;
   let failure: unknown = null;
   let writeStarted = false;
   try {
     const before = fstatSync(descriptor, { bigint: true });
+    if (expectedProject !== null) {
+      const checkedDirectory = safeConversationsDir(root, false, expectedProject);
+      const current = lstatSync(opened.path, { bigint: true });
+      if (checkedDirectory !== opened.directory || !current.isFile() || current.isSymbolicLink()
+        || current.nlink !== 1n || !sameIdentity(before, current)
+        || !inside(opened.directory, realpathSync.native(opened.path))) {
+        throw new Error("CONDUCTOR_HISTORY_UNSAFE: Cairn refused a changed Builder-review destination.");
+      }
+    }
     let separator = "";
     if (before.size > 0n) {
       const tail = Buffer.allocUnsafe(1);
@@ -158,6 +243,15 @@ function appendJsonLine(root: string, id: string, value: unknown): void {
     const after = fstatSync(descriptor, { bigint: true });
     if (!sameIdentity(before, after) || after.nlink !== 1n || after.size !== before.size + BigInt(bytes.length)) {
       throw new Error("CONDUCTOR_HISTORY_UNSAFE: Cairn could not verify the conversation append.");
+    }
+    if (expectedProject !== null) {
+      const checkedDirectory = safeConversationsDir(root, false, expectedProject);
+      const current = lstatSync(opened.path, { bigint: true });
+      if (checkedDirectory !== opened.directory || !current.isFile() || current.isSymbolicLink()
+        || current.nlink !== 1n || !sameIdentity(after, current)
+        || !inside(opened.directory, realpathSync.native(opened.path))) {
+        throw new Error("CONDUCTOR_HISTORY_UNSAFE: Builder-review destination changed during append.");
+      }
     }
   } catch (error) {
     failure = error;
@@ -281,6 +375,9 @@ export function newConversationId(root: string): string {
  */
 export function appendTurn(root: string, id: string, turn: ConductorTurn): void {
   assertConversationId(id);
+  if (turn.role === "builder-review") {
+    throw new Error("BUILDER_REVIEW_APPEND_FORBIDDEN: Use the exact Task 224 Main append boundary.");
+  }
   if (turn.role === "envelope") {
     if (!isResultCard(turn.card)) {
       throw new Error("INVALID_RESULT_CARD: Cairn refused to persist a malformed result card.");
@@ -289,6 +386,54 @@ export function appendTurn(root: string, id: string, turn: ConductorTurn): void 
     recordTranscriptEventMarker(root, "envelope", cardDigest(root, id, turn.ts, turn.card));
   }
   appendJsonLine(root, id, turn);
+}
+
+/**
+ * The sole Builder-review producer. Callers supply genuine live Task 224
+ * custody, never a renderer-authored projection. Main composes the inert view,
+ * mints a non-action id, records out-of-project custody and ordering first,
+ * then appends the project-owned transcript line.
+ */
+export function appendBuilderReviewTurn(
+  root: string,
+  id: string,
+  context: BuilderTurnContextV1,
+  response: BuilderTurnResponseV1,
+): ConductorBuilderReviewTurn | null {
+  assertConversationId(id);
+  const project = captureBuilderReviewProject(root);
+  if (project === null) return null;
+  const review = composeBuilderProposalReview(context, response);
+  if (review === null || context.projectHash !== project.projectHash
+    || !builderReviewProjectStillExact(root, project)) return null;
+  if (consumedBuilderResponses.has(response as object)) return null;
+  // Consume before custody I/O: marker-only failure residue can display
+  // nothing and may not turn into a retry/resume authority in this process.
+  consumedBuilderResponses.add(response as object);
+  const turn = Object.freeze({
+    role: "builder-review" as const,
+    version: BUILDER_REVIEW_TURN_VERSION,
+    displayTurnId: randomUUID(),
+    review,
+    ts: new Date().toISOString(),
+  });
+  const digest = recordBuilderReviewMarker(project.snapshot.canonicalRoot, id, turn, project);
+  recordStrictTranscriptEventMarker(
+    project.snapshot.canonicalRoot,
+    "builder-review",
+    digest,
+    project.snapshot.canonicalRoot.replace(/\\/g, "/"),
+  );
+  if (!builderReviewProjectStillExact(root, project)) {
+    throw new Error("BUILDER_REVIEW_PROJECT_CHANGED: Builder review target identity changed before persistence.");
+  }
+  appendJsonLine(project.snapshot.canonicalRoot, id, turn, project);
+  if (!builderReviewProjectStillExact(root, project)) {
+    throw new ConversationAppendUncertainError(
+      new Error("BUILDER_REVIEW_PROJECT_CHANGED: Builder review target identity changed after persistence."),
+    );
+  }
+  return turn;
 }
 
 /**
@@ -713,6 +858,9 @@ export interface ConductorHistoryEntry {
    * flag additionally proves their position in the cross-role transcript and
    * is required before a card may re-enter a provider prompt. */
   readonly authenticatedEnvelope: boolean;
+  /** Builder review lines are included only when their separate exact marker,
+   * strict ordering event and unique physical transcript line all agree. */
+  readonly authenticatedBuilderReview: boolean;
 }
 
 export interface ConductorHistorySnapshot {
@@ -735,10 +883,18 @@ export function readHistorySnapshot(root: string, id: string): ConductorHistoryS
   // every card rather than trusting any.
   const markers = cardMarkers(root);
   const cairnMarkers = cairnTurnMarkers(root);
+  const builderMarkerSequence = builderReviewMarkerSequence(root);
+  const builderMarkerCounts = new Map<string, number>();
+  for (const digest of builderMarkerSequence) builderMarkerCounts.set(digest, (builderMarkerCounts.get(digest) ?? 0) + 1);
   const ownerMarkerSequence = turnMarkerSequence(root);
   const ownerMarkerPositions = new Map(ownerMarkerSequence.map((digest, index) => [digest, index]));
   const transcriptSequence = transcriptEventSequence(root);
   const transcriptPositions = new Map(transcriptSequence.map((event, index) => [event, index]));
+  const strictTranscriptSequence = strictTranscriptEventSequence(root);
+  const strictTranscriptPositions = new Map(strictTranscriptSequence.map((event, index) => [event, index]));
+  const strictTranscriptCounts = new Map<string, number>();
+  for (const event of strictTranscriptSequence) strictTranscriptCounts.set(event, (strictTranscriptCounts.get(event) ?? 0) + 1);
+  const strictTranscriptUnique = strictTranscriptCounts.size === strictTranscriptSequence.length;
   const seenOwnerIds = new Set<string>();
   let lastOwnerMarkerPosition = -1;
   let lastTranscriptPosition = -1;
@@ -753,7 +909,59 @@ export function readHistorySnapshot(root: string, id: string): ConductorHistoryS
   // they were written, both stand.
   const shown = new Set<string>();
   const shownCairn = new Set<string>();
-  for (const line of historyText.split(/\r?\n/)) {
+  const physicalLines = historyText.split(/\r?\n/);
+  const completeLineCount = Math.max(0, physicalLines.length - 1);
+  const hasIncompleteTail = (physicalLines.at(-1)?.trim().length ?? 0) > 0;
+  const physicalBuilderCounts = new Map<string, number>();
+  const physicalBuilderIdCounts = new Map<string, number>();
+  let physicalTranscriptOrderSafe = true;
+  let lastPhysicalTranscriptPosition = -1;
+  for (let index = 0; index < completeLineCount; index += 1) {
+    const rawDisplayIds = rawBuilderDisplayIdClaims(physicalLines[index]);
+    for (const displayTurnId of rawDisplayIds) {
+      physicalBuilderIdCounts.set(displayTurnId, (physicalBuilderIdCounts.get(displayTurnId) ?? 0) + 1);
+    }
+    try {
+      const rawCandidate = JSON.parse(physicalLines[index]);
+      const displayTurnId = builderReviewDisplayTurnIdCandidate(rawCandidate);
+      if (displayTurnId !== null && !rawDisplayIds.includes(displayTurnId)) {
+        physicalBuilderIdCounts.set(displayTurnId, (physicalBuilderIdCounts.get(displayTurnId) ?? 0) + 1);
+      }
+      const candidate = parseBuilderReviewTurn(rawCandidate);
+      const digest = candidate === null ? null : builderReviewTurnDigest(root, id, candidate);
+      if (digest !== null) physicalBuilderCounts.set(digest, (physicalBuilderCounts.get(digest) ?? 0) + 1);
+
+      let authenticatedEvent: string | null = digest === null ? null : `builder-review:${digest}`;
+      const raw = rawCandidate as Record<string, unknown>;
+      if (raw.role === "owner" && typeof raw.text === "string" && typeof raw.ts === "string") {
+        const rawContext = Object.prototype.hasOwnProperty.call(raw, "replyContext") ? raw.replyContext : null;
+        const checkedContext = rawContext === null ? null : validateOwnerReplyContext(rawContext);
+        if (isOwnerTurnId(raw.inputId) && (rawContext === null || checkedContext !== null)) {
+          const ownerDigest = turnDigest(root, id, raw.inputId, raw.ts, raw.text, checkedContext);
+          authenticatedEvent = ownerMarkerPositions.has(ownerDigest) ? `owner:${ownerDigest}` : null;
+        }
+      } else if (raw.role === "cairn" && typeof raw.text === "string" && typeof raw.ts === "string") {
+        const parsed = sanitizedCairnTurn(rawCandidate as ConductorTurn);
+        const turnId = raw.turnId;
+        const cairnDigest = parsed !== null && isOwnerTurnId(turnId)
+          ? cairnTurnDigest(root, id, { ...parsed, turnId })
+          : null;
+        authenticatedEvent = cairnDigest !== null && cairnMarkers.has(cairnDigest) ? `cairn:${cairnDigest}` : null;
+      } else if (raw.role === "envelope" && typeof raw.ts === "string" && isResultCard(raw.card)) {
+        const envelopeDigest = cardDigest(root, id, raw.ts, raw.card);
+        authenticatedEvent = cardDigestCandidates(root, id, raw.ts, raw.card).some((value) => markers.has(value))
+          ? `envelope:${envelopeDigest}`
+          : null;
+      }
+      const eventPosition = authenticatedEvent === null ? undefined : strictTranscriptPositions.get(authenticatedEvent);
+      if (eventPosition !== undefined) {
+        if (eventPosition <= lastPhysicalTranscriptPosition) physicalTranscriptOrderSafe = false;
+        lastPhysicalTranscriptPosition = eventPosition;
+      }
+    } catch { /* malformed/project-written lines are not custody */ }
+  }
+  for (let lineIndex = 0; lineIndex < physicalLines.length; lineIndex += 1) {
+    const line = physicalLines[lineIndex];
     if (!line.trim()) continue;
     try {
       const value = JSON.parse(line) as ConductorTurn;
@@ -786,7 +994,7 @@ export function readHistorySnapshot(root: string, id: string): ConductorHistoryS
             }
           }
         }
-        entries.push(Object.freeze({ turn, replyContext, inputId: authenticatedOwner ? inputId as string : null, authenticatedOwner, authenticatedCairn: false, authenticatedEnvelope: false }));
+        entries.push(Object.freeze({ turn, replyContext, inputId: authenticatedOwner ? inputId as string : null, authenticatedOwner, authenticatedCairn: false, authenticatedEnvelope: false, authenticatedBuilderReview: false }));
       } else if (value.role === "cairn" && typeof value.text === "string") {
         // A commentary's suggestions (Task 157) are re-validated on read with
         // the same fail-closed rule as at persist time: this file lives
@@ -821,7 +1029,7 @@ export function readHistorySnapshot(root: string, id: string): ConductorHistoryS
             ...(parsedTurn.tokens !== undefined ? { tokens: parsedTurn.tokens } : {}),
             ...(parsedTurn.costUsd !== undefined ? { costUsd: parsedTurn.costUsd } : {}),
           });
-        entries.push(Object.freeze({ turn, replyContext: null, inputId: null, authenticatedOwner: false, authenticatedCairn, authenticatedEnvelope: false }));
+        entries.push(Object.freeze({ turn, replyContext: null, inputId: null, authenticatedOwner: false, authenticatedCairn, authenticatedEnvelope: false, authenticatedBuilderReview: false }));
       } else if (value.role === "envelope" && isResultCard(value.card)) {
         // Shape AND authorship. What the owner reads as Cairn's own
         // verification has to be something Cairn actually wrote: this line
@@ -835,7 +1043,33 @@ export function readHistorySnapshot(root: string, id: string): ConductorHistoryS
         const authenticatedEnvelope = transcriptPosition !== undefined && transcriptPosition > lastTranscriptPosition;
         if (authenticatedEnvelope) lastTranscriptPosition = transcriptPosition;
         const turn = Object.freeze({ role: "envelope" as const, card: value.card, ts: value.ts });
-        entries.push(Object.freeze({ turn, replyContext: null, inputId: null, authenticatedOwner: false, authenticatedCairn: false, authenticatedEnvelope }));
+        entries.push(Object.freeze({ turn, replyContext: null, inputId: null, authenticatedOwner: false, authenticatedCairn: false, authenticatedEnvelope, authenticatedBuilderReview: false }));
+      } else if (value.role === "builder-review" && lineIndex < completeLineCount) {
+        const turn = parseBuilderReviewTurn(value);
+        const digest = turn === null ? null : builderReviewTurnDigest(root, id, turn);
+        const event = digest === null ? null : `builder-review:${digest}`;
+        const transcriptPosition = event === null ? undefined : strictTranscriptPositions.get(event);
+        const authenticatedBuilderReview = digest !== null && event !== null
+          && !hasIncompleteTail
+          && strictTranscriptUnique
+          && physicalTranscriptOrderSafe
+          && builderMarkerCounts.get(digest) === 1
+          && physicalBuilderCounts.get(digest) === 1
+          && physicalBuilderIdCounts.get(turn?.displayTurnId ?? "") === 1
+          && strictTranscriptCounts.get(event) === 1
+          && transcriptPosition !== undefined
+          && transcriptPosition > lastTranscriptPosition;
+        if (!authenticatedBuilderReview || turn === null || transcriptPosition === undefined) continue;
+        lastTranscriptPosition = transcriptPosition;
+        entries.push(Object.freeze({
+          turn,
+          replyContext: null,
+          inputId: null,
+          authenticatedOwner: false,
+          authenticatedCairn: false,
+          authenticatedEnvelope: false,
+          authenticatedBuilderReview: true,
+        }));
       }
     } catch {
       // A corrupt line is skipped; the rest of the memory survives.
@@ -883,8 +1117,9 @@ export function listConversations(root: string): Array<{ id: string; startedTs: 
       // at all — so the preview is the first thing owner or Cairn said, and
       // "Result card" only when neither ever spoke.
       const spoken = turns.find((turn) => turn.role === "owner" || turn.role === "cairn");
-      const preview = spoken && spoken.role !== "envelope"
+      const preview = spoken && (spoken.role === "owner" || spoken.role === "cairn")
         ? spoken.text.slice(0, 80)
+        : turns.some((turn) => turn.role === "builder-review") ? BUILDER_PROPOSAL_REVIEW_BOUNDARY.title
         : turns.length > 0 ? "Result card" : "";
       return { id, startedTs: turns[0]?.ts ?? "", preview };
     });

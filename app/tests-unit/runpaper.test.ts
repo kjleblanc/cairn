@@ -29,15 +29,15 @@ test("the project run keeps one live status node and exposes only presentation s
 
 test("disconnected restart exposes only authenticated local results and run reattachment", () => {
   assert.match(chat,
-    /if \(!status\.connected\) \{[\s\S]*?conductorConversations\(dir\)[\s\S]*?conductorTurns\(dir, id\)[\s\S]*?\.filter\(\(turn\)[\s\S]*?turn\.role === "envelope"/,
-    "disconnected restore does not load and narrow Main's authenticated local history to envelope turns");
+    /if \(!status\.connected\) \{[\s\S]*?conductorConversations\(dir\)[\s\S]*?conductorTurns\(dir, id\)[\s\S]*?\.filter\(\(turn\)[\s\S]*?turn\.role === "envelope" \|\| turn\.role === "builder-review"/,
+    "disconnected restore must load only authenticated local envelope and Builder-review evidence");
   assert.match(chat,
-    /status && !status\.connected && turns\.some\(\(turn\) => turn\.role === "envelope"\)[\s\S]*?aria-label="Saved task results"[\s\S]*?turn\.role === "envelope"[\s\S]*?<ResultCardView/,
-    "authenticated result cards stay hidden when the conductor is disconnected");
+    /status && !status\.connected && turns\.some\(\(turn\) => turn\.role === "envelope" \|\| turn\.role === "builder-review"\)[\s\S]*?aria-label="Saved conversation evidence"[\s\S]*?turn\.role === "envelope"[\s\S]*?<ResultCardView[\s\S]*?<BuilderProposalReview/,
+    "authenticated result cards and inert Builder reviews stay visible while ordinary prose stays hidden");
   assert.match(chat, /status && !status\.connected \? runStrip : null/,
     "the restored run has no disconnected reattachment strip");
 
-  const disconnectedResults = chat.indexOf('aria-label="Saved task results"');
+  const disconnectedResults = chat.indexOf('aria-label="Saved conversation evidence"');
   const connectedGate = chat.indexOf("{status?.connected ? (", disconnectedResults);
   const ordinaryTurn = chat.indexOf('className={`bubble ${turn.role === "owner"');
   const composer = chat.indexOf('<div className="chat-composer">');

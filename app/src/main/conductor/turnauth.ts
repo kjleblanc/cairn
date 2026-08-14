@@ -8,7 +8,7 @@ import { appendVerifiedDigest, appendVerifiedLine, externalMarkerContainer, read
 const OWNER_TURN_DOMAIN = "cairn-owner-turn/v1";
 const CAIRN_TURN_DOMAIN = "cairn-conductor-turn/v1";
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const TRANSCRIPT_EVENT = /^(?:owner|cairn|envelope):[0-9a-f]{64}$/;
+const TRANSCRIPT_EVENT = /^(?:owner|cairn|envelope|builder-review):[0-9a-f]{64}$/;
 const FORBIDDEN_VISIBLE_CONTROLS = /[\u0000\u202a-\u202e\u2066-\u2069]/u;
 
 let markerDir: string | null = null;
@@ -167,14 +167,19 @@ export function turnDigest(
     .digest("hex");
 }
 
-function markerFile(dir: string, containerName: string, create: boolean): string | null {
+function markerFile(
+  dir: string,
+  containerName: string,
+  create: boolean,
+  canonicalKey = canonicalProjectKey(dir),
+): string | null {
   const container = externalMarkerContainer(markerDir, dir, containerName, create);
   if (container === null) return null;
-  const name = createHash("sha256").update(canonicalProjectKey(dir)).digest("hex");
+  const name = createHash("sha256").update(canonicalKey).digest("hex");
   return join(container, `${name}.txt`);
 }
 
-export type TranscriptEventKind = "owner" | "cairn" | "envelope";
+export type TranscriptEventKind = "owner" | "cairn" | "envelope" | "builder-review";
 
 /** One protected ordering ledger for every main-authenticated conversation
  * event. Role-specific marker files prove authorship; this sequence also
@@ -187,9 +192,41 @@ export function recordTranscriptEventMarker(dir: string, kind: TranscriptEventKi
   appendVerifiedLine(file, `${kind}:${digest}`, TRANSCRIPT_EVENT);
 }
 
+/** Builder display append needs strict reloadability before the project line
+ * can be accepted. A malformed prior ledger or duplicate exact event leaves
+ * only inert marker residue and refuses before JSONL. */
+export function recordStrictTranscriptEventMarker(
+  dir: string,
+  kind: "builder-review",
+  digest: string,
+  stableCanonicalProjectKey: string,
+): void {
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error("TRANSCRIPT_EVENT_INVALID");
+  const file = markerFile(dir, "conversation-event-markers", true, stableCanonicalProjectKey);
+  if (file === null) throw new Error("TRANSCRIPT_EVENT_STORE_UNAVAILABLE");
+  const event = `${kind}:${digest}`;
+  appendVerifiedLine(file, event, TRANSCRIPT_EVENT);
+  const sequence = readStrictVerifiedLines(file, TRANSCRIPT_EVENT);
+  if (sequence.at(-1) !== event || sequence.filter((candidate) => candidate === event).length !== 1
+    || new Set(sequence).size !== sequence.length) {
+    throw new Error("TRANSCRIPT_EVENT_VERIFY_FAILED");
+  }
+}
+
 export function transcriptEventSequence(dir: string): readonly string[] {
   try {
     return readVerifiedLines(markerFile(dir, "conversation-event-markers", false), TRANSCRIPT_EVENT);
+  } catch {
+    return Object.freeze([]);
+  }
+}
+
+/** Builder display custody treats any malformed or crash-partial ordering
+ * ledger as no evidence at all. Existing chat/card upgrade behavior keeps its
+ * historical tolerant reader above. */
+export function strictTranscriptEventSequence(dir: string): readonly string[] {
+  try {
+    return readStrictVerifiedLines(markerFile(dir, "conversation-event-markers", false), TRANSCRIPT_EVENT);
   } catch {
     return Object.freeze([]);
   }

@@ -232,7 +232,13 @@ export function Workspace({
       void cairn.conductorStatus().then(setConductor);
     };
     const offTask = cairn.onTaskActivity(refresh);
-    const offConductor = cairn.onConductorDelta(refresh);
+    // A Builder review is an append-only display turn. It must not provoke
+    // project, task, runtime, or connection reads merely by arriving.
+    const offConductor = cairn.onConductorDelta((event) => {
+      const payloadTurn = (event as { turn?: { role?: unknown } }).turn;
+      if (event.kind === "turn" || payloadTurn?.role === "builder-review") return;
+      refresh();
+    });
     const timer = window.setInterval(refresh, 2_000);
     return () => {
       offTask();

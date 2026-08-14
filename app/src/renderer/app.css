@@ -273,6 +273,75 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-request-context { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
 .result-card-request-context > h2 { font-size: 1rem; }
 .result-card-path { margin: 8px 0 0; color: var(--card-muted); overflow-wrap: anywhere; }
+
+/* Task 231: authenticated Builder output is a nonterminal review surface,
+ * neither a chat bubble nor an envelope result. These rules style only the
+ * existing literal/actionless Task 229 component. */
+.builder-proposal-review {
+  align-self: stretch; display: grid; min-width: 0; gap: 14px; margin: 0;
+  padding: 18px; border: 1px solid var(--amber); border-left-width: 5px;
+  border-radius: var(--r); background: var(--card); color: var(--card-ink);
+}
+.builder-proposal-header { display: grid; min-width: 0; gap: 4px; }
+.builder-proposal-header h2,
+.builder-proposal-capability h3,
+.builder-proposal-file h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.builder-proposal-eyebrow,
+.builder-proposal-label {
+  margin: 0; color: var(--amber-deep); font-size: .72rem; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+}
+.builder-proposal-boundary {
+  margin: 0; padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--amber-soft); color: var(--amber-deep); font-weight: 700;
+}
+.builder-proposal-caveat,
+.builder-proposal-summary p:last-child { margin: 0; }
+.builder-proposal-caveat { color: var(--card-muted); }
+.builder-proposal-summary,
+.builder-proposal-files { display: grid; min-width: 0; gap: 8px; }
+.builder-proposal-files { gap: 12px; }
+.builder-proposal-file,
+.builder-proposal-capability {
+  display: grid; min-width: 0; gap: 10px; padding: 13px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card-solid);
+}
+.builder-proposal-comparison {
+  display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+}
+.builder-proposal-comparison > section { min-width: 0; }
+.builder-proposal-hash {
+  display: block; margin-top: 4px; overflow-wrap: anywhere;
+  color: var(--card-muted); font: 600 .7rem/1.45 var(--mono);
+}
+.builder-proposal-file pre {
+  min-height: 78px; margin: 8px 0 0; padding: 10px; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); color: var(--ink);
+  font: 600 .76rem/1.5 var(--mono);
+}
+.builder-proposal-capability dl,
+.builder-proposal-identity { display: grid; min-width: 0; gap: 7px; margin: 0; }
+.builder-proposal-capability dl > div,
+.builder-proposal-identity > div {
+  display: grid; min-width: 0; grid-template-columns: minmax(112px, .32fr) minmax(0, 1fr); gap: 10px;
+}
+.builder-proposal-capability dt,
+.builder-proposal-identity dt { color: var(--card-muted); font-weight: 700; }
+.builder-proposal-capability dd,
+.builder-proposal-identity dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.builder-proposal-identity { padding-top: 10px; border-top: 1px solid var(--line); font-size: .74rem; }
+
+/* Cairn's desktop window has a 760px minimum. Collapse before that real
+ * compact boundary, rather than at a viewport width the app cannot reach. */
+@media (max-width: 820px) {
+  .builder-proposal-review { padding: 14px 12px; }
+  .builder-proposal-comparison,
+  .builder-proposal-capability dl > div,
+  .builder-proposal-identity > div { grid-template-columns: minmax(0, 1fr); }
+  .builder-proposal-capability dl > div,
+  .builder-proposal-identity > div { gap: 2px; }
+}
 /* Task 173: a checked result leads with pictures when — and only when — main
  * can still read at least one image from the card's exact trusted run. The
  * renderer receives opaque IDs, never paths. One surviving still owns the

@@ -4,7 +4,9 @@ import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
 import { startPhoneBridge, stopPhoneBridge } from "./bridge/runtime.js";
 import { setCardMarkerDir } from "./conductor/cardauth.js";
+import { setBuilderReviewMarkerDir } from "./conductor/builderreviewauth.js";
 import { setTurnMarkerDir } from "./conductor/turnauth.js";
+import { appendTask231SyntheticBuilderReview } from "./builderproposalreviewfixture.js";
 import { setEvidenceMarkerDir } from "./evidence.js";
 import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import {
@@ -72,6 +74,22 @@ if (q9E2eRequested && calibrationE2eRequested) {
 if (q9E2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "1"
   || !testUserData || !process.env.CAIRN_OPEN || q9ScenarioFromEnvironment() === null)) {
   throw new Error("Q9 E2E requires the complete isolated fake guard and one closed preregistered scenario.");
+}
+
+// Task 231's only producer is a no-argument, one-shot Main hook for an
+// isolated synthetic Electron proof. Partial markers fail at boot; normal
+// product launches have no route, IPC method or renderer control that creates
+// a Builder review turn.
+const builderReviewE2eRequested = process.env.CAIRN_TEST_BUILDER_REVIEW === "1";
+if (process.env.CAIRN_TEST_BUILDER_REVIEW !== undefined && !builderReviewE2eRequested) {
+  throw new Error("CAIRN_TEST_BUILDER_REVIEW must be exactly 1 when present.");
+}
+if (builderReviewE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "1"
+  || !testUserData || !process.env.CAIRN_OPEN)) {
+  throw new Error("Builder review E2E requires CAIRN_E2E=1, CAIRN_MOCK=1, CAIRN_TEST_USER_DATA, and CAIRN_OPEN.");
+}
+if (builderReviewE2eRequested && (q9E2eRequested || calibrationE2eRequested)) {
+  throw new Error("Builder review, Q8 calibration, and Q9 task fakes are mutually exclusive boot modes.");
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -182,6 +200,9 @@ function bootstrap(): void {
     // `--sandbox workspace-write --cd <project>` cannot write. Set before any
     // IPC is registered: until it is, `readTurns` vouches for no card at all.
     setCardMarkerDir(app.getPath("userData"));
+    // Builder reviews use their own versioned marker domain and container.
+    // Configure it before the guarded fixture or any conversation read.
+    setBuilderReviewMarkerDir(app.getPath("userData"));
     // Owner-turn custody uses its own marker namespace at the same demonstrated
     // out-of-project boundary. Configure it before conductor IPC can send.
     setTurnMarkerDir(app.getPath("userData"));
@@ -209,7 +230,7 @@ function bootstrap(): void {
       );
     }
     bootstrapReady = true;
-    registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested });
+    registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested });
     registerConductorIpc();
     registerBridgeIpc();
     criticCalibration = calibrationE2eRequested
@@ -247,6 +268,28 @@ function bootstrap(): void {
     }
     registerTaskIpc(() => mainWindow, criticCalibration, q9Runtime);
     restoreQ9TaskRuns(q9Runtime, () => mainWindow);
+    if (builderReviewE2eRequested) {
+      let used = false;
+      const projectRoot = path.resolve(process.env.CAIRN_OPEN as string);
+      (globalThis as typeof globalThis & {
+        __CAIRN_TASK231_APPEND_BUILDER_REVIEW__?: () => Readonly<{ conversationId: string; displayTurnId: string }>;
+      }).__CAIRN_TASK231_APPEND_BUILDER_REVIEW__ = () => {
+        if (used) throw new Error("TASK231_FIXTURE_ALREADY_USED");
+        if (mainWindow === null || mainWindow.isDestroyed()) throw new Error("TASK231_FIXTURE_WINDOW_UNAVAILABLE");
+        used = true;
+        const appended = appendTask231SyntheticBuilderReview(projectRoot);
+        mainWindow.webContents.send("conductor:delta", {
+          dir: projectRoot,
+          conversationId: appended.conversationId,
+          kind: "turn",
+          turn: appended.turn,
+        });
+        return Object.freeze({
+          conversationId: appended.conversationId,
+          displayTurnId: appended.turn.displayTurnId,
+        });
+      };
+    }
     // The phone bridge (Task 143): one LAN listener serving the owner's
     // paired phone. It starts with the normal app and stops at quit; if it
     // cannot start (no home-network address, ports in use) the settings
@@ -254,7 +297,7 @@ function bootstrap(): void {
     // Guarded Q9 is a strictly local evidence fixture: it must neither open a
     // LAN listener nor create/update the bridge device store in its isolated
     // profile. Registration remains inert; only the stateful runtime is dark.
-    if (!q9E2eRequested) void startPhoneBridge();
+    if (!q9E2eRequested && !builderReviewE2eRequested) void startPhoneBridge();
     createWindow();
     deliverPendingTaskResultCards(() => mainWindow);
     app.on("activate", () => {

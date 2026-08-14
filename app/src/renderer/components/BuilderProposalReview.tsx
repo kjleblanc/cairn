@@ -23,16 +23,16 @@ function ReplacementReview({ review }: {
         <p>{review.summary}</p>
       </section>
       <div className="builder-proposal-files">
-        {review.replacements.map((row) => (
-          <article className="builder-proposal-file" key={row.projectRelativePath}>
+        {review.replacements.map((row, index) => (
+          <article className="builder-proposal-file" key={index}>
             <h3><code>{row.projectRelativePath}</code></h3>
             <div className="builder-proposal-comparison">
-              <section aria-label={`Before text for ${row.projectRelativePath}`}>
+              <section aria-label="Before selected text">
                 <p className="builder-proposal-label">Before · SHA-256</p>
                 <code className="builder-proposal-hash">{row.beforeSha256}</code>
                 <pre>{row.beforeText}</pre>
               </section>
-              <section aria-label={`Proposed text for ${row.projectRelativePath}`}>
+              <section aria-label="Proposed replacement text">
                 <p className="builder-proposal-label">Proposed · SHA-256</p>
                 <code className="builder-proposal-hash">{row.afterSha256}</code>
                 <pre>{row.afterText}</pre>
@@ -62,7 +62,7 @@ function CapabilityReview({ review }: {
       <p className="builder-proposal-label">Builder asks for</p>
       <h3>{review.categoryLabel}</h3>
       <dl>
-        {fields.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+        {fields.map(([label, value], index) => <div key={index}><dt>{label}</dt><dd>{value}</dd></div>)}
       </dl>
     </section>
   );

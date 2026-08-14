@@ -222,6 +222,7 @@ export const PHONE_PAGE = `<!doctype html>
       card.appendChild(el("p", "turn-when", fmtTime(turn.ts)));
       return card;
     }
+    if (turn.role !== "owner" && turn.role !== "cairn") return null;
     var bubble = el("div", "bubble " + (turn.role === "owner" ? "bubble-owner" : "bubble-cairn"));
     bubble.appendChild(el("span", "who", turn.role === "owner" ? "You" : "Cairn"));
     bubble.appendChild(document.createTextNode(turn.text));
@@ -250,7 +251,10 @@ export const PHONE_PAGE = `<!doctype html>
       root.appendChild(el("p", "muted", "No conversation yet. Start one on the computer and it will appear here."));
     } else {
       var list = el("div");
-      convo.turns.forEach(function (turn) { list.appendChild(renderTurn(turn)); });
+      convo.turns.forEach(function (turn) {
+        var rendered = renderTurn(turn);
+        if (rendered) list.appendChild(rendered);
+      });
       if (convo.streaming) {
         var bubble = el("div", "bubble bubble-cairn streaming");
         bubble.appendChild(el("span", "who", convo.streaming.kind === "commentary" ? "Cairn (commenting on the result card)" : "Cairn"));

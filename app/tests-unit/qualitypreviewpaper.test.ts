@@ -26,7 +26,7 @@ test("the Task Spec preview crosses IPC as optional output only", () => {
   assert.doesNotMatch(routeRequest, /taskSpec|quality|criteria|preferences/iu);
   assert.doesNotMatch(runRequest, /taskSpec|quality|criteria|preferences/iu);
 
-  const action = section(ipc, "export type ConductorAction =", "export interface ConductorDelta");
+  const action = section(ipc, "export type ConductorAction =", "export interface ConductorBuilderReviewTurn");
   assert.match(action, /taskSpecPreview\?: TaskSpecProposalPreviewV1;/);
 });
 

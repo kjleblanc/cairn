@@ -309,7 +309,8 @@ test("the attribution styles are supplemental, wrap long text, and add no layout
   assert.match(css, /\.task-intent-interpretation[\s\S]*?white-space:\s*pre-wrap/);
   assert.match(css, /\.question-card-controls[\s\S]*?flex-wrap:\s*wrap/);
   const widths = [...css.matchAll(/@media\s+\((?:min|max)-width:\s*(\d+)px\)/g)].map((match) => Number(match[1]));
-  assert.ok(widths.every((width) => width === 620 || width === 621 || width === 1260));
+  assert.ok(widths.every((width) => width === 620 || width === 621 || width === 820 || width === 1260),
+    "the only added layout policy is Task 231's compact inert Builder-review card");
   const attributionCss = css.slice(css.indexOf("/* Task 179:"), css.indexOf("/* Task 179 end. */"));
   assert.ok(attributionCss.length > 0);
   assert.ok(!/animation\s*:|transition\s*:|overflow-x\s*:/.test(attributionCss));

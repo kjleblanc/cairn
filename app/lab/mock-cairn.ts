@@ -162,9 +162,10 @@ function simulateReply(conversationId: string): void {
     }, 350 * (i + 1)));
   });
   streamTimers.push(setTimeout(() => {
-    world.turns = [...world.turns, { role: "cairn", text, ts: new Date().toISOString() }];
+    const turn = { role: "cairn" as const, text, ts: new Date().toISOString() };
+    world.turns = [...world.turns, turn];
     world.stream = null;
-    emitConductor({ dir: DIR, conversationId, kind: "done" });
+    emitConductor({ dir: DIR, conversationId, kind: "done", turn });
   }, 350 * (parts.length + 1) + 400));
 }
 

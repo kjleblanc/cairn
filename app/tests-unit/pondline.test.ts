@@ -131,5 +131,6 @@ test("the pond is never reduced — it is whole, or it is a line", () => {
 
 test("no new breakpoint was invented for the narrow window", () => {
   const widths = [...css.matchAll(/@media \(m(?:in|ax)-width: (\d+)px\)/g)].map((match) => match[1]);
-  assert.deepEqual([...new Set(widths)].sort(), ["1260", "620", "621"]);
+  assert.deepEqual([...new Set(widths)].sort(), ["1260", "620", "621", "820"],
+    "Task 231 adds only the explicit compact Builder-review card breakpoint");
 });

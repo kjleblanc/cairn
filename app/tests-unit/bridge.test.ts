@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import { runInNewContext } from "node:vm";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ import {
   type Bridge,
   type BridgeService,
 } from "../src/main/bridge/server.js";
-import type { ConductorStatus, ConductorTurn } from "../src/shared/ipc.js";
+import type { ConductorStatus, ConductorTurn, ResultCard } from "../src/shared/ipc.js";
 
 /**
  * Task 143's bridge coverage: pairing accept/refuse/expiry/single-use,
@@ -37,6 +38,87 @@ const TURNS: ConductorTurn[] = [
   { role: "owner", text: "hello Cairn", ts: "2026-07-31T09:00:00.000Z" },
   { role: "cairn", text: "hello back", ts: "2026-07-31T09:00:05.000Z" },
 ];
+
+const LEGACY_CARD: ResultCard = {
+  kind: "result",
+  disposition: "DONE",
+  taskNumber: 143,
+  stopReason: null,
+  errorCode: null,
+  filesChanged: [],
+  protectedIntact: true,
+  commit: null,
+  evidenceSummary: "legacy-envelope-stays-visible",
+  recordRecovery: null,
+  processFailure: null,
+  claims: null,
+  route: null,
+};
+
+/** Every string is deliberately distinctive so the HTTP assertions prove the
+ * whole Builder turn is absent, rather than checking only its role tag. */
+const BUILDER_TURN: Extract<ConductorTurn, { role: "builder-review" }> = {
+  role: "builder-review",
+  version: "cairn-builder-review-turn/v1",
+  displayTurnId: "23123123-1231-4231-8231-231231231231",
+  review: {
+    version: "cairn-builder-proposal-review/v1",
+    taskNumber: 923_111,
+    runId: "23123123-1231-4231-8231-231231231232",
+    turnId: "23123123-1231-4231-8231-231231231233",
+    contextSha256: "a231".repeat(16),
+    responseSha256: "b231".repeat(16),
+    kind: "replacement-proposal",
+    summary: "BUILDER-SUMMARY-MUST-NOT-CROSS-LAN",
+    replacements: [{
+      projectRelativePath: "builder/private/sentinel-231.ts",
+      beforeSha256: "c231".repeat(16),
+      beforeText: "BUILDER-BEFORE-TEXT-MUST-NOT-CROSS-LAN",
+      afterSha256: "d231".repeat(16),
+      afterText: "BUILDER-AFTER-TEXT-MUST-NOT-CROSS-LAN",
+    }],
+  },
+  ts: "2026-08-13T23:11:23.231Z",
+};
+
+const LEGACY_AND_BUILDER_TURNS: ConductorTurn[] = [
+  TURNS[0],
+  BUILDER_TURN,
+  TURNS[1],
+  { role: "envelope", card: LEGACY_CARD, ts: "2026-07-31T09:00:10.000Z" },
+];
+
+function stringLeaves(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringLeaves);
+  if (value !== null && typeof value === "object") return Object.values(value).flatMap(stringLeaves);
+  return [];
+}
+
+function assertBuilderOmittedAndLegacyPreserved(serialized: string): void {
+  for (const builderByte of stringLeaves(BUILDER_TURN)) {
+    assert.ok(!serialized.includes(builderByte), `phone snapshot leaked Builder byte: ${builderByte}`);
+  }
+  assert.ok(!serialized.includes(String(BUILDER_TURN.review.taskNumber)), "phone snapshot leaked Builder task identity");
+
+  const snapshot = JSON.parse(serialized) as {
+    conversation: { turns: ConductorTurn[] };
+  };
+  assert.deepEqual(snapshot.conversation.turns.map((turn) => turn.role), ["owner", "cairn", "envelope"]);
+  assert.equal(snapshot.conversation.turns[0]?.role === "owner" && snapshot.conversation.turns[0].text, "hello Cairn");
+  assert.equal(snapshot.conversation.turns[1]?.role === "cairn" && snapshot.conversation.turns[1].text, "hello back");
+  assert.equal(
+    snapshot.conversation.turns[2]?.role === "envelope" && snapshot.conversation.turns[2].card.evidenceSummary,
+    "legacy-envelope-stays-visible",
+  );
+}
+
+function phoneRenderTurn(turn: unknown): unknown {
+  const start = PHONE_PAGE.indexOf("function renderTurn(turn)");
+  const end = PHONE_PAGE.indexOf("\n\n  function render(state)", start);
+  assert.ok(start >= 0 && end > start, "phone renderTurn source must remain independently testable");
+  return runInNewContext(`${PHONE_PAGE.slice(start, end)}\nrenderTurn(input);`, { input: turn });
+}
 
 function fakeService(overrides: Partial<BridgeService> = {}): BridgeService {
   return {
@@ -200,6 +282,27 @@ test("a paired phone reads the state snapshot — content only, no paths, no pro
   await bridge.close();
 });
 
+test("the phone state API and SSE omit every Builder-review byte while preserving legacy turns", async () => {
+  const service = fakeService({ turns: () => LEGACY_AND_BUILDER_TURNS });
+  const { bridge, url } = await boot({ service });
+  const { code } = bridge.beginPairing();
+  const cookie = cookieFrom(await pair(url, code));
+
+  const state = await fetch(`${url}/api/state`, { headers: { cookie } });
+  assert.equal(state.status, 200);
+  assertBuilderOmittedAndLegacyPreserved(await state.text());
+
+  const stream = sseCollect(url, cookie);
+  await waitFor(() => stream.frames.length === 1);
+  assertBuilderOmittedAndLegacyPreserved(JSON.stringify(stream.frames[0]));
+
+  emitBridgeSync();
+  await waitFor(() => stream.frames.length === 2);
+  assertBuilderOmittedAndLegacyPreserved(JSON.stringify(stream.frames[1]));
+  stream.close();
+  await bridge.close();
+});
+
 test("the phone names the updated-sharing pause and sends the owner to the computer", () => {
   assert.match(
     PHONE_PAGE,
@@ -210,6 +313,24 @@ test("the phone names the updated-sharing pause and sends the owner to the compu
 test("the phone points to desktop evidence without requesting or embedding pictures", () => {
   assert.match(PHONE_PAGE, /Pictures for this run are available on the computer\./);
   assert.doesNotMatch(PHONE_PAGE, /evidence:image|data:image\/png|\/api\/evidence/);
+});
+
+test("the phone renderer omits Builder and unknown roles without reading their payload", () => {
+  for (const role of ["builder-review", "future-unrecognized-role"]) {
+    let payloadRead = false;
+    const unknownTurn = {
+      role,
+      get text() { payloadRead = true; return "PHONE-UNKNOWN-TEXT-MUST-STAY-HIDDEN"; },
+      get review() { payloadRead = true; return BUILDER_TURN.review; },
+    };
+    assert.equal(phoneRenderTurn(unknownTurn), null);
+    assert.equal(payloadRead, false, `${role} payload must not be inspected by the phone renderer`);
+  }
+  assert.match(
+    PHONE_PAGE,
+    /var rendered = renderTurn\(turn\);\s*if \(rendered\) list\.appendChild\(rendered\);/,
+    "the phone turn list must append only a role renderer's positive result",
+  );
 });
 
 test("a paired phone receives the saved-connection consent pause", async () => {

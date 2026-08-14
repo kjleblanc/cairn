@@ -1,5 +1,6 @@
 import type { ConvertInspection, ConvertOutcome, ProjectStatus, RouteResult, SerialActivity, SerialRunResult, TaskRequestView, WorkerDisclosure } from "@cairn/core";
 import type { TaskSpecProposalPreviewV1 } from "./quality-preview.js";
+import type { BuilderProposalReviewV1 } from "./builder-proposal-review.js";
 import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-review.js";
 import type { CriticCallDecisionRequest, CriticCallDecisionV1, CriticCallDisclosureV1 } from "./critic-call.js";
 import type { RepairCallDecisionRequest, RepairCallDecisionV1, RepairCallDisclosureV1 } from "./repair-call.js";
@@ -378,7 +379,7 @@ export type ConductorAction =
       taskSpecPreview?: TaskSpecProposalPreviewV1;
     };
 
-export interface ConductorDelta {
+interface ConductorDeltaCoordinates {
   dir: string;
   conversationId: string;
   /**
@@ -389,25 +390,54 @@ export interface ConductorDelta {
    */
   /** "replace" resets a live reply to main's canonical proposal
    * acknowledgement once main can validate that the stream carries a task. */
-  kind: "delta" | "replace" | "done" | "error" | "envelope";
-  text?: string;
-  turn?: ConductorTurn;
-  taskBlock?: TaskBlock | null;
   /** Trusted main-owned projection. Null on a settled ordinary reply; omitted
    * on streaming deltas/replacements, errors, envelope cards, and commentary. */
-  action?: ConductorAction | null;
-  message?: string;
   /** Which of Cairn's two voices is streaming: the reply the owner asked
    * for, or the envelope's one short comment on a result card (Task 153).
    * The renderer needs the difference: a commentary is shown as a labeled
    * bubble with no Stop control, and its failure is released quietly — no
    * error bubble, no phantom partial turn — matching main's silent drop. */
-  turnKind?: ConductorStreamKind;
   /** Task 157: the commentary's up-to-three next-step suggestions, on the
    * done delta only. Null for a reply (a reply never carries them) and when
    * the model's block failed validation — never a coerced list. */
-  followups?: string[] | null;
 }
+
+/** Strict event vocabulary used by every producer and consumer. `turn` is
+ * role-closed per kind, so a Builder review cannot be treated as a terminal
+ * reply, an error settlement, or an envelope receipt. */
+export type ConductorDelta =
+  | (ConductorDeltaCoordinates & {
+      kind: "delta";
+      text?: string;
+      turnKind?: ConductorStreamKind;
+    })
+  | (ConductorDeltaCoordinates & {
+      kind: "replace";
+      text?: string;
+      turnKind?: ConductorStreamKind;
+    })
+  | (ConductorDeltaCoordinates & {
+      kind: "done";
+      turn: ConductorChatTurn & { role: "cairn" };
+      taskBlock?: TaskBlock | null;
+      action?: ConductorAction | null;
+      turnKind?: ConductorStreamKind;
+      followups?: string[] | null;
+    })
+  | (ConductorDeltaCoordinates & {
+      kind: "error";
+      turn?: ConductorChatTurn & { role: "cairn" };
+      message?: string;
+      turnKind?: ConductorStreamKind;
+    })
+  | (ConductorDeltaCoordinates & {
+      kind: "envelope";
+      turn: ConductorEnvelopeTurn;
+    })
+  | (ConductorDeltaCoordinates & {
+      kind: "turn";
+      turn: ConductorBuilderReviewTurn;
+    });
 
 /**
  * Task 160's checkup report. Built deterministically in main from the
@@ -680,7 +710,18 @@ export interface ConductorEnvelopeTurn {
   ts: string;
 }
 
-export type ConductorTurn = ConductorChatTurn | ConductorEnvelopeTurn;
+/** Main-authenticated, nonterminal display evidence from the proposal-only
+ * Builder route. The opaque id deduplicates delta/read races; it is not an
+ * action id and no renderer value can re-enter Main as authority. */
+export interface ConductorBuilderReviewTurn {
+  role: "builder-review";
+  version: "cairn-builder-review-turn/v1";
+  displayTurnId: string;
+  review: BuilderProposalReviewV1;
+  ts: string;
+}
+
+export type ConductorTurn = ConductorChatTurn | ConductorEnvelopeTurn | ConductorBuilderReviewTurn;
 
 /**
  * Task 143: the phone bridge ("pair and read" — decisions 1, 2, and 5 of

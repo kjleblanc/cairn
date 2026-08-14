@@ -97,10 +97,19 @@ interface BridgeSnapshot {
   project: { name: string } | null;
   conversation: {
     id: string;
-    turns: ConductorTurn[];
+    turns: BridgeVisibleTurn[];
     streaming: { kind: string; startedAt: string; text: string } | null;
   } | null;
   device: { name: string };
+}
+
+type BridgeVisibleTurn = Extract<ConductorTurn, { role: "owner" | "cairn" | "envelope" }>;
+
+/** Positive phone data-scope boundary. New conversation roles stay off the
+ * LAN until a later owner decision explicitly admits them. */
+export function bridgeVisibleTurns(turns: readonly ConductorTurn[]): BridgeVisibleTurn[] {
+  return turns.filter((turn): turn is BridgeVisibleTurn =>
+    turn.role === "owner" || turn.role === "cairn" || turn.role === "envelope");
 }
 
 interface LivePairing {
@@ -168,7 +177,7 @@ export async function startBridge(opts: BridgeOptions): Promise<Bridge> {
       if (id !== null) {
         conversation = {
           id,
-          turns: opts.service.turns(project.dir, id),
+          turns: bridgeVisibleTurns(opts.service.turns(project.dir, id)),
           streaming: stream !== null && stream.conversationId === id
             ? { kind: stream.kind, startedAt: stream.startedAt, text: stream.text }
             : null,

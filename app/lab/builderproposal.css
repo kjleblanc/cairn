@@ -7,8 +7,8 @@ body {
   color: var(--lantern-ink);
 }
 
-/* Task 229: this lab-only stylesheet keeps the proposal card out of Cairn's
- * production renderer bundle while borrowing its existing paper tokens. */
+/* Task 229's standalone lab retains its wider visual treatment. Task 231 adds
+ * separate production Chat rules without importing this lab stylesheet. */
 .builder-proposal-review {
   display: grid;
   gap: 14px;

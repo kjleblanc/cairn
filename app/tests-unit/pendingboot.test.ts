@@ -12,7 +12,7 @@ test("pending recovery is installed before every IPC, bridge, or window boundary
   const recovery = main.indexOf("installPendingSerialCandidateRecovery(app.getPath(\"userData\"), {");
   assert.ok(recovery > main.indexOf("setEvidenceMarkerDir(app.getPath(\"userData\"))"));
   for (const boundary of [
-    "registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested })",
+    "registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested })",
     "registerConductorIpc()",
     "registerBridgeIpc()",
     "registerTaskIpc(() => mainWindow, criticCalibration, q9Runtime)",
@@ -52,7 +52,8 @@ test("an unverifiable pending store gates every project instead of refusing to s
   const bootstrap = main.slice(main.indexOf("function bootstrap()"));
   const branchStart = bootstrap.indexOf("if (!pendingBoot.journal.ready)");
   assert.ok(branchStart > 0, "boot must still notice an unverifiable journal");
-  const branch = bootstrap.slice(branchStart, bootstrap.indexOf("registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested })"));
+  const projectIpc = "registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested || builderReviewE2eRequested })";
+  const branch = bootstrap.slice(branchStart, bootstrap.indexOf(projectIpc));
   // A poisoned store already refuses every mutation and gates every project
   // through the globally-unsafe sentinel, so quitting here would turn one
   // drifted journal — in any project — into an app that can never start and
@@ -60,7 +61,7 @@ test("an unverifiable pending store gates every project instead of refusing to s
   // unstartable Cairn.
   assert.equal(/app\.quit\(\)/u.test(branch), false, "an unsafe journal must not make Cairn unstartable");
   assert.equal(/\breturn\b/u.test(branch), false, "boot must continue to register its gated surfaces");
-  assert.ok(bootstrap.indexOf("registerProjectIpc({ suppressExternalUpdateCheck: q9E2eRequested })") > branchStart);
+  assert.ok(bootstrap.indexOf(projectIpc) > branchStart);
 });
 
 test("one project's failed recovery cannot stop the others or the app from booting", () => {
@@ -99,12 +100,12 @@ test("candidate routing remains guarded Q9-only and adds no verdict IPC", () => 
     "guarded Q9 reserve/send cuts must hard-exit only through the boot-selected driver");
   assert.match(main, /installPendingSerialCandidateQ9E2eTerminalPreparedHook\([\s\S]*const selected = driver\.shouldCut\("after-terminal-prepare"\);[\s\S]*if \(selected\) process\.exit\(86\);[\s\S]*return selected;/u,
     "the terminal cut must occur only after durable preparation");
-  assert.match(main, /if \(!q9E2eRequested\) void startPhoneBridge\(\);/u,
-    "guarded Q9 boot must not open the LAN bridge or initialize its device store");
+  assert.match(main, /if \(!q9E2eRequested && !builderReviewE2eRequested\) void startPhoneBridge\(\);/u,
+    "guarded Q9 or Builder-review boot must not open the LAN bridge or initialize its device store");
   assert.equal((main.match(/startPhoneBridge\(\)/gu) ?? []).length, 1,
     "no second unguarded phone-bridge start may bypass the Q9 boot guard");
-  assert.match(main, /registerProjectIpc\(\{ suppressExternalUpdateCheck: q9E2eRequested \}\);/u,
-    "only Main's exact guarded-Q9 boot choice may suppress the ambient update lookup");
+  assert.match(main, /registerProjectIpc\(\{ suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested \}\);/u,
+    "only Main's exact guarded Q9 or Builder-review boot may suppress the ambient update lookup");
   const projectIpc = source("ipc.ts");
   const update = projectIpc.slice(
     projectIpc.indexOf('ipcMain.handle("app:updateCheck"'),
