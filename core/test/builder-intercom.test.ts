@@ -21,6 +21,7 @@ import {
   BUILDER_SELECTOR_PROVENANCE_VERSION,
   BUILDER_TURN_CONTEXT_VERSION,
   BUILDER_TURN_RESPONSE_VERSION,
+  builderSelectedTrackedTextPathAllowed,
   builderTurnContextSha256,
   builderTurnResponseMatchesContext,
   builderTurnResponseSha256,
@@ -357,6 +358,8 @@ test("builder intercom: context refuses stale, ambiguous, unsafe, widened, and a
     "src/.git/config", ".g\u0131t/config", "node_modules/pkg/index.js", "dist/answer.js", ".env", "secrets/token.txt",
     "config/client-secret.json", "auth/private_key.txt", "config/api-token.txt",
     "package.json", ".npmrc", "pnpm-workspace.yaml", ".github/workflows/release.yml",
+    ".vscode/settings.json", ".idea/workspace.xml", "AGENTS.md", "CONTRACT-TEMPLATE.md",
+    "CLAUDE.md", "CODEX.md", "GEMINI.md",
     ".gitattributes", ".gitignore", ".gitmodules", "build.gradle", "requirements-dev.txt", "app.csproj",
     "vercel.json", "scripts/install.ps1", "src/CON.txt", "src/CONIN$", "src/COM\u00b9.txt",
     "src/a?.ts", "src/a*.ts", "src/a|b.ts", "src/<x>.ts", "src/\"x\".ts",
@@ -639,6 +642,7 @@ test("builder intercom: package surface exposes pure data operations and no Buil
     "BUILDER_SELECTOR_PROVENANCE_VERSION",
     "BUILDER_TURN_CONTEXT_VERSION",
     "BUILDER_TURN_RESPONSE_VERSION",
+    "builderSelectedTrackedTextPathAllowed",
     "builderTurnContextSha256",
     "builderTurnResponseMatchesContext",
     "builderTurnResponseSha256",
@@ -662,6 +666,15 @@ test("builder intercom: package surface exposes pure data operations and no Buil
     compiledSource,
     /\bimport\s*\(|\brequire\s*\(|\bprocess\.env\b|\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\b|\bEventSource\b|\beval\s*\(|\bnew\s+Function\b/u,
   );
+});
+
+test("builder intercom: selector path predicate is the exact protocol path gate", () => {
+  assert.equal(builderSelectedTrackedTextPathAllowed("src/answer.ts"), true);
+  for (const unsafe of [
+    "AGENTS.md", "CONTRACT-TEMPLATE.md", ".vscode/settings.json", ".idea/workspace.xml",
+    ".github/workflows/release.yml", "dist/answer.js", ".env", "src/CON.txt",
+    "../outside.txt", "src\\answer.ts", "src/Σ.ts",
+  ]) assert.equal(builderSelectedTrackedTextPathAllowed(unsafe), false, unsafe);
 });
 
 test("builder intercom: inherited toJSON poisoning cannot collapse canonical identities", () => {

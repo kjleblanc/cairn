@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,30 +9,64 @@ const TITLE = "Builder proposal \u2014 not applied";
 const BEFORE = "export const greeting = '<script>syntheticBefore()</script>';\n";
 const AFTER = "export const greeting = '<img src=x onerror=syntheticAfter()>';\n";
 const SUMMARY = "Builder **suggests** one fixed synthetic replacement; [nothing opens](https://invalid.example).";
-const OUTPUT_DIR = resolve(__dirname, "..", "test-results", "task231-builder-conversation");
-const NORMAL_SCREENSHOT = join(OUTPUT_DIR, "task231-builder-conversation-normal.png");
-const COMPACT_SCREENSHOT = join(OUTPUT_DIR, "task231-builder-conversation-compact.png");
+const OUTPUT_DIR = resolve(__dirname, "..", "test-results", "task232-builder-conversation");
+const NORMAL_SCREENSHOT = join(OUTPUT_DIR, "task232-builder-conversation-normal.png");
+const COMPACT_SCREENSHOT = join(OUTPUT_DIR, "task232-builder-conversation-compact.png");
+
+function gitEnvironment(): NodeJS.ProcessEnv {
+  const env = Object.fromEntries(Object.entries(process.env)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  for (const key of Object.keys(env)) if (key.toUpperCase().startsWith("GIT_")) delete env[key];
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_SYSTEM = "NUL";
+  env.GIT_CONFIG_GLOBAL = "NUL";
+  env.GIT_TERMINAL_PROMPT = "0";
+  env.GIT_OPTIONAL_LOCKS = "0";
+  return env;
+}
+
+function git(project: string, args: readonly string[]): string {
+  return execFileSync("git", ["-c", "core.excludesFile=/dev/null", ...args], {
+    cwd: project,
+    env: gitEnvironment(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trimEnd();
+}
 
 function scaffold(project: string): void {
   const core = pathToFileURL(join(__dirname, "..", "node_modules", "@cairn", "core", "dist", "src", "files.js")).href;
   execFileSync(process.execPath, [
     "--input-type=module", "-e",
-    `import { scaffoldProject } from ${JSON.stringify(core)}; scaffoldProject(process.argv[1], { name: "Task 231 synthetic Builder review", what: "show one fixed inert proposal", who: "Cairn maintainers", milestone: "one local display turn" });`,
+    `import { scaffoldProject } from ${JSON.stringify(core)}; scaffoldProject(process.argv[1], { name: "Task 232 tracked-text Builder review", what: "show one fixed inert tracked-text proposal", who: "Cairn maintainers", milestone: "one local display turn" });`,
     project,
   ]);
+  mkdirSync(join(project, "examples", "synthetic"), { recursive: true });
+  writeFileSync(join(project, "examples", "synthetic", "greeting.ts"), BEFORE, "utf8");
+  git(project, ["init", "--initial-branch=main", "--object-format=sha1", "--ref-format=files"]);
+  git(project, ["add", "--", "AGENTS.md", "docs/ai-work/PROJECT.md", "docs/ai-work/LOG.md", "examples/synthetic/greeting.ts"]);
+  git(project, ["-c", "user.name=Cairn Task 232", "-c", "user.email=task232@example.invalid", "commit", "-m", "Seed Task 232 synthetic tracked text"]);
+  const excludePath = join(project, ".git", "info", "exclude");
+  const exclude = readFileSync(excludePath, "utf8");
+  if (!exclude.split(/\r?\n/u).includes("/.cairn/")) {
+    writeFileSync(excludePath, `${exclude.length === 0 || exclude.endsWith("\n") ? exclude : `${exclude}\n`}/.cairn/\n`, "utf8");
+  }
+  if (git(project, ["status", "--porcelain=v2", "--untracked-files=all"]) !== "") {
+    throw new Error("TASK232_SYNTHETIC_REPOSITORY_NOT_CLEAN");
+  }
 }
 
 function launch(project: string, profile: string): Promise<ElectronApplication> {
   const env = Object.fromEntries(Object.entries(process.env)
     .filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  for (const key of ["CAIRN_TEST_Q9", "CAIRN_Q9_SCENARIO", "CAIRN_Q9_CUT", "CAIRN_TEST_CRITIC_CALIBRATION"]) delete env[key];
+  for (const key of ["CAIRN_TEST_Q9", "CAIRN_Q9_SCENARIO", "CAIRN_Q9_CUT", "CAIRN_TEST_CRITIC_CALIBRATION", "CAIRN_TEST_BUILDER_REVIEW"]) delete env[key];
   return electron.launch({
     args: ["."],
     env: {
       ...env,
       CAIRN_E2E: "1",
       CAIRN_MOCK: "1",
-      CAIRN_TEST_BUILDER_REVIEW: "1",
+      CAIRN_TEST_BUILDER_TRACKED_TEXT: "task232-fixed-v1",
       CAIRN_TEST_USER_DATA: profile,
       CAIRN_OPEN: project,
     },
@@ -46,7 +80,7 @@ function ownedTemp(prefix: string): OwnedDirectory {
   const real = realpathSync.native(path);
   const stat = lstatSync(real, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev <= 0n || stat.ino <= 0n) {
-    throw new Error("TASK231_OWNED_TEMP_UNSAFE");
+    throw new Error("TASK232_OWNED_TEMP_UNSAFE");
   }
   return Object.freeze({ path, real, dev: stat.dev, ino: stat.ino });
 }
@@ -55,10 +89,10 @@ function removeOwnedTemp(owned: OwnedDirectory): void {
   const currentReal = realpathSync.native(owned.path);
   const current = lstatSync(currentReal, { bigint: true });
   const tempRoot = realpathSync.native(tmpdir());
-  const expectedPrefix = join(tempRoot, "cairn-task231-");
+  const expectedPrefix = join(tempRoot, "cairn-task232-");
   if (currentReal !== owned.real || !current.isDirectory() || current.isSymbolicLink()
     || current.dev !== owned.dev || current.ino !== owned.ino || !currentReal.startsWith(expectedPrefix)) {
-    throw new Error(`TASK231_OWNED_TEMP_CHANGED: retained ${owned.path}`);
+    throw new Error(`TASK232_OWNED_TEMP_CHANGED: retained ${owned.path}`);
   }
   rmSync(owned.real, { recursive: true, force: false });
 }
@@ -70,7 +104,7 @@ async function closeAndConfirm(application: ElectronApplication): Promise<void> 
   await new Promise<void>((resolveExit, rejectExit) => {
     const timer = setTimeout(() => {
       cleanup();
-      rejectExit(new Error("TASK231_ELECTRON_DID_NOT_EXIT"));
+      rejectExit(new Error("TASK232_ELECTRON_DID_NOT_EXIT"));
     }, 10_000);
     const cleanup = () => {
       clearTimeout(timer);
@@ -179,9 +213,9 @@ test("an authenticated synthetic Builder review arrives once and survives a cold
   let profile = "";
   let app: ElectronApplication | null = null;
   try {
-    projectOwned = ownedTemp("cairn-task231-project-");
+    projectOwned = ownedTemp("cairn-task232-project-");
     project = projectOwned.path;
-    profileOwned = ownedTemp("cairn-task231-profile-");
+    profileOwned = ownedTemp("cairn-task232-profile-");
     profile = profileOwned.path;
     scaffold(project);
     mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -203,9 +237,9 @@ test("an authenticated synthetic Builder review arrives once and survives a cold
 
     const appended = await app.evaluate(() => {
       const hook = (globalThis as typeof globalThis & {
-        __CAIRN_TASK231_APPEND_BUILDER_REVIEW__?: () => { conversationId: string; displayTurnId: string };
-      }).__CAIRN_TASK231_APPEND_BUILDER_REVIEW__;
-      if (!hook) throw new Error("TASK231_FIXTURE_HOOK_MISSING");
+        __CAIRN_TASK232_APPEND_BUILDER_REVIEW__?: () => Promise<{ conversationId: string; displayTurnId: string }>;
+      }).__CAIRN_TASK232_APPEND_BUILDER_REVIEW__;
+      if (!hook) throw new Error("TASK232_FIXTURE_HOOK_MISSING");
       return hook();
     });
     expect(appended.conversationId).toMatch(/^\d{3}$/u);
@@ -214,11 +248,11 @@ test("an authenticated synthetic Builder review arrives once and survives a cold
     await assertInertCard(page);
     await expect(app.evaluate(() => {
       const hook = (globalThis as typeof globalThis & {
-        __CAIRN_TASK231_APPEND_BUILDER_REVIEW__?: () => unknown;
-      }).__CAIRN_TASK231_APPEND_BUILDER_REVIEW__;
-      if (!hook) throw new Error("TASK231_FIXTURE_HOOK_MISSING");
+        __CAIRN_TASK232_APPEND_BUILDER_REVIEW__?: () => Promise<unknown>;
+      }).__CAIRN_TASK232_APPEND_BUILDER_REVIEW__;
+      if (!hook) throw new Error("TASK232_FIXTURE_HOOK_MISSING");
       return hook();
-    })).rejects.toThrow(/TASK231_FIXTURE_ALREADY_USED/u);
+    })).rejects.toThrow(/TASK232_FIXTURE_ALREADY_USED/u);
     const card = page.locator(".builder-proposal-review");
     await card.locator(".builder-proposal-summary p").last().click();
     await card.locator(".builder-proposal-file h3 code").dblclick();
@@ -296,6 +330,10 @@ test("an authenticated synthetic Builder review arrives once and survives a cold
       .map((entry) => entry.name).filter((name) => /^https?:/iu.test(name)))).toEqual([]);
     expect(app.windows()).toHaveLength(1);
     expect(readFileSync(conversationPath, "utf8")).toBe(transcriptText);
+    expect(readFileSync(join(project, "examples", "synthetic", "greeting.ts"), "utf8")).toBe(BEFORE);
+    expect(git(project, ["ls-files", "--error-unmatch", "--", "examples/synthetic/greeting.ts"]))
+      .toBe("examples/synthetic/greeting.ts");
+    expect(git(project, ["status", "--porcelain=v2", "--untracked-files=all"])).toBe("");
     expect(statSync(NORMAL_SCREENSHOT).size).toBeGreaterThan(10_000);
     expect(statSync(COMPACT_SCREENSHOT).size).toBeGreaterThan(10_000);
 

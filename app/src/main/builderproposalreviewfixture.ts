@@ -26,6 +26,8 @@ const BASE_HEAD = "c".repeat(40);
 const SYNTHETIC_PATH = "examples/synthetic/greeting.ts";
 const SYNTHETIC_BEFORE = "export const greeting = '<script>syntheticBefore()</script>';\n";
 const SYNTHETIC_AFTER = "export const greeting = '<img src=x onerror=syntheticAfter()>';\n";
+const TASK232_RUN_ID = "23223223-2232-4232-8232-232232232232";
+const TASK232_TURN_ID = "32232322-2322-4322-8322-322323322323";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -121,6 +123,22 @@ function authorities() {
   });
   if (evidencePlan === null) throw new Error("TASK231_FIXTURE_INVALID");
   return { taskSpec, evidencePlan };
+}
+
+/** Fixed authority and path choice for Task 232's guarded disposable-repo
+ * route. Git state, project identity, bytes, hashes and provenance are absent:
+ * the trusted selector must derive every one of those facts live. */
+export function task232FixedTrackedTextRequestForTests() {
+  const { taskSpec, evidencePlan } = authorities();
+  return Object.freeze({
+    taskNumber: 900_232,
+    runId: TASK232_RUN_ID,
+    turnId: TASK232_TURN_ID,
+    connectionConsentVersion: "selected-text-v1",
+    taskSpec,
+    evidencePlan,
+    selectedProjectRelativePaths: Object.freeze([SYNTHETIC_PATH]),
+  });
 }
 
 /** Test-only constructor for the exact fixed pair used by this positively

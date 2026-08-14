@@ -5,6 +5,7 @@ export {
   BUILDER_SELECTOR_PROVENANCE_VERSION,
   BUILDER_TURN_CONTEXT_VERSION,
   BUILDER_TURN_RESPONSE_VERSION,
+  builderSelectedTrackedTextPathAllowed,
   builderTurnContextSha256,
   builderTurnResponseMatchesContext,
   builderTurnResponseSha256,

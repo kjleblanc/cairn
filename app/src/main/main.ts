@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, screen } from "electron";
+import { lstatSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { setContractPath } from "@cairn/core";
@@ -6,7 +8,8 @@ import { startPhoneBridge, stopPhoneBridge } from "./bridge/runtime.js";
 import { setCardMarkerDir } from "./conductor/cardauth.js";
 import { setBuilderReviewMarkerDir } from "./conductor/builderreviewauth.js";
 import { setTurnMarkerDir } from "./conductor/turnauth.js";
-import { appendTask231SyntheticBuilderReview } from "./builderproposalreviewfixture.js";
+import { createTask232FakeBuilderTransport, sendTask232FakeBuilderTurn } from "./builderfaketransport.js";
+import { appendTask232SyntheticBuilderReview, prepareTask232SyntheticBuilderReview } from "./builderreviewroutefixture.js";
 import { setEvidenceMarkerDir } from "./evidence.js";
 import { registerBridgeIpc, registerConductorIpc, registerProjectIpc } from "./ipc.js";
 import {
@@ -35,11 +38,68 @@ import { q9TerminalCardInputFromPendingState } from "./qualityloop.js";
 
 if (started) app.quit();
 
+type Task232OwnedDisposableDirectory = Readonly<{ path: string; dev: bigint; ino: bigint }>;
+
+function task232OwnedDisposableDirectory(
+  value: unknown,
+  kind: "project" | "profile",
+): Task232OwnedDisposableDirectory | null {
+  try {
+    if (typeof value !== "string" || value.length === 0 || value.includes("\0")) return null;
+    const lexical = path.resolve(value);
+    const real = realpathSync.native(lexical);
+    const tempRoot = realpathSync.native(tmpdir());
+    const stat = lstatSync(real, { bigint: true });
+    const temp = lstatSync(tempRoot, { bigint: true });
+    const name = path.basename(real);
+    return lexical === real && path.dirname(real) === tempRoot
+      && new RegExp(`^cairn-task232-${kind}-[A-Za-z0-9]{6}$`, "u").test(name)
+      && stat.isDirectory() && !stat.isSymbolicLink() && stat.dev === temp.dev && stat.ino > 0n
+      ? Object.freeze({ path: real, dev: stat.dev, ino: stat.ino })
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function task232OwnedDisposableDirectoryStillExact(value: Task232OwnedDisposableDirectory | null): boolean {
+  try {
+    if (value === null || realpathSync.native(value.path) !== value.path) return false;
+    const stat = lstatSync(value.path, { bigint: true });
+    return stat.isDirectory() && !stat.isSymbolicLink() && stat.dev === value.dev && stat.ino === value.ino;
+  } catch {
+    return false;
+  }
+}
+
+// Retire Task 231's direct producer and admit only Task 232's exact marker.
+// Its project and profile must be fresh direct children of the OS temporary
+// directory with the exact mkdtemp-owned names used by the guarded proof.
+if (process.env.CAIRN_TEST_BUILDER_REVIEW !== undefined) {
+  throw new Error("CAIRN_TEST_BUILDER_REVIEW is retired; the Task 232 evidence route requires its exact marker.");
+}
+const builderReviewE2eRequested = process.env.CAIRN_TEST_BUILDER_TRACKED_TEXT === "task232-fixed-v1";
+if (process.env.CAIRN_TEST_BUILDER_TRACKED_TEXT !== undefined && !builderReviewE2eRequested) {
+  throw new Error("CAIRN_TEST_BUILDER_TRACKED_TEXT must be exactly task232-fixed-v1 when present.");
+}
+const task232E2eProjectRoot = builderReviewE2eRequested
+  ? task232OwnedDisposableDirectory(process.env.CAIRN_OPEN, "project")
+  : null;
+const task232E2eProfileRoot = builderReviewE2eRequested
+  ? task232OwnedDisposableDirectory(process.env.CAIRN_TEST_USER_DATA, "profile")
+  : null;
+if (builderReviewE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "1"
+  || task232E2eProjectRoot === null || task232E2eProfileRoot === null)) {
+  throw new Error("Builder review E2E requires its complete isolated fake guard and exact owned disposable project/profile.");
+}
+
 // Test-only userData isolation. Electron's default profile may contain the
 // owner's encrypted conductor connection and remembered projects, so an E2E
 // suite must never borrow it. The positive marker prevents an ordinary app
 // launch from being redirected by one stray environment variable.
-const testUserData = process.env.CAIRN_TEST_USER_DATA;
+const testUserData = builderReviewE2eRequested
+  ? task232E2eProfileRoot?.path
+  : process.env.CAIRN_TEST_USER_DATA;
 if (testUserData) {
   if (process.env.CAIRN_E2E !== "1") {
     throw new Error("CAIRN_TEST_USER_DATA requires CAIRN_E2E=1.");
@@ -76,18 +136,9 @@ if (q9E2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !
   throw new Error("Q9 E2E requires the complete isolated fake guard and one closed preregistered scenario.");
 }
 
-// Task 231's only producer is a no-argument, one-shot Main hook for an
-// isolated synthetic Electron proof. Partial markers fail at boot; normal
-// product launches have no route, IPC method or renderer control that creates
-// a Builder review turn.
-const builderReviewE2eRequested = process.env.CAIRN_TEST_BUILDER_REVIEW === "1";
-if (process.env.CAIRN_TEST_BUILDER_REVIEW !== undefined && !builderReviewE2eRequested) {
-  throw new Error("CAIRN_TEST_BUILDER_REVIEW must be exactly 1 when present.");
-}
-if (builderReviewE2eRequested && (process.env.CAIRN_E2E !== "1" || process.env.CAIRN_MOCK !== "1"
-  || !testUserData || !process.env.CAIRN_OPEN)) {
-  throw new Error("Builder review E2E requires CAIRN_E2E=1, CAIRN_MOCK=1, CAIRN_TEST_USER_DATA, and CAIRN_OPEN.");
-}
+// Task 232's only producer is one exact, one-shot Main hook for the validated
+// disposable-Git Electron proof. Ordinary launches have no selector IPC,
+// renderer control, or direct Task 231 producer.
 if (builderReviewE2eRequested && (q9E2eRequested || calibrationE2eRequested)) {
   throw new Error("Builder review, Q8 calibration, and Q9 task fakes are mutually exclusive boot modes.");
 }
@@ -270,14 +321,27 @@ function bootstrap(): void {
     restoreQ9TaskRuns(q9Runtime, () => mainWindow);
     if (builderReviewE2eRequested) {
       let used = false;
-      const projectRoot = path.resolve(process.env.CAIRN_OPEN as string);
+      const projectRoot = (task232E2eProjectRoot as Task232OwnedDisposableDirectory).path;
       (globalThis as typeof globalThis & {
-        __CAIRN_TASK231_APPEND_BUILDER_REVIEW__?: () => Readonly<{ conversationId: string; displayTurnId: string }>;
-      }).__CAIRN_TASK231_APPEND_BUILDER_REVIEW__ = () => {
-        if (used) throw new Error("TASK231_FIXTURE_ALREADY_USED");
-        if (mainWindow === null || mainWindow.isDestroyed()) throw new Error("TASK231_FIXTURE_WINDOW_UNAVAILABLE");
+        __CAIRN_TASK232_APPEND_BUILDER_REVIEW__?: () => Promise<Readonly<{ conversationId: string; displayTurnId: string }>>;
+      }).__CAIRN_TASK232_APPEND_BUILDER_REVIEW__ = async () => {
+        if (used) throw new Error("TASK232_FIXTURE_ALREADY_USED");
+        if (mainWindow === null || mainWindow.isDestroyed()) throw new Error("TASK232_FIXTURE_WINDOW_UNAVAILABLE");
         used = true;
-        const appended = appendTask231SyntheticBuilderReview(projectRoot);
+        if (!task232OwnedDisposableDirectoryStillExact(task232E2eProjectRoot)
+          || !task232OwnedDisposableDirectoryStillExact(task232E2eProfileRoot)) {
+          throw new Error("TASK232_FIXTURE_OWNERSHIP_CHANGED");
+        }
+        const selection = prepareTask232SyntheticBuilderReview(projectRoot);
+        const transport = createTask232FakeBuilderTransport(selection.context);
+        if (transport === null) throw new Error("TASK232_FAKE_TRANSPORT_REFUSED");
+        const answer = await sendTask232FakeBuilderTurn(transport, selection.context);
+        if (answer === null) throw new Error("TASK232_FAKE_TRANSPORT_REFUSED");
+        if (!task232OwnedDisposableDirectoryStillExact(task232E2eProjectRoot)
+          || !task232OwnedDisposableDirectoryStillExact(task232E2eProfileRoot)) {
+          throw new Error("TASK232_FIXTURE_OWNERSHIP_CHANGED");
+        }
+        const appended = appendTask232SyntheticBuilderReview(projectRoot, selection, transport, answer);
         mainWindow.webContents.send("conductor:delta", {
           dir: projectRoot,
           conversationId: appended.conversationId,

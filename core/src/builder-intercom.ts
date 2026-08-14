@@ -146,7 +146,9 @@ const ASCII_PATH = /^[\x20-\x7e]+$/u;
 const FORBIDDEN_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/u;
 const FORBIDDEN_PATH = /[\\:<>"|?*\u0000-\u001f\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/u;
 const PROTECTED_SEGMENTS = new Set([".git", ".cairn", ".agents", ".codex"].map(pathIdentity));
-const HOST_CONTROL_SEGMENTS = new Set([".github", ".gitlab", ".circleci"].map(pathIdentity));
+const HOST_CONTROL_SEGMENTS = new Set([
+  ".github", ".gitlab", ".circleci", ".vscode", ".idea",
+].map(pathIdentity));
 const DEPENDENCY_SEGMENTS = new Set([
   "node_modules", "vendor", ".venv", "venv", "bower_components", "pods",
 ].map(pathIdentity));
@@ -155,6 +157,7 @@ const GENERATED_SEGMENTS = new Set([
 ].map(pathIdentity));
 const CONTROL_OR_DEPENDENCY_FILES = new Set([
   ".gitattributes", ".gitignore", ".gitmodules",
+  "agents.md", "contract-template.md", "claude.md", "codex.md", "gemini.md",
   "package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
   "pyproject.toml", "poetry.lock", "pipfile", "pipfile.lock", "requirements.txt",
   "cargo.toml", "cargo.lock", "go.mod", "go.sum", "pom.xml", "composer.json", "composer.lock",
@@ -276,6 +279,16 @@ function safeProjectRelativePath(value: unknown): value is string {
     || CONTROL_OR_DEPENDENCY_FILE_PATTERN.test(segment)
     || INSTALL_SCRIPT_SEGMENT.test(segment) || CREDENTIAL_SEGMENT.test(segment))) return false;
   return true;
+}
+
+/**
+ * The trusted selector's positive path gate. Keeping this pure predicate in
+ * the protocol module makes selection and response parsing use one revisioned
+ * spelling/classification policy instead of maintaining a second allowlist.
+ * It grants no filesystem access or authority.
+ */
+export function builderSelectedTrackedTextPathAllowed(value: unknown): value is string {
+  return safeProjectRelativePath(value);
 }
 
 /** V1 paths are printable ASCII, so invariant uppercase is a complete

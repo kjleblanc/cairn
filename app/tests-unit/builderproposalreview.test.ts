@@ -547,6 +547,7 @@ function unexpectedProductConsumers(extra: readonly { relativePath: string; text
   const allowed = new Set([
     "main/builderproposalreview.ts",
     "main/builderproposalreviewfixture.ts",
+    "main/builderreviewroutefixture.ts",
     "main/conductor/builderreviewauth.ts",
     "main/conductor/store.ts",
     "main/main.ts",
@@ -704,13 +705,16 @@ function assertIpcBuilderRoleSafe(value: string): void {
 }
 
 function assertFixtureGuardSafe(value: string): void {
-  assert.match(value, /const builderReviewE2eRequested = process\.env\.CAIRN_TEST_BUILDER_REVIEW === "1";/u);
-  assert.match(value, /builderReviewE2eRequested && \(process\.env\.CAIRN_E2E !== "1" \|\| process\.env\.CAIRN_MOCK !== "1"\s*\|\| !testUserData \|\| !process\.env\.CAIRN_OPEN\)/u);
+  assert.match(value, /function task232OwnedDisposableDirectory\(\s*value: unknown,\s*kind: "project" \| "profile"/u);
+  assert.match(value, /process\.env\.CAIRN_TEST_BUILDER_REVIEW !== undefined/u);
+  assert.match(value, /const builderReviewE2eRequested = process\.env\.CAIRN_TEST_BUILDER_TRACKED_TEXT === "task232-fixed-v1";/u);
+  assert.match(value, /process\.env\.CAIRN_TEST_BUILDER_TRACKED_TEXT !== undefined && !builderReviewE2eRequested/u);
+  assert.match(value, /builderReviewE2eRequested && \(process\.env\.CAIRN_E2E !== "1" \|\| process\.env\.CAIRN_MOCK !== "1"\s*\|\| task232E2eProjectRoot === null \|\| task232E2eProfileRoot === null\)/u);
   assert.match(value, /builderReviewE2eRequested && \(q9E2eRequested \|\| calibrationE2eRequested\)/u);
   assert.match(value, /suppressExternalUpdateCheck: q9E2eRequested \|\| builderReviewE2eRequested/u);
   assert.match(value, /if \(!q9E2eRequested && !builderReviewE2eRequested\) void startPhoneBridge\(\);/u);
   const guarded = value.indexOf("if (builderReviewE2eRequested) {");
-  const hook = value.indexOf("__CAIRN_TASK231_APPEND_BUILDER_REVIEW__", guarded);
+  const hook = value.indexOf("__CAIRN_TASK232_APPEND_BUILDER_REVIEW__", guarded);
   const createWindow = value.indexOf("createWindow();", guarded);
   assert.ok(guarded >= 0 && hook > guarded && createWindow > hook);
   assert.match(value, /mainWindow\.webContents\.send\("conductor:delta", \{\s*dir: projectRoot,[\s\S]*?kind: "turn",\s*turn: appended\.turn,/u);
@@ -737,6 +741,7 @@ function assertFixtureModuleSafe(value: string): void {
     "import:./conductor/store.js:appendBuilderReviewTurn,newConversationId",
   ], "the fixed fixture may import only its exact pure composition and append symbols");
   assert.deepEqual(surface.filter((entry) => entry.startsWith("export:")), [
+    "export:FunctionDeclaration:task232FixedTrackedTextRequestForTests",
     "export:FunctionDeclaration:task231FixedBuilderPairForTests",
     "export:FunctionDeclaration:appendTask231SyntheticBuilderReview",
   ]);
@@ -908,12 +913,15 @@ test("component, composer and production integration expose only the closed disp
     "the dedicated visual lab remains a positive component harness");
 
   assert.deepEqual(unexpectedProductConsumers(), [],
-    "only the exact Task 231 production display/custody allowlist may name the review projection under app/src");
+    "only the exact Task 232 production display/custody allowlist may name the review projection under app/src");
   assert.deepEqual(unexpectedBuilderRoleConsumers(), [],
     "the role literal may appear only at the exact custody, omission, type and desktop render boundaries");
   assert.deepEqual(authoritySymbolConsumers("recordBuilderReviewMarker", "main/conductor/builderreviewauth.ts"), ["main/conductor/store.ts"]);
-  assert.deepEqual(authoritySymbolConsumers("appendBuilderReviewTurn", "main/conductor/store.ts"), ["main/builderproposalreviewfixture.ts"]);
-  assert.deepEqual(authoritySymbolConsumers("appendTask231SyntheticBuilderReview", "main/builderproposalreviewfixture.ts"), ["main/main.ts"]);
+  assert.deepEqual(authoritySymbolConsumers("appendBuilderReviewTurn", "main/conductor/store.ts"), [
+    "main/builderproposalreviewfixture.ts",
+    "main/builderreviewroutefixture.ts",
+  ]);
+  assert.deepEqual(authoritySymbolConsumers("appendTask231SyntheticBuilderReview", "main/builderproposalreviewfixture.ts"), []);
   assert.deepEqual(authoritySymbolConsumers("composeBuilderProposalReview", "main/builderproposalreview.ts"), ["main/conductor/store.ts"]);
   assertBuilderStoreCustodySafe(source("src/main/conductor/store.ts"));
   assertBuilderAuthCustodySafe(source("src/main/conductor/builderreviewauth.ts"));
@@ -1133,7 +1141,7 @@ test("causal source mutants prove custody, literal rendering, no-action and inte
       relativePath: "main/rogue-builder-consumer.ts",
       text: 'import * as store from "./conductor/store.js"; void store.appendBuilderReviewTurn;',
     }],
-  ), ["main/builderproposalreviewfixture.ts", "main/rogue-builder-consumer.ts"]);
+  ), ["main/builderproposalreviewfixture.ts", "main/builderreviewroutefixture.ts", "main/rogue-builder-consumer.ts"]);
 
   const service = source("src/main/conductor/service.ts");
   const providerLeak = service.replace('if (turn.role === "builder-review") return [];',

@@ -5,7 +5,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "tests",
   testMatch: "builder-proposal-conversation.spec.ts",
-  outputDir: "test-results/task231-builder-conversation",
+  outputDir: "test-results/task232-builder-conversation",
   timeout: 90_000,
   workers: 1,
   fullyParallel: false,

@@ -36,8 +36,13 @@ test("fresh bundles admit exactly the authenticated desktop Builder review route
   assert.match(main, /cairn-builder-proposal-review\/v1/u);
   assert.match(main, /BUILDER_REVIEW_APPEND_FORBIDDEN/u,
     "the generic transcript producer must retain its runtime refusal");
-  assert.match(main, /syntheticBefore\(\)/u,
-    "the guarded Main-only positive fixture must survive bundling");
+  assert.match(main, /cairn-builder-tracked-text-selection\/v1/u);
+  assert.match(main, /cairn-task232-tool-free-fake-transport\/v1/u);
+  assert.match(main, /task232-fixed-v1/u,
+    "the only bundled selector route must retain its exact evidence marker");
+  assert.doesNotMatch(main, /syntheticBefore\(\)/u,
+    "the selected before text must come from the live tracked file, not a bundled fixture");
+  assert.match(main, /examples\/synthetic\/greeting\.ts/u);
 
   assert.match(renderer, /Builder proposal[^a-z]+not applied/iu,
     "real production Chat must contain the Task 229 honesty heading");
@@ -45,6 +50,7 @@ test("fresh bundles admit exactly the authenticated desktop Builder review route
   assert.match(renderer, /Nothing changed\. No command ran\./u);
   assert.doesNotMatch(renderer, /syntheticBefore\(\)|syntheticAfter\(\)/u,
     "fixed Task 224 fixture input belongs to Main, never the renderer bundle");
+  assert.doesNotMatch(renderer, /cairn-builder-tracked-text-selection|cairn-task232-tool-free-fake-transport|selectedTrackedText/u);
 
   const preload = files(mainRoot)
     .filter((path) => /preload/iu.test(path))
@@ -53,6 +59,7 @@ test("fresh bundles admit exactly the authenticated desktop Builder review route
   assert.doesNotMatch(preload, REVIEW_MARKER,
     "generic conversation IPC needs no Builder-only preload code");
   assert.doesNotMatch(preload, /syntheticBefore\(\)|syntheticAfter\(\)/u);
+  assert.doesNotMatch(preload, /cairn-builder-tracked-text-selection|cairn-task232-tool-free-fake-transport|selectedTrackedText/u);
 
   assert.match(lab, REVIEW_MARKER,
     "the Task 229 visual lab remains an independent positive control");
@@ -81,9 +88,9 @@ test("fresh bundles admit exactly the authenticated desktop Builder review route
 
   const expectedSourceConsumers = new Set([
     "main/builderproposalreview.ts",
+    "main/builderreviewroutefixture.ts",
     "main/conductor/builderreviewauth.ts",
     "main/conductor/store.ts",
-    "main/main.ts",
     "renderer/components/BuilderProposalReview.tsx",
     "renderer/screens/Chat.tsx",
     "shared/builder-proposal-review.ts",
