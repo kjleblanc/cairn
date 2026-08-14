@@ -39,24 +39,24 @@ export function TaskPromiseCard({ request, menu, selections, disabled = false, o
 }) {
   const rows = taskCardRows(request);
   return (
-    <section className="task-card" aria-label="What this task promises">
-      <h3 className="task-card-title">What this task promises</h3>
-      <p className="task-card-lead">
+    <section className="task-promise-card" aria-label="What this task promises">
+      <h3 className="task-promise-card-title">What this task promises</h3>
+      <p className="task-promise-card-lead">
         Cairn will try to prove each of these. Choose how each one gets checked.
       </p>
       {menu.length === 0 ? (
-        <p className="task-card-nomenu">
+        <p className="task-promise-card-nomenu">
           This project doesn&apos;t declare any commands Cairn knows how to run, so you&apos;ll
           need to look at each of these yourself.
         </p>
       ) : null}
-      <ol className="task-card-rows">
+      <ol className="task-promise-card-rows">
         {rows.map((row) => (
-          <li key={row.id} className="task-card-row" data-row={row.id}>
-            <p className="task-card-row-text">
-              <span className="task-card-row-id mono">{row.id}</span> {row.text}
+          <li key={row.id} className="task-promise-card-row" data-row={row.id}>
+            <p className="task-promise-card-row-text">
+              <span className="task-promise-card-row-id mono">{row.id}</span> {row.text}
             </p>
-            <div className="task-card-row-choices" role="group" aria-label={`How ${row.id} gets checked`}>
+            <div className="task-promise-card-row-choices" role="group" aria-label={`How ${row.id} gets checked`}>
               {menu.map((check) => (
                 <button
                   key={check.id}
@@ -80,7 +80,7 @@ export function TaskPromiseCard({ request, menu, selections, disabled = false, o
                 I&apos;ll look at this myself
               </button>
             </div>
-            <p className="task-card-row-answerer">
+            <p className="task-promise-card-row-answerer">
               {selections[row.id] === undefined
                 ? "Not chosen yet."
                 : selections[row.id] === OWNER_OBSERVATION

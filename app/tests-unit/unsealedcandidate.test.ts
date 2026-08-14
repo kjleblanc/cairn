@@ -44,6 +44,9 @@ function candidate(overrides: Record<string, unknown> = {}) {
       milestone: "YES",
     },
     evidenceSummary: "Bounded worker evidence: fileChangeCount=1.",
+    // Task 238: Core always sends this, so the fixture does too. A run that
+    // carried no promises sends an empty list, never a missing key.
+    answers: [],
     ...overrides,
   };
 }
@@ -73,11 +76,12 @@ test("continue settles the waiting run exactly once and clears the pending check
     dir: DIR,
     checkpointId: opened.projection.checkpointId,
     choice: "continue",
+    ownerAnswers: {},
   });
   assert.equal(decision.ok, true);
   if (!decision.ok) return;
   assert.equal(decision.decision.choice, "continue");
-  assert.equal(await opened.settled, "continue");
+  assert.deepEqual(await opened.settled, { choice: "continue", ownerAnswers: {} });
   assert.equal(currentUnsealedCandidate(DIR), null);
   assert.equal(pendingUnsealedCandidateCount(), 0);
 });
@@ -85,21 +89,21 @@ test("continue settles the waiting run exactly once and clears the pending check
 test("stop settles the waiting run with stop", async () => {
   const opened = openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate() });
   assert.ok(opened);
-  decideUnsealedCandidate({ dir: DIR, checkpointId: opened.projection.checkpointId, choice: "stop" });
-  assert.equal(await opened.settled, "stop");
+  decideUnsealedCandidate({ dir: DIR, checkpointId: opened.projection.checkpointId, choice: "stop", ownerAnswers: {} });
+  assert.deepEqual(await opened.settled, { choice: "stop" });
 });
 
 test("a second press after the checkpoint is answered is refused", async () => {
   const opened = openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate() });
   assert.ok(opened);
-  const request = { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue" as const };
+  const request = { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue" as const, ownerAnswers: {} };
   assert.equal(decideUnsealedCandidate(request).ok, true);
   const second = decideUnsealedCandidate({ ...request, choice: "stop" as const });
   assert.equal(second.ok, false);
   if (second.ok) return;
   assert.equal(second.code, "UNSEALED_CANDIDATE_UNKNOWN_CHECKPOINT");
   // The first answer stands; a late press cannot change a settled run.
-  assert.equal(await opened.settled, "continue");
+  assert.deepEqual(await opened.settled, { choice: "continue", ownerAnswers: {} });
 });
 
 test("an unknown checkpoint id is refused and leaves the live pause waiting", () => {
@@ -109,6 +113,7 @@ test("an unknown checkpoint id is refused and leaves the live pause waiting", ()
     dir: DIR,
     checkpointId: "00000000-0000-4000-8000-000000000000",
     choice: "continue",
+    ownerAnswers: {},
   });
   assert.equal(refused.ok, false);
   if (refused.ok) return;
@@ -123,6 +128,7 @@ test("a press naming another project cannot answer this project's pause", () => 
     dir: OTHER,
     checkpointId: opened.projection.checkpointId,
     choice: "continue",
+    ownerAnswers: {},
   });
   assert.equal(refused.ok, false);
   assert.deepEqual(currentUnsealedCandidate(DIR), opened.projection);
@@ -133,10 +139,14 @@ test("a malformed press is refused without touching the live pause", () => {
   assert.ok(opened);
   for (const bad of [
     null,
-    { dir: DIR, checkpointId: opened.projection.checkpointId },
-    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "seal" },
-    { dir: DIR, checkpointId: 7, choice: "continue" },
-    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue", extra: 1 },
+    { dir: DIR, checkpointId: opened.projection.checkpointId, ownerAnswers: {} },
+    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "seal", ownerAnswers: {} },
+    { dir: DIR, checkpointId: 7, choice: "continue", ownerAnswers: {} },
+    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue", ownerAnswers: {}, extra: 1 },
+    // Task 238: the answers themselves must be exactly readable.
+    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue" },
+    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue", ownerAnswers: { c1: "maybe" } },
+    { dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue", ownerAnswers: { "not-a-row": "met" } },
   ]) {
     const refused = decideUnsealedCandidate(bad);
     assert.equal(refused.ok, false, `refused ${JSON.stringify(bad)}`);
@@ -160,21 +170,26 @@ test("closing the checkpoint Main-side settles the run as stop", async () => {
   // The abort/window-loss door: Cairn is still alive, so it closes honestly
   // rather than leaving the run waiting on a renderer that will never answer.
   assert.equal(closeUnsealedCandidateIfCurrent(DIR, opened.projection), true);
-  assert.equal(await opened.settled, "stop");
+  assert.deepEqual(await opened.settled, { choice: "stop" });
   assert.equal(currentUnsealedCandidate(DIR), null);
 });
 
 test("closing a checkpoint that is no longer current changes nothing", async () => {
   const opened = openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate() });
   assert.ok(opened);
-  decideUnsealedCandidate({ dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue" });
+  decideUnsealedCandidate({ dir: DIR, checkpointId: opened.projection.checkpointId, choice: "continue", ownerAnswers: {} });
   assert.equal(closeUnsealedCandidateIfCurrent(DIR, opened.projection), false);
-  assert.equal(await opened.settled, "continue");
+  assert.deepEqual(await opened.settled, { choice: "continue", ownerAnswers: {} });
 });
 
 test("a candidate Core did not mint is refused", () => {
   assert.equal(openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate({ version: "forged/v1" }) }), null);
   assert.equal(openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate({ taskNumber: -1 }) }), null);
+  // Task 238: Core always sends the answered rows. A candidate without them is
+  // not one Core minted, and putting it on screen would show the owner a card
+  // whose promises Cairn cannot vouch for.
+  assert.equal(openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate({ answers: undefined }) }), null);
+  assert.equal(openUnsealedCandidateCheckpoint({ dir: DIR, candidate: candidate({ answers: "c1" }) }), null);
   assert.equal(openUnsealedCandidateCheckpoint({ dir: DIR, candidate: null }), null);
   assert.equal(openUnsealedCandidateCheckpoint(null), null);
   assert.equal(pendingUnsealedCandidateCount(), 0);

@@ -89,6 +89,7 @@ function doneCard(disposition: "DONE" | "STOPPED"): ResultCard {
       ? "The run stopped because protected starting work changed; the evidence was kept."
       : "2 files changed, one snapshot saved, all checks passed.",
     recordRecovery: null,
+    promises: [],
     processFailure: null,
     claims: {
       summary: disposition === "DONE"

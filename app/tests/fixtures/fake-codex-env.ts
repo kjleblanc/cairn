@@ -56,7 +56,7 @@ process.stdin.on("end", () => {
     // account through one cairn-claims fence. It writes no report or log row.
     const root = process.cwd();
     fs.writeFileSync(path.join(root, "visible.txt"), "model-authored result\\n");
-    process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "m", type: "agent_message", text: "Done.\\n\\n\`\`\`cairn-claims\\n" + JSON.stringify({ disposition: "DONE", summary: "Added the visible result.", changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }], howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES" }) + "\\n\`\`\`" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "m", type: "agent_message", text: "Done.\\n\\n\`\`\`cairn-claims\\n" + JSON.stringify({ disposition: "DONE", summary: "Added the visible result.", changes: ["visible.txt — created"], checks: [{ name: "read back", result: "matches" }, { name: "c1", result: "I changed the page title" }, { name: "c2", result: "I kept 74, 477 and 256" }], howToTry: "Open visible.txt.", limitations: "None.", milestone: "YES" }) + "\\n\`\`\`" } }) + "\\n");
     process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 50, output_tokens: 80, reasoning_output_tokens: 20 } }) + "\\n");
   };
   if (${JSON.stringify(behavior)} === "town") {

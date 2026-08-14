@@ -123,8 +123,20 @@ test("unsealed candidate paper: Core pauses before the terminal close and stays 
   const donePath = serial.indexOf("// DONE path — the claims say DONE");
   assert.ok(stopGate > 0 && hook > stopGate && donePath > hook,
     "the pause is between the stop gate and the DONE path");
-  // Fail closed: only an exact "continue" may reach the seal.
-  assert.match(serial, /if \(choice !== "continue"\) return closeStopped\("OWNER_STOPPED_AT_CANDIDATE"\);/u);
+  // Fail closed: only an exact continue may reach the seal. Task 238 moved the
+  // test from a bare string comparison to one normalizer, because the answer
+  // now carries the owner's row judgments — but the rule is unchanged, so this
+  // guard pins the new shape rather than being dropped.
+  assert.match(serial, /const continuation = unsealedCandidateContinuation\(choice\);/u);
+  assert.match(serial, /if \(!continuation\) return closeStopped\("OWNER_STOPPED_AT_CANDIDATE"\);/u);
+  // And the normalizer itself refuses anything that is not exactly a continue,
+  // in either accepted shape.
+  assert.match(serial, /if \(value === "continue"\) return Object\.freeze\(\{ ownerAnswers: Object\.freeze\(\{\}\) \}\);/u);
+  assert.match(serial, /if \(record\.choice !== "continue"\) return null;/u);
+  // Task 238: an unreadable owner answer leaves the row pending rather than
+  // becoming a silent "met".
+  assert.match(serial, /if \(answer === "met" \|\| answer === "not-met"\) answers\[key\] = answer;/u);
   // Optional by construction, so a run without it keeps today's close.
   assert.match(serial, /onUnsealedCandidate\?: \(/u);
+  assert.match(serial, /taskPromises\?: SerialTaskPromisesV1;/u);
 });

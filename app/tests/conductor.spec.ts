@@ -4725,3 +4725,188 @@ test("cancelling while the unsealed candidate waits closes the run without a DON
     await app.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Task 239 (restoration Slice 2): the Task Card's promises, chosen before
+// dispatch and answered afterwards in three separate voices — through the
+// ORDINARY Chat route, with the same two existing fakes and no new entrance.
+// ---------------------------------------------------------------------------
+
+const PROMISE_CARD_SHOT = join(tmpdir(), "cairn-task-239-task-card.png");
+const PROMISE_CANDIDATE_SHOT = join(tmpdir(), "cairn-task-239-answered-candidate.png");
+
+const CAIRN_CHECK_BUTTON = "Check the code still compiles";
+const OWNER_CHECK_BUTTON = "I'll look at this myself";
+const OWNER_MET_BUTTON = "I checked this — it's done";
+const CONTINUE_BUTTON = "Continue to Cairn's current checks";
+
+/** Give the disposable project one real, fast check of its own to offer. */
+function withTypecheckScript(project: string, exitCode: number): void {
+  writeFileSync(join(project, "check.js"), `process.exit(${exitCode});\n`, "utf8");
+  writeFileSync(
+    join(project, "package.json"),
+    JSON.stringify({ name: "disposable", private: true, scripts: { typecheck: "node check.js" } }),
+    "utf8",
+  );
+}
+
+/** Choose c1 for Cairn to check and c2 for the owner to look at. */
+async function chooseTaskCardChecks(win: Page): Promise<Locator> {
+  const promises = win.locator(".task-promise-card");
+  await expect(promises).toBeVisible();
+  await promises.locator('[data-row="c1"]').getByRole("button", { name: CAIRN_CHECK_BUTTON }).click();
+  await promises.locator('[data-row="c2"]').getByRole("button", { name: OWNER_CHECK_BUTTON }).click();
+  return promises;
+}
+
+test("the Task Card promises, Cairn checks them itself, and the owner answers their own row", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-promises-done-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 1800 });
+
+    // c3 — the Task Card appears BEFORE dispatch, inside the ordinary panel,
+    // carrying the accepted outcome as c1 and the accepted requirement as c2.
+    await dispatchOneRealCall(win, async () => {
+      const promises = win.locator(".task-promise-card");
+      await expect(promises).toBeVisible();
+      await expect(promises).toContainText("What this task promises");
+      await expect(promises.locator('[data-row="c1"]')).toContainText("Change the page title");
+      await expect(promises.locator('[data-row="c2"]')).toContainText("Keep the counts 74, 477, 256 exactly.");
+
+      await chooseTaskCardChecks(win);
+      await expect(promises.locator('[data-row="c1"]')).toContainText("Cairn will run npm run typecheck itself.");
+      await expect(promises.locator('[data-row="c2"]')).toContainText("You will check this yourself");
+
+      // c10 — the first picture the owner judges: the WHOLE card.
+      await promises.scrollIntoViewIfNeeded();
+      await promises.screenshot({ path: PROMISE_CARD_SHOT });
+    });
+
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+
+    // c6 — the same rows, answered by three visibly separate voices.
+    const c1 = candidate.locator('[data-row="c1"]');
+    const c2 = candidate.locator('[data-row="c2"]');
+    await expect(c1).toContainText("Cairn checked this");
+    await expect(c1).toContainText("Cairn ran npm run typecheck and it passed");
+    await expect(c1).toContainText("reported, not checked");
+    // The worker answered this row too. Its sentence sits BESIDE Cairn's
+    // finding, attributed, never standing in for it.
+    await expect(c1).toContainText("Codex Exec says: I changed the page title");
+    await expect(c2).toContainText("Codex Exec says: I kept 74, 477 and 256");
+    await expect(c2).toContainText("needs your judgment");
+    await expect(c2).toContainText("You have not judged this yet.");
+
+    // c7 — an owner row cannot be auto-passed: Continue waits on it.
+    const cont = candidate.getByRole("button", { name: CONTINUE_BUTTON });
+    await expect(cont).toBeDisabled();
+    await expect(candidate).toContainText("Answer c2 above before Cairn can finish this task.");
+
+    await c2.getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await expect(cont).toBeEnabled();
+
+    // c10 — the second picture: the WHOLE answered card, buttons included.
+    // Slice 1 shipped a capture that cropped its buttons; a picture that cannot
+    // show the choices cannot support a judgment about them. Give the window
+    // room and prove both buttons are actually in frame before the shot.
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    await expect(cont).toBeInViewport();
+    await expect(candidate.getByRole("button", { name: "Stop and keep the work for inspection" })).toBeInViewport();
+    await candidate.screenshot({ path: PROMISE_CANDIDATE_SHOT });
+
+    // c5 — one worker call, and the run seals only now every row is answered.
+    await cont.click();
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 60_000 });
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **DONE**");
+
+    // c2 — the same rows reach the report AND the result card.
+    expect(report).toContain("## Promises and how each was answered");
+    expect(report).toContain("Cairn ran `npm run typecheck`: passed");
+    expect(report).toContain("You confirmed this yourself.");
+    const resultPromises = win.locator(".result-card-promises");
+    await expect(resultPromises).toContainText("Cairn ran npm run typecheck and it passed.");
+    await expect(resultPromises).toContainText("You confirmed this yourself.");
+    await expect(resultPromises).toContainText("reported, not checked");
+  } finally {
+    await app.close();
+  }
+});
+
+test("a failing Cairn check stops the run even though the worker claims it passed", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-promises-fail-"));
+  scaffold(project);
+  withTypecheckScript(project, 1);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 1800 });
+    const startHead = headOf(project);
+
+    await dispatchOneRealCall(win, async () => { await chooseTaskCardChecks(win); });
+
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+    // The worker said DONE; Cairn's own run of the check disagrees, and the
+    // card shows both without letting the worker's word stand as evidence.
+    await expect(candidate).toContainText("Codex Exec says: DONE");
+    await expect(candidate.locator('[data-row="c1"]')).toContainText("Cairn ran npm run typecheck and it failed.");
+
+    await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await candidate.getByRole("button", { name: CONTINUE_BUTTON }).click();
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 60_000 });
+
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **STOPPED**");
+    expect(report).toContain("TASK_PROMISE_NOT_MET");
+    expect(report).toContain("Cairn ran `npm run typecheck`: failed");
+    // Nothing was committed, and the worker's edits stay for inspection.
+    expect(headOf(project)).toBe(startHead);
+    expect(existsSync(join(project, "visible.txt"))).toBe(true);
+  } finally {
+    await app.close();
+  }
+});
+
+test("cancelling at the Task Card makes no worker call at all", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-promises-cancel-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await sendChat(win, "Change the page title");
+    await waitStreamDone(win);
+    const taskCard = win.locator(".task-card");
+    await expect(taskCard).toBeVisible();
+    await taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" }).click();
+    await waitStreamDone(win);
+    await taskCard.getByRole("button", { name: "Review" }).click();
+
+    const panel = win.locator(".dispatch-panel");
+    await expect(panel).toBeVisible({ timeout: 20_000 });
+    await expect(win.locator(".task-promise-card")).toBeVisible();
+
+    // c4 — Cancel from the card. No worker ran, and no task record exists.
+    await panel.getByRole("button", { name: "Cancel" }).click();
+    await expect(panel).toHaveCount(0);
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(0);
+    expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  } finally {
+    await app.close();
+  }
+});

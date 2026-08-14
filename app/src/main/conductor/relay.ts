@@ -193,6 +193,24 @@ export function composeResultCard(
   card.commit = composed.commit ? composed.commit.reason : null;
   card.evidenceSummary = composed.evidenceSummary;
   card.recordRecovery = composed.recordRecovery ?? null;
+  // Task 238: the same rows the candidate showed, so the result cannot
+  // quietly disagree with what the owner was asked to judge.
+  // Only when there is something to say. A run that carried no promises leaves
+  // this key ABSENT, so a legacy card and a promise-free card stay byte-identical
+  // to what every existing reader and saved conversation already holds.
+  const answered = composed.promiseAnswers ?? [];
+  if (answered.length > 0) card.promises = answered.map((row) => ({
+    id: row.id,
+    text: row.text,
+    source: row.source,
+    answeredBy: row.verification.kind === "cairn-check" ? "cairn" as const : "owner" as const,
+    cairn: row.cairn === null ? null : {
+      label: row.cairn.label, command: row.cairn.command,
+      status: row.cairn.status, durationMs: row.cairn.durationMs,
+    },
+    worker: row.worker,
+    owner: row.owner,
+  }));
   card.processFailure = composed.processFailure
     ? { code: composed.processFailure.code, debugPath: composed.processFailure.debugPath }
     : null;

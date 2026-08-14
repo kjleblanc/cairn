@@ -8,6 +8,7 @@ import type {
   UnsealedCandidateDecisionRequest,
   UnsealedCandidateDecisionV1,
   UnsealedCandidateOwnerAnswer,
+  UnsealedCandidatePromiseView,
   UnsealedCandidateProjectionV1,
 } from "./unsealed-candidate.js";
 import type {
@@ -680,6 +681,11 @@ export interface ResultCard {
    * the record renders it under "Verified by Cairn" and so does the card.
    */
   recordRecovery: string | null;
+  /** Task 238: the promises this task made and how each was answered, in the
+   * same three voices the candidate showed. Empty when the run carried none,
+   * and ABSENT on a card saved before this existed — a conversation saved
+   * yesterday must still open, so readers treat missing as none. */
+  promises?: UnsealedCandidatePromiseView[];
   /** The worker process's own failure code and the retained local debug path
    * (null when the debug directory could not be created). */
   processFailure: { code: string; debugPath: string | null } | null;

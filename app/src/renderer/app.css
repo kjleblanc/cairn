@@ -2513,3 +2513,57 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   border-top: 1px solid rgb(246 236 225 / 9%); padding-top: 2px;
 }
 .unsealed-candidate-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+
+/* Task 238/239 — the promises a task makes, and how each one was answered.
+   The three voices are visually separate because they are separate kinds of
+   evidence: Cairn's own check, the worker's claim, and the owner's judgment. */
+.task-promise-card {
+  margin: 12px 0; padding: 12px 14px;
+  border: 1px solid var(--lantern-line); border-radius: 10px;
+  background: var(--lantern-panel);
+}
+.task-promise-card-title { margin: 0 0 4px; font-size: .95rem; font-weight: 600; }
+.task-promise-card-lead,
+.task-promise-card-nomenu { margin: 0 0 8px; font-size: .8rem; color: var(--lantern-soft); line-height: 1.45; }
+.task-promise-card-rows { margin: 0; padding: 0; list-style: none; }
+.task-promise-card-row { padding: 8px 0; border-top: 1px solid var(--lantern-line); }
+.task-promise-card-row:first-child { border-top: none; }
+.task-promise-card-row-text { margin: 0 0 6px; line-height: 1.45; }
+.task-promise-card-row-id { color: var(--lantern-soft); margin-right: 6px; }
+.task-promise-card-row-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-promise-card-row-answerer { margin: 6px 0 0; font-size: .75rem; color: var(--lantern-soft); }
+
+.unsealed-candidate-promises { margin-top: 10px; }
+.unsealed-candidate-promise-list { margin: 0; padding: 0; list-style: none; }
+.unsealed-candidate-promise { padding: 8px 0; border-top: 1px solid var(--lantern-line); }
+.unsealed-candidate-promise:first-child { border-top: none; }
+.unsealed-candidate-promise-text { margin: 0 0 4px; line-height: 1.45; }
+.unsealed-candidate-promise-id { color: var(--lantern-soft); margin-right: 6px; }
+.unsealed-candidate-promise-cairn,
+.unsealed-candidate-promise-worker { margin: 2px 0; font-size: .8rem; line-height: 1.45; }
+/* Cairn's own finding carries a status colour; the worker's never does, so a
+   confident-sounding claim cannot borrow the look of verified evidence. */
+.unsealed-candidate-promise-cairn[data-status="passed"] { color: var(--lantern-ok, #7fbf8f); }
+.unsealed-candidate-promise-cairn[data-status="failed"],
+.unsealed-candidate-promise-cairn[data-status="unfinished"],
+.unsealed-candidate-promise-cairn[data-status="none"] { color: var(--lantern-warn, #d8a657); }
+.unsealed-candidate-promise-worker { color: var(--lantern-soft); }
+.unsealed-candidate-promise-owner { margin: 4px 0 0; font-size: .8rem; }
+.unsealed-candidate-promise-pending { color: var(--lantern-warn, #d8a657); }
+.unsealed-candidate-promise-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.unsealed-candidate-owed { margin: 6px 0 0; font-size: .8rem; color: var(--lantern-warn, #d8a657); }
+
+.result-card-promises { margin-top: 10px; }
+.result-card-promise-list { margin: 0; padding: 0; list-style: none; }
+.result-card-promise { padding: 6px 0; border-top: 1px solid var(--lantern-line); }
+.result-card-promise:first-child { border-top: none; }
+.result-card-promise-text { margin: 0 0 3px; line-height: 1.45; }
+.result-card-promise-cairn,
+.result-card-promise-owner,
+.result-card-promise-worker { margin: 2px 0; font-size: .8rem; line-height: 1.45; }
+.result-card-promise-cairn[data-status="passed"] { color: var(--lantern-ok, #7fbf8f); }
+.result-card-promise-cairn[data-status="failed"],
+.result-card-promise-cairn[data-status="unfinished"],
+.result-card-promise-cairn[data-status="none"] { color: var(--lantern-warn, #d8a657); }
+.result-card-promise-worker { color: var(--lantern-soft); }
+.result-card-promise-provenance { font-size: .7rem; }

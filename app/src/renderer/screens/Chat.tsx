@@ -399,6 +399,47 @@ function ResultCardView({ card, dir, onOpenRun }: { card: ResultCard; dir: strin
         </>
       ) : null}
 
+      {/* Task 238: the same rows the Task Card promised and the candidate
+        * answered, so the result cannot quietly disagree with either. The three
+        * voices stay on their own lines here too. */}
+      {(card.promises ?? []).length === 0 ? null : (
+        <section className="result-card-promises" aria-label="What this task promised">
+          <h2 className="result-card-facts-title">What this task promised</h2>
+          <ol className="result-card-promise-list">
+            {(card.promises ?? []).map((row) => (
+              <li key={row.id} className="result-card-promise" data-row={row.id}>
+                <p className="result-card-promise-text">
+                  <span className="mono">{row.id}</span> {row.text}
+                </p>
+                {row.answeredBy === "cairn" ? (
+                  <p className="result-card-promise-cairn" data-status={row.cairn?.status ?? "none"}>
+                    {row.cairn === null
+                      ? "Cairn had no result for this check."
+                      : row.cairn.status === "unfinished"
+                        ? `Cairn ran ${row.cairn.command} but it did not finish in time.`
+                        : `Cairn ran ${row.cairn.command} and it ${row.cairn.status}.`}
+                  </p>
+                ) : (
+                  <p className="result-card-promise-owner">
+                    {row.owner === "met"
+                      ? "You confirmed this yourself."
+                      : row.owner === "not-met"
+                        ? "You said this is not done."
+                        : "You did not judge this."}
+                  </p>
+                )}
+                <p className="result-card-promise-worker">
+                  {row.worker === null
+                    ? `${card.route?.adapterLabel ?? "The worker"} did not answer this.`
+                    : `${card.route?.adapterLabel ?? "The worker"} says: ${row.worker}`}
+                  <span className="result-card-promise-provenance"> (reported, not checked)</span>
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
       {card.disposition !== "ERROR" && wroteRecords ? (
         <section className="result-card-verification">
           <h2 className="result-card-facts-title">What Cairn checked</h2>
@@ -1744,7 +1785,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         checkpointId: candidate.checkpointId,
         choice,
         // Only rows the owner actually answered. An omission stays unanswered,
-        // which Cairn refuses to seal — it is never read as approval.
+        // and main decides what that means — it is never read as approval here.
         ownerAnswers: choice === "continue" ? ownerAnswers : {},
       });
       if (!response.ok) { setError(response.message); return; }
@@ -1854,9 +1895,12 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       previewId: request.previewId,
       realCallConfirmed: worker && realCallConfirmed,
       disclosure: request.disclosure ?? undefined,
-      // Every displayed row, with who answers it. Omitted entirely when the
-      // card showed nothing, which leaves this run exactly as it was before.
-      checkSelections: request.request === null ? undefined : checkSelections,
+      // Every displayed row, with who answers it. Sent only when the owner
+      // actually chose: an EMPTY object means "opted in but chose nothing",
+      // which main rightly refuses as incomplete. Choosing none at all is
+      // declining the card, and that run carries no promises — exactly the run
+      // Cairn made before this card existed. Partial choices still refuse.
+      checkSelections: Object.keys(checkSelections).length === 0 ? undefined : checkSelections,
     });
     if (dispatchToken.current !== token) return; // a newer dispatch owns the panel now
     if (!response.ok) {
