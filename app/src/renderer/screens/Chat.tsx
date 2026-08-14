@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1, UnsealedCandidateChoice, UnsealedCandidateProjectionV1 } from "../../shared/ipc";
+import type { ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1, UnsealedCandidateChoice, UnsealedCandidateOwnerAnswer, UnsealedCandidateProjectionV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -19,6 +19,7 @@ import { CriticCallCard } from "../components/CriticCall";
 import { RepairCallCard } from "../components/RepairCall";
 import { HarnessRevisionCard } from "../components/HarnessRevision";
 import { UnsealedCandidateCard } from "../components/UnsealedCandidate";
+import { OWNER_OBSERVATION, TaskPromiseCard, taskCardRows } from "../components/TaskPromiseCard";
 import { Pill } from "../components/Ui";
 
 /** Tracks one in-flight `send()`. `id` starts out as whatever conversation
@@ -78,6 +79,8 @@ type Dispatch = {
   criticCall: CriticCallDisclosureV1 | null;
   route: RouteResult | null;
   disclosure: WorkerDisclosure | null;
+  /** Task 238: the checks this project can answer, from the route response. */
+  checkMenu: readonly Readonly<{ id: string; label: string; command: string }>[];
   phase: "confirm" | "running" | "settling";
   error: string | null;
 };
@@ -621,6 +624,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const [repairCallBusy, setRepairCallBusy] = useState(false);
   const [harnessRevisionBusy, setHarnessRevisionBusy] = useState(false);
   const [unsealedCandidateBusy, setUnsealedCandidateBusy] = useState(false);
+  // Task 238: how each Task Card row will be checked, keyed by row id.
+  const [checkSelections, setCheckSelections] = useState<Record<string, string>>({});
   const [calibrationCall, setCalibrationCall] = useState<CriticCallDisclosureV1 | null>(null);
   const [realCallConfirmed, setRealCallConfirmed] = useState(false);
   const dispatchHeadingId = useId();
@@ -1726,6 +1731,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   async function chooseUnsealedCandidate(
     candidate: UnsealedCandidateProjectionV1,
     choice: UnsealedCandidateChoice,
+    ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>> = {},
   ): Promise<void> {
     const held = session;
     if (unsealedCandidateBusy || held?.phase !== "running" || held.unsealedCandidate !== candidate
@@ -1737,6 +1743,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         dir,
         checkpointId: candidate.checkpointId,
         choice,
+        // Only rows the owner actually answered. An omission stays unanswered,
+        // which Cairn refuses to seal — it is never read as approval.
+        ownerAnswers: choice === "continue" ? ownerAnswers : {},
       });
       if (!response.ok) { setError(response.message); return; }
       recorded = true;
@@ -1794,7 +1803,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setError(null);
     setRetryRequest(null);
     setRealCallConfirmed(false);
-    setDispatch({ previewId: null, request: null, context: [], taskSpecPreview: null, taskReview: null, criticCall: null, route: null, disclosure: null, phase: "confirm", error: null });
+    setDispatch({ previewId: null, request: null, context: [], taskSpecPreview: null, taskReview: null, criticCall: null, route: null, disclosure: null, checkMenu: [], phase: "confirm", error: null });
     void cairn.taskRoute({
       dir,
       source: { kind: "proposal", proposalId: candidate.actionId, conversationId: candidate.conversationId },
@@ -1818,6 +1827,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         taskReview: response.ok ? response.value.taskReview ?? null : current.taskReview,
         criticCall: response.ok ? response.value.criticCall ?? null : null,
         route: response.ok ? response.value.route : null,
+        checkMenu: response.ok ? response.value.checkMenu : [],
         disclosure: response.ok ? response.value.disclosure ?? null : null,
         error: response.ok ? null : response.message,
       }));
@@ -1844,6 +1854,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       previewId: request.previewId,
       realCallConfirmed: worker && realCallConfirmed,
       disclosure: request.disclosure ?? undefined,
+      // Every displayed row, with who answers it. Omitted entirely when the
+      // card showed nothing, which leaves this run exactly as it was before.
+      checkSelections: request.request === null ? undefined : checkSelections,
     });
     if (dispatchToken.current !== token) return; // a newer dispatch owns the panel now
     if (!response.ok) {
@@ -2151,7 +2164,8 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 <UnsealedCandidateCard
                   candidate={session.unsealedCandidate}
                   busy={unsealedCandidateBusy}
-                  onChoose={(choice) => void chooseUnsealedCandidate(session.unsealedCandidate!, choice)}
+                  onChoose={(choice, ownerAnswers) =>
+                    void chooseUnsealedCandidate(session.unsealedCandidate!, choice, ownerAnswers)}
                 />
               ) : null}
               {dispatch && dispatch.phase !== "settling" ? (
@@ -2186,6 +2200,14 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                       ) : dispatch.request !== null ? (
                         <>
                           <TaskIntentList request={dispatch.request} context={dispatch.context} heading="Final review" />
+                          <TaskPromiseCard
+                            request={dispatch.request}
+                            menu={dispatch.checkMenu}
+                            selections={checkSelections}
+                            disabled={conversationResetting}
+                            onSelect={(rowId, choice) =>
+                              setCheckSelections((current) => ({ ...current, [rowId]: choice }))}
+                          />
                           <p className="small muted dispatch-acceptance">
                             Starting accepts every displayed <strong>Cairn chose</strong> value as part of this task.
                             Separate risk, data-sharing, cost, and provider approvals still use their own controls below.

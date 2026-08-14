@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { SERIAL_UNSEALED_CANDIDATE_VERSION, type SerialUnsealedCandidateV1 } from "@cairn/core";
+import {
+  SERIAL_UNSEALED_CANDIDATE_VERSION,
+  type SerialTaskPromiseAnswerV1,
+  type SerialUnsealedCandidateV1,
+} from "@cairn/core";
 
 import { canonicalProjectKey } from "./conductor/turnauth.js";
 import {
@@ -9,8 +13,22 @@ import {
   parseUnsealedCandidateDecisionRequest,
   type UnsealedCandidateChoice,
   type UnsealedCandidateDecisionV1,
+  type UnsealedCandidateOwnerAnswer,
+  type UnsealedCandidatePromiseView,
   type UnsealedCandidateProjectionV1,
 } from "../shared/unsealed-candidate.js";
+
+/**
+ * What settles the pause. `continue` carries the owner's own row judgments,
+ * because the card is where those rows are answered; `stop` carries nothing,
+ * since nothing needs judging to keep the work and finish honestly.
+ */
+export type UnsealedCandidateSettlementV1 =
+  | Readonly<{ choice: "stop" }>
+  | Readonly<{
+      choice: "continue";
+      ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>;
+    }>;
 
 /**
  * Main's half of the pre-terminal pause.
@@ -34,7 +52,7 @@ const PENDING_LIMIT = 64;
 type Pending = {
   projectKey: string;
   projection: UnsealedCandidateProjectionV1;
-  settle: (choice: UnsealedCandidateChoice) => void;
+  settle: (settlement: UnsealedCandidateSettlementV1) => void;
   done: boolean;
 };
 
@@ -54,8 +72,8 @@ export type UnsealedCandidateDecisionOutcome =
 
 export type UnsealedCandidateCheckpointV1 = Readonly<{
   projection: UnsealedCandidateProjectionV1;
-  /** Resolves once, with the choice that settled this pause. */
-  settled: Promise<UnsealedCandidateChoice>;
+  /** Resolves once, with the settlement that answered this pause. */
+  settled: Promise<UnsealedCandidateSettlementV1>;
 }>;
 
 function projectKey(value: unknown): string | null {
@@ -86,7 +104,32 @@ function checkedCandidate(value: unknown): SerialUnsealedCandidateV1 | null {
   if (stringList(record.changedPaths) === null || stringList(record.requestContext) === null) return null;
   if (record.evidenceSummary !== null && typeof record.evidenceSummary !== "string") return null;
   if (record.claims !== null && (typeof record.claims !== "object" || record.claims === undefined)) return null;
+  if (!Array.isArray(record.answers)) return null;
   return record as SerialUnsealedCandidateV1;
+}
+
+/**
+ * Core's answered rows, flattened for the screen. The three voices stay three
+ * fields: nothing here can merge the worker's sentence into Cairn's finding or
+ * into the owner's judgment.
+ */
+function promiseViews(
+  answers: readonly SerialTaskPromiseAnswerV1[],
+): readonly UnsealedCandidatePromiseView[] {
+  return Object.freeze(answers.map((row) => Object.freeze({
+    id: row.id,
+    text: row.text,
+    source: row.source,
+    answeredBy: row.verification.kind === "cairn-check" ? "cairn" as const : "owner" as const,
+    cairn: row.cairn === null ? null : Object.freeze({
+      label: row.cairn.label,
+      command: row.cairn.command,
+      status: row.cairn.status,
+      durationMs: row.cairn.durationMs,
+    }),
+    worker: row.worker,
+    owner: row.owner,
+  })));
 }
 
 /**
@@ -120,11 +163,12 @@ export function openUnsealedCandidateCheckpoint(input: unknown): UnsealedCandida
     changedPaths: checked.changedPaths,
     claims: checked.claims,
     evidenceSummary: checked.evidenceSummary,
+    promises: promiseViews(checked.answers),
     choices: UNSEALED_CANDIDATE_CHOICES,
   });
 
-  let settle: (choice: UnsealedCandidateChoice) => void = () => {};
-  const settled = new Promise<UnsealedCandidateChoice>((resolve) => { settle = resolve; });
+  let settle: (settlement: UnsealedCandidateSettlementV1) => void = () => {};
+  const settled = new Promise<UnsealedCandidateSettlementV1>((resolve) => { settle = resolve; });
   const held: Pending = { projectKey: key, projection, settle, done: false };
   pendingByProject.set(key, held);
   pendingByCheckpoint.set(checkpointId, held);
@@ -137,12 +181,14 @@ export function currentUnsealedCandidate(dir: string): UnsealedCandidateProjecti
   return key === null ? null : pendingByProject.get(key)?.projection ?? null;
 }
 
-function retire(held: Pending, choice: UnsealedCandidateChoice): void {
+function retire(held: Pending, settlement: UnsealedCandidateSettlementV1): void {
   held.done = true;
   pendingByProject.delete(held.projectKey);
   pendingByCheckpoint.delete(held.projection.checkpointId);
-  held.settle(choice);
+  held.settle(settlement);
 }
+
+const STOP_SETTLEMENT: UnsealedCandidateSettlementV1 = Object.freeze({ choice: "stop" } as const);
 
 /**
  * Answer the one live pause. Every refusal leaves that pause exactly as it was,
@@ -159,13 +205,16 @@ export function decideUnsealedCandidate(value: unknown): UnsealedCandidateDecisi
     || pendingByProject.get(key) !== held) {
     return Object.freeze({ ok: false, code: "UNSEALED_CANDIDATE_UNKNOWN_CHECKPOINT" } as const);
   }
-  retire(held, request.choice);
+  retire(held, request.choice === "continue"
+    ? Object.freeze({ choice: "continue", ownerAnswers: request.ownerAnswers } as const)
+    : STOP_SETTLEMENT);
   return Object.freeze({
     ok: true,
     decision: Object.freeze({
       version: UNSEALED_CANDIDATE_VERSION,
       checkpointId: request.checkpointId,
       choice: request.choice,
+      ownerAnswers: request.ownerAnswers,
     }),
   } as const);
 }
@@ -187,7 +236,7 @@ export function closeUnsealedCandidateIfCurrent(
   if (key === null) return false;
   const held = pendingByProject.get(key);
   if (held === undefined || held.done || held.projection !== projection) return false;
-  retire(held, "stop");
+  retire(held, STOP_SETTLEMENT);
   return true;
 }
 
@@ -196,7 +245,7 @@ export function pendingUnsealedCandidateCount(): number {
 }
 
 export function _resetUnsealedCandidatesForTests(): void {
-  for (const held of [...pendingByProject.values()]) retire(held, "stop");
+  for (const held of [...pendingByProject.values()]) retire(held, STOP_SETTLEMENT);
   pendingByProject.clear();
   pendingByCheckpoint.clear();
 }

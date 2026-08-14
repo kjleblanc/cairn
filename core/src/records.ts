@@ -13,6 +13,7 @@ import {
   type TaskSpecV1,
 } from "./quality.js";
 import type { AdapterTaskContract } from "./routing.js";
+import type { SerialTaskPromiseAnswerV1 } from "./taskcard.js";
 import {
   isCriticCompletionAuthority,
   type CriticCompletionAuthorityV1,
@@ -370,6 +371,9 @@ export interface ComposedRecordInput {
   // (work-log restore and/or report-path overwrite). Optional so every existing
   // construction site stays valid; rendered under "Verified by Cairn" when set.
   recordRecovery?: string | null;
+  /** Task 238: the accepted promises and how each was answered. Absent on a
+   * run that carried none, which leaves the report exactly as it was. */
+  promiseAnswers?: readonly SerialTaskPromiseAnswerV1[];
 }
 
 const ROW_CAP = 160;
@@ -623,6 +627,38 @@ function bulletsOrNone(items: readonly string[]): string {
   return items.length > 0 ? items.map((item) => quarantineBlock(`- ${item}`)).join("\n") : "- None reported.";
 }
 
+/**
+ * Task 238: every accepted promise and how each was answered, with the three
+ * voices kept apart on their own lines — what Cairn ran and found, what the
+ * worker said (named as the worker), and what the owner judged. A reader must
+ * never have to guess which of the three is speaking.
+ */
+function promiseAnswerBlock(
+  answers: readonly SerialTaskPromiseAnswerV1[],
+  adapterLabel: string,
+): string {
+  return answers.map((row) => {
+    const lines: string[] = [quarantineBlock(`- ${row.id}: ${row.text}`)];
+    if (row.verification.kind === "cairn-check") {
+      lines.push(row.cairn === null
+        ? `  - Cairn has no result for this check, so it is not answered.`
+        : row.cairn.status === "unfinished"
+          ? `  - Cairn ran \`${row.cairn.command}\`: did not finish within the time limit, so it is not answered.`
+          : `  - Cairn ran \`${row.cairn.command}\`: ${row.cairn.status} (${Math.round(row.cairn.durationMs / 1000)}s).`);
+    } else {
+      lines.push(row.owner === "met"
+        ? "  - You confirmed this yourself."
+        : row.owner === "not-met"
+          ? "  - You said this is not done."
+          : "  - You have not judged this yet, so it is not answered.");
+    }
+    lines.push(row.worker === null
+      ? `  - ${adapterLabel} did not answer this row.`
+      : quarantineInline(`  - ${adapterLabel} says: ${row.worker}`));
+    return lines.join("\n");
+  }).join("\n");
+}
+
 function checkBullets(checks: WorkerClaims["checks"]): string {
   return checks.length > 0
     ? checks.map((check) => quarantineBlock(`- ${check.name} — ${check.result}`)).join("\n")
@@ -711,6 +747,10 @@ export function composeWorkerReport(input: ComposedRecordInput): string {
   if (stopped) sections.push(stopped);
   sections.push(PRIVACY_PARAGRAPH);
   sections.push(renderAcceptedRequestView(input.acceptedRequest, input.requestContext));
+  if (input.promiseAnswers && input.promiseAnswers.length > 0) {
+    sections.push("## Promises and how each was answered");
+    sections.push(promiseAnswerBlock(input.promiseAnswers, input.route.adapterLabel));
+  }
   if (taskSpecRecord) {
     sections.push("## Task Spec evidence — separate from claims and envelope facts");
     sections.push(taskSpecEvidenceBlock(taskSpecRecord));

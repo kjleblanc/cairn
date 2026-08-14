@@ -62,20 +62,54 @@ export type UnsealedCandidateProjectionV1 = Readonly<{
     milestone: string;
   }> | null;
   evidenceSummary: string | null;
+  /**
+   * Task 238: every promise the owner accepted, answered in three separate
+   * fields so the screen can never blur them together. `cairn` is what Cairn
+   * itself ran; `worker` is the worker's sentence and belongs to the worker;
+   * `owner` is the owner's own judgment and starts `pending` — this card is
+   * where they answer it. Empty when the run carried no promises.
+   */
+  promises: readonly UnsealedCandidatePromiseView[];
   choices: readonly UnsealedCandidateChoice[];
 }>;
+
+export type UnsealedCandidatePromiseView = Readonly<{
+  id: string;
+  text: string;
+  source: string;
+  /** Who owes this row's answer. */
+  answeredBy: "cairn" | "owner";
+  /** Cairn's own finding, or null when it has none (owner rows always null). */
+  cairn: Readonly<{
+    label: string;
+    command: string;
+    status: "passed" | "failed" | "unfinished";
+    durationMs: number;
+  }> | null;
+  /** The worker's own words for this row, attributed wherever shown. */
+  worker: string | null;
+  owner: UnsealedCandidateOwnerAnswer | "pending";
+}>;
+
+export const UNSEALED_CANDIDATE_OWNER_ANSWERS = Object.freeze(["met", "not-met"] as const);
+
+export type UnsealedCandidateOwnerAnswer = typeof UNSEALED_CANDIDATE_OWNER_ANSWERS[number];
 
 /** The only shape the renderer may send back. */
 export type UnsealedCandidateDecisionRequest = {
   dir: string;
   checkpointId: string;
   choice: UnsealedCandidateChoice;
+  /** The owner's judgment per row id. Rows left out stay unanswered, which
+   * cannot seal — an omission is never read as approval. */
+  ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>;
 };
 
 export type UnsealedCandidateDecisionV1 = Readonly<{
   version: typeof UNSEALED_CANDIDATE_VERSION;
   checkpointId: string;
   choice: UnsealedCandidateChoice;
+  ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>;
 }>;
 
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -94,10 +128,35 @@ export function parseUnsealedCandidateDecisionRequest(
 ): UnsealedCandidateDecisionRequest | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const keys = Object.keys(value as Record<string, unknown>).sort();
-  if (keys.join("\0") !== "checkpointId\0choice\0dir") return null;
-  const { dir, checkpointId, choice } = value as Record<string, unknown>;
+  if (keys.join("\0") !== "checkpointId\0choice\0dir\0ownerAnswers") return null;
+  const { dir, checkpointId, choice, ownerAnswers } = value as Record<string, unknown>;
   if (typeof dir !== "string" || dir.length === 0 || dir.length > 4_000) return null;
   if (typeof checkpointId !== "string" || !CHECKPOINT_ID.test(checkpointId)) return null;
   if (!isUnsealedCandidateChoice(choice)) return null;
-  return { dir, checkpointId, choice };
+  const answers = parseOwnerAnswers(ownerAnswers);
+  if (answers === null) return null;
+  return { dir, checkpointId, choice, ownerAnswers: answers };
+}
+
+const ROW_ID = /^c[1-9][0-9]{0,2}$/u;
+const OWNER_ANSWER_CAP = 32;
+
+/**
+ * Row ids only, and only the two real answers. An unrecognised word is refused
+ * outright rather than dropped, because a press Cairn cannot read exactly is
+ * not a press it should act on.
+ */
+function parseOwnerAnswers(
+  value: unknown,
+): Readonly<Record<string, UnsealedCandidateOwnerAnswer>> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > OWNER_ANSWER_CAP) return null;
+  const answers: Record<string, UnsealedCandidateOwnerAnswer> = {};
+  for (const [id, answer] of entries) {
+    if (!ROW_ID.test(id)) return null;
+    if (answer !== "met" && answer !== "not-met") return null;
+    answers[id] = answer;
+  }
+  return Object.freeze(answers);
 }

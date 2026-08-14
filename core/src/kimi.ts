@@ -960,6 +960,14 @@ function kimiTaskPrompt(contract: AdapterTaskContract): string {
     "For You said so, the exact owner words govern if they conflict with Cairn’s interpretation.",
     "You weren’t sure is a starting point, not a fixed rule. Cairn chose is Cairn’s choice, not evidence of owner preference.",
     acceptedRequest,
+    // Task 238: mirrors the Codex adapter. Same promises, same wording, so a
+    // task means the same thing whichever worker Cairn routes it to.
+    ...(contract.version === "cairn-serial-task/v3" && contract.promises && contract.promises.rows.length > 0 ? [
+      "Promises the owner accepted for this task — answer every cN exactly once, in order:",
+      ...contract.promises.rows.map((row) => `- ${row.id}: ${JSON.stringify(row.text)}`),
+      "Add one entry to your claims checks array per cN, whose name is exactly that id (for example \"c1\") and whose result is your real finding for it.",
+      "Your cN answers are claims, not Cairn verification. Cairn runs its own checks and asks the owner about the rest; a promise you merely assert is not met.",
+    ] : []),
     "Cairn already created this task's brief. Do not create another brief or start another task.",
     "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
     "Implement the requested outcome and run proportionate checks.",

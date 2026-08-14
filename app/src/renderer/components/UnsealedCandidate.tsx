@@ -1,4 +1,10 @@
-import type { UnsealedCandidateChoice, UnsealedCandidateProjectionV1 } from "../../shared/unsealed-candidate";
+import { useState } from "react";
+
+import type {
+  UnsealedCandidateChoice,
+  UnsealedCandidateOwnerAnswer,
+  UnsealedCandidateProjectionV1,
+} from "../../shared/unsealed-candidate";
 
 /**
  * What the owner reads before Cairn is allowed to finish a task.
@@ -28,12 +34,30 @@ const CHOICE_STYLES: Readonly<Record<UnsealedCandidateChoice, string>> = Object.
   stop: "pill pill-quiet",
 });
 
+/** Cairn's own finding for one row, in plain words. */
+function cairnFinding(row: UnsealedCandidateProjectionV1["promises"][number]): string {
+  if (row.cairn === null) return "Cairn has no result for this check, so it is not answered.";
+  const seconds = Math.round(row.cairn.durationMs / 1000);
+  if (row.cairn.status === "unfinished") {
+    return `Cairn ran ${row.cairn.command} but it did not finish in time, so this is not answered.`;
+  }
+  return row.cairn.status === "passed"
+    ? `Cairn ran ${row.cairn.command} and it passed (${seconds}s).`
+    : `Cairn ran ${row.cairn.command} and it failed.`;
+}
+
 export function UnsealedCandidateCard({ candidate, busy = false, onChoose }: {
   candidate: UnsealedCandidateProjectionV1;
   busy?: boolean;
-  onChoose?: (choice: UnsealedCandidateChoice) => void;
+  onChoose?: (
+    choice: UnsealedCandidateChoice,
+    ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>,
+  ) => void;
 }) {
   const claims = candidate.claims;
+  const [ownerAnswers, setOwnerAnswers] = useState<Record<string, UnsealedCandidateOwnerAnswer>>({});
+  const ownerRows = candidate.promises.filter((row) => row.answeredBy === "owner");
+  const unanswered = ownerRows.filter((row) => ownerAnswers[row.id] === undefined);
   return (
     <section className="unsealed-candidate" aria-label="Unsealed candidate">
       <h3 className="unsealed-candidate-title">Unsealed candidate</h3>
@@ -55,6 +79,67 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose }: {
           </ul>
         )}
       </section>
+
+      {candidate.promises.length === 0 ? null : (
+        <section className="unsealed-candidate-promises" aria-label="What this task promised">
+          <h4 className="unsealed-candidate-section-title">What this task promised</h4>
+          <ol className="unsealed-candidate-promise-list">
+            {candidate.promises.map((row) => (
+              <li key={row.id} className="unsealed-candidate-promise" data-row={row.id}>
+                <p className="unsealed-candidate-promise-text">
+                  <span className="unsealed-candidate-promise-id mono">{row.id}</span> {row.text}
+                </p>
+
+                {/* Voice one: Cairn's own check. */}
+                {row.answeredBy === "cairn" ? (
+                  <p className="unsealed-candidate-promise-cairn" data-status={row.cairn?.status ?? "none"}>
+                    <span className="unsealed-candidate-provenance">Cairn checked this</span>
+                    {" "}{cairnFinding(row)}
+                  </p>
+                ) : null}
+
+                {/* Voice two: the worker, always attributed to the worker. */}
+                <p className="unsealed-candidate-promise-worker">
+                  <span className="unsealed-candidate-provenance">reported, not checked</span>
+                  {" "}{row.worker === null
+                    ? `${candidate.adapterLabel} did not answer this.`
+                    : `${candidate.adapterLabel} says: ${row.worker}`}
+                </p>
+
+                {/* Voice three: the owner's own eyes, still owed. */}
+                {row.answeredBy === "owner" ? (
+                  <div className="unsealed-candidate-promise-owner">
+                    <span className="unsealed-candidate-provenance">needs your judgment</span>
+                    {ownerAnswers[row.id] === undefined ? (
+                      <span className="unsealed-candidate-promise-pending"> You have not judged this yet.</span>
+                    ) : null}
+                    <div className="unsealed-candidate-promise-actions">
+                      <button
+                        type="button"
+                        className={ownerAnswers[row.id] === "met" ? "pill pill-primary" : "pill pill-quiet"}
+                        aria-pressed={ownerAnswers[row.id] === "met"}
+                        disabled={busy}
+                        onClick={() => setOwnerAnswers((current) => ({ ...current, [row.id]: "met" }))}
+                      >
+                        I checked this — it&apos;s done
+                      </button>
+                      <button
+                        type="button"
+                        className={ownerAnswers[row.id] === "not-met" ? "pill pill-primary" : "pill pill-quiet"}
+                        aria-pressed={ownerAnswers[row.id] === "not-met"}
+                        disabled={busy}
+                        onClick={() => setOwnerAnswers((current) => ({ ...current, [row.id]: "not-met" }))}
+                      >
+                        Not done
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       <section className="unsealed-candidate-changes" aria-label="Files changed in your project">
         <h4 className="unsealed-candidate-section-title">
@@ -127,13 +212,23 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose }: {
               key={choice}
               type="button"
               className={CHOICE_STYLES[choice]}
-              disabled={busy}
-              onClick={() => onChoose(choice)}
+              // Continue waits on the rows only the owner can answer. Cairn
+              // refuses to seal them unanswered anyway; disabling here says so
+              // before the press rather than after it.
+              disabled={busy || (choice === "continue" && unanswered.length > 0)}
+              onClick={() => onChoose(choice, ownerAnswers)}
             >
               {CHOICE_LABELS[choice]}
             </button>
           ))}
         </div>
+      ) : null}
+      {unanswered.length > 0 ? (
+        <p className="unsealed-candidate-owed" role="status">
+          {unanswered.length === 1
+            ? `Answer ${unanswered[0]?.id} above before Cairn can finish this task.`
+            : `Answer ${unanswered.map((row) => row.id).join(", ")} above before Cairn can finish this task.`}
+        </p>
       ) : null}
     </section>
   );

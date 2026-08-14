@@ -7759,3 +7759,99 @@ test("Cairn runs only the checks the owner selected", async () => {
   });
   assert.equal(readFileSync(join(root, "ran.txt"), "utf8"), "typecheck\n");
 });
+
+test("the dispatched worker prompt lists every promise row and demands one answer each", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(0)\"");
+  const intent = attributedRequest();
+  let stdin = "";
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run(request) {
+      stdin = request.stdin;
+      writeFileSync(join(root, "visible.txt"), "worker output\n");
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Did it.", changes: ["visible.txt - created"],
+          checks: [
+            { name: "c1", result: "the list sorts by word count" },
+            { name: "c2", result: "counts are 74, 477, 256" },
+          ],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+        }),
+      };
+    },
+  };
+  const adapter = createCodexExecAdapter(
+    root, { installed: true, connected: true }, authorizeCodexExecForIntent(root, intent), fake,
+  );
+
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [adapter],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() { return { choice: "continue", ownerAnswers: { c2: "met" } }; },
+  });
+
+  // Every displayed row reaches the worker, by id and by its exact text. The
+  // text is JSON-quoted like the v4 branch already does, so requirement text
+  // containing newlines cannot forge extra instruction lines in the prompt.
+  assert.match(stdin, /- c1: "Books sort by word count"/);
+  assert.match(stdin, /- c2: "Use these exact word counts"/);
+  // And the worker is told these are the owner's promises, answered one each,
+  // and that its answers are claims rather than Cairn's verification.
+  assert.match(stdin, /answer every cN/i);
+  assert.match(stdin, /claims, not Cairn/i);
+  assert.equal(result.status, "done");
+});
+
+test("the terminal report answers every promise row in three distinguishable voices", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(0)\"");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen, [
+      { name: "c1", result: "sorted it by word count" },
+      { name: "c2", result: "used 74, 477, 256" },
+    ])],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() { return { choice: "continue", ownerAnswers: { c2: "met" } }; },
+  });
+
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  const report = result.reportText;
+  assert.match(report, /## Promises and how each was answered/);
+  // Cairn's own finding, named as Cairn's, with the command it actually ran.
+  assert.match(report, /c1: Books sort by word count/);
+  assert.match(report, /Cairn ran `npm run typecheck`: passed/);
+  // The worker's words, attributed to the worker and never to Cairn.
+  assert.match(report, /Promise Worker says: sorted it by word count/);
+  // The owner's own judgment, named as the owner's.
+  assert.match(report, /c2: Use these exact word counts/);
+  assert.match(report, /You confirmed this yourself/);
+  // The worker also answered c2, and that answer must NOT be dressed up as
+  // Cairn's verification of it.
+  assert.match(report, /Promise Worker says: used 74, 477, 256/);
+});
+
+test("a stopped run still names the promise that went unanswered", async () => {
+  const root = project();
+  withCheckScript(root, "node -e \"process.exit(1)\"");
+  const intent = attributedRequest();
+  const seen: { contract: AdapterTaskContract | null } = { contract: null };
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [promiseAdapter(root, seen, [{ name: "c1", result: "all good, honest" }])],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() { return { choice: "continue", ownerAnswers: { c2: "met" } }; },
+  });
+
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.match(result.reportText, /## Promises and how each was answered/);
+  assert.match(result.reportText, /Cairn ran `npm run typecheck`: failed/);
+  assert.match(result.reportText, /Promise Worker says: all good, honest/);
+});

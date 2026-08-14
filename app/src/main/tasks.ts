@@ -5,6 +5,10 @@ import {
   previewSerialRoute,
   projectStatus,
   runSerialTask,
+  composeSerialTaskPromises,
+  projectCheckMenu,
+  type SerialTaskPromiseVerificationV1,
+  type SerialTaskPromisesV1,
   taskRequestView,
   type AdapterDescriptor,
   type SerialRunResult,
@@ -463,18 +467,43 @@ function checkedDisclosure(value: unknown): WorkerDisclosure | undefined | null 
 }
 
 function checkedRunRequest(value: unknown): TaskRunRequest | null {
-  const request = exactRecord(value, ["dir", "previewId"], ["realCallConfirmed", "disclosure"]);
+  const request = exactRecord(value, ["dir", "previewId"], ["realCallConfirmed", "disclosure", "checkSelections"]);
   if (!request || typeof request.dir !== "string" || request.dir.length === 0 || request.dir.length > 32_767 ||
       typeof request.previewId !== "string" || !UUID_V4.test(request.previewId)) return null;
   if (request.realCallConfirmed !== undefined && typeof request.realCallConfirmed !== "boolean") return null;
   const disclosure = checkedDisclosure(request.disclosure);
   if (disclosure === null) return null;
+  const checkSelections = checkedCheckSelections(request.checkSelections);
+  if (checkSelections === null) return null;
   return {
     dir: request.dir,
     previewId: request.previewId,
     ...(request.realCallConfirmed === true ? { realCallConfirmed: true } : {}),
     ...(disclosure === undefined ? {} : { disclosure }),
+    ...(checkSelections === undefined ? {} : { checkSelections }),
   };
+}
+
+/**
+ * Task 238: one entry per displayed row, naming either a menu check id or
+ * `owner`. Refused outright if it is not exactly that, because a selection
+ * Cairn cannot read exactly must not silently become a different check.
+ */
+function checkedCheckSelections(
+  value: unknown,
+): Readonly<Record<string, string>> | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > 32) return null;
+  const known = new Set<string>(["owner", "typecheck", "build", "unit-tests"]);
+  const selections: Record<string, string> = {};
+  for (const [id, choice] of entries) {
+    if (!/^c[1-9][0-9]{0,2}$/u.test(id)) return null;
+    if (typeof choice !== "string" || !known.has(choice)) return null;
+    selections[id] = choice;
+  }
+  return Object.freeze(selections);
 }
 
 function nextGeneration(key: string): number {
@@ -661,6 +690,12 @@ export function registerTaskIpc(
           request: projection,
           context: [...intent.context],
           route: value,
+          // Task 238: the checks THIS project can actually answer. A project
+          // declaring none gets an empty menu, and every row falls to the
+          // owner's own eyes rather than to an invented check.
+          checkMenu: projectCheckMenu(dir).map((check) => ({
+            id: check.id, label: check.label, command: check.command,
+          })),
           ...(disclosure === undefined ? {} : { disclosure }),
           ...(taskSpecPreview === undefined ? {} : { taskSpecPreview }),
           ...(taskReview === undefined ? {} : { taskReview }),
@@ -945,6 +980,34 @@ export function registerTaskIpc(
     };
     if (pending.route.status !== "ready" || pending.adapter === null) {
       return refuseBeforeAcceptance("TASK_ROUTE_UNAVAILABLE: That route is no longer ready. Review the task again.");
+    }
+    // Task 238: turn the owner's card selections into Core's promise rows. The
+    // rows are derived from the SAME accepted intent Core will use, in the same
+    // order, so `c1` here and `c1` there are the same promise. A selection that
+    // does not cover every row is refused rather than silently completed, since
+    // a missing row would be a promise nobody agreed to answer.
+    let taskPromises: SerialTaskPromisesV1 | undefined;
+    if (request.checkSelections !== undefined) {
+      const rowCount = 1 + pending.request.requirements.length;
+      const verifications: SerialTaskPromiseVerificationV1[] = [];
+      for (let index = 0; index < rowCount; index += 1) {
+        const choice = request.checkSelections[`c${index + 1}`];
+        if (choice === undefined) {
+          return refuseBeforeAcceptance(
+            "TASK_CHECKS_INCOMPLETE: Every promise on the Task Card needs a way to be checked. Review the task again.",
+          );
+        }
+        verifications.push(choice === "owner"
+          ? { kind: "owner-observation" }
+          : { kind: "cairn-check", checkId: choice });
+      }
+      const composed = composeSerialTaskPromises(pending.intent, verifications);
+      if (composed === null) {
+        return refuseBeforeAcceptance(
+          "TASK_CHECKS_INVALID: Cairn could not match those checks to this request. Review the task again.",
+        );
+      }
+      taskPromises = composed;
     }
     if (pending.source.kind === "proposal") {
       let current: ReturnType<typeof currentTaskProposal>;
@@ -1258,6 +1321,10 @@ export function registerTaskIpc(
           adapters: detected.adapters,
           adapterId: routedAdapterId,
           signal: controller.signal,
+          // Task 238: the rows the owner accepted on the Task Card, with who
+          // answers each. Absent when the owner selected nothing, which leaves
+          // this run byte-for-byte the run it was before.
+          ...(taskPromises ? { taskPromises } : {}),
           events: {
             onActivity: (activity) => {
               sessions.get(key)?.activities.push(activity);
@@ -1291,7 +1358,12 @@ export function registerTaskIpc(
             else signal?.addEventListener("abort", close, { once: true });
             contents.once("destroyed", close);
             try {
-              return await opened.settled;
+              // Main answers in Core's own words. `continue` carries the
+              // owner's row judgments; anything else is the honest stop.
+              const settlement = await opened.settled;
+              return settlement.choice === "continue"
+                ? { choice: "continue" as const, ownerAnswers: settlement.ownerAnswers }
+                : "stop";
             } finally {
               signal?.removeEventListener("abort", close);
               if (!contents.isDestroyed()) contents.off("destroyed", close);

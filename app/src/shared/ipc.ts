@@ -7,6 +7,7 @@ import type { RepairCallDecisionRequest, RepairCallDecisionV1, RepairCallDisclos
 import type {
   UnsealedCandidateDecisionRequest,
   UnsealedCandidateDecisionV1,
+  UnsealedCandidateOwnerAnswer,
   UnsealedCandidateProjectionV1,
 } from "./unsealed-candidate.js";
 import type {
@@ -41,6 +42,8 @@ export type {
   UnsealedCandidateChoice,
   UnsealedCandidateDecisionRequest,
   UnsealedCandidateDecisionV1,
+  UnsealedCandidateOwnerAnswer,
+  UnsealedCandidatePromiseView,
   UnsealedCandidateProjectionV1,
 } from "./unsealed-candidate.js";
 
@@ -133,6 +136,10 @@ export type TaskRoutePreview = {
   request: TaskRequestView;
   context: readonly string[];
   route: RouteResult;
+  /** Task 238: the checks this project can actually answer, in Cairn's fixed
+   * order. Empty when the project declares none of them, which honestly leaves
+   * every row to the owner's own eyes. */
+  checkMenu: readonly Readonly<{ id: string; label: string; command: string }>[];
   disclosure?: WorkerDisclosure;
   /** Optional output-only Quality Plan review. Main remains the sole owner of
    * the branded Task Spec; `task:run` accepts only `previewId`. */
@@ -179,6 +186,11 @@ export type TaskRunRequest = {
   previewId: string;
   realCallConfirmed?: boolean;
   disclosure?: WorkerDisclosure;
+  /** Task 238: how each Task Card row will be answered, keyed by row id
+   * (`c1`, `c2`, ...). Each value is a menu check id or `owner`. Main derives
+   * the rows themselves from its own accepted intent; this only says who
+   * answers which. Omitted entirely when the card offered no rows. */
+  checkSelections?: Readonly<Record<string, string>>;
 };
 export type RunSessionSnapshot = {
   dir: string;

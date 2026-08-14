@@ -209,4 +209,21 @@ export {
   type SerialUnsealedCandidateChoiceV1,
   type SerialUnsealedCandidateV1,
 } from "./serial.js";
+export {
+  PROJECT_CHECK_DEFAULT_CAP_MS,
+  SERIAL_TASK_PROMISES_VERSION,
+  composeSerialTaskPromiseAnswers,
+  composeSerialTaskPromises,
+  projectCheckMenu,
+  runProjectCheck,
+  serialTaskPromisesSatisfied,
+  type ProjectCheckIdV1,
+  type ProjectCheckV1,
+  type SerialProjectCheckResultV1,
+  type SerialTaskPromiseAnswerV1,
+  type SerialTaskPromiseOwnerAnswerV1,
+  type SerialTaskPromiseV1,
+  type SerialTaskPromiseVerificationV1,
+  type SerialTaskPromisesV1,
+} from "./taskcard.js";
 export * from "./steps.js";

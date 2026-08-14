@@ -2333,6 +2333,8 @@ function composeCairnWorkerRecordValues(
   candidateFilesChanged?: readonly string[],
   terminalAction?: SerialCandidateTerminalActionCustody,
   recordDate = new Date().toISOString().slice(0, 10),
+  /** Task 238: the accepted promises and how each was answered. */
+  promiseAnswers?: readonly SerialTaskPromiseAnswerV1[],
 ): { reportText: string; row: LogRow; composed: ComposedRecordInput } {
   const taskSpecRunRecord = composeBoundRunRecord(
     contract,
@@ -2360,6 +2362,7 @@ function composeCairnWorkerRecordValues(
     paidCallStarted: true,
     ...(taskSpecRunRecord ? { taskSpecRunRecord } : {}),
     recordRecovery: recovery?.disclosure ?? null,
+    ...(promiseAnswers && promiseAnswers.length > 0 ? { promiseAnswers } : {}),
   };
   const report = reportWithCandidateCustody(
     composeWorkerReport(input),
@@ -2409,6 +2412,8 @@ function cairnWorkerRecords(
   terminalAction?: SerialCandidateTerminalActionCustody,
   recordDate?: string,
   candidateBriefText?: string,
+  /** Task 238: the accepted promises and how each was answered. */
+  promiseAnswers?: readonly SerialTaskPromiseAnswerV1[],
 ): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
   const values = composeCairnWorkerRecordValues(
     root,
@@ -2425,6 +2430,7 @@ function cairnWorkerRecords(
     candidateFilesChanged,
     terminalAction,
     recordDate,
+    promiseAnswers,
   );
   const report = values.reportText;
   const row = values.row;
@@ -7307,6 +7313,10 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         const records = cairnWorkerRecords(
           projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null,
           workerResult?.evidence ?? null, recovery, taskSpecEvidence,
+          // No candidate custody, files, terminal action, date or brief text on
+          // this path; the trailing argument is Task 238's answered promises, so
+          // a stop can name the promise that went unanswered.
+          undefined, undefined, undefined, undefined, undefined, promiseAnswers,
         );
         if (!records.verified) {
           const restored = restoreLogBeforeThrow(projectRoot, start);
@@ -7518,6 +7528,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         const records = cairnWorkerRecords(
           projectRoot, contract, start, "DONE", null, claims, protectedValid, commit,
           workerResult?.evidence ?? null, undefined, taskSpecEvidence,
+          undefined, undefined, undefined, undefined, undefined, promiseAnswers,
         );
         if (!records.verified) return closeRecordRewrite(records);
         emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
@@ -7539,6 +7550,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
         workerResult?.evidence ?? null,
         undefined,
         taskSpecEvidence,
+        undefined, undefined, undefined, undefined, undefined, promiseAnswers,
       );
       if (!records.verified) return closeRecordRewrite(records);
       const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];

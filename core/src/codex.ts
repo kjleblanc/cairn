@@ -1436,6 +1436,16 @@ function taskPrompt(contract: AdapterTaskContract): string {
       "For You said so, the exact owner words govern if they conflict with Cairn\u2019s interpretation.",
       "You weren\u2019t sure is a starting point, not a fixed rule. Cairn chose is Cairn\u2019s choice, not evidence of owner preference.",
       acceptedRequest,
+      // Task 238: the promises the owner actually saw before approving this
+      // dispatch. The worker answers each one, and is told plainly that its
+      // answers are claims — Cairn runs its own checks and asks the owner
+      // separately, so asserting a promise here cannot make it met.
+      ...(contract.promises && contract.promises.rows.length > 0 ? [
+        "Promises the owner accepted for this task — answer every cN exactly once, in order:",
+        ...contract.promises.rows.map((row) => `- ${row.id}: ${JSON.stringify(row.text)}`),
+        "Add one entry to your claims checks array per cN, whose name is exactly that id (for example \"c1\") and whose result is your real finding for it.",
+        "Your cN answers are claims, not Cairn verification. Cairn runs its own checks and asks the owner about the rest; a promise you merely assert is not met.",
+      ] : []),
       "Cairn already created this task's brief. Do not create another brief or start another task.",
       "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
       "Use Codex's built-in apply_patch tool for file edits. Do not invoke an apply_patch command inherited from PATH.",
