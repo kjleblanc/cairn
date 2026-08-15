@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { bindTaskIntent, type TaskIntent } from "../src/intent.js";
@@ -296,4 +297,27 @@ test("c1 does not steal c10's answer", () => {
   });
   assert.equal(answers[0]?.id, "c1");
   assert.equal(answers[0]?.worker, "answer meant for c1");
+});
+
+// ---------------------------------------------------------------------------
+// Task 246. Cairn's OWN check menu.
+//
+// Every other test here builds a throwaway project. This one reads the real
+// repository root, because the thing worth guarding is not that the filter
+// works - that is proved above - but that Cairn itself actually declares
+// checks it can answer. Slice 5 asks a beginner to watch one whole Gauntlet
+// journey on Cairn, and a project with an empty menu has nothing to verify
+// with, so every row falls to owner observation.
+// ---------------------------------------------------------------------------
+
+test("Cairn's own project offers real checks, not an empty menu", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const menu = projectCheckMenu(repoRoot);
+
+  // Exactly the two Cairn can truthfully pass. `test:unit` is deliberately not
+  // declared: the app unit suite exceeds PROJECT_CHECK_DEFAULT_CAP_MS and nine
+  // of its tests fail today, so a row answered by it could only ever end
+  // `unfinished` or `failed`. An empty menu is bad; a menu that lies is worse.
+  assert.deepEqual(menu.map((check) => check.id), ["typecheck", "build"]);
+  assert.deepEqual(menu.map((check) => check.command), ["npm run typecheck", "npm run build"]);
 });

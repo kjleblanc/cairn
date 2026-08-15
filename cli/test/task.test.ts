@@ -18,6 +18,11 @@ import {
   previewSerialRoute,
   runSerialTask,
   taskRequestSha256,
+  type AdapterTaskQualityBinding,
+  type LegacyCodexExecAuthorization,
+  type LegacyCodexExecDisclosure,
+  type QualityBoundCodexExecAuthorization,
+  type QualityBoundCodexExecDisclosure,
   type TaskIntent,
 } from "@cairn/core";
 
@@ -86,6 +91,45 @@ function fakePrompts(flow: FlowTrace, confirmation: boolean | symbol): TaskFlowP
 }
 
 function fakeDependencies(flow: FlowTrace, confirmation: boolean | symbol = true): TaskFlowDependencies {
+  // Task 246. `TaskFlowDependencies` types these two as Core's own functions,
+  // and Task 211 (`c77b86c`) made both overloaded. An arrow literal cannot
+  // satisfy an overloaded type - one signature cannot return both the legacy
+  // and the quality-bound shape - which is why this file has not typechecked
+  // since. The doubles below carry the SAME two overloads and delegate on the
+  // same branch, so they record exactly what they recorded before and observe
+  // exactly what they observed before. `taskFlow` itself only ever calls the
+  // two-argument form; the three-argument overload exists here solely so the
+  // double really is Core's type rather than a narrowing of it.
+  function tracedDisclosure(root: string, intent: TaskIntent): LegacyCodexExecDisclosure;
+  function tracedDisclosure(
+    root: string, intent: TaskIntent, quality: AdapterTaskQualityBinding,
+  ): QualityBoundCodexExecDisclosure;
+  function tracedDisclosure(root: string, intent: TaskIntent, quality?: AdapterTaskQualityBinding) {
+    flow.disclosureCalls += 1;
+    flow.events.push("disclosure");
+    flow.intents.push(intent);
+    const disclosure = quality === undefined
+      ? codexExecDisclosure(root, intent)
+      : codexExecDisclosure(root, intent, quality);
+    flow.disclosureTask = disclosure.task;
+    return disclosure;
+  }
+
+  function tracedAuthorization(root: string, intent: TaskIntent): LegacyCodexExecAuthorization;
+  function tracedAuthorization(
+    root: string, intent: TaskIntent, quality: AdapterTaskQualityBinding,
+  ): QualityBoundCodexExecAuthorization;
+  function tracedAuthorization(root: string, intent: TaskIntent, quality?: AdapterTaskQualityBinding) {
+    flow.authorizationCalls += 1;
+    flow.events.push("authorize");
+    flow.intents.push(intent);
+    const authorization = quality === undefined
+      ? authorizeCodexExec(root, intent)
+      : authorizeCodexExec(root, intent, quality);
+    flow.authorizationDigest = authorization.requestSha256;
+    return authorization;
+  }
+
   return {
     prompts: fakePrompts(flow, confirmation),
     newInputId: () => {
@@ -108,22 +152,8 @@ function fakeDependencies(flow: FlowTrace, confirmation: boolean | symbol = true
       flow.intents.push(intent);
       return previewSerialRoute(intent, adapters, adapterId);
     },
-    codexExecDisclosure: (root, intent) => {
-      flow.disclosureCalls += 1;
-      flow.events.push("disclosure");
-      flow.intents.push(intent);
-      const disclosure = codexExecDisclosure(root, intent);
-      flow.disclosureTask = disclosure.task;
-      return disclosure;
-    },
-    authorizeCodexExec: (root, intent) => {
-      flow.authorizationCalls += 1;
-      flow.events.push("authorize");
-      flow.intents.push(intent);
-      const authorization = authorizeCodexExec(root, intent);
-      flow.authorizationDigest = authorization.requestSha256;
-      return authorization;
-    },
+    codexExecDisclosure: tracedDisclosure,
+    authorizeCodexExec: tracedAuthorization,
     runSerialTask: async (_root, intent) => {
       flow.runCalls += 1;
       flow.events.push("run");

@@ -5,6 +5,8 @@
   "workspaces": ["core", "cli"],
   "engines": { "node": ">=20" },
   "scripts": {
-    "test": "npm test --workspaces"
+    "test": "npm test --workspaces",
+    "typecheck": "npm run typecheck --workspaces && npm --prefix app run typecheck",
+    "build": "npm run build --workspaces && npm --prefix app run build:vite"
   }
 }
