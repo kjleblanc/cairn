@@ -292,7 +292,7 @@ no checkpoint at all - the byte-identical close, preserved.
 | Command | Result |
 |---|---|
 | `core: npm run build` | PASS |
-| `core: npm test` (full suite) | CORE_SUITE_RESULT |
+| `core: npm test` (full suite) | **507 tests, 497 pass, 0 fail, 10 skipped** — but see "The Core suite failed once" below |
 | `app: npx tsc --noEmit` | PASS |
 | `app: npx tsc -p tsconfig.unit.json` | PASS |
 | `app: node --test dist-unit/tests-unit/*.test.js` | **934 tests, 923 pass, 9 fail, 2 skipped** |
@@ -319,6 +319,59 @@ itself instead of appearing as one timeout:
 [Task 244] second findings: +658ms
 [Task 244] result card: +1099ms
 ```
+
+## The Core suite failed once, and I could not reproduce it
+
+**The first full `npm test -w @cairn/core` run FAILED.** The visible dump was a
+test asserting `expected: null` that received a whole run result carrying
+`stopReason: 'PROTECTED_WORK_CHANGED'` and a `SerialCandidateV1` with
+`repairEligibility` and `criticMode: 'required'` — the Q6/Q9 candidate
+subsystem, which is `runSerialTaskToCandidate` and not the `runSerialTask`
+block this task changed. I lost the test's name to my own `tail -15`.
+
+What I then established, and what I did not:
+
+- Every Core file passes **in isolation**: `serial.test.js` alone is 195 tests,
+  189 pass, **0 fail**, 6 skipped; `candidate.test.js` is 36/32/0/4; the other
+  16 files and both `.mjs` files are all zero-fail.
+- The full suite **passed on re-run**: 507 tests, 497 pass, 0 fail, 10 skipped.
+- `npm test` runs all nineteen files in ONE `node --test` invocation, which
+  parallelises across files over heavy git I/O in temp directories.
+
+So the honest statement is: **the suite failed once under concurrency, every
+file is green alone, and a second full run was green. I never named the failing
+test and never proved whose it was.** A single green re-run is not proof the
+suite is stable, and this should not be read as one. If it recurs, the next
+session should capture the WHOLE output — not a `tail` — and settle ownership
+by rebuilding at `c9caf3b`, this task's brief-only commit.
+
+The handoff warns that the Core suite is slow and I/O-bound. It does not warn
+that its concurrent full-suite run can fail where every file passes alone.
+That is the sharper warning, and it is recorded here.
+
+## This report was committed by another session, mid-write
+
+While I was still running verification, **a second session working this same
+main checkout committed this task's work as `dde2662` and then claimed Task 245
+as `83f481f`** and began editing `CandidateCritique.tsx`,
+`UnsealedCandidate.tsx`, `app.css`, `conductor.spec.ts` and
+`unsealedcandidatepaper.test.ts`. I made neither commit.
+
+`dde2662` therefore captured this report with the literal placeholder
+`CORE_SUITE_RESULT` still standing in the `c11` table, because the Core suite
+had not finished. This commit replaces that placeholder with the real result
+and adds the section above. Nothing else in the record was rewritten.
+
+Two consequences a later reader should know:
+
+- **The E2E results in `c1`-`c11` were measured before Task 245's edits.** They
+  were true of `dde2662`. Task 245 changes these same screens and owns
+  re-proving them; my assertions on wording (`checked this one itself`, the
+  confirm and dismiss button labels) are exactly the ones its work will move.
+- This is the second time this has happened in this checkout — Task 243's
+  report records the first. **Two lanes in one checkout is what the contract's
+  lane rules forbid**, and it is why this task's own completion commit was not
+  made by the session that did the work.
 
 ### `c12` - the owner can read it: FAILED
 
