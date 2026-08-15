@@ -357,3 +357,124 @@ export function serialCritiquePreview(packet: SerialCritiquePacketV1): SerialCri
     totalCharacters: packetMessage(packet).length,
   });
 }
+
+/**
+ * Two published prices, held the way `app/src/main/connections/schema.ts:230`
+ * holds them: canonical decimal STRINGS, never floats. A price is money, and
+ * binary floating point cannot represent most decimal money exactly.
+ */
+export type SerialCritiquePriceV1 = Readonly<{
+  inputPerMillion: string;
+  outputPerMillion: string;
+  currency: string;
+}>;
+
+export type SerialCritiqueCostBoundV1 = Readonly<{
+  inputCharacters: number;
+  inputTokensAtMost: number;
+  outputTokensAtMost: number;
+  currency: string;
+  /** A plain decimal string, rounded UP. Never exponent notation. */
+  atMost: string;
+}>;
+
+const CANONICAL_DECIMAL = /^\d+(?:\.\d+)?$/u;
+const CURRENCY = /^[A-Z]{3}$/u;
+/** Scale every price to this many integer sub-units so nothing is a float. */
+const SCALE = 9;
+
+/**
+ * Deliberately pessimistic. Cairn has no tokenizer for a provider's model, and
+ * a ceiling that could be exceeded is worse than useless, so this assumes a
+ * denser packing than real text achieves - three characters per token, where
+ * English prose runs closer to four.
+ */
+const CHARACTERS_PER_TOKEN = 3;
+
+/** "1.25" -> 1250000000n at SCALE 9. Null for anything not canonical. */
+function decimalToScaled(value: string): bigint | null {
+  if (!CANONICAL_DECIMAL.test(value)) return null;
+  const [whole, fraction = ""] = value.split(".");
+  if (fraction.length > SCALE) return null;
+  return BigInt(whole as string) * 10n ** BigInt(SCALE)
+    + BigInt((fraction + "0".repeat(SCALE)).slice(0, SCALE) || "0");
+}
+
+/** Scaled integer back to a plain decimal string, rounding UP at `places`. */
+function scaledToDecimal(scaled: bigint, places: number): string {
+  const divisor = 10n ** BigInt(SCALE - places);
+  const rounded = (scaled + divisor - 1n) / divisor;
+  const text = rounded.toString().padStart(places + 1, "0");
+  return `${text.slice(0, text.length - places)}.${text.slice(text.length - places)}`;
+}
+
+/**
+ * The most this one call can cost, over the whole prompt Cairn will actually
+ * send and the output cap it declares.
+ *
+ * Every step is integer arithmetic on scaled decimals, and the final figure
+ * rounds up, so the number the owner reads can never be smaller than the
+ * charge. A price Cairn cannot read produces no ceiling at all - never a
+ * guess, and never a silently omitted line.
+ */
+export function serialCritiqueCostBound(
+  packet: SerialCritiquePacketV1,
+  price: SerialCritiquePriceV1,
+): SerialCritiqueCostBoundV1 | null {
+  if (typeof price.currency !== "string" || !CURRENCY.test(price.currency)) return null;
+  const inputScaled = decimalToScaled(price.inputPerMillion);
+  const outputScaled = decimalToScaled(price.outputPerMillion);
+  if (inputScaled === null || outputScaled === null) return null;
+
+  // The WHOLE prompt, system message included - not just the packet.
+  const inputCharacters = SERIAL_CRITIQUE_SYSTEM_PROMPT.length + packetMessage(packet).length;
+  const inputTokensAtMost = Math.ceil(inputCharacters / CHARACTERS_PER_TOKEN);
+  const outputTokensAtMost = SERIAL_CRITIQUE_MAX_OUTPUT_TOKENS;
+
+  const million = 1_000_000n;
+  const totalScaled =
+    (BigInt(inputTokensAtMost) * inputScaled + BigInt(outputTokensAtMost) * outputScaled + million - 1n)
+    / million;
+
+  return Object.freeze({
+    inputCharacters,
+    inputTokensAtMost,
+    outputTokensAtMost,
+    currency: price.currency,
+    atMost: scaledToDecimal(totalScaled, 4),
+  });
+}
+
+/**
+ * Move a decimal point right, exactly.
+ *
+ * Providers publish per-token prices; a ceiling is worked out per million. The
+ * conversion is done by moving digits between the whole and fraction parts
+ * rather than by multiplying, because multiplying a decimal price by 1e6 in
+ * binary floating point is how a published "0.0000015" becomes something
+ * slightly other than 1.5.
+ */
+function shiftDecimalRight(value: string, places: number): string | null {
+  if (!CANONICAL_DECIMAL.test(value)) return null;
+  const [whole = "0", fraction = ""] = value.split(".");
+  const padded = fraction.padEnd(places, "0");
+  const moved = padded.slice(0, places);
+  const rest = padded.slice(places);
+  const newWhole = `${whole}${moved}`.replace(/^0+(?=\d)/u, "");
+  const newFraction = rest.replace(/0+$/u, "");
+  return newFraction.length === 0 ? newWhole : `${newWhole}.${newFraction}`;
+}
+
+/** Per-million prices from the per-token pair a provider's catalog publishes. */
+export function serialCritiquePricePerMillion(
+  inputPerToken: string,
+  outputPerToken: string,
+  currency: string,
+): SerialCritiquePriceV1 | null {
+  if (typeof currency !== "string" || !CURRENCY.test(currency)) return null;
+  if (typeof inputPerToken !== "string" || typeof outputPerToken !== "string") return null;
+  const inputPerMillion = shiftDecimalRight(inputPerToken, 6);
+  const outputPerMillion = shiftDecimalRight(outputPerToken, 6);
+  if (inputPerMillion === null || outputPerMillion === null) return null;
+  return Object.freeze({ inputPerMillion, outputPerMillion, currency });
+}

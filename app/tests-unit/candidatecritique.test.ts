@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  attachCandidateCritiquePrice,
   closeCandidateCritique,
   currentCandidateCritique,
   decideCandidateCritique,
@@ -69,12 +70,17 @@ const goodAnswer = JSON.stringify({
   notes: ["The commit message could be clearer."],
 });
 
-type Call = { url: string; body: string };
+type Call = { url: string; body: string; authorization?: string };
 
 function recorder(respond: (call: Call) => Response | Promise<Response>) {
   const calls: Call[] = [];
-  const fetchImpl = (async (input: unknown, init?: { body?: unknown }) => {
-    const call = { url: String(input), body: String(init?.body ?? "") };
+  const fetchImpl = (async (input: unknown, init?: { body?: unknown; headers?: Record<string, string> }) => {
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    const call = {
+      url: String(input),
+      body: String(init?.body ?? ""),
+      ...(headers.authorization === undefined ? {} : { authorization: headers.authorization }),
+    };
     calls.push(call);
     return await respond(call);
   }) as unknown as typeof fetch;
@@ -263,4 +269,86 @@ test("a run with no frozen rows offers no critique", () => {
     dir: DIR, checkpointId: "cp-1", answers: [], facts: facts(), connection: connection(),
   });
   assert.equal(opened, null);
+});
+
+const CATALOG = JSON.stringify({
+  data: [
+    { id: "other/model", pricing: { prompt: "0.001", completion: "0.002" } },
+    { id: "fixture-model", pricing: { prompt: "0.000015", completion: "0.000075" } },
+  ],
+});
+
+const catalogReply = (body: string, status = 200): Response =>
+  new Response(body, { status, headers: { "content-type": "application/json" } });
+
+test("the offer opens at once, with no price and no network call yet", () => {
+  const { calls, fetchImpl } = recorder(() => catalogReply(CATALOG));
+  offer();
+  // Opening the pause must never wait on a network call.
+  assert.equal(calls.length, 0);
+  assert.equal(currentCandidateCritique(DIR)?.disclosure?.cost, null);
+  void fetchImpl;
+});
+
+test("the price lands afterwards, keyless, and states what it was worked out from", async () => {
+  offer();
+  const { calls, fetchImpl } = recorder(() => catalogReply(CATALOG));
+  await attachCandidateCritiquePrice(DIR, "cp-1", { fetchImpl });
+
+  assert.equal(calls.length, 1, "exactly one lookup");
+  assert.match(calls[0]!.url, /\/models$/u, "the public catalog");
+  assert.equal(calls[0]!.authorization, undefined, "no credential is sent");
+  assert.equal(calls[0]!.body, "", "and no body at all");
+
+  const cost = currentCandidateCritique(DIR)?.disclosure?.cost;
+  assert.ok(cost);
+  assert.equal(cost.known, true);
+  if (cost.known !== true) return;
+  assert.equal(cost.currency, "USD");
+  assert.equal(cost.inputPerMillion, "15");
+  assert.equal(cost.outputPerMillion, "75");
+  assert.match(cost.atMost, /^\d+\.\d+$/u);
+  assert.ok(cost.inputCharacters > 0);
+});
+
+test("a price Cairn cannot get is said plainly, and never guessed", async () => {
+  for (const respond of [
+    () => { throw new Error("offline"); },
+    () => catalogReply("nope", 500),
+    () => catalogReply("not json"),
+    () => catalogReply(JSON.stringify({ data: [] })),
+    () => catalogReply(JSON.stringify({ data: [{ id: "fixture-model" }] })),
+    () => catalogReply(JSON.stringify({ data: [{ id: "someone-else", pricing: { prompt: "1", completion: "1" } }] })),
+  ]) {
+    _resetCandidateCritiquesForTests();
+    offer();
+    const { calls, fetchImpl } = recorder(respond);
+    await attachCandidateCritiquePrice(DIR, "cp-1", { fetchImpl });
+    const cost = currentCandidateCritique(DIR)?.disclosure?.cost;
+    assert.ok(cost, "a cost field is always present once the lookup has run");
+    assert.equal(cost.known, false, "unknown, not invented");
+    assert.equal(calls.length, 1, "one attempt, never a retry");
+  }
+});
+
+test("a failed lookup leaves the offer pressable and the pause untouched", async () => {
+  offer();
+  const { fetchImpl } = recorder(() => { throw new Error("offline"); });
+  await attachCandidateCritiquePrice(DIR, "cp-1", { fetchImpl });
+  assert.equal(currentCandidateCritique(DIR)?.state, "offered");
+
+  const { calls, fetchImpl: callImpl } = recorder(() => reply(goodAnswer));
+  const outcome = await decideCandidateCritique(
+    { dir: DIR, checkpointId: "cp-1", action: "approve" }, deps(callImpl));
+  assert.equal(outcome.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(currentCandidateCritique(DIR)?.state, "answered");
+});
+
+test("a price for a checkpoint this project no longer holds changes nothing", async () => {
+  offer();
+  const { calls, fetchImpl } = recorder(() => catalogReply(CATALOG));
+  await attachCandidateCritiquePrice(DIR, "cp-gone", { fetchImpl });
+  assert.equal(calls.length, 0, "no lookup at all for an unknown checkpoint");
+  assert.equal(currentCandidateCritique(DIR)?.disclosure?.cost, null);
 });

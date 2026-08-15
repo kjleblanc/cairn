@@ -58,6 +58,7 @@ import {
 import { isConversationId } from "./conductor/conversation-id.js";
 import { canonicalProjectKey } from "./conductor/turnauth.js";
 import {
+  attachCandidateCritiquePrice,
   closeCandidateCritique,
   currentCandidateCritique,
   decideCandidateCritique,
@@ -571,6 +572,29 @@ function evidenceTitle(outcome: string): string {
  * inside the hook would cut that slice short. Keeping the shape out here keeps
  * the hook the short, auditable block the guard is meant to read.
  */
+/**
+ * Ask the provider what it charges, without making the pause wait.
+ *
+ * Fired and not awaited on purpose. A run is holding its lock at the pause; a
+ * price is a nicety beside that, so it arrives on the renderer's next poll or
+ * it does not arrive at all, and either way the card stays pressable.
+ */
+function priceCritiqueInBackground(dir: string, checkpointId: string, signal?: AbortSignal): void {
+  const deps = signal ? { fetchImpl: fetch, signal } : { fetchImpl: fetch };
+  void attachCandidateCritiquePrice(dir, checkpointId, deps).then(() => {
+    // The module holds its own copy; the renderer reads the session. Publish
+    // the priced offer onto the polled snapshot, and only while the SAME
+    // checkpoint is still the one on screen, so a price cannot land on a
+    // newer pause.
+    const priced = currentCandidateCritique(dir);
+    if (priced === null || priced.checkpointId !== checkpointId) return;
+    const session = sessions.get(canonicalProjectKey(dir));
+    if (session?.unsealedCandidateCritique?.checkpointId === checkpointId) {
+      session.unsealedCandidateCritique = priced;
+    }
+  }).catch(() => {});
+}
+
 function openCritiqueForCandidate(
   dir: string,
   checkpointId: string,
@@ -1433,6 +1457,7 @@ export function registerTaskIpc(
             // settling the pause. Nothing here is read by any gate.
             const critique = openCritiqueForCandidate(dir, opened.projection.checkpointId, candidate);
             if (held && critique) held.unsealedCandidateCritique = critique;
+            if (critique) priceCritiqueInBackground(dir, opened.projection.checkpointId, signal);
             // Cairn is still alive in both of these cases, so both close the
             // pause the honest way — an authored STOPPED, never a DONE.
             const close = (): void => { closeUnsealedCandidateIfCurrent(dir, opened.projection); };

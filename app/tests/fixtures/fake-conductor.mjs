@@ -362,6 +362,10 @@ async function streamReply(res, script, beforeDone, afterFirstPart) {
   res.end();
 }
 
+let catalogRequests = 0;
+let catalogStatus = 200;
+let catalogBody = null;
+let lastCatalogAuthorization = null;
 let lastCritiqueBody = null;
 let critiqueAnswer = null;
 let critiqueStatus = 200;
@@ -370,6 +374,18 @@ let critiqueRequests = 0;
 export function start() {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
+      // Task 241: the public, keyless price list. Answered before the POST
+      // guard so a GET can never be mistaken for a completion request.
+      if (req.method === "GET" && req.url === "/v1/models") {
+        catalogRequests += 1;
+        lastCatalogAuthorization = req.headers.authorization ?? null;
+        if (catalogStatus !== 200) { res.writeHead(catalogStatus).end(); return; }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(catalogBody ?? JSON.stringify({ data: [
+          { id: "fixture-model", pricing: { prompt: "0.000015", completion: "0.000075" } },
+        ] }));
+        return;
+      }
       if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
         res.writeHead(404).end();
         return;
@@ -433,6 +449,10 @@ export function start() {
         lastCritiqueBody: () => lastCritiqueBody,
         setCritiqueAnswer: (value) => { critiqueAnswer = value; },
         setCritiqueStatus: (value) => { critiqueStatus = value; },
+        catalogRequestCount: () => catalogRequests,
+        lastCatalogAuthorization: () => lastCatalogAuthorization,
+        setCatalogStatus: (value) => { catalogStatus = value; },
+        setCatalogBody: (value) => { catalogBody = value; },
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
         setProseOnlySetAside: (enabled) => { proseOnlySetAside = enabled; },
         holdCommentary,

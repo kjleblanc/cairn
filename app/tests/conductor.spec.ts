@@ -184,6 +184,10 @@ let critiqueRequestCount: () => number = () => 0;
 let lastCritiqueBody: () => string | null = () => null;
 let setFixtureCritiqueAnswer: (value: string | ((packet: string) => string) | null) => void = () => {};
 let setFixtureCritiqueStatus: (value: number) => void = () => {};
+let catalogRequestCount: () => number = () => 0;
+let lastCatalogAuthorization: () => string | null = () => null;
+let setFixtureCatalogStatus: (value: number) => void = () => {};
+let setFixtureCatalogBody: (value: string | null) => void = () => {};
 let lastOAuthExchangeBody: () => string | null = () => null;
 let oauthExchangeVerdict: () => boolean | null = () => null;
 
@@ -211,6 +215,10 @@ test.beforeAll(async () => {
       lastCritiqueBody: () => string | null;
       setCritiqueAnswer: (value: string | ((packet: string) => string) | null) => void;
       setCritiqueStatus: (value: number) => void;
+      catalogRequestCount: () => number;
+      lastCatalogAuthorization: () => string | null;
+      setCatalogStatus: (value: number) => void;
+      setCatalogBody: (value: string | null) => void;
     }>;
   };
   const server = await fixture.start();
@@ -234,6 +242,10 @@ test.beforeAll(async () => {
   lastCritiqueBody = server.lastCritiqueBody;
   setFixtureCritiqueAnswer = server.setCritiqueAnswer;
   setFixtureCritiqueStatus = server.setCritiqueStatus;
+  catalogRequestCount = server.catalogRequestCount;
+  lastCatalogAuthorization = server.lastCatalogAuthorization;
+  setFixtureCatalogStatus = server.setCatalogStatus;
+  setFixtureCatalogBody = server.setCatalogBody;
 
   const openRouterPath = pathToFileURL(join(__dirname, "fixtures", "fake-openrouter.mjs")).href;
   const openRouter = (await import(openRouterPath)) as {
@@ -270,6 +282,8 @@ test.beforeEach(() => {
   setFixtureProseOnlySetAside(false);
   setFixtureCritiqueAnswer(null);
   setFixtureCritiqueStatus(200);
+  setFixtureCatalogStatus(200);
+  setFixtureCatalogBody(null);
   clearStoredConnectionFiles();
 });
 
@@ -4955,11 +4969,35 @@ test("the owner approves one review and reads findings tied to the frozen rows",
     const critique = win.locator(".candidate-critique");
     await expect(critique).toBeVisible();
     await expect(critique).toHaveAttribute("data-state", "offered");
+
+    // The offer must sit ABOVE the buttons that end the pause. An offer
+    // rendered below Continue is an offer nobody reads: the owner reaches the
+    // decision first and presses it, which is exactly what happened the first
+    // time this was tried for real.
+    const offerComesFirst = await win.evaluate(() => {
+      const offer = document.querySelector(".candidate-critique");
+      const buttons = [...document.querySelectorAll(".unsealed-candidate-actions button")];
+      const decide = buttons.find((b) => (b.textContent ?? "").includes("Continue"));
+      if (!offer || !decide) return null;
+      // DOCUMENT_POSITION_FOLLOWING (4) means `decide` comes after `offer`.
+      return (offer.compareDocumentPosition(decide) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    expect(offerComesFirst).toBe(true);
+
     // The four facts a beginner needs, on the first screen.
     await expect(critique).toContainText("fixture-model");
     await expect(critique).toContainText("never your files");
     await expect(critique).toContainText("cannot change anything");
     await expect(critique).toContainText("One request - if it fails, Cairn will not try again.");
+    // c1/c2 - a real ceiling, from the provider's own published prices, and
+    // the arithmetic behind it is checkable in the fold.
+    const costLine = critique.locator(".candidate-critique-cost");
+    await expect(costLine).toHaveAttribute("data-cost", "known", { timeout: 30_000 });
+    await expect(costLine).toContainText("At most about USD");
+    await expect(costLine).toContainText("publishes today");
+    // c4 - the price list is fetched keyless: no credential is ever sent to it.
+    expect(catalogRequestCount()).toBeGreaterThan(0);
+    expect(lastCatalogAuthorization()).toBeNull();
     // The exact audit trail is one click away, not gone.
     const detail = critique.locator("details.candidate-critique-detail");
     await expect(detail).toHaveCount(1);
@@ -4967,6 +5005,7 @@ test("the owner approves one review and reads findings tied to the frozen rows",
     await expect(detail).toContainText("asking about c1, c2");
     await expect(detail).toContainText("Not sent:");
     await expect(detail).toContainText("the contents of any file");
+    await expect(detail).toContainText("Worked out from USD");
     // Collapsed by default, and it really opens: the exact numbers are
     // reachable, not merely present in the DOM.
     await expect(detail.locator(".candidate-critique-total")).not.toBeVisible();
@@ -4986,7 +5025,10 @@ test("the owner approves one review and reads findings tied to the frozen rows",
     await critique.scrollIntoViewIfNeeded();
     await expect(ask).toBeInViewport();
     await expect(critique.getByRole("button", { name: SKIP_REVIEW_BUTTON })).toBeInViewport();
-    await critique.screenshot({ path: CRITIQUE_OFFER_SHOT });
+    // The WHOLE candidate, with the offer inside it. Shooting the offer alone
+    // is what hid the ordering defect: a component can look right in isolation
+    // and still be unreachable in the page it lives in.
+    await candidate.screenshot({ path: CRITIQUE_OFFER_SHOT });
 
     // c2 - approving spends exactly one request.
     await ask.click();
@@ -5020,7 +5062,7 @@ test("the owner approves one review and reads findings tied to the frozen rows",
     await critique.scrollIntoViewIfNeeded();
     await expect(critique.locator('[data-critique-row="c1"]')).toBeInViewport();
     await expect(critique.locator('[data-critique-row="c2"]')).toBeInViewport();
-    await critique.screenshot({ path: CRITIQUE_FINDINGS_SHOT });
+    await candidate.screenshot({ path: CRITIQUE_FINDINGS_SHOT });
 
     // c3 and c6 - the finding changed nothing. The owner's own row is still
     // owed, and the run seals only once THEY answer it.

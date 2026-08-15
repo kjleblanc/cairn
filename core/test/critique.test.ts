@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  SERIAL_CRITIQUE_MAX_OUTPUT_TOKENS,
   SERIAL_CRITIQUE_SYSTEM_PROMPT,
+  serialCritiqueCostBound,
+  serialCritiquePricePerMillion,
   composeSerialCritiquePacket,
   serialCritiquePreview,
   serialCritiqueRequestBody,
@@ -304,4 +307,84 @@ test("the preview lists no file contents, because none were sent", () => {
   const packet = composeSerialCritiquePacket(answersOfTwo(), candidateFacts());
   if (packet === null) { assert.fail("packet"); return; }
   assert.deepEqual(serialCritiquePreview(packet).files, []);
+});
+
+const price = (input: string, output: string) =>
+  ({ inputPerMillion: input, outputPerMillion: output, currency: "USD" });
+
+test("a ceiling is a real worst case over the packet actually sent", () => {
+  const packet = composeSerialCritiquePacket(answersOfTwo(), candidateFacts());
+  if (packet === null) { assert.fail("packet"); return; }
+  const bound = serialCritiqueCostBound(packet, price("1.000000", "2.000000"));
+  assert.notEqual(bound, null);
+  if (bound === null) return;
+
+  // The bound must cover the WHOLE prompt, not just the packet message.
+  const body = JSON.parse(serialCritiqueRequestBody("m", packet)) as {
+    messages: readonly { content: string }[];
+  };
+  const promptCharacters = body.messages.reduce((n, m) => n + m.content.length, 0);
+  assert.equal(bound.inputCharacters, promptCharacters);
+  // Conservative: never fewer tokens than a generous characters-per-token rate.
+  assert.ok(bound.inputTokensAtMost >= Math.ceil(promptCharacters / 4),
+    `${bound.inputTokensAtMost} must not under-count ${promptCharacters} characters`);
+  assert.equal(bound.outputTokensAtMost, SERIAL_CRITIQUE_MAX_OUTPUT_TOKENS);
+  assert.equal(bound.currency, "USD");
+});
+
+test("the ceiling rounds up, so the real charge cannot exceed what was shown", () => {
+  const packet = composeSerialCritiquePacket(answersOfTwo(), candidateFacts());
+  if (packet === null) { assert.fail("packet"); return; }
+  // A price chosen so the exact product has more precision than the display.
+  const bound = serialCritiqueCostBound(packet, price("0.333333", "0.777777"));
+  if (bound === null) { assert.fail("bound"); return; }
+
+  const shown = Number.parseFloat(bound.atMost);
+  const exact = (bound.inputTokensAtMost * 0.333333 + bound.outputTokensAtMost * 0.777777) / 1_000_000;
+  assert.ok(shown >= exact, `shown ${bound.atMost} must be >= exact ${exact}`);
+  assert.ok(shown - exact < 0.0002, "and it must not be wildly over");
+});
+
+test("money is carried as decimal strings, so a price no float can hold survives", () => {
+  const packet = composeSerialCritiquePacket(answersOfTwo(), candidateFacts());
+  if (packet === null) { assert.fail("packet"); return; }
+  // 0.1 + 0.2 !== 0.3 in binary floating point. Prices must not go near it.
+  const bound = serialCritiqueCostBound(packet, price("0.100000", "0.200000"));
+  if (bound === null) { assert.fail("bound"); return; }
+  assert.match(bound.atMost, /^\d+\.\d+$/u, "a plain decimal string");
+  assert.ok(!bound.atMost.includes("e"), "never exponent notation");
+});
+
+test("a price Cairn cannot read yields no ceiling at all, never a guess", () => {
+  const packet = composeSerialCritiquePacket(answersOfTwo(), candidateFacts());
+  if (packet === null) { assert.fail("packet"); return; }
+  for (const bad of [
+    price("", "1.0"),
+    price("1.0", ""),
+    price("-1.0", "1.0"),
+    price("1,0", "1.0"),
+    price("1e-6", "1.0"),
+    price("Infinity", "1.0"),
+    { inputPerMillion: "1.0", outputPerMillion: "1.0", currency: "" },
+  ]) {
+    assert.equal(serialCritiqueCostBound(packet, bad), null, JSON.stringify(bad));
+  }
+});
+
+test("a per-token price becomes a per-million price without touching a float", () => {
+  // The real shapes openrouter.ai publishes, read from its public catalog.
+  const p = serialCritiquePricePerMillion("0.000015", "0.000075", "USD");
+  assert.deepEqual(p, { inputPerMillion: "15", outputPerMillion: "75", currency: "USD" });
+
+  // Seven decimal places, which a naive 6-place shift would lose.
+  assert.equal(serialCritiquePricePerMillion("0.0000015", "0.000075", "USD")?.inputPerMillion, "1.5");
+  // A free model is a real answer, not a missing one.
+  assert.equal(serialCritiquePricePerMillion("0", "0", "USD")?.inputPerMillion, "0");
+});
+
+test("a per-token price Cairn cannot read yields nothing", () => {
+  for (const [i, o] of [["1e-6", "0.1"], ["-0.1", "0.1"], ["", "0.1"], ["0.1", "abc"]]) {
+    assert.equal(serialCritiquePricePerMillion(i as string, o as string, "USD"), null, `${i} ${o}`);
+  }
+  assert.equal(serialCritiquePricePerMillion("0.1", "0.1", "usd"), null, "currency must be canonical");
 });

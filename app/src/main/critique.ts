@@ -1,9 +1,12 @@
 import {
   composeSerialCritiquePacket,
   parseSerialCritiqueOutput,
+  serialCritiqueCostBound,
   serialCritiquePreview,
+  serialCritiquePricePerMillion,
   serialCritiqueRequestBody,
   type SerialCritiqueCandidateFactsV1,
+  type SerialCritiquePriceV1,
   type SerialCritiquePacketV1,
   type SerialTaskPromiseAnswerV1,
 } from "@cairn/core";
@@ -17,6 +20,7 @@ import {
   CANDIDATE_CRITIQUE_PURPOSE_TEXT,
   CANDIDATE_CRITIQUE_VERSION,
   parseCandidateCritiqueDecisionRequest,
+  type CandidateCritiqueCostV1,
   type CandidateCritiqueDisclosureV1,
   type CandidateCritiqueProjectionV1,
   type CandidateCritiqueStateV1,
@@ -132,6 +136,9 @@ export function openCandidateCritique(input: {
       notSent: CANDIDATE_CRITIQUE_NOT_SENT,
       credentialText: CANDIDATE_CRITIQUE_CREDENTIAL_TEXT,
       limitText: CANDIDATE_CRITIQUE_LIMIT_TEXT,
+      // Null, not pending-shaped: the pause must never wait on a price, so the
+      // card opens without one and the lookup fills it in a moment later.
+      cost: null,
     });
   }
 
@@ -285,4 +292,96 @@ export function closeCandidateCritique(dir: string, checkpointId: string): void 
 
 export function _resetCandidateCritiquesForTests(): void {
   held.clear();
+}
+
+/**
+ * The provider's own published prices for the connected model.
+ *
+ * Keyless on purpose: this is the public price list, so it carries no
+ * credential, no project path, no file name and no packet - nothing but the
+ * request for a catalog anyone can read. One attempt, no retry, no fallback
+ * provider, and it never throws: a price is a nicety beside a run that is
+ * holding its lock, and it must behave like one.
+ *
+ * Cairn shows what it read or says it could not find out. It never estimates.
+ */
+export async function attachCandidateCritiquePrice(
+  dir: string,
+  checkpointId: string,
+  deps: Readonly<{ fetchImpl: typeof fetch; signal?: AbortSignal }>,
+): Promise<void> {
+  const key = projectKey(dir);
+  const entry = key === null ? undefined : held.get(key);
+  // An offer that is gone, already decided, or was never priceable gets no
+  // lookup at all - so a stale timer cannot reach out on a closed pause.
+  if (entry === undefined || entry.checkpointId !== checkpointId) return;
+  if (entry.packet === null || entry.connection === null || entry.disclosure === null) return;
+  if (entry.disclosure.cost !== null) return;
+
+  const priced = (cost: CandidateCritiqueCostV1): void => {
+    if (entry.disclosure === null) return;
+    entry.disclosure = Object.freeze({ ...entry.disclosure, cost });
+    project(entry, {});
+  };
+
+  let host: string;
+  try { host = new URL(entry.connection.baseUrl).host; } catch { host = entry.connection.provider; }
+
+  let payload: unknown;
+  try {
+    const base = entry.connection.baseUrl.endsWith("/")
+      ? entry.connection.baseUrl
+      : `${entry.connection.baseUrl}/`;
+    const response = await deps.fetchImpl(new URL("models", base).toString(), {
+      method: "GET",
+      redirect: "manual",
+      ...(deps.signal ? { signal: deps.signal } : {}),
+    });
+    if (!response.ok) { priced(unknownCost("CRITIQUE_PRICE_REFUSED")); return; }
+    payload = await response.json() as unknown;
+  } catch {
+    priced(unknownCost("CRITIQUE_PRICE_UNAVAILABLE"));
+    return;
+  }
+
+  const published = publishedPrice(payload, entry.connection.model);
+  if (published === null) { priced(unknownCost("CRITIQUE_PRICE_NOT_PUBLISHED")); return; }
+  const bound = serialCritiqueCostBound(entry.packet, published);
+  if (bound === null) { priced(unknownCost("CRITIQUE_PRICE_UNREADABLE")); return; }
+
+  priced(Object.freeze({
+    known: true as const,
+    atMost: bound.atMost,
+    currency: bound.currency,
+    inputPerMillion: published.inputPerMillion,
+    outputPerMillion: published.outputPerMillion,
+    inputCharacters: bound.inputCharacters,
+    inputTokensAtMost: bound.inputTokensAtMost,
+    outputTokensAtMost: bound.outputTokensAtMost,
+    source: host,
+  }));
+}
+
+const unknownCost = (reason: string): CandidateCritiqueCostV1 =>
+  Object.freeze({ known: false as const, reason });
+
+/**
+ * One entry, matched by exact model id, read at exactly one depth. A catalog
+ * that does not carry this model's prices is not an error to recover from - it
+ * is a fact to report.
+ */
+function publishedPrice(payload: unknown, model: string): SerialCritiquePriceV1 | null {
+  if (payload === null || typeof payload !== "object") return null;
+  const data = (payload as { data?: unknown }).data;
+  if (!Array.isArray(data)) return null;
+  for (const raw of data) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as { id?: unknown; pricing?: { prompt?: unknown; completion?: unknown } };
+    if (row.id !== model) continue;
+    const prompt = row.pricing?.prompt;
+    const completion = row.pricing?.completion;
+    if (typeof prompt !== "string" || typeof completion !== "string") return null;
+    return serialCritiquePricePerMillion(prompt, completion, "USD");
+  }
+  return null;
 }

@@ -55,6 +55,7 @@ export type {
 export type {
   CandidateCritiqueAction,
   CandidateCritiqueDecisionRequest,
+  CandidateCritiqueCostV1,
   CandidateCritiqueDisclosureV1,
   CandidateCritiqueFindingView,
   CandidateCritiqueProjectionV1,

@@ -2242,17 +2242,17 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   busy={unsealedCandidateBusy}
                   onChoose={(choice, ownerAnswers) =>
                     void chooseUnsealedCandidate(session.unsealedCandidate!, choice, ownerAnswers)}
-                />
-              ) : null}
-              {/* Joined to the pause by checkpoint id, so a stale offer can
-                  never render against a newer candidate. */}
-              {session?.phase === "running" && session.unsealedCandidate && session.unsealedCandidateCritique
-                && session.unsealedCandidateCritique.checkpointId === session.unsealedCandidate.checkpointId ? (
-                <CandidateCritiqueCard
-                  critique={session.unsealedCandidateCritique}
-                  busy={candidateCritiqueBusy}
-                  onDecide={(action) =>
-                    void decideCandidateCritique(session.unsealedCandidateCritique!, action)}
+                  critique={session.unsealedCandidateCritique
+                    && session.unsealedCandidateCritique.checkpointId === session.unsealedCandidate.checkpointId
+                    ? (
+                      <CandidateCritiqueCard
+                        critique={session.unsealedCandidateCritique}
+                        busy={candidateCritiqueBusy}
+                        onDecide={(action) =>
+                          void decideCandidateCritique(session.unsealedCandidateCritique!, action)}
+                      />
+                    )
+                    : undefined}
                 />
               ) : null}
               {dispatch && dispatch.phase !== "settling" ? (

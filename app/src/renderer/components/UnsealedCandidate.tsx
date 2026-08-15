@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import type {
   UnsealedCandidateChoice,
@@ -46,9 +46,15 @@ function cairnFinding(row: UnsealedCandidateProjectionV1["promises"][number]): s
     : `Cairn ran ${row.cairn.command} and it failed.`;
 }
 
-export function UnsealedCandidateCard({ candidate, busy = false, onChoose }: {
+export function UnsealedCandidateCard({ candidate, busy = false, onChoose, critique }: {
   candidate: UnsealedCandidateProjectionV1;
   busy?: boolean;
+  /**
+   * Anything that must be read BEFORE the two choices. It renders above the
+   * buttons on purpose: an offer placed after them is an offer nobody reads,
+   * because the owner reaches the decision first and takes it.
+   */
+  critique?: ReactNode;
   onChoose?: (
     choice: UnsealedCandidateChoice,
     ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>,
@@ -204,6 +210,8 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose }: {
           <li>Cairn has not said DONE or STOPPED.</li>
         </ul>
       </section>
+
+      {critique}
 
       {onChoose ? (
         <div className="unsealed-candidate-actions">

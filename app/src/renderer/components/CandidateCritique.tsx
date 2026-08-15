@@ -67,6 +67,15 @@ function SentDetail({ disclosure, summary }: {
       </p>
       <p className="candidate-critique-credential">{disclosure.credentialText}</p>
       <p className="candidate-critique-limit">{disclosure.limitText}</p>
+      {disclosure.cost?.known === true ? (
+        <p className="candidate-critique-arithmetic">
+          Worked out from {disclosure.cost.currency} {disclosure.cost.inputPerMillion} per
+          million in and {disclosure.cost.currency} {disclosure.cost.outputPerMillion} per
+          million out, applied to {disclosure.cost.inputCharacters} characters
+          (at most {disclosure.cost.inputTokensAtMost} tokens) in and at most{" "}
+          {disclosure.cost.outputTokensAtMost} tokens back, rounded up.
+        </p>
+      ) : null}
     </details>
   );
 }
@@ -90,6 +99,20 @@ export function CandidateCritiqueCard({ critique, busy = false, onDecide }: {
           above were kept. It sees a short summary of this task, never your
           files, and it cannot change anything.{" "}
           <strong>One request - if it fails, Cairn will not try again.</strong>
+        </p>
+      ) : null}
+
+      {/* The money, in the owner's own currency, worked out from the prices
+          the provider publishes - or an honest statement that Cairn could not
+          find them out. There is no third option: an estimate Cairn invented
+          would be worse than no number, because it would be believed. */}
+      {critique.state === "offered" && disclosure ? (
+        <p className="candidate-critique-cost" data-cost={disclosure.cost?.known === true ? "known" : disclosure.cost === null ? "pending" : "unknown"}>
+          {disclosure.cost === null
+            ? "Checking what this would cost..."
+            : disclosure.cost.known
+              ? `At most about ${disclosure.cost.currency} ${disclosure.cost.atMost}, at the prices ${disclosure.cost.source} publishes today.`
+              : "Cairn could not find out what this would cost, so it is not guessing. The sizes are in the details below."}
         </p>
       ) : null}
 

@@ -2655,3 +2655,18 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .candidate-critique-finding[data-judgment="not_met"] .candidate-critique-judgment { color: var(--garden-amber); }
 .candidate-critique-finding[data-judgment="unclear"] .candidate-critique-judgment { color: var(--lantern-soft); }
+
+/* Task 241: the money. Given its own line and its own weight because it is
+   the one fact on this card that spends something. */
+.candidate-critique-cost {
+  margin: 0 0 10px; padding: 6px 10px; line-height: 1.45;
+  border-radius: 8px; background: var(--lantern-paper-lit);
+  color: var(--lantern-ink); font-size: .8rem; overflow-wrap: anywhere;
+}
+.candidate-critique-cost[data-cost="known"] { font-weight: 650; }
+.candidate-critique-cost[data-cost="unknown"],
+.candidate-critique-cost[data-cost="pending"] { color: var(--lantern-soft); }
+.candidate-critique-arithmetic {
+  margin: 4px 0 0; line-height: 1.45; font-size: .76rem;
+  color: var(--lantern-soft); overflow-wrap: anywhere;
+}
