@@ -5,6 +5,10 @@ import type { TaskReviewActionRequest, TaskReviewProjectionV1 } from "./task-rev
 import type { CriticCallDecisionRequest, CriticCallDecisionV1, CriticCallDisclosureV1 } from "./critic-call.js";
 import type { RepairCallDecisionRequest, RepairCallDecisionV1, RepairCallDisclosureV1 } from "./repair-call.js";
 import type {
+  CandidateCritiqueDecisionRequest,
+  CandidateCritiqueProjectionV1,
+} from "./critique.js";
+import type {
   UnsealedCandidateDecisionRequest,
   UnsealedCandidateDecisionV1,
   UnsealedCandidateOwnerAnswer,
@@ -47,6 +51,14 @@ export type {
   UnsealedCandidatePromiseView,
   UnsealedCandidateProjectionV1,
 } from "./unsealed-candidate.js";
+
+export type {
+  CandidateCritiqueAction,
+  CandidateCritiqueDecisionRequest,
+  CandidateCritiqueDisclosureV1,
+  CandidateCritiqueFindingView,
+  CandidateCritiqueProjectionV1,
+} from "./critique.js";
 
 export type {
   AccountLabelProvenance,
@@ -225,6 +237,11 @@ export type RunSessionSnapshot = {
   /** Output-only unsealed candidate: the worker has changed files and Cairn is
    * waiting, before any record or commit, for permission to finish. */
   unsealedCandidate?: UnsealedCandidateProjectionV1;
+  /** Output-only critic offer beside that pause, joined to it by checkpointId.
+   * A sidecar rather than a field on the projection: three identity
+   * comparisons pin that frozen object, and replacing it would stop an abort
+   * or a closed window from settling the pause. Nothing here gates anything. */
+  unsealedCandidateCritique?: CandidateCritiqueProjectionV1;
 };
 
 /** Main creates evidence run IDs with `randomUUID()`. Keep the runtime check in
@@ -526,6 +543,7 @@ export interface CairnApi {
    * the reply says what was chosen. Continuing grants nothing new — it lets the
    * run Cairn is already holding reach the close it was already headed for. */
   unsealedCandidateDecide(request: UnsealedCandidateDecisionRequest): Promise<Result<UnsealedCandidateDecisionV1>>;
+  candidateCritiqueDecide(request: CandidateCritiqueDecisionRequest): Promise<Result<CandidateCritiqueProjectionV1>>;
   /** Guarded Q8 seam. Normal production has no injected fake and refuses the
    * open before any card or profile write exists. */
   criticCalibrationOpen(request: CriticCalibrationOpenRequestV1): Promise<Result<CriticCalibrationSnapshotV1>>;

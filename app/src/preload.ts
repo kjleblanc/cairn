@@ -22,6 +22,7 @@ const api: CairnApi = {
   repairCallDecide: (request) => ipcRenderer.invoke("repair:call-decide", request),
   harnessRevisionDecide: (request) => ipcRenderer.invoke("harness:revision-decide", request),
   unsealedCandidateDecide: (request) => ipcRenderer.invoke("task:candidate-decide", request),
+  candidateCritiqueDecide: (request) => ipcRenderer.invoke("task:candidate-critique", request),
   criticCalibrationOpen: (request) => ipcRenderer.invoke("critic:calibration-open", request),
   criticCalibrationCurrent: (dir) => ipcRenderer.invoke("critic:calibration-current", dir),
   criticCalibrationCancel: (dir) => ipcRenderer.invoke("critic:calibration-cancel", dir),

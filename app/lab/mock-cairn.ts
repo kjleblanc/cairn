@@ -328,6 +328,7 @@ const mock: CairnApi = {
   repairCallDecide: (_request) => soon(nope("the lab has no approved repair call")),
   harnessRevisionDecide: (_request) => soon(nope("the lab has no guarded harness revision")),
   unsealedCandidateDecide: (_request) => soon(nope("the lab never runs tasks, so no task is paused at a candidate")),
+  candidateCritiqueDecide: (_request) => soon(nope("the lab never runs tasks, so no inspection is offered")),
   criticCalibrationOpen: (_request) => soon(nope("the lab has no calibration transport")),
   criticCalibrationCurrent: (_dir: string) => soon(null),
   criticCalibrationCancel: (_dir: string) => soon(nope("the lab has no calibration call")),

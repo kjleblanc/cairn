@@ -1121,6 +1121,44 @@ export type CommentaryPreparation =
 /** Decide synchronously whether the result-card commentary is authorized.
  * A caller may durably claim the one attempt between this check and `start`;
  * it must then invoke `start` immediately without yielding. */
+/**
+ * Task 240: the route a candidate critique may use, and nothing more.
+ *
+ * Deliberately narrow. It hands back the three fields the approval card must
+ * disclose plus a thunk that decrypts the key at the moment of the call, so no
+ * stored connection object and no credential ever crosses into the critique
+ * module. The thunk re-proves project authority first, exactly as the
+ * conversation transport does at its own send site, because a connection that
+ * was valid when the pause opened may not be when the owner presses.
+ *
+ * Unlike `prepareCommentary`, this deliberately does NOT refuse while a task is
+ * running: a candidate critique happens only while one is, held open at the
+ * pause.
+ */
+export function candidateCritiqueRoute(dir: string): Readonly<{
+  connection: Readonly<{ provider: string; baseUrl: string; model: string }>;
+  credential: () => string;
+}> | null {
+  const projectExpectation = selectedProjectExpectation(dir);
+  if (currentProjectRoot === null || projectExpectation === null) return null;
+  const projectDir = currentProjectRoot;
+  const loaded = keystore.readConnection(projectDir, projectExpectation);
+  if (loaded.kind !== "ready") return null;
+  const conn = loaded.value;
+  if (!hasCurrentConsent(conn) || !conn.projectAuthorized) return null;
+  let provider: string;
+  try { provider = new URL(conn.baseUrl).host; } catch { return null; }
+  return Object.freeze({
+    connection: Object.freeze({ provider, baseUrl: conn.baseUrl, model: conn.model }),
+    credential: () => {
+      if (!keystore.revalidateConnection(conn, projectDir, projectExpectation)) {
+        throw new Error("CONDUCTOR_CREDENTIAL_UNAVAILABLE");
+      }
+      return keystore.decryptedKey(conn);
+    },
+  });
+}
+
 export function prepareCommentary(
   dir: string,
   conversationId: string,

@@ -1,7 +1,9 @@
 import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import type { RouteResult, WorkerDisclosure } from "@cairn/core";
-import type { ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1, UnsealedCandidateChoice, UnsealedCandidateOwnerAnswer, UnsealedCandidateProjectionV1 } from "../../shared/ipc";
+import type {
+  CandidateCritiqueAction,
+  CandidateCritiqueProjectionV1, ConductorAction, ConductorActionReply, ConductorChatTurn, ConductorDelta, ConductorStatus, ConductorTurn, CriticCallActionV1, CriticCallDisclosureV1, PushPreview, PushResult, Q9HarnessRevisionDecisionRequest, RepairCallDecisionRequest, ResultCard, RunSessionSnapshot, TaskReviewProjectionV1, TaskSpecProposalPreviewV1, UnsealedCandidateChoice, UnsealedCandidateOwnerAnswer, UnsealedCandidateProjectionV1 } from "../../shared/ipc";
 import { codeInPlainWords } from "../../shared/stopwords";
 import { cairn } from "../api";
 import { BodyPill } from "../components/BodyPill";
@@ -18,6 +20,7 @@ import { TaskReviewView, TaskSpecProposalPreviewView, type TaskReviewActionChoic
 import { CriticCallCard } from "../components/CriticCall";
 import { RepairCallCard } from "../components/RepairCall";
 import { HarnessRevisionCard } from "../components/HarnessRevision";
+import { CandidateCritiqueCard } from "../components/CandidateCritique";
 import { UnsealedCandidateCard } from "../components/UnsealedCandidate";
 import { OWNER_OBSERVATION, TaskPromiseCard, taskCardRows } from "../components/TaskPromiseCard";
 import { Pill } from "../components/Ui";
@@ -665,6 +668,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const [repairCallBusy, setRepairCallBusy] = useState(false);
   const [harnessRevisionBusy, setHarnessRevisionBusy] = useState(false);
   const [unsealedCandidateBusy, setUnsealedCandidateBusy] = useState(false);
+  const [candidateCritiqueBusy, setCandidateCritiqueBusy] = useState(false);
   // Task 238: how each Task Card row will be checked, keyed by row id.
   const [checkSelections, setCheckSelections] = useState<Record<string, string>>({});
   const [calibrationCall, setCalibrationCall] = useState<CriticCallDisclosureV1 | null>(null);
@@ -1769,6 +1773,34 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   /** Answer the one unsealed candidate this project is paused on. The renderer
    * returns only the pause's own id and one of the choices that pause listed;
    * it reconstructs nothing and decides nothing about the result. */
+  /* The critic offer beside the pause. This press settles nothing: it either
+   * spends the one disclosed request or declines it, and the pause's own
+   * choices stay exactly where they were. It echoes back only the checkpoint
+   * id the offer carried. */
+  async function decideCandidateCritique(
+    critique: CandidateCritiqueProjectionV1,
+    action: CandidateCritiqueAction,
+  ): Promise<void> {
+    const held = session;
+    if (candidateCritiqueBusy || held?.phase !== "running"
+      || held.unsealedCandidateCritique?.checkpointId !== critique.checkpointId) return;
+    setCandidateCritiqueBusy(true);
+    try {
+      const response = await cairn.candidateCritiqueDecide({
+        dir,
+        checkpointId: critique.checkpointId,
+        action,
+      });
+      if (!response.ok) { setError(response.message); return; }
+      setError(null);
+      await refreshSession();
+    } catch {
+      setError("Cairn could not reach that inspection.");
+    } finally {
+      setCandidateCritiqueBusy(false);
+    }
+  }
+
   async function chooseUnsealedCandidate(
     candidate: UnsealedCandidateProjectionV1,
     choice: UnsealedCandidateChoice,
@@ -2210,6 +2242,17 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                   busy={unsealedCandidateBusy}
                   onChoose={(choice, ownerAnswers) =>
                     void chooseUnsealedCandidate(session.unsealedCandidate!, choice, ownerAnswers)}
+                />
+              ) : null}
+              {/* Joined to the pause by checkpoint id, so a stale offer can
+                  never render against a newer candidate. */}
+              {session?.phase === "running" && session.unsealedCandidate && session.unsealedCandidateCritique
+                && session.unsealedCandidateCritique.checkpointId === session.unsealedCandidate.checkpointId ? (
+                <CandidateCritiqueCard
+                  critique={session.unsealedCandidateCritique}
+                  busy={candidateCritiqueBusy}
+                  onDecide={(action) =>
+                    void decideCandidateCritique(session.unsealedCandidateCritique!, action)}
                 />
               ) : null}
               {dispatch && dispatch.phase !== "settling" ? (

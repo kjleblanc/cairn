@@ -2567,3 +2567,91 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .result-card-promise-cairn[data-status="none"] { color: var(--lantern-warn, #d8a657); }
 .result-card-promise-worker { color: var(--lantern-soft); }
 .result-card-promise-provenance { font-size: .7rem; }
+
+/* Task 240: the second opinion beside the unsealed candidate.
+   Deliberately quieter than the candidate card - a dimmer left rule, no amber
+   - because this card carries less authority than the one above it, and should
+   not read as another thing waiting on the owner. */
+.candidate-critique {
+  margin: 10px 0 0; padding: 11px 0 2px 12px;
+  border-left: 2px solid var(--line); min-width: 0;
+}
+.candidate-critique-title {
+  margin: 0 0 8px; color: var(--lantern-ink);
+  font-size: .86rem; font-weight: 650; letter-spacing: .01em;
+}
+.candidate-critique-sentence {
+  margin: 0 0 10px; padding: 8px 10px; line-height: 1.5;
+  border-radius: 8px; background: var(--lantern-paper-lit);
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.candidate-critique-section-title {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  margin: 10px 0 4px; color: var(--lantern-soft);
+  font-size: .75rem; font-weight: 600; letter-spacing: .025em;
+}
+.candidate-critique-provenance {
+  color: var(--lantern-soft); font-size: .7rem; font-weight: 400; letter-spacing: .02em;
+}
+.candidate-critique-route-list { margin: 0; padding: 0; }
+.candidate-critique-route-list div { display: flex; gap: 8px; padding: 2px 0; }
+.candidate-critique-route-list dt {
+  color: var(--lantern-soft); font-size: .75rem; min-width: 66px;
+}
+.candidate-critique-route-list dd {
+  margin: 0; font-size: .76rem; color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.candidate-critique-artifacts,
+.candidate-critique-note-list {
+  margin: 4px 0; padding-left: 18px; color: var(--lantern-ink);
+  line-height: 1.45; font-size: .8rem;
+}
+.candidate-critique-count { color: var(--lantern-soft); }
+.candidate-critique-total,
+.candidate-critique-notsent,
+.candidate-critique-credential,
+.candidate-critique-limit,
+.candidate-critique-notes-foot {
+  margin: 4px 0 0; line-height: 1.45; font-size: .76rem;
+  color: var(--lantern-soft); overflow-wrap: anywhere;
+}
+.candidate-critique-limit strong { color: var(--lantern-ink); }
+.candidate-critique-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+
+.candidate-critique-finding-list { margin: 0; padding: 0; list-style: none; }
+.candidate-critique-finding { padding: 8px 0; border-top: 1px solid var(--line); }
+.candidate-critique-finding:first-child { border-top: none; }
+.candidate-critique-finding-text { margin: 0 0 4px; line-height: 1.45; }
+.candidate-critique-finding-id { color: var(--lantern-soft); margin-right: 6px; }
+.candidate-critique-finding-observation,
+.candidate-critique-finding-evidence {
+  margin: 2px 0; font-size: .8rem; line-height: 1.45;
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.candidate-critique-finding-evidence { color: var(--lantern-soft); font-size: .76rem; }
+/* The judgment word is the one thing a reader scans for, so it is the one
+   thing that carries colour - and "not met" is deliberately not red: it is an
+   opinion, not a failure Cairn has confirmed. */
+.candidate-critique-finding[data-judgment="not_met"] .candidate-critique-finding-text { color: var(--garden-amber); }
+.candidate-critique-finding[data-judgment="unclear"] .candidate-critique-finding-text { color: var(--lantern-soft); }
+
+/* Task 240 (owner gate 2 of this task): the audit trail, one click away.
+   The first screen answers who is asked, what they see, whether it can change
+   anything, and what it costs. Everything exact lives in here. */
+.candidate-critique-detail { margin: 10px 0 4px; }
+.candidate-critique-detail > summary {
+  cursor: pointer; color: var(--lantern-soft);
+  font-size: .75rem; font-weight: 600; letter-spacing: .025em;
+  padding: 4px 0; list-style-position: inside;
+}
+.candidate-critique-detail > summary:hover { color: var(--lantern-ink); }
+.candidate-critique-detail > summary:focus-visible {
+  outline: 3px solid var(--garden-cyan); outline-offset: 3px; border-radius: 4px;
+}
+.candidate-critique-detail[open] > summary { margin-bottom: 6px; }
+/* The judgment is the one word a reader scans for, so it gets the weight. */
+.candidate-critique-judgment {
+  font-weight: 650; color: var(--lantern-ink);
+}
+.candidate-critique-finding[data-judgment="not_met"] .candidate-critique-judgment { color: var(--garden-amber); }
+.candidate-critique-finding[data-judgment="unclear"] .candidate-critique-judgment { color: var(--lantern-soft); }

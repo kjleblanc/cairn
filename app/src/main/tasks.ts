@@ -1,6 +1,7 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  type SerialUnsealedCandidateV1,
   createDirectTaskIntent,
   previewSerialRoute,
   projectStatus,
@@ -19,6 +20,7 @@ import {
 import { connectionRequiredReason, detectedAdapters } from "./adapters.js";
 import { emitBridgeSync } from "./bridge/hub.js";
 import type {
+  CandidateCritiqueProjectionV1,
   ConductorDelta,
   EvidenceAlbum,
   EvidenceImageData,
@@ -45,6 +47,7 @@ import type { TaskSpecProposalPreviewV1 } from "../shared/quality-preview.js";
 import { composeErrorCard, composeResultCard, postResultCard, postResultCardOnce } from "./conductor/relay.js";
 import { newConversationId } from "./conductor/store.js";
 import {
+  candidateCritiqueRoute,
   commentary,
   consumeCurrentTaskProposal,
   currentTaskProposal,
@@ -54,6 +57,12 @@ import {
 } from "./conductor/service.js";
 import { isConversationId } from "./conductor/conversation-id.js";
 import { canonicalProjectKey } from "./conductor/turnauth.js";
+import {
+  closeCandidateCritique,
+  currentCandidateCritique,
+  decideCandidateCritique,
+  openCandidateCritique,
+} from "./critique.js";
 import {
   clearProviderCriticCallApprovalByKey,
   decideCriticCall,
@@ -553,6 +562,33 @@ function evidenceTitle(outcome: string): string {
   return outcome.replace(/\s+/g, " ").trim().slice(0, 500);
 }
 
+/**
+ * The critic offer that rides beside one pause.
+ *
+ * Deliberately a named function rather than an inline literal at the call
+ * site: the pause hook is read as source text by its containment guard, which
+ * slices the hook at the first `});` it finds, and a multi-line object literal
+ * inside the hook would cut that slice short. Keeping the shape out here keeps
+ * the hook the short, auditable block the guard is meant to read.
+ */
+function openCritiqueForCandidate(
+  dir: string,
+  checkpointId: string,
+  candidate: SerialUnsealedCandidateV1,
+): CandidateCritiqueProjectionV1 | null {
+  return openCandidateCritique({
+    dir,
+    checkpointId,
+    answers: candidate.answers,
+    facts: {
+      acceptedOutcome: candidate.acceptedRequest.outcome.text,
+      changedPaths: candidate.changedPaths,
+      workerEvidenceSummary: candidate.evidenceSummary,
+    },
+    connection: candidateCritiqueRoute(dir)?.connection ?? null,
+  });
+}
+
 export function registerTaskIpc(
   win: () => BrowserWindow | null,
   criticCalibration: CriticCalibrationOrchestrator | null = null,
@@ -852,6 +888,45 @@ export function registerTaskIpc(
       return {
         ok: false,
         message: "UNSEALED_CANDIDATE_UNKNOWN_CHECKPOINT: That unsealed candidate is no longer waiting.",
+      };
+    }
+  });
+
+  // The owner's answer to the critic offer beside that pause. This is NOT a
+  // way to finish, stop, or change the run: it either spends one disclosed
+  // request or declines it, and either way the owner's two real choices are
+  // still waiting on the card above.
+  //
+  // Everything is caught. This runs while a Core runner is blocked on the
+  // pause with no catch of its own, so an exception escaping here would strand
+  // that run holding its lock.
+  ipcMain.handle("task:candidate-critique", async (_event, unsafeRequest: unknown): Promise<Result<CandidateCritiqueProjectionV1>> => {
+    try {
+      const dir = (unsafeRequest as { dir?: unknown } | null)?.dir;
+      const route = typeof dir === "string" ? candidateCritiqueRoute(dir) : null;
+      const outcome = await decideCandidateCritique(unsafeRequest, {
+        fetchImpl: fetch,
+        // Read at the moment of the call, never held. Throwing here is caught
+        // by the critique module and reported as unavailable.
+        credential: () => {
+          if (route === null) throw new Error("CONDUCTOR_CREDENTIAL_UNAVAILABLE");
+          return route.credential();
+        },
+      });
+      if (!outcome.ok) {
+        return { ok: false, message: `${outcome.code}: Cairn is not offering that inspection.` };
+      }
+      // Publish onto the session the renderer already polls once a second.
+      if (typeof dir === "string") {
+        const session = sessions.get(canonicalProjectKey(dir));
+        if (session) session.unsealedCandidateCritique = outcome.projection;
+      }
+      return { ok: true, value: outcome.projection };
+    } catch (error) {
+      logError("task:candidate-critique", error);
+      return {
+        ok: false,
+        message: "CANDIDATE_CRITIQUE_UNKNOWN_CHECKPOINT: That inspection is no longer being offered.",
       };
     }
   });
@@ -1351,6 +1426,13 @@ export function registerTaskIpc(
             if (opened === null) return "stop";
             const held = sessions.get(key);
             if (held) held.unsealedCandidate = opened.projection;
+            // The critic offer rides BESIDE the pause, joined to it by the
+            // same checkpoint id. It is a separate field on purpose: the
+            // projection above is pinned by three identity comparisons, and
+            // replacing it would stop an abort or a closed window from
+            // settling the pause. Nothing here is read by any gate.
+            const critique = openCritiqueForCandidate(dir, opened.projection.checkpointId, candidate);
+            if (held && critique) held.unsealedCandidateCritique = critique;
             // Cairn is still alive in both of these cases, so both close the
             // pause the honest way — an authored STOPPED, never a DONE.
             const close = (): void => { closeUnsealedCandidateIfCurrent(dir, opened.projection); };
@@ -1369,6 +1451,8 @@ export function registerTaskIpc(
               if (!contents.isDestroyed()) contents.off("destroyed", close);
               const current = sessions.get(key);
               if (current?.unsealedCandidate === opened.projection) delete current.unsealedCandidate;
+              closeCandidateCritique(dir, opened.projection.checkpointId);
+              if (current) delete current.unsealedCandidateCritique;
             }
           },
         });

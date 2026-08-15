@@ -226,4 +226,25 @@ export {
   type SerialTaskPromiseVerificationV1,
   type SerialTaskPromisesV1,
 } from "./taskcard.js";
+export {
+  SERIAL_CRITIQUE_ARTIFACT_CAP,
+  SERIAL_CRITIQUE_MAX_OUTPUT_TOKENS,
+  SERIAL_CRITIQUE_NOTE_CAP,
+  SERIAL_CRITIQUE_SYSTEM_PROMPT,
+  SERIAL_CRITIQUE_TEXT_CAP,
+  SERIAL_CRITIQUE_VERSION,
+  composeSerialCritiquePacket,
+  parseSerialCritiqueOutput,
+  serialCritiquePreview,
+  serialCritiqueRequestBody,
+  type SerialCritiqueArtifactV1,
+  type SerialCritiqueCandidateFactsV1,
+  type SerialCritiqueFindingV1,
+  type SerialCritiqueJudgmentV1,
+  type SerialCritiqueNoteV1,
+  type SerialCritiqueOutcomeV1,
+  type SerialCritiquePacketV1,
+  type SerialCritiquePreviewV1,
+  type SerialCritiqueRowV1,
+} from "./critique.js";
 export * from "./steps.js";

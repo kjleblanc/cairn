@@ -290,6 +290,33 @@ function commentaryRequested(messages) {
   return Boolean(last) && last.role === "system" && typeof last.content === "string" && last.content.includes("result card");
 }
 
+// Task 240: a candidate critique. Two things make it unmistakable and unable
+// to collide with the two rules above: its LAST message is a user turn (so it
+// is not commentary), and that turn begins with the frozen-row header, which
+// no ordinary owner message can start with. It is also the only NON-streaming
+// request Cairn makes, so it is answered as one plain JSON body, not SSE.
+function critiqueRequested(messages) {
+  const last = messages[messages.length - 1];
+  return Boolean(last) && last.role === "user" && typeof last.content === "string"
+    && last.content.startsWith("DECLARED ROWS");
+}
+
+function declaredRowIds(content) {
+  const rows = content.split("\n\nARTIFACTS")[0] ?? "";
+  return [...rows.matchAll(/^(c\d+) \[answered by /gmu)].map((match) => match[1]);
+}
+
+// Always well formed against whatever rows the packet actually declared, so a
+// test that does not care about the critic's opinion still gets a readable one.
+function defaultCritiqueAnswer(content) {
+  return JSON.stringify({
+    findings: declaredRowIds(content).map((id, index) => index === 0
+      ? { checkId: id, judgment: "met", observation: "The changed file list shows this was done.", evidenceRefs: ["a2"] }
+      : { checkId: id, judgment: "unclear", observation: "Nothing in the packet shows this either way.", evidenceRefs: [] }),
+    notes: ["The commit message could name the file it changed."],
+  });
+}
+
 function commentaryScriptFor(messages) {
   const prompt = messages.map((message) => typeof message?.content === "string" ? message.content : "").join("\n");
   return prompt.includes('"disposition":"STOPPED"') ? STOPPED_COMMENTARY_SCRIPT : COMMENTARY_SCRIPT;
@@ -335,6 +362,11 @@ async function streamReply(res, script, beforeDone, afterFirstPart) {
   res.end();
 }
 
+let lastCritiqueBody = null;
+let critiqueAnswer = null;
+let critiqueStatus = 200;
+let critiqueRequests = 0;
+
 export function start() {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
@@ -350,6 +382,21 @@ export function start() {
         if (commentaryRequested(messages)) {
           lastCommentaryBody = rawBody;
           void streamReply(res, { ...commentaryScriptFor(messages), delayMs: commentaryDelayMs }, commentaryGatePoint);
+          return;
+        }
+        if (critiqueRequested(messages)) {
+          critiqueRequests += 1;
+          lastCritiqueBody = rawBody;
+          const packet = messages[messages.length - 1].content;
+          if (critiqueStatus !== 200) {
+            res.writeHead(critiqueStatus, { "content-type": "application/json" });
+            res.end(JSON.stringify({ error: { message: "refused" } }));
+            return;
+          }
+          const answer = typeof critiqueAnswer === "function" ? critiqueAnswer(packet)
+            : critiqueAnswer === null ? defaultCritiqueAnswer(packet) : critiqueAnswer;
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: answer } }] }));
           return;
         }
         const content = lastUserContent(messages);
@@ -382,6 +429,10 @@ export function start() {
          * has arrived — same wire-honesty purpose as lastCommentaryBody. */
         lastReplyBody: () => lastReplyBody,
         replyRequestCount: () => replyRequestCount,
+        critiqueRequestCount: () => critiqueRequests,
+        lastCritiqueBody: () => lastCritiqueBody,
+        setCritiqueAnswer: (value) => { critiqueAnswer = value; },
+        setCritiqueStatus: (value) => { critiqueStatus = value; },
         setCommentaryDelay: (delayMs) => { commentaryDelayMs = delayMs; },
         setProseOnlySetAside: (enabled) => { proseOnlySetAside = enabled; },
         holdCommentary,

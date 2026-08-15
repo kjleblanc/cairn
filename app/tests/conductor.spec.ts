@@ -180,6 +180,10 @@ let replyRequestCount: () => number = () => 0;
  * hashes to the challenge it handed out. */
 let openRouterUrl = "";
 let openRouterClose: () => Promise<void> = async () => {};
+let critiqueRequestCount: () => number = () => 0;
+let lastCritiqueBody: () => string | null = () => null;
+let setFixtureCritiqueAnswer: (value: string | ((packet: string) => string) | null) => void = () => {};
+let setFixtureCritiqueStatus: (value: number) => void = () => {};
 let lastOAuthExchangeBody: () => string | null = () => null;
 let oauthExchangeVerdict: () => boolean | null = () => null;
 
@@ -203,6 +207,10 @@ test.beforeAll(async () => {
       releaseThirdProposal: () => void;
       holdAnswer: () => void;
       releaseAnswer: () => void;
+      critiqueRequestCount: () => number;
+      lastCritiqueBody: () => string | null;
+      setCritiqueAnswer: (value: string | ((packet: string) => string) | null) => void;
+      setCritiqueStatus: (value: number) => void;
     }>;
   };
   const server = await fixture.start();
@@ -222,6 +230,10 @@ test.beforeAll(async () => {
   releaseFixtureThirdProposal = server.releaseThirdProposal;
   holdFixtureAnswer = server.holdAnswer;
   releaseFixtureAnswer = server.releaseAnswer;
+  critiqueRequestCount = server.critiqueRequestCount;
+  lastCritiqueBody = server.lastCritiqueBody;
+  setFixtureCritiqueAnswer = server.setCritiqueAnswer;
+  setFixtureCritiqueStatus = server.setCritiqueStatus;
 
   const openRouterPath = pathToFileURL(join(__dirname, "fixtures", "fake-openrouter.mjs")).href;
   const openRouter = (await import(openRouterPath)) as {
@@ -256,6 +268,8 @@ test.beforeEach(() => {
   releaseFixtureAnswer();
   setFixtureCommentaryDelay(400);
   setFixtureProseOnlySetAside(false);
+  setFixtureCritiqueAnswer(null);
+  setFixtureCritiqueStatus(200);
   clearStoredConnectionFiles();
 });
 
@@ -4906,6 +4920,199 @@ test("cancelling at the Task Card makes no worker call at all", async () => {
     await expect(panel).toHaveCount(0);
     expect(workerSpawnCount(fakeCodex.marker)).toBe(0);
     expect(existsSync(join(project, "docs", "ai-work", "tasks", "001-brief.md"))).toBe(false);
+  } finally {
+    await app.close();
+  }
+});
+
+const CRITIQUE_OFFER_SHOT = join(tmpdir(), "cairn-task-240-critique-offer.png");
+const CRITIQUE_FINDINGS_SHOT = join(tmpdir(), "cairn-task-240-critique-findings.png");
+const CRITIQUE_DETAIL_SHOT = join(tmpdir(), "cairn-task-240-critique-detail.png");
+
+const ASK_REVIEW_BUTTON = "Ask for one review";
+const SKIP_REVIEW_BUTTON = "Skip this";
+
+test("the owner approves one review and reads findings tied to the frozen rows", async () => {
+  test.setTimeout(180_000);
+  const project = mkdtempSync(join(tmpdir(), "cairn-critique-done-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    const callsBefore = critiqueRequestCount();
+
+    await dispatchOneRealCall(win, async () => { await chooseTaskCardChecks(win); });
+
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+
+    // c3 - the offer names its route and what would be sent, BEFORE any press.
+    const critique = win.locator(".candidate-critique");
+    await expect(critique).toBeVisible();
+    await expect(critique).toHaveAttribute("data-state", "offered");
+    // The four facts a beginner needs, on the first screen.
+    await expect(critique).toContainText("fixture-model");
+    await expect(critique).toContainText("never your files");
+    await expect(critique).toContainText("cannot change anything");
+    await expect(critique).toContainText("One request - if it fails, Cairn will not try again.");
+    // The exact audit trail is one click away, not gone.
+    const detail = critique.locator("details.candidate-critique-detail");
+    await expect(detail).toHaveCount(1);
+    await expect(detail.locator("summary")).toHaveText("Exactly what would be sent");
+    await expect(detail).toContainText("asking about c1, c2");
+    await expect(detail).toContainText("Not sent:");
+    await expect(detail).toContainText("the contents of any file");
+    // Collapsed by default, and it really opens: the exact numbers are
+    // reachable, not merely present in the DOM.
+    await expect(detail.locator(".candidate-critique-total")).not.toBeVisible();
+    await detail.locator("summary").click();
+    await expect(detail.locator(".candidate-critique-total")).toBeVisible();
+    await critique.scrollIntoViewIfNeeded();
+    await critique.screenshot({ path: CRITIQUE_DETAIL_SHOT });
+    await detail.locator("summary").click();
+    await expect(detail.locator(".candidate-critique-total")).not.toBeVisible();
+    expect(critiqueRequestCount()).toBe(callsBefore);
+
+    // c11 - the first picture: the WHOLE offer, both presses in frame.
+    // The card sits below the whole candidate, so bring it into frame before
+    // judging what is in frame. Asserting in-viewport WITHOUT scrolling first
+    // only tests where the page happened to be scrolled.
+    const ask = critique.getByRole("button", { name: ASK_REVIEW_BUTTON });
+    await critique.scrollIntoViewIfNeeded();
+    await expect(ask).toBeInViewport();
+    await expect(critique.getByRole("button", { name: SKIP_REVIEW_BUTTON })).toBeInViewport();
+    await critique.screenshot({ path: CRITIQUE_OFFER_SHOT });
+
+    // c2 - approving spends exactly one request.
+    await ask.click();
+    await expect(critique).toHaveAttribute("data-state", "answered", { timeout: 30_000 });
+    expect(critiqueRequestCount()).toBe(callsBefore + 1);
+
+    // c7 - what the card totalled is the length of what actually went out.
+    const sentBody = lastCritiqueBody();
+    expect(sentBody).not.toBeNull();
+    const sent = JSON.parse(sentBody!) as {
+      stream: boolean;
+      messages: readonly { role: string; content: string }[];
+    };
+    expect(sent.stream).toBe(false);
+    expect(Object.hasOwn(sent, "tools")).toBe(false);
+    const packet = sent.messages.find((m) => m.role === "user")!.content;
+    await expect(critique.locator("details.candidate-critique-detail"))
+      .toContainText(`${packet.length} characters in total`);
+
+    // c3 - findings name only frozen rows; the note is visibly advisory.
+    await expect(critique.locator('[data-critique-row="c1"]')).toContainText("met");
+    await expect(critique.locator('[data-critique-row="c2"]')).toContainText("not sure");
+    await expect(critique.locator('[data-critique-row="c99"]')).toHaveCount(0);
+    const notes = critique.locator(".candidate-critique-notes");
+    await expect(notes).toContainText("Also suggested");
+    await expect(notes).toContainText("advice only, nothing is waiting on these");
+    await expect(notes).toContainText("commit message");
+    await expect(critique).toContainText("Cairn has not acted on it");
+
+    // c11 - the second picture: the WHOLE findings card.
+    await critique.scrollIntoViewIfNeeded();
+    await expect(critique.locator('[data-critique-row="c1"]')).toBeInViewport();
+    await expect(critique.locator('[data-critique-row="c2"]')).toBeInViewport();
+    await critique.screenshot({ path: CRITIQUE_FINDINGS_SHOT });
+
+    // c3 and c6 - the finding changed nothing. The owner's own row is still
+    // owed, and the run seals only once THEY answer it.
+    const cont = candidate.getByRole("button", { name: CONTINUE_BUTTON });
+    await expect(cont).toBeDisabled();
+    await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await expect(cont).toBeEnabled();
+    await cont.click();
+
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 60_000 });
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **DONE**");
+    // The critic reached no record: the report is the envelope's, unchanged.
+    expect(report).not.toContain("could not tell");
+    expect(report).not.toContain("commit message could name");
+    // And still exactly one review for the whole run.
+    expect(critiqueRequestCount()).toBe(callsBefore + 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test("skipping asks nobody, and the run closes exactly as it does today", async () => {
+  test.setTimeout(180_000);
+  const project = mkdtempSync(join(tmpdir(), "cairn-critique-skip-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    const callsBefore = critiqueRequestCount();
+
+    await dispatchOneRealCall(win, async () => { await chooseTaskCardChecks(win); });
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+
+    // c1 - skipping sends nothing, and the run closes exactly as it does today.
+    const critique = win.locator(".candidate-critique");
+    await critique.getByRole("button", { name: SKIP_REVIEW_BUTTON }).click();
+    await expect(critique).toHaveAttribute("data-state", "declined");
+    await expect(critique).toContainText("Nothing was sent, and nothing was charged.");
+    expect(critiqueRequestCount()).toBe(callsBefore);
+
+    await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await candidate.getByRole("button", { name: CONTINUE_BUTTON }).click();
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 60_000 });
+    expect(critiqueRequestCount()).toBe(callsBefore);
+  } finally {
+    await app.close();
+  }
+});
+
+test("a refused review is reported honestly, once, with no second attempt", async () => {
+  test.setTimeout(180_000);
+  const project = mkdtempSync(join(tmpdir(), "cairn-critique-refused-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    setFixtureCritiqueStatus(429);
+    const callsBefore = critiqueRequestCount();
+
+    await dispatchOneRealCall(win, async () => { await chooseTaskCardChecks(win); });
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+
+    const critique = win.locator(".candidate-critique");
+    await critique.getByRole("button", { name: ASK_REVIEW_BUTTON }).click();
+
+    // c4 - unavailable is its own honest state: no findings, no guessed answer.
+    await expect(critique).toHaveAttribute("data-state", "unavailable", { timeout: 30_000 });
+    await expect(critique).toContainText("Cairn could not get a review");
+    await expect(critique).toContainText("no answer is being guessed at");
+    await expect(critique.locator(".candidate-critique-finding")).toHaveCount(0);
+
+    // c2 - exactly one attempt, and the offer cannot be pressed again.
+    expect(critiqueRequestCount()).toBe(callsBefore + 1);
+    await expect(critique.getByRole("button", { name: ASK_REVIEW_BUTTON })).toHaveCount(0);
+
+    // c1 - and the run still finishes exactly as it would have.
+    await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await candidate.getByRole("button", { name: CONTINUE_BUTTON }).click();
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 60_000 });
+    expect(critiqueRequestCount()).toBe(callsBefore + 1);
   } finally {
     await app.close();
   }
