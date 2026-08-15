@@ -9,6 +9,7 @@ import {
 import { canonicalProjectKey } from "./conductor/turnauth.js";
 import {
   UNSEALED_CANDIDATE_CHOICES,
+  UNSEALED_CANDIDATE_REPAIR_CHOICE,
   UNSEALED_CANDIDATE_VERSION,
   parseUnsealedCandidateDecisionRequest,
   type UnsealedCandidateChoice,
@@ -16,6 +17,7 @@ import {
   type UnsealedCandidateOwnerAnswer,
   type UnsealedCandidatePromiseView,
   type UnsealedCandidateProjectionV1,
+  type UnsealedCandidateRepairAskedV1,
 } from "../shared/unsealed-candidate.js";
 
 /**
@@ -28,7 +30,10 @@ export type UnsealedCandidateSettlementV1 =
   | Readonly<{
       choice: "continue";
       ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>;
-    }>;
+    }>
+  // Task 244: the owner confirmed one allegation and approved one correction.
+  // It carries no judgments, because a repair spends them.
+  | Readonly<{ choice: "repair"; repair: UnsealedCandidateRepairAskedV1 }>;
 
 /**
  * Main's half of the pre-terminal pause.
@@ -105,7 +110,21 @@ function checkedCandidate(value: unknown): SerialUnsealedCandidateV1 | null {
   if (record.evidenceSummary !== null && typeof record.evidenceSummary !== "string") return null;
   if (record.claims !== null && (typeof record.claims !== "object" || record.claims === undefined)) return null;
   if (!Array.isArray(record.answers)) return null;
+  // Task 244: Core always sends both, so a candidate missing either is not one
+  // Cairn minted and the pause refuses to open rather than guess at the offer.
+  if (typeof record.repairAvailable !== "boolean") return null;
+  if (record.repair !== null && repairAsked(record.repair) === null) return null;
   return record as SerialUnsealedCandidateV1;
+}
+
+/** Core's repair, flattened for the screen. The version stays in Core, where
+ * it is the thing that gets re-checked; the screen shows only the two facts. */
+function repairAsked(value: unknown): UnsealedCandidateRepairAskedV1 | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as { checkId?: unknown; correction?: unknown };
+  if (typeof record.checkId !== "string" || record.checkId.length === 0) return null;
+  if (typeof record.correction !== "string" || record.correction.length === 0) return null;
+  return Object.freeze({ checkId: record.checkId, correction: record.correction });
 }
 
 /**
@@ -165,6 +184,8 @@ export function openUnsealedCandidateCheckpoint(input: unknown): UnsealedCandida
     evidenceSummary: checked.evidenceSummary,
     promises: promiseViews(checked.answers),
     choices: UNSEALED_CANDIDATE_CHOICES,
+    repairAvailable: checked.repairAvailable,
+    repairAsked: checked.repair === null ? null : repairAsked(checked.repair),
   });
 
   let settle: (settlement: UnsealedCandidateSettlementV1) => void = () => {};
@@ -194,7 +215,17 @@ const STOP_SETTLEMENT: UnsealedCandidateSettlementV1 = Object.freeze({ choice: "
  * Answer the one live pause. Every refusal leaves that pause exactly as it was,
  * so a malformed or stale press can never strand a waiting run.
  */
-export function decideUnsealedCandidate(value: unknown): UnsealedCandidateDecisionOutcome {
+export function decideUnsealedCandidate(
+  value: unknown,
+  /**
+   * Task 244: the `not_met` findings Cairn actually received from a critic for
+   * this pause. Main is the only place that can know this, and it is the one
+   * thing Core cannot re-derive — Core can prove the row is real and still open,
+   * but not that the words came from a critic rather than from a renderer. The
+   * default is empty, so a caller that supplies nothing can spend no repair.
+   */
+  allegations: readonly Readonly<{ checkId: string; observation: string }>[] = Object.freeze([]),
+): UnsealedCandidateDecisionOutcome {
   const request = parseUnsealedCandidateDecisionRequest(value);
   if (request === null) {
     return Object.freeze({ ok: false, code: "UNSEALED_CANDIDATE_MALFORMED_DECISION" } as const);
@@ -204,6 +235,28 @@ export function decideUnsealedCandidate(value: unknown): UnsealedCandidateDecisi
   if (held === undefined || held.done || key === null || key !== held.projectKey
     || pendingByProject.get(key) !== held) {
     return Object.freeze({ ok: false, code: "UNSEALED_CANDIDATE_UNKNOWN_CHECKPOINT" } as const);
+  }
+  if (request.choice === UNSEALED_CANDIDATE_REPAIR_CHOICE) {
+    const asked = request.repair;
+    // A repair this pause never offered, or a correction that is not word for
+    // word a sentence a critic sent Cairn about that exact row, is refused and
+    // leaves the pause untouched. Nothing here can be widened into a request.
+    if (asked === undefined || !held.projection.repairAvailable
+      || !allegations.some((claim) =>
+        claim.checkId === asked.checkId && claim.observation === asked.correction)) {
+      return Object.freeze({ ok: false, code: "UNSEALED_CANDIDATE_MALFORMED_DECISION" } as const);
+    }
+    retire(held, Object.freeze({ choice: "repair", repair: asked } as const));
+    return Object.freeze({
+      ok: true,
+      decision: Object.freeze({
+        version: UNSEALED_CANDIDATE_VERSION,
+        checkpointId: request.checkpointId,
+        choice: UNSEALED_CANDIDATE_REPAIR_CHOICE,
+        ownerAnswers: request.ownerAnswers,
+        repair: asked,
+      }),
+    } as const);
   }
   retire(held, request.choice === "continue"
     ? Object.freeze({ choice: "continue", ownerAnswers: request.ownerAnswers } as const)

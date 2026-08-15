@@ -5282,3 +5282,248 @@ test("a refused review is reported honestly, once, with no second attempt", asyn
     await app.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Task 244. Confirm one allegation, permit one repair, then seal.
+//
+// Both tests drive the ordinary Chat route with no task-specific entrance. The
+// critic is the fixture conductor at the transport seam Slice 3 already built;
+// no real critic call is made here, and a pass proves nothing about one.
+// ---------------------------------------------------------------------------
+
+let stampedAt = 0;
+/** A phase timeline for a long journey test, so a slow or hung step names
+ * itself in the run output rather than only as one 5-minute timeout. */
+function stamp(label: string): void {
+  const now = Date.now();
+  console.log(`[Task 244] ${label}: +${stampedAt === 0 ? 0 : now - stampedAt}ms`);
+  stampedAt = now;
+}
+
+const ALLEGATION_SHOT = join(tmpdir(), "cairn-task-244-allegation.png");
+const REPAIR_OFFER_SHOT = join(tmpdir(), "cairn-task-244-repair-offer.png");
+const REPAIRED_CANDIDATE_SHOT = join(tmpdir(), "cairn-task-244-repaired-candidate.png");
+
+const CONFIRM_BUTTON = "Yes, that is not done";
+const DISMISS_BUTTON = "No, that is fine";
+const REPAIR_BUTTON = "Ask for this one correction";
+
+const C1_ALLEGATION = "Nothing in the packet proves the page title changed at all.";
+const C2_ALLEGATION = "The page still shows 251 where c2 asked for 256.";
+
+/**
+ * The critic alleges BOTH frozen rows are not met. c1 is Cairn's own row and
+ * its check passed, so Cairn answers that one itself; c2 is the owner's, and
+ * only they can settle it. Findings are positional against the declared rows,
+ * so the order and the count are the packet's, not this fixture's choice.
+ */
+/**
+ * Both findings cite `a2`, the worker's own account, because Slice 3's parser
+ * refuses a met/not_met finding that cites nothing at all
+ * (`core/src/critique.ts:164`) — an allegation resting on no packet evidence is
+ * an opinion, and Cairn will not carry it as a judgment. A fixture that forgot
+ * this produced one honest `unavailable`, which is the rule working.
+ */
+const BOTH_ROWS_ALLEGED = JSON.stringify({
+  findings: [
+    { checkId: "c1", judgment: "not_met", observation: C1_ALLEGATION, evidenceRefs: ["a2"] },
+    { checkId: "c2", judgment: "not_met", observation: C2_ALLEGATION, evidenceRefs: ["a2"] },
+  ],
+  notes: [],
+});
+
+/**
+ * The price lookup lands after the offer opens and reflows the card under the
+ * pointer, so a click issued before it settles can wait on a moving target.
+ * Task 240's own test settles the cost line and scrolls before pressing; this
+ * does the same, and is why a press here is a press and not a race.
+ */
+async function askForOneReview(critique: Locator): Promise<void> {
+  await expect(critique.locator(".candidate-critique-cost"))
+    .not.toHaveAttribute("data-cost", "pending", { timeout: 30_000 });
+  await critique.scrollIntoViewIfNeeded();
+  const ask = critique.getByRole("button", { name: ASK_REVIEW_BUTTON });
+  await expect(ask).toBeEnabled({ timeout: 30_000 });
+  await ask.click();
+}
+
+test("the owner confirms one allegation, approves one repair, and Cairn checks it all again", async () => {
+  test.setTimeout(240_000);
+  const project = mkdtempSync(join(tmpdir(), "cairn-repair-done-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  setFixtureCritiqueAnswer(BOTH_ROWS_ALLEGED);
+  try {
+    stamp("start");
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    const callsBefore = critiqueRequestCount();
+
+    await dispatchOneRealCall(win, async () => { await chooseTaskCardChecks(win); });
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+    stamp("first candidate");
+
+    const critique = win.locator(".candidate-critique");
+    await askForOneReview(critique);
+    await expect(critique).toHaveAttribute("data-state", "answered", { timeout: 30_000 });
+    expect(critiqueRequestCount()).toBe(callsBefore + 1);
+    stamp("first findings");
+
+    // c2 - Cairn answers the allegation its OWN check already settled, and the
+    // owner is never offered a button for it.
+    const c1 = critique.locator('[data-critique-row="c1"]');
+    await expect(c1.locator('[data-dismissed-by="cairn"]')).toBeVisible();
+    await expect(c1.locator('[data-dismissed-by="cairn"]')).toContainText("checked this one itself");
+    await expect(c1.getByRole("button", { name: CONFIRM_BUTTON })).toHaveCount(0);
+
+    // The owner's own row is theirs, and both answers are on offer.
+    const c2 = critique.locator('[data-critique-row="c2"]');
+    await expect(c2).toContainText(C2_ALLEGATION);
+    await expect(c2.getByRole("button", { name: CONFIRM_BUTTON })).toBeVisible();
+    await expect(c2.getByRole("button", { name: DISMISS_BUTTON })).toBeVisible();
+
+    // c12 - the picture of the decision itself: one allegation Cairn answered,
+    // one the owner must, and both of their answers in frame. Asserting in
+    // viewport AFTER scrolling, so a future crop fails the test rather than
+    // reaching the owner.
+    await candidate.scrollIntoViewIfNeeded();
+    await expect(c2.getByRole("button", { name: CONFIRM_BUTTON })).toBeInViewport();
+    await expect(c2.getByRole("button", { name: DISMISS_BUTTON })).toBeInViewport();
+    await candidate.screenshot({ path: ALLEGATION_SHOT });
+
+    // c3 - confirming is NOT yet a repair. It offers one, which needs its own
+    // press, and says plainly that it is the only one.
+    await c2.getByRole("button", { name: CONFIRM_BUTTON }).click();
+    const repair = c2.locator(".candidate-critique-repair");
+    await expect(repair).toBeVisible();
+    await expect(repair).toContainText("Codex Exec");
+    await expect(repair).toContainText("This is the only repair for this task.");
+    await expect(repair).toContainText("runs every check again");
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+    stamp("repair offered");
+
+    // c12 - the first picture: the allegation and both of its answers, in frame.
+    await candidate.scrollIntoViewIfNeeded();
+    await expect(repair.getByRole("button", { name: REPAIR_BUTTON })).toBeInViewport();
+    await candidate.screenshot({ path: REPAIR_OFFER_SHOT });
+
+    // c3 and c5 - the one approved repair, dispatched inside the same open run.
+    await repair.getByRole("button", { name: REPAIR_BUTTON }).click();
+    const repaired = candidate.locator(".unsealed-candidate-repaired");
+    await expect(repaired).toBeVisible({ timeout: 90_000 });
+    stamp("repaired candidate");
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(2);
+    await expect(repaired).toContainText("c2");
+    await expect(repaired).toContainText(C2_ALLEGATION);
+    await expect(repaired).toContainText("no second repair");
+
+    // c4 - what the worker was told, and what it was told not to do. The shim
+    // overwrites this file per spawn, so this is the REPAIR prompt.
+    const prompt = readFileSync(fakeCodex.prompt, "utf8");
+    expect(prompt).toContain(C2_ALLEGATION);
+    expect(prompt).toContain("the only correction");
+    expect(prompt).toContain("Do not widen the task");
+    // The task itself did not move: the same frozen rows, in the same words.
+    expect(prompt).toContain('c1: "Change the page title"');
+    expect(prompt).toContain('c2: "Keep the counts 74, 477, 256 exactly."');
+
+    // c12 - the second picture: the repaired candidate the owner now judges.
+    await candidate.scrollIntoViewIfNeeded();
+    await candidate.screenshot({ path: REPAIRED_CANDIDATE_SHOT });
+
+    // c6 - a second opinion is still available on the repaired work (two calls
+    // for a whole task, and this is the second), but there is no second repair.
+    await expect(critique).toHaveAttribute("data-state", "offered", { timeout: 30_000 });
+    stamp("second offer");
+    await askForOneReview(critique);
+    await expect(critique).toHaveAttribute("data-state", "answered", { timeout: 30_000 });
+    expect(critiqueRequestCount()).toBe(callsBefore + 2);
+    stamp("second findings");
+    await expect(critique.locator('[data-critique-row="c2"]')).toContainText(C2_ALLEGATION);
+    await expect(critique.getByRole("button", { name: CONFIRM_BUTTON })).toHaveCount(0);
+    await expect(critique.getByRole("button", { name: REPAIR_BUTTON })).toHaveCount(0);
+
+    // c7 - the owner's own row is owed AGAIN. They judged code that has since
+    // changed, so that judgment was spent by the repair.
+    const cont = candidate.getByRole("button", { name: CONTINUE_BUTTON });
+    await expect(cont).toBeDisabled();
+    await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await expect(cont).toBeEnabled();
+    await cont.click();
+
+    // c9 - only the envelope sealed anything, and its record says what happened.
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 90_000 });
+    stamp("result card");
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **DONE**");
+    expect(report).toContain("## The one repair you approved");
+    expect(report).toContain(C2_ALLEGATION);
+    expect(report).toContain("Cairn ran every check again afterwards");
+    // The allegation Cairn dismissed left no trace at all, and neither did the
+    // critic's opinion of any row it did not repair.
+    expect(report).not.toContain(C1_ALLEGATION);
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(2);
+  } finally {
+    setFixtureCritiqueAnswer(null);
+    await app.close();
+  }
+});
+
+test("dismissing an allegation changes nothing at all", async () => {
+  test.setTimeout(240_000);
+  const project = mkdtempSync(join(tmpdir(), "cairn-repair-dismiss-"));
+  scaffold(project);
+  withTypecheckScript(project, 0);
+  const reportPath = join(project, "docs", "ai-work", "tasks", "001-report.md");
+  const fakeCodex = fakeCodexEnvironment(project, true, "success");
+  const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
+  const win = await app.firstWindow();
+  setFixtureCritiqueAnswer(BOTH_ROWS_ALLEGED);
+  try {
+    await connectToFixture(win, fixtureUrl, "fixture-model");
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    const callsBefore = critiqueRequestCount();
+
+    await dispatchOneRealCall(win, async () => { await chooseTaskCardChecks(win); });
+    const candidate = win.locator(".unsealed-candidate");
+    await expect(candidate).toBeVisible({ timeout: 60_000 });
+
+    const critique = win.locator(".candidate-critique");
+    await askForOneReview(critique);
+    await expect(critique).toHaveAttribute("data-state", "answered", { timeout: 30_000 });
+
+    // c1 - dismissing writes no file, calls nobody, and spends nothing.
+    const c2 = critique.locator('[data-critique-row="c2"]');
+    await c2.getByRole("button", { name: DISMISS_BUTTON }).click();
+    const dismissed = c2.locator('[data-dismissed-by="owner"]');
+    await expect(dismissed).toBeVisible();
+    await expect(dismissed).toContainText("Nothing was changed.");
+    await expect(c2.locator(".candidate-critique-repair")).toHaveCount(0);
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+    expect(critiqueRequestCount()).toBe(callsBefore + 1);
+
+    // The owner's two choices are exactly as they were: still owed, still
+    // theirs, and the run still seals only when they answer.
+    const cont = candidate.getByRole("button", { name: CONTINUE_BUTTON });
+    await expect(cont).toBeDisabled();
+    await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
+    await expect(cont).toBeEnabled();
+    await cont.click();
+
+    await expect(win.locator(".result-card")).toBeVisible({ timeout: 90_000 });
+    const report = readFileSync(reportPath, "utf8");
+    expect(report).toContain("Disposition: **DONE**");
+    expect(report).not.toContain("## The one repair you approved");
+    expect(report).not.toContain(C2_ALLEGATION);
+    expect(workerSpawnCount(fakeCodex.marker)).toBe(1);
+  } finally {
+    setFixtureCritiqueAnswer(null);
+    await app.close();
+  }
+});

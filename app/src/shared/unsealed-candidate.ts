@@ -71,7 +71,37 @@ export type UnsealedCandidateProjectionV1 = Readonly<{
    */
   promises: readonly UnsealedCandidatePromiseView[];
   choices: readonly UnsealedCandidateChoice[];
+  /**
+   * Task 244. Whether this pause may still ask for the one repair, and what a
+   * repair already spent asked for. `repairAvailable` is false at the reopened
+   * pause and false for a run with no frozen rows, because there is no promise
+   * for an allegation to name.
+   */
+  repairAvailable: boolean;
+  repairAsked: UnsealedCandidateRepairAskedV1 | null;
 }>;
+
+/**
+ * The one correction a confirmed allegation asks for: a frozen row, and the
+ * critic's own sentence about it. There is nowhere here to put anything else,
+ * which is what stops a repair widening the task.
+ */
+export type UnsealedCandidateRepairAskedV1 = Readonly<{
+  checkId: string;
+  correction: string;
+}>;
+
+/**
+ * The press that asks for the one repair. It is deliberately NOT one of
+ * `UNSEALED_CANDIDATE_CHOICES`: those are the two buttons that END the pause,
+ * and a repair does not end it — the pause reopens over the repaired work with
+ * every row owed again.
+ */
+export const UNSEALED_CANDIDATE_REPAIR_CHOICE = "repair" as const;
+
+export type UnsealedCandidateDecisionChoice =
+  | UnsealedCandidateChoice
+  | typeof UNSEALED_CANDIDATE_REPAIR_CHOICE;
 
 export type UnsealedCandidatePromiseView = Readonly<{
   id: string;
@@ -91,6 +121,24 @@ export type UnsealedCandidatePromiseView = Readonly<{
   owner: UnsealedCandidateOwnerAnswer | "pending";
 }>;
 
+/**
+ * Task 244. The rows an allegation may still be confirmed against.
+ *
+ * This mirrors Core's `serialCandidateAllegationOpen` exactly: a row Cairn ran
+ * itself and watched pass is disproved by evidence Cairn holds, so the owner is
+ * never asked about it. It is display truth only — Main and Core both re-check
+ * before anything is dispatched — but the screen must agree with the runner, or
+ * it would offer a press that could only ever be refused.
+ */
+export function unsealedCandidateOpenRowIds(
+  promises: readonly UnsealedCandidatePromiseView[],
+): readonly string[] {
+  return Object.freeze(promises.flatMap((row) =>
+    row.answeredBy === "cairn" && row.cairn !== null && row.cairn.status === "passed"
+      ? []
+      : [row.id]));
+}
+
 export const UNSEALED_CANDIDATE_OWNER_ANSWERS = Object.freeze(["met", "not-met"] as const);
 
 export type UnsealedCandidateOwnerAnswer = typeof UNSEALED_CANDIDATE_OWNER_ANSWERS[number];
@@ -99,17 +147,20 @@ export type UnsealedCandidateOwnerAnswer = typeof UNSEALED_CANDIDATE_OWNER_ANSWE
 export type UnsealedCandidateDecisionRequest = {
   dir: string;
   checkpointId: string;
-  choice: UnsealedCandidateChoice;
+  choice: UnsealedCandidateDecisionChoice;
   /** The owner's judgment per row id. Rows left out stay unanswered, which
    * cannot seal — an omission is never read as approval. */
   ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>;
+  /** Present exactly when `choice` is `repair`, and never otherwise. */
+  repair?: UnsealedCandidateRepairAskedV1;
 };
 
 export type UnsealedCandidateDecisionV1 = Readonly<{
   version: typeof UNSEALED_CANDIDATE_VERSION;
   checkpointId: string;
-  choice: UnsealedCandidateChoice;
+  choice: UnsealedCandidateDecisionChoice;
   ownerAnswers: Readonly<Record<string, UnsealedCandidateOwnerAnswer>>;
+  repair?: UnsealedCandidateRepairAskedV1;
 }>;
 
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -127,15 +178,46 @@ export function parseUnsealedCandidateDecisionRequest(
   value: unknown,
 ): UnsealedCandidateDecisionRequest | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const keys = Object.keys(value as Record<string, unknown>).sort();
-  if (keys.join("\0") !== "checkpointId\0choice\0dir\0ownerAnswers") return null;
-  const { dir, checkpointId, choice, ownerAnswers } = value as Record<string, unknown>;
+  const keys = Object.keys(value as Record<string, unknown>).sort().join("\0");
+  // Two exact shapes, and the key set decides which press this is. A repair
+  // must carry its correction; a continue or stop must not carry one at all.
+  const repairing = keys === "checkpointId\0choice\0dir\0ownerAnswers\0repair";
+  if (!repairing && keys !== "checkpointId\0choice\0dir\0ownerAnswers") return null;
+  const { dir, checkpointId, choice, ownerAnswers, repair } = value as Record<string, unknown>;
   if (typeof dir !== "string" || dir.length === 0 || dir.length > 4_000) return null;
   if (typeof checkpointId !== "string" || !CHECKPOINT_ID.test(checkpointId)) return null;
-  if (!isUnsealedCandidateChoice(choice)) return null;
   const answers = parseOwnerAnswers(ownerAnswers);
   if (answers === null) return null;
+  if (repairing) {
+    if (choice !== UNSEALED_CANDIDATE_REPAIR_CHOICE) return null;
+    // A repair spends the owner's row judgments rather than carrying them: the
+    // code they judged is about to change. A press claiming both is refused
+    // rather than half-read.
+    if (Object.keys(answers).length > 0) return null;
+    const asked = parseRepairAsked(repair);
+    if (asked === null) return null;
+    return { dir, checkpointId, choice: UNSEALED_CANDIDATE_REPAIR_CHOICE, ownerAnswers: answers, repair: asked };
+  }
+  if (!isUnsealedCandidateChoice(choice)) return null;
   return { dir, checkpointId, choice, ownerAnswers: answers };
+}
+
+/**
+ * The correction's real cap is Core's `SERIAL_CRITIQUE_TEXT_CAP`, which refuses
+ * anything longer before a critic's sentence ever reaches a screen. This bound
+ * is the same number, restated here so the renderer carries no Core import —
+ * and Core re-checks it regardless, so this can only refuse, never permit.
+ */
+const REPAIR_CORRECTION_CAP = 600;
+
+function parseRepairAsked(value: unknown): UnsealedCandidateRepairAskedV1 | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (Object.keys(value as Record<string, unknown>).sort().join("\0") !== "checkId\0correction") return null;
+  const { checkId, correction } = value as Record<string, unknown>;
+  if (typeof checkId !== "string" || !ROW_ID.test(checkId)) return null;
+  if (typeof correction !== "string" || correction.length === 0
+    || correction.length > REPAIR_CORRECTION_CAP) return null;
+  return Object.freeze({ checkId, correction });
 }
 
 const ROW_ID = /^c[1-9][0-9]{0,2}$/u;

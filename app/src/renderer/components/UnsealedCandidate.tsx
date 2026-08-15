@@ -74,6 +74,30 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose, criti
         complete.</strong> Nothing is saved or recorded yet.
       </p>
 
+      {/* Task 244. A repair already spent is said HERE, before the rows the
+          owner is about to judge — because those rows are about code that has
+          changed since they last looked at it, and judging repaired work
+          without knowing it was repaired is not a judgment Cairn should take. */}
+      {candidate.repairAsked === null ? null : (
+        <section className="unsealed-candidate-repaired" aria-label="The one repair you approved">
+          <h4 className="unsealed-candidate-section-title">
+            You asked for one correction, and Cairn checked again
+          </h4>
+          <p className="unsealed-candidate-repaired-row">
+            You said <span className="mono">{candidate.repairAsked.checkId}</span> was
+            not met, and approved this one correction:
+          </p>
+          <p className="unsealed-candidate-repaired-correction">
+            {candidate.repairAsked.correction}
+          </p>
+          <p className="unsealed-candidate-repaired-limit">
+            Everything below is from <strong>after</strong> that correction: the
+            files, the worker's account, and Cairn's own checks all ran again.
+            There is no second repair, so this is the last time you are asked.
+          </p>
+        </section>
+      )}
+
       <section className="unsealed-candidate-request" aria-label="What you asked for">
         <h4 className="unsealed-candidate-section-title">What you asked for</h4>
         <p className="unsealed-candidate-outcome">{candidate.acceptedRequest.outcome.text}</p>

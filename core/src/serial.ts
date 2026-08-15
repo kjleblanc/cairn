@@ -106,6 +106,10 @@ import {
   type SerialTaskPromisesV1,
 } from "./taskcard.js";
 import {
+  serialCandidateRepairRequest,
+  type SerialCandidateRepairRequestV1,
+} from "./critique.js";
+import {
   ADAPTER_COMMAND_ATTESTATION_VERSION,
   ENVELOPE_RESULT_VERSION,
   TASK_SPEC_RUN_RECORD_VERSION,
@@ -242,12 +246,26 @@ export type SerialUnsealedCandidateV1 = Readonly<{
    * the run carried no promises, which is the Slice 1 shape unchanged.
    */
   answers: readonly SerialTaskPromiseAnswerV1[];
+  /**
+   * Task 244. Whether this pause may still ask for the one repair. False at the
+   * reopened pause after a repair has been spent, and false for a run carrying
+   * no frozen rows at all — there is no promise for an allegation to name.
+   */
+  repairAvailable: boolean;
+  /** What the repair already spent on this run asked for, or null before one. */
+  repair: SerialCandidateRepairRequestV1 | null;
 }>;
 
 /**
  * The bare words remain valid so a caller with nothing to report keeps working
  * exactly as before. The object form is how the owner's own row judgments come
  * back; anything else at all is read as `stop`.
+ *
+ * Task 244 adds `repair`: the owner confirmed one allegation against one frozen
+ * row and approved one correction. It is accepted only while `repairAvailable`
+ * was true and only for a row Cairn has not itself proved; every other case
+ * falls through to the honest stop, because a choice this pause never offered
+ * is not a continue.
  */
 export type SerialUnsealedCandidateChoiceV1 =
   | "continue"
@@ -255,7 +273,8 @@ export type SerialUnsealedCandidateChoiceV1 =
   | Readonly<{
       choice: "continue";
       ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>>;
-    }>;
+    }>
+  | Readonly<{ choice: "repair"; repair: SerialCandidateRepairRequestV1 }>;
 
 /** Fail closed: only an exact continue, in either accepted shape, seals. */
 function unsealedCandidateContinuation(
@@ -278,6 +297,26 @@ function unsealedCandidateContinuation(
     if (answer === "met" || answer === "not-met") answers[key] = answer;
   }
   return Object.freeze({ ownerAnswers: Object.freeze(answers) });
+}
+
+/**
+ * Read a repair out of the pause's answer, or null.
+ *
+ * Null is not an error here — it is every other answer, including a repair the
+ * pause did not offer or one naming a row Cairn's own passing check already
+ * disproved. The caller then falls through to `unsealedCandidateContinuation`,
+ * which reads anything that is not an exact continue as the honest stop.
+ */
+function unsealedCandidateRepair(
+  value: unknown,
+  available: boolean,
+  answers: readonly SerialTaskPromiseAnswerV1[],
+): SerialCandidateRepairRequestV1 | null {
+  if (!available) return null;
+  if (value === null || typeof value !== "object") return null;
+  const record = value as { choice?: unknown; repair?: unknown };
+  if (record.choice !== "repair") return null;
+  return serialCandidateRepairRequest(record.repair, answers);
 }
 
 export interface SerialCandidateRunOptions {
@@ -2335,6 +2374,8 @@ function composeCairnWorkerRecordValues(
   recordDate = new Date().toISOString().slice(0, 10),
   /** Task 238: the accepted promises and how each was answered. */
   promiseAnswers?: readonly SerialTaskPromiseAnswerV1[],
+  /** Task 244: the one approved repair, or nothing when none was. */
+  repair?: SerialCandidateRepairRequestV1 | null,
 ): { reportText: string; row: LogRow; composed: ComposedRecordInput } {
   const taskSpecRunRecord = composeBoundRunRecord(
     contract,
@@ -2363,6 +2404,7 @@ function composeCairnWorkerRecordValues(
     ...(taskSpecRunRecord ? { taskSpecRunRecord } : {}),
     recordRecovery: recovery?.disclosure ?? null,
     ...(promiseAnswers && promiseAnswers.length > 0 ? { promiseAnswers } : {}),
+    ...(repair ? { repair } : {}),
   };
   const report = reportWithCandidateCustody(
     composeWorkerReport(input),
@@ -2414,6 +2456,8 @@ function cairnWorkerRecords(
   candidateBriefText?: string,
   /** Task 238: the accepted promises and how each was answered. */
   promiseAnswers?: readonly SerialTaskPromiseAnswerV1[],
+  /** Task 244: the one approved repair, or nothing when none was. */
+  repair?: SerialCandidateRepairRequestV1 | null,
 ): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
   const values = composeCairnWorkerRecordValues(
     root,
@@ -2431,6 +2475,7 @@ function cairnWorkerRecords(
     terminalAction,
     recordDate,
     promiseAnswers,
+    repair,
   );
   const report = values.reportText;
   const row = values.row;
@@ -2513,6 +2558,8 @@ function composedForClose(
     paidCallStarted: boolean;
     taskSpecClaims?: TaskSpecWorkerClaims | null;
     adapterAttestations?: readonly AdapterCommandAttestationV1[];
+    /** Task 244: the one approved repair, or absent when none was. */
+    repair?: SerialCandidateRepairRequestV1 | null;
   },
 ): ComposedRecordInput {
   const taskSpecRunRecord = composeBoundRunRecord(
@@ -2539,6 +2586,7 @@ function composedForClose(
     processFailure: site.processFailure,
     paidCallStarted: site.paidCallStarted,
     ...(taskSpecRunRecord ? { taskSpecRunRecord } : {}),
+    ...(site.repair ? { repair: site.repair } : {}),
     // Only the Task 052 owned-records gate authors a recovery line, and it
     // closes through cairnWorkerRecords; no legacy-template site has one.
     recordRecovery: null,
@@ -7247,291 +7295,436 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
     });
     emit(activities, options.events, { stage: "Check", state: "working", detail: "Checking the result, records, and protected Git state." });
     if (!demo) {
-      const workerResult = parseWorkerResult(adapterValue, contract);
-      const qualityWorkerResult = contract.version === "cairn-serial-task/v4"
-        && workerResult?.kind === "worker-result/v3" ? workerResult : null;
-      const adapterAttestations = contract.version === "cairn-serial-task/v4" && qualityWorkerResult
-        ? deriveAdapterAttestations(contract, qualityWorkerResult)
-        : contract.version === "cairn-serial-task/v4" ? null : Object.freeze([]);
-      const resultValid = workerResult !== null && adapterAttestations !== null;
-      if (workerResult) {
-        emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEvidenceSummary(workerResult.evidence) });
-      }
-      const workerCompleted = workerResult?.status === "completed";
-      const protectedStarting = protectedStartingPathsOrNull(projectRoot, start);
-      if (protectedStarting === null) {
-        // Git cannot answer, so nothing below may be decided: no honest record
-        // can be composed, and a worker-forged log row may be standing right
-        // now. Restore Cairn's OWN log and throw, so the run is must-inspect
-        // (Tasks 058/059/067).
-        const restored = restoreLogBeforeThrow(projectRoot, start);
-        throw recordVerificationFailed(
-          "Git could not be read to verify protected starting work; worker-authored evidence was retained without overwrite.",
-          restored,
-        );
-      }
-      const protectedValid = protectedStarting;
-      // The worker authored no record; it speaks through one cairn-claims fence.
-      const claims = contract.version === "cairn-serial-task/v3" && workerResult
-        ? parseWorkerClaims(workerResult.claimsText)
-        : null;
-      const taskSpecClaims = contract.version === "cairn-serial-task/v4" && qualityWorkerResult
-        ? parseTaskSpecWorkerClaims(qualityWorkerResult.claimsText, taskSpecClaimExpectation(contract))
-        : null;
-      const claimDisposition = taskSpecClaims?.disposition ?? claims?.disposition ?? null;
-      const unexpectedPlannedExit = contract.version === "cairn-serial-task/v4" && adapterAttestations
-        ? hasUnexpectedPlannedExit(contract, adapterAttestations)
-        : false;
-      const taskSpecEvidence = contract.version === "cairn-serial-task/v4" ? Object.freeze({
-        claims: taskSpecClaims,
-        attestations: adapterAttestations ?? Object.freeze([]),
-      }) : undefined;
-      const stopReason: SerialStopReason | null = !resultValid
-        ? "INVALID_ADAPTER_RESULT"
-        : !workerCompleted
-          ? "ADAPTER_FAILED"
-          : !protectedValid
-            ? "PROTECTED_WORK_CHANGED"
-            : !(taskSpecClaims ?? claims)
-              ? "WORKER_CLAIMS_MISSING"
-              : claimDisposition === "STOPPED"
-                ? "MODEL_REPORTED_STOPPED"
-                : unexpectedPlannedExit
-                  ? "MODEL_RESULT_NOT_VERIFIED"
-                : null;
-
-      // A STOPPED close: Cairn authors honest STOPPED records from whatever
-      // claims (if any) survived, keeps the retained evidence, commits nothing.
-      // Task 237 — declared here so the stop path below can carry the rows too.
-      // A STOPPED result must be able to say which promise went unanswered.
-      const checkResults: SerialProjectCheckResultV1[] = [];
-      let ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>> = Object.freeze({});
-      let promiseAnswers: readonly SerialTaskPromiseAnswerV1[] = Object.freeze([]);
-
-      const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).` });
-        const records = cairnWorkerRecords(
-          projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null,
-          workerResult?.evidence ?? null, recovery, taskSpecEvidence,
-          // No candidate custody, files, terminal action, date or brief text on
-          // this path; the trailing argument is Task 238's answered promises, so
-          // a stop can name the promise that went unanswered.
-          undefined, undefined, undefined, undefined, undefined, promiseAnswers,
-        );
-        if (!records.verified) {
-          const restored = restoreLogBeforeThrow(projectRoot, start);
-          throw recordVerificationFailed("Worker-authored evidence was retained without overwrite.", restored);
+      // Task 244: the one repair this run may spend, and what it asked for.
+      // These are facts about the RUN, so they live outside the loop below.
+      let repairSpent = false;
+      let acceptedRepair: SerialCandidateRepairRequestV1 | null = null;
+      // Everything from here to the terminal close runs ONCE per worker
+      // attempt. A confirmed allegation reenters it with a second dispatch,
+      // so the repaired tree meets exactly the same parse, the same owned-
+      // records gate, the same protected-work check and the same project
+      // checks the first attempt met - by construction, not by a second
+      // ladder that could drift from this one. Only the repair branch loops;
+      // every other path returns.
+      for (;;) {
+        const workerResult = parseWorkerResult(adapterValue, contract);
+        const qualityWorkerResult = contract.version === "cairn-serial-task/v4"
+          && workerResult?.kind === "worker-result/v3" ? workerResult : null;
+        const adapterAttestations = contract.version === "cairn-serial-task/v4" && qualityWorkerResult
+          ? deriveAdapterAttestations(contract, qualityWorkerResult)
+          : contract.version === "cairn-serial-task/v4" ? null : Object.freeze([]);
+        const resultValid = workerResult !== null && adapterAttestations !== null;
+        if (workerResult) {
+          emit(activities, options.events, { stage: "Check", state: "working", detail: boundedEvidenceSummary(workerResult.evidence) });
         }
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(reason)}` });
-        return {
-          status: "stopped", reason, taskNumber, disposition: "STOPPED",
-          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
-          reportText: records.reportText, row: records.row, route, activities,
-          commit: { status: "skipped", reason: "Stopped evidence was retained for inspection." },
-          composed: records.composed,
-        };
-      };
-
-      // A DONE write whose byte-back verification fails must never leave a
-      // forged DONE report/log row standing. Rewrite the just-written DONE
-      // records to honest STOPPED records in place — replaceDoneRecordsWithStopped
-      // only proceeds when the on-disk records are byte-for-byte the DONE ones —
-      // and close RECORD_VERIFICATION_FAILED. Only an unrewritable failure throws.
-      const closeRecordRewrite = (done: { reportText: string; row: LogRow }): SerialRunResult => {
-        const stopped = replaceDoneRecordsWithStopped(
-          projectRoot, contract, demo, start, Boolean(options.commitRecords), done,
-          "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined, taskSpecEvidence,
-        );
-        if (!stopped?.verified) {
-          // The DONE row could not be rewritten as an honest STOPPED row. That
-          // row may well have passed its own byte-back check, but the run it
-          // claims threw instead of completing, so it must not stand: restore
-          // the log to what Cairn last wrote that is still true of this run.
+        const workerCompleted = workerResult?.status === "completed";
+        const protectedStarting = protectedStartingPathsOrNull(projectRoot, start);
+        if (protectedStarting === null) {
+          // Git cannot answer, so nothing below may be decided: no honest record
+          // can be composed, and a worker-forged log row may be standing right
+          // now. Restore Cairn's OWN log and throw, so the run is must-inspect
+          // (Tasks 058/059/067).
           const restored = restoreLogBeforeThrow(projectRoot, start);
-          throw recordVerificationFailed("Task records were retained for inspection.", restored);
-        }
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")} (RECORD_VERIFICATION_FAILED).` });
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")}` });
-        return {
-          status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",
-          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
-          reportText: stopped.reportText, row: stopped.row, route, activities,
-          commit: { status: "skipped", reason: "Record verification failed." },
-          composed: composedForClose(contract, "STOPPED", "RECORD_VERIFICATION_FAILED", {
-            claims,
-            filesChanged: changedSetForRecord(projectRoot),
-            protectedIntact: protectedValid,
-            commit: null,
-            evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
-            processFailure: null,
-            paidCallStarted: true,
-            taskSpecClaims,
-            adapterAttestations: adapterAttestations ?? Object.freeze([]),
-          }),
-        };
-      };
-
-      // Owned-records integrity gate (Task 052). The task brief, the append-only
-      // work log, and the task report path are all Cairn-owned records that live
-      // OUTSIDE the protected-path snapshot: the brief and report are written
-      // untracked at task start, and the log is one Cairn appends to itself. A
-      // worker can therefore edit any of them and still pass every protected-work
-      // and exact-path check. Before ANY record-writing close — the claims-lane
-      // stop closes below OR the DONE authoring further down — verify all three
-      // are exactly as Cairn left them at task start. On any violation, recover
-      // Cairn's OWN records (restore the log, overwrite the report) and close
-      // honestly as STOPPED, so no forged DONE, log row, or stone can stand.
-      const briefPath = paths.brief(projectRoot, taskNumber);
-      const reportPath = paths.report(projectRoot, taskNumber);
-      const logPath = paths.log(projectRoot);
-      const ownedRecordsGuard = (): SerialRunResult | null => {
-        const briefIntact = existsSync(briefPath) && readFileSync(briefPath, "utf8") === contractMarkdown;
-        const logIntact = existsSync(logPath) && readFileSync(logPath, "utf8") === start.logText;
-        const reportPresent = existsSync(reportPath);
-        if (briefIntact && logIntact && !reportPresent) return null;
-
-        const disclosures: string[] = [];
-        if (!logIntact) {
-          // The log is Cairn's OWN append-only record. Restoring it from the
-          // task-start snapshot is NOT destroying worker evidence — the worker's
-          // product-file changes stay retained in the workspace for inspection;
-          // leaving a worker-forged row standing WOULD be dishonest. The restore
-          // must happen BEFORE the stop close writes its records so the close's
-          // byte-back append starts from the pristine log.
-          writeFileSync(logPath, start.logText, "utf8");
-          disclosures.push(
-            "The worker modified the append-only work log; Cairn restored it from the task-start snapshot and recorded this stop. " +
-              "The worker's modification was discarded from the log; its product-file changes remain retained in the workspace for inspection.",
+          throw recordVerificationFailed(
+            "Git could not be read to verify protected starting work; worker-authored evidence was retained without overwrite.",
+            restored,
           );
         }
-        if (reportPresent) {
-          disclosures.push("The worker pre-wrote the task report path; Cairn replaced it with this honest record.");
-        }
-        // A tampered or missing brief is retained as evidence (never restored);
-        // like the 051 brief check it only triggers this honest stop.
-        return closeStopped("RECORD_VERIFICATION_FAILED", {
-          disclosure: disclosures.length > 0 ? disclosures.join(" ") : null,
-          overwriteReport: reportPresent,
-        });
-      };
-      const guarded = ownedRecordsGuard();
-      if (guarded) return guarded;
+        const protectedValid = protectedStarting;
+        // The worker authored no record; it speaks through one cairn-claims fence.
+        const claims = contract.version === "cairn-serial-task/v3" && workerResult
+          ? parseWorkerClaims(workerResult.claimsText)
+          : null;
+        const taskSpecClaims = contract.version === "cairn-serial-task/v4" && qualityWorkerResult
+          ? parseTaskSpecWorkerClaims(qualityWorkerResult.claimsText, taskSpecClaimExpectation(contract))
+          : null;
+        const claimDisposition = taskSpecClaims?.disposition ?? claims?.disposition ?? null;
+        const unexpectedPlannedExit = contract.version === "cairn-serial-task/v4" && adapterAttestations
+          ? hasUnexpectedPlannedExit(contract, adapterAttestations)
+          : false;
+        const taskSpecEvidence = contract.version === "cairn-serial-task/v4" ? Object.freeze({
+          claims: taskSpecClaims,
+          attestations: adapterAttestations ?? Object.freeze([]),
+        }) : undefined;
+        const stopReason: SerialStopReason | null = !resultValid
+          ? "INVALID_ADAPTER_RESULT"
+          : !workerCompleted
+            ? "ADAPTER_FAILED"
+            : !protectedValid
+              ? "PROTECTED_WORK_CHANGED"
+              : !(taskSpecClaims ?? claims)
+                ? "WORKER_CLAIMS_MISSING"
+                : claimDisposition === "STOPPED"
+                  ? "MODEL_REPORTED_STOPPED"
+                  : unexpectedPlannedExit
+                    ? "MODEL_RESULT_NOT_VERIFIED"
+                  : null;
 
-      if (stopReason) return closeStopped(stopReason);
+        // A STOPPED close: Cairn authors honest STOPPED records from whatever
+        // claims (if any) survived, keeps the retained evidence, commits nothing.
+        // Task 237 — declared here so the stop path below can carry the rows too.
+        // A STOPPED result must be able to say which promise went unanswered.
+        const checkResults: SerialProjectCheckResultV1[] = [];
+        let ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>> = Object.freeze({});
+        let promiseAnswers: readonly SerialTaskPromiseAnswerV1[] = Object.freeze([]);
 
-      // Task 235 — the one pre-terminal pause. Everything decisive has already
-      // passed: the worker result parsed, its claims read, protected work
-      // verified byte-identical, and the owned records proved exactly as Cairn
-      // left them. Nothing terminal exists yet — no report, no log row, no
-      // commit, no result — so the caller can put a genuinely unsealed
-      // candidate in front of the owner here and nowhere else.
-      //
-      // The run stays OPEN across this await: same lock, same start snapshot,
-      // same chosen adapter, same abort signal. That is what makes the pause a
-      // checkpoint rather than a handoff — no second writer can take the run,
-      // and the close below is the same close a checkpoint-free run reaches.
-      //
-      // Fail closed on the answer: only an exact "continue" seals. Anything
-      // else — a stop, or a caller that returned something unexpected — takes
-      // the honest STOPPED door, which commits nothing and retains the edits.
-      // Task 237 — Cairn runs its OWN checks here, before anyone is asked
-      // anything. Still inside the open run: same lock, same snapshot, same
-      // abort signal. Whatever commands the worker says it ran stay claims; only
-      // what happens on these lines is Cairn's own finding.
-      const promises = contract.version === "cairn-serial-task/v3" ? contract.promises : undefined;
-      const workerChecks = claims ? claims.checks : [];
-      if (promises) {
-        const menu = projectCheckMenu(projectRoot);
-        const selected = [...new Set(promises.rows.flatMap((row) =>
-          row.verification.kind === "cairn-check" ? [row.verification.checkId] : []))];
-        for (const checkId of selected) {
-          const check = menu.find((entry) => entry.id === checkId);
-          // A check the project can no longer answer leaves its row without a
-          // result, which cannot seal. Cairn does not substitute another.
-          if (!check) continue;
-          emit(activities, options.events, {
-            stage: "Check", state: "working", detail: `Cairn is running ${check.label} (${check.command}).`,
-          });
-          const result = await runProjectCheck(projectRoot, check, {
-            signal: options.signal,
-            onElapsed: (elapsedMs) => emit(activities, options.events, {
-              stage: "Check", state: "working",
-              detail: `${check.label} — still running, ${Math.round(elapsedMs / 1000)}s so far.`,
+        const closeStopped = (reason: SerialStopReason, recovery?: RecordRecovery): SerialRunResult => {
+          emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).` });
+          const records = cairnWorkerRecords(
+            projectRoot, contract, start, "STOPPED", reason, claims, protectedValid, null,
+            workerResult?.evidence ?? null, recovery, taskSpecEvidence,
+            // No candidate custody, files, terminal action, date or brief text on
+            // this path; the trailing argument is Task 238's answered promises, so
+            // a stop can name the promise that went unanswered.
+            undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair,
+          );
+          if (!records.verified) {
+            const restored = restoreLogBeforeThrow(projectRoot, start);
+            throw recordVerificationFailed("Worker-authored evidence was retained without overwrite.", restored);
+          }
+          emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(reason)}` });
+          return {
+            status: "stopped", reason, taskNumber, disposition: "STOPPED",
+            briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+            reportText: records.reportText, row: records.row, route, activities,
+            commit: { status: "skipped", reason: "Stopped evidence was retained for inspection." },
+            composed: records.composed,
+          };
+        };
+
+        // A DONE write whose byte-back verification fails must never leave a
+        // forged DONE report/log row standing. Rewrite the just-written DONE
+        // records to honest STOPPED records in place — replaceDoneRecordsWithStopped
+        // only proceeds when the on-disk records are byte-for-byte the DONE ones —
+        // and close RECORD_VERIFICATION_FAILED. Only an unrewritable failure throws.
+        const closeRecordRewrite = (done: { reportText: string; row: LogRow }): SerialRunResult => {
+          const stopped = replaceDoneRecordsWithStopped(
+            projectRoot, contract, demo, start, Boolean(options.commitRecords), done,
+            "RECORD_VERIFICATION_FAILED", workerResult?.evidence ?? undefined, taskSpecEvidence,
+          );
+          if (!stopped?.verified) {
+            // The DONE row could not be rewritten as an honest STOPPED row. That
+            // row may well have passed its own byte-back check, but the run it
+            // claims threw instead of completing, so it must not stand: restore
+            // the log to what Cairn last wrote that is still true of this run.
+            const restored = restoreLogBeforeThrow(projectRoot, start);
+            throw recordVerificationFailed("Task records were retained for inspection.", restored);
+          }
+          emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")} (RECORD_VERIFICATION_FAILED).` });
+          emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("RECORD_VERIFICATION_FAILED")}` });
+          return {
+            status: "stopped", reason: "RECORD_VERIFICATION_FAILED", taskNumber, disposition: "STOPPED",
+            briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+            reportText: stopped.reportText, row: stopped.row, route, activities,
+            commit: { status: "skipped", reason: "Record verification failed." },
+            composed: composedForClose(contract, "STOPPED", "RECORD_VERIFICATION_FAILED", {
+              claims,
+              filesChanged: changedSetForRecord(projectRoot),
+              protectedIntact: protectedValid,
+              commit: null,
+              evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+              processFailure: null,
+              paidCallStarted: true,
+              taskSpecClaims,
+              adapterAttestations: adapterAttestations ?? Object.freeze([]),
+              repair: acceptedRepair,
             }),
+          };
+        };
+
+        // Owned-records integrity gate (Task 052). The task brief, the append-only
+        // work log, and the task report path are all Cairn-owned records that live
+        // OUTSIDE the protected-path snapshot: the brief and report are written
+        // untracked at task start, and the log is one Cairn appends to itself. A
+        // worker can therefore edit any of them and still pass every protected-work
+        // and exact-path check. Before ANY record-writing close — the claims-lane
+        // stop closes below OR the DONE authoring further down — verify all three
+        // are exactly as Cairn left them at task start. On any violation, recover
+        // Cairn's OWN records (restore the log, overwrite the report) and close
+        // honestly as STOPPED, so no forged DONE, log row, or stone can stand.
+        const briefPath = paths.brief(projectRoot, taskNumber);
+        const reportPath = paths.report(projectRoot, taskNumber);
+        const logPath = paths.log(projectRoot);
+        const ownedRecordsGuard = (): SerialRunResult | null => {
+          const briefIntact = existsSync(briefPath) && readFileSync(briefPath, "utf8") === contractMarkdown;
+          const logIntact = existsSync(logPath) && readFileSync(logPath, "utf8") === start.logText;
+          const reportPresent = existsSync(reportPath);
+          if (briefIntact && logIntact && !reportPresent) return null;
+
+          const disclosures: string[] = [];
+          if (!logIntact) {
+            // The log is Cairn's OWN append-only record. Restoring it from the
+            // task-start snapshot is NOT destroying worker evidence — the worker's
+            // product-file changes stay retained in the workspace for inspection;
+            // leaving a worker-forged row standing WOULD be dishonest. The restore
+            // must happen BEFORE the stop close writes its records so the close's
+            // byte-back append starts from the pristine log.
+            writeFileSync(logPath, start.logText, "utf8");
+            disclosures.push(
+              "The worker modified the append-only work log; Cairn restored it from the task-start snapshot and recorded this stop. " +
+                "The worker's modification was discarded from the log; its product-file changes remain retained in the workspace for inspection.",
+            );
+          }
+          if (reportPresent) {
+            disclosures.push("The worker pre-wrote the task report path; Cairn replaced it with this honest record.");
+          }
+          // A tampered or missing brief is retained as evidence (never restored);
+          // like the 051 brief check it only triggers this honest stop.
+          return closeStopped("RECORD_VERIFICATION_FAILED", {
+            disclosure: disclosures.length > 0 ? disclosures.join(" ") : null,
+            overwriteReport: reportPresent,
           });
-          checkResults.push(result);
-          emit(activities, options.events, {
-            stage: "Check", state: "working",
-            detail: result.status === "passed"
-              ? `${check.label} passed (${Math.round(result.durationMs / 1000)}s).`
-              : result.status === "failed"
-                ? `${check.label} failed (${check.command}).`
-                : `${check.label} did not finish in time; Cairn stopped it.`,
-          });
+        };
+        const guarded = ownedRecordsGuard();
+        if (guarded) return guarded;
+
+        if (stopReason) return closeStopped(stopReason);
+
+        // Task 235 — the one pre-terminal pause. Everything decisive has already
+        // passed: the worker result parsed, its claims read, protected work
+        // verified byte-identical, and the owned records proved exactly as Cairn
+        // left them. Nothing terminal exists yet — no report, no log row, no
+        // commit, no result — so the caller can put a genuinely unsealed
+        // candidate in front of the owner here and nowhere else.
+        //
+        // The run stays OPEN across this await: same lock, same start snapshot,
+        // same chosen adapter, same abort signal. That is what makes the pause a
+        // checkpoint rather than a handoff — no second writer can take the run,
+        // and the close below is the same close a checkpoint-free run reaches.
+        //
+        // Fail closed on the answer: only an exact "continue" seals. Anything
+        // else — a stop, or a caller that returned something unexpected — takes
+        // the honest STOPPED door, which commits nothing and retains the edits.
+        // Task 237 — Cairn runs its OWN checks here, before anyone is asked
+        // anything. Still inside the open run: same lock, same snapshot, same
+        // abort signal. Whatever commands the worker says it ran stay claims; only
+        // what happens on these lines is Cairn's own finding.
+        const promises = contract.version === "cairn-serial-task/v3" ? contract.promises : undefined;
+        const workerChecks = claims ? claims.checks : [];
+        if (promises) {
+          const menu = projectCheckMenu(projectRoot);
+          const selected = [...new Set(promises.rows.flatMap((row) =>
+            row.verification.kind === "cairn-check" ? [row.verification.checkId] : []))];
+          for (const checkId of selected) {
+            const check = menu.find((entry) => entry.id === checkId);
+            // A check the project can no longer answer leaves its row without a
+            // result, which cannot seal. Cairn does not substitute another.
+            if (!check) continue;
+            emit(activities, options.events, {
+              stage: "Check", state: "working", detail: `Cairn is running ${check.label} (${check.command}).`,
+            });
+            const result = await runProjectCheck(projectRoot, check, {
+              signal: options.signal,
+              onElapsed: (elapsedMs) => emit(activities, options.events, {
+                stage: "Check", state: "working",
+                detail: `${check.label} — still running, ${Math.round(elapsedMs / 1000)}s so far.`,
+              }),
+            });
+            checkResults.push(result);
+            emit(activities, options.events, {
+              stage: "Check", state: "working",
+              detail: result.status === "passed"
+                ? `${check.label} passed (${Math.round(result.durationMs / 1000)}s).`
+                : result.status === "failed"
+                  ? `${check.label} failed (${check.command}).`
+                  : `${check.label} did not finish in time; Cairn stopped it.`,
+            });
+          }
         }
-      }
 
-      if (options.onUnsealedCandidate) {
-        emit(activities, options.events, {
-          stage: "Check",
-          state: "working",
-          detail: "The worker changed files. Waiting for your decision before Cairn finishes the task.",
-        });
-        const choice = await options.onUnsealedCandidate(Object.freeze({
-          version: SERIAL_UNSEALED_CANDIDATE_VERSION,
-          taskNumber,
-          ...acceptedRequestForRecord(contract),
-          route: Object.freeze({
-            adapterId: contract.route.adapterId,
-            adapterLabel: contract.route.adapterLabel,
-            provider: contract.route.provider,
-            model: contract.route.model,
-          }),
-          // Git's own bounded answer, the same one the terminal record will
-          // carry, so the candidate and the result never disagree about what
-          // changed.
-          changedPaths: changedSetForRecord(projectRoot),
-          claims,
-          evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+        if (options.onUnsealedCandidate) {
+          emit(activities, options.events, {
+            stage: "Check",
+            state: "working",
+            detail: "The worker changed files. Waiting for your decision before Cairn finishes the task.",
+          });
           // Shown with every owner row still `pending`: the card is where the
-          // owner answers them, so it cannot arrive pre-answered.
-          answers: promises
+          // owner answers them, so it cannot arrive pre-answered. After a repair
+          // this is composed again from the reran checks and the new claims, so
+          // a judgment the owner made about the earlier code is never carried
+          // over onto code that has since changed.
+          const shown = promises
             ? composeSerialTaskPromiseAnswers(promises, { checkResults, workerChecks, ownerAnswers: {} })
-            : Object.freeze([]),
-        }), options.signal);
-        const continuation = unsealedCandidateContinuation(choice);
-        if (!continuation) return closeStopped("OWNER_STOPPED_AT_CANDIDATE");
-        ownerAnswers = continuation.ownerAnswers;
-      }
+            : Object.freeze([]);
+          // A run with no frozen rows has no promise for an allegation to name,
+          // so it never offers the repair — the same reason it gets no critic.
+          const repairAvailable = !repairSpent && promises !== undefined;
+          const choice = await options.onUnsealedCandidate(Object.freeze({
+            version: SERIAL_UNSEALED_CANDIDATE_VERSION,
+            taskNumber,
+            ...acceptedRequestForRecord(contract),
+            route: Object.freeze({
+              adapterId: contract.route.adapterId,
+              adapterLabel: contract.route.adapterLabel,
+              provider: contract.route.provider,
+              model: contract.route.model,
+            }),
+            // Git's own bounded answer, the same one the terminal record will
+            // carry, so the candidate and the result never disagree about what
+            // changed.
+            changedPaths: changedSetForRecord(projectRoot),
+            claims,
+            evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+            answers: shown,
+            repairAvailable,
+            repair: acceptedRepair,
+          }), options.signal);
 
-      // The DONE gate. A row is answered by Cairn's passing check or by the
-      // owner's own word, and by nothing else — a worker that swore every
-      // promise was kept cannot move this.
-      if (promises) {
-        promiseAnswers = composeSerialTaskPromiseAnswers(promises, {
-          checkResults, workerChecks, ownerAnswers,
-        });
-        if (!serialTaskPromisesSatisfied(promiseAnswers)) return closeStopped("TASK_PROMISE_NOT_MET");
-      }
+          // Task 244 — the one repair. It is dispatched from HERE, inside the
+          // still-open run: same lock, same starting snapshot, same chosen
+          // adapter, same abort signal. `runSerialTask` is not reentered, so
+          // there is no second writer and no nested run to reconcile.
+          const repair = unsealedCandidateRepair(choice, repairAvailable, shown);
+          if (repair) {
+            repairSpent = true;
+            acceptedRepair = repair;
+            emit(activities, options.events, {
+              stage: "Run",
+              state: "working",
+              detail: `Asking ${contract.route.adapterLabel} for one correction to ${repair.checkId}. This is the only repair for this task.`,
+            });
+            // The SAME contract object in every field that could widen the
+            // task — accepted request, its digest, the frozen rows — plus the
+            // one confirmed correction. The brief on disk is not rewritten:
+            // the Task Card the owner approved is a record, not a draft.
+            try {
+              adapterValue = await chosen.run(
+                freezeContract({ ...contract, repair } as AdapterTaskContract),
+                options.signal,
+              );
+            } catch (error) {
+              // A repair that never returned leaves the first attempt's edits
+              // exactly where they are, and closes through the door this run
+              // already owns. No retry, and never a DONE.
+              const reason: SerialStopReason = error instanceof WorkerBoundaryError
+                ? "REAL_MODEL_CALL_NOT_AUTHORIZED"
+                : error instanceof WorkerProcessError
+                  ? error.failure === "timeout"
+                    ? "ADAPTER_TIMED_OUT"
+                    : error.failure === "cancelled"
+                      ? "CANCELLED_BY_OWNER"
+                      : "ADAPTER_FAILED"
+                  : "ADAPTER_FAILED";
+              return closeStopped(reason, {
+                disclosure: `The one approved repair of ${repair.checkId} did not return a result. `
+                  + "The worker's earlier changes were retained in the workspace for inspection.",
+                overwriteReport: false,
+              });
+            }
+            continue;
+          }
 
-      // DONE path — the claims say DONE, the process completed, and protected
-      // work is byte-identical. Cairn writes the records and owns the commit.
-      // A worker that committed on its own (head moved) is not verifiable. The
-      // owned-records gate above already proved the brief, log, and report path
-      // are byte-exactly as Cairn left them, so no forged DONE record can stand.
-      if (git(projectRoot, ["rev-parse", "HEAD"]) !== start.head) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
+          const continuation = unsealedCandidateContinuation(choice);
+          if (!continuation) return closeStopped("OWNER_STOPPED_AT_CANDIDATE");
+          ownerAnswers = continuation.ownerAnswers;
+        }
 
-      if (start.status.length > 0) {
-        // A protected dirty start forbids an isolated commit: the records are
-        // written but the product changes stay uncommitted for the owner.
-        const commit: RecordCommit = { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
+        // The DONE gate. A row is answered by Cairn's passing check or by the
+        // owner's own word, and by nothing else — a worker that swore every
+        // promise was kept cannot move this.
+        if (promises) {
+          promiseAnswers = composeSerialTaskPromiseAnswers(promises, {
+            checkResults, workerChecks, ownerAnswers,
+          });
+          if (!serialTaskPromisesSatisfied(promiseAnswers)) return closeStopped("TASK_PROMISE_NOT_MET");
+        }
+
+        // DONE path — the claims say DONE, the process completed, and protected
+        // work is byte-identical. Cairn writes the records and owns the commit.
+        // A worker that committed on its own (head moved) is not verifiable. The
+        // owned-records gate above already proved the brief, log, and report path
+        // are byte-exactly as Cairn left them, so no forged DONE record can stand.
+        if (git(projectRoot, ["rev-parse", "HEAD"]) !== start.head) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
+
+        if (start.status.length > 0) {
+          // A protected dirty start forbids an isolated commit: the records are
+          // written but the product changes stay uncommitted for the owner.
+          const commit: RecordCommit = { status: "skipped", reason: "Protected starting work prevented an isolated task commit." };
+          const records = cairnWorkerRecords(
+            projectRoot, contract, start, "DONE", null, claims, protectedValid, commit,
+            workerResult?.evidence ?? null, undefined, taskSpecEvidence,
+            undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair,
+          );
+          if (!records.verified) return closeRecordRewrite(records);
+          emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
+          emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
+          return {
+            status: "done", taskNumber, disposition: "DONE",
+            briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+            reportText: records.reportText, row: records.row, route, activities, commit,
+            composed: records.composed,
+          };
+        }
+
+        // Clean start: the product change set must be Cairn-committable exactly.
+        const productPaths = changedTaskPaths(projectRoot, contract);
+        if (!productPaths) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
         const records = cairnWorkerRecords(
-          projectRoot, contract, start, "DONE", null, claims, protectedValid, commit,
-          workerResult?.evidence ?? null, undefined, taskSpecEvidence,
-          undefined, undefined, undefined, undefined, undefined, promiseAnswers,
+          projectRoot, contract, start, "DONE", null, claims, protectedValid,
+          { status: "created", reason: "One exact-path commit contains the product changes and these records." },
+          workerResult?.evidence ?? null,
+          undefined,
+          taskSpecEvidence,
+          undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair,
         );
         if (!records.verified) return closeRecordRewrite(records);
-        emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
+        const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
+        // Task 080: `commitExactPaths` reads Git in three places that its own
+        // try/catch does not cover — the HEAD read inside that catch, and the
+        // ancestry and single-commit checks after the commit — and all three run
+        // once the DONE report and log row are written and byte-back verified. A
+        // worker that corrupts the repository makes one of them throw (a planted
+        // `post-commit` hook is enough; nothing under `.git` is visible to any
+        // check Cairn runs), and the raw error would escape `runSerialTask` with
+        // that verified DONE row standing for a run that did not finish. Same
+        // shape as `safetyCloseFacts`, same door out.
+        let commit: RecordCommit | null;
+        try {
+          commit = commitExactPaths(projectRoot, start, expectedCommitSet, taskNumber);
+        } catch {
+          const restored = restoreLogBeforeThrow(projectRoot, start);
+          throw recordVerificationFailed(
+            "Git could not be read to complete the task commit; task records were retained for inspection.",
+            restored,
+          );
+        }
+        if (!commit) {
+          // Any staging/commit failure: undo staging, rewrite the DONE records as
+          // STOPPED (this self-check is the one surviving use), and close
+          // MODEL_RESULT_NOT_VERIFIED with the evidence retained.
+          unstageExactPaths(projectRoot, expectedCommitSet);
+          const stopped = replaceDoneRecordsWithStopped(
+            projectRoot, contract, demo, start, Boolean(options.commitRecords), records,
+            "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined, taskSpecEvidence,
+          );
+          if (!stopped?.verified) {
+            // The verified DONE row above described a run that then failed to
+            // commit; a DONE row for a thrown run must not stand.
+            const restored = restoreLogBeforeThrow(projectRoot, start);
+            throw recordVerificationFailed("Task records were retained for inspection.", restored);
+          }
+          emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")} (MODEL_RESULT_NOT_VERIFIED).` });
+          emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")}` });
+          return {
+            status: "stopped", reason: "MODEL_RESULT_NOT_VERIFIED", taskNumber, disposition: "STOPPED",
+            briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
+            reportText: stopped.reportText, row: stopped.row, route, activities,
+            commit: { status: "skipped", reason: "Record verification failed." },
+            composed: composedForClose(contract, "STOPPED", "MODEL_RESULT_NOT_VERIFIED", {
+              claims,
+              filesChanged: changedSetForRecord(projectRoot),
+              protectedIntact: protectedValid,
+              commit: null,
+              evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
+              processFailure: null,
+              paidCallStarted: true,
+              taskSpecClaims,
+              adapterAttestations: adapterAttestations ?? Object.freeze([]),
+              repair: acceptedRepair,
+            }),
+          };
+        }
+        emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result, task records, protected work, and Cairn-owned Git result were verified." });
         emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
         return {
           status: "done", taskNumber, disposition: "DONE",
@@ -7540,82 +7733,6 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
           composed: records.composed,
         };
       }
-
-      // Clean start: the product change set must be Cairn-committable exactly.
-      const productPaths = changedTaskPaths(projectRoot, contract);
-      if (!productPaths) return closeStopped("MODEL_RESULT_NOT_VERIFIED");
-      const records = cairnWorkerRecords(
-        projectRoot, contract, start, "DONE", null, claims, protectedValid,
-        { status: "created", reason: "One exact-path commit contains the product changes and these records." },
-        workerResult?.evidence ?? null,
-        undefined,
-        taskSpecEvidence,
-        undefined, undefined, undefined, undefined, undefined, promiseAnswers,
-      );
-      if (!records.verified) return closeRecordRewrite(records);
-      const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];
-      // Task 080: `commitExactPaths` reads Git in three places that its own
-      // try/catch does not cover — the HEAD read inside that catch, and the
-      // ancestry and single-commit checks after the commit — and all three run
-      // once the DONE report and log row are written and byte-back verified. A
-      // worker that corrupts the repository makes one of them throw (a planted
-      // `post-commit` hook is enough; nothing under `.git` is visible to any
-      // check Cairn runs), and the raw error would escape `runSerialTask` with
-      // that verified DONE row standing for a run that did not finish. Same
-      // shape as `safetyCloseFacts`, same door out.
-      let commit: RecordCommit | null;
-      try {
-        commit = commitExactPaths(projectRoot, start, expectedCommitSet, taskNumber);
-      } catch {
-        const restored = restoreLogBeforeThrow(projectRoot, start);
-        throw recordVerificationFailed(
-          "Git could not be read to complete the task commit; task records were retained for inspection.",
-          restored,
-        );
-      }
-      if (!commit) {
-        // Any staging/commit failure: undo staging, rewrite the DONE records as
-        // STOPPED (this self-check is the one surviving use), and close
-        // MODEL_RESULT_NOT_VERIFIED with the evidence retained.
-        unstageExactPaths(projectRoot, expectedCommitSet);
-        const stopped = replaceDoneRecordsWithStopped(
-          projectRoot, contract, demo, start, Boolean(options.commitRecords), records,
-          "MODEL_RESULT_NOT_VERIFIED", workerResult?.evidence ?? undefined, taskSpecEvidence,
-        );
-        if (!stopped?.verified) {
-          // The verified DONE row above described a run that then failed to
-          // commit; a DONE row for a thrown run must not stand.
-          const restored = restoreLogBeforeThrow(projectRoot, start);
-          throw recordVerificationFailed("Task records were retained for inspection.", restored);
-        }
-        emit(activities, options.events, { stage: "Check", state: "stopped", detail: `Stopped safely: ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")} (MODEL_RESULT_NOT_VERIFIED).` });
-        emit(activities, options.events, { stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords("MODEL_RESULT_NOT_VERIFIED")}` });
-        return {
-          status: "stopped", reason: "MODEL_RESULT_NOT_VERIFIED", taskNumber, disposition: "STOPPED",
-          briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
-          reportText: stopped.reportText, row: stopped.row, route, activities,
-          commit: { status: "skipped", reason: "Record verification failed." },
-          composed: composedForClose(contract, "STOPPED", "MODEL_RESULT_NOT_VERIFIED", {
-            claims,
-            filesChanged: changedSetForRecord(projectRoot),
-            protectedIntact: protectedValid,
-            commit: null,
-            evidenceSummary: workerResult ? boundedEvidenceSummary(workerResult.evidence) : null,
-            processFailure: null,
-            paidCallStarted: true,
-            taskSpecClaims,
-            adapterAttestations: adapterAttestations ?? Object.freeze([]),
-          }),
-        };
-      }
-      emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result, task records, protected work, and Cairn-owned Git result were verified." });
-      emit(activities, options.events, { stage: "Result", state: "done", detail: `DONE — one real ${contract.route.adapterLabel} task completed and was verified.` });
-      return {
-        status: "done", taskNumber, disposition: "DONE",
-        briefPath: paths.brief(projectRoot, taskNumber), reportPath: paths.report(projectRoot, taskNumber),
-        reportText: records.reportText, row: records.row, route, activities, commit,
-        composed: records.composed,
-      };
     }
     const resultValid = chosen.descriptor.capabilities.includes("offline-demo") && validateWorkerResult(adapterValue, contract);
     const protectedValid = verifyProtected(projectRoot, start, ownedSet);

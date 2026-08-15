@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
   CANDIDATE_CRITIQUE_AUTHORITY_TEXT,
   type CandidateCritiqueAction,
@@ -80,12 +82,36 @@ function SentDetail({ disclosure, summary }: {
   );
 }
 
-export function CandidateCritiqueCard({ critique, busy = false, onDecide }: {
+export function CandidateCritiqueCard({
+  critique,
+  busy = false,
+  onDecide,
+  openRowIds = [],
+  repairAvailable = false,
+  adapterLabel = "the worker",
+  onRepair,
+}: {
   critique: CandidateCritiqueProjectionV1;
   busy?: boolean;
   onDecide?: (action: CandidateCritiqueAction) => void;
+  /**
+   * Task 244. Rows an allegation may still be confirmed against. A row Cairn
+   * ran and watched pass is disproved by evidence Cairn holds, so the owner is
+   * never asked about it — the same rule Core enforces, said here so the screen
+   * agrees with the runner rather than offering a press that would be refused.
+   */
+  openRowIds?: readonly string[];
+  repairAvailable?: boolean;
+  adapterLabel?: string;
+  onRepair?: (checkId: string, correction: string) => void;
 }) {
   const disclosure = critique.disclosure;
+  // Whose allegation the owner has answered, and how. This lives here and only
+  // here: dismissing changes no file, calls nobody and spends nothing, so it
+  // needs no channel — and confirming grants nothing either, because Main and
+  // Core both re-check the row and the correction before any dispatch.
+  const [answered, setAnswered] = useState<Record<string, "confirmed" | "dismissed">>({});
+  const confirmed = Object.keys(answered).find((id) => answered[id] === "confirmed") ?? null;
   return (
     <section className="candidate-critique" aria-label="Independent inspection" data-state={critique.state}>
       <h3 className="candidate-critique-title">A second opinion</h3>
@@ -176,6 +202,79 @@ export function CandidateCritiqueCard({ critique, busy = false, onDecide }: {
                   <span className="candidate-critique-judgment">{JUDGMENT_WORDS[finding.judgment]}</span>
                 </p>
                 <p className="candidate-critique-finding-observation">{finding.observation}</p>
+
+                {/* Task 244. An allegation, and what the owner may do about it.
+                    Cairn answers the ones its own checks already settled; the
+                    rest are the owner's, and confirming one is not yet a
+                    repair — the correction gets its own separate press. */}
+                {finding.judgment === "not_met" && !openRowIds.includes(finding.checkId) ? (
+                  <p className="candidate-critique-dismissed" data-dismissed-by="cairn">
+                    Cairn checked this one itself and it passed, so this is not
+                    something you need to answer.
+                  </p>
+                ) : null}
+
+                {finding.judgment === "not_met" && openRowIds.includes(finding.checkId)
+                  && repairAvailable && onRepair ? (
+                  answered[finding.checkId] === "dismissed" ? (
+                    <p className="candidate-critique-dismissed" data-dismissed-by="owner">
+                      You decided this is fine. Nothing was changed.
+                    </p>
+                  ) : answered[finding.checkId] === "confirmed" ? (
+                    <div className="candidate-critique-repair" data-repair-row={finding.checkId}>
+                      <p className="candidate-critique-repair-text">
+                        Cairn can ask <strong>{adapterLabel}</strong> to make this
+                        one correction, and nothing else.
+                      </p>
+                      <p className="candidate-critique-repair-limit">
+                        <strong>This is the only repair for this task.</strong>{" "}
+                        Afterwards Cairn runs every check again and asks you once
+                        more before it finishes anything.
+                      </p>
+                      <div className="candidate-critique-actions">
+                        <button
+                          type="button"
+                          className="pill pill-primary"
+                          disabled={busy}
+                          onClick={() => onRepair(finding.checkId, finding.observation)}
+                        >
+                          Ask for this one correction
+                        </button>
+                        <button
+                          type="button"
+                          className="pill pill-quiet"
+                          disabled={busy}
+                          onClick={() => setAnswered((prior) => {
+                            const next = { ...prior };
+                            delete next[finding.checkId];
+                            return next;
+                          })}
+                        >
+                          Never mind
+                        </button>
+                      </div>
+                    </div>
+                  ) : confirmed === null ? (
+                    <div className="candidate-critique-actions candidate-critique-allege">
+                      <button
+                        type="button"
+                        className="pill"
+                        disabled={busy}
+                        onClick={() => setAnswered((prior) => ({ ...prior, [finding.checkId]: "confirmed" }))}
+                      >
+                        Yes, that is not done
+                      </button>
+                      <button
+                        type="button"
+                        className="pill pill-quiet"
+                        disabled={busy}
+                        onClick={() => setAnswered((prior) => ({ ...prior, [finding.checkId]: "dismissed" }))}
+                      >
+                        No, that is fine
+                      </button>
+                    </div>
+                  ) : null
+                ) : null}
               </li>
             ))}
           </ol>

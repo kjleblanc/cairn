@@ -1446,6 +1446,17 @@ function taskPrompt(contract: AdapterTaskContract): string {
         "Add one entry to your claims checks array per cN, whose name is exactly that id (for example \"c1\") and whose result is your real finding for it.",
         "Your cN answers are claims, not Cairn verification. Cairn runs its own checks and asks the owner about the rest; a promise you merely assert is not met.",
       ] : []),
+      // Task 244: present ONLY on the second dispatch of a run whose owner
+      // confirmed one allegation. The correction is JSON-quoted for the same
+      // reason the promise rows are — text containing newlines cannot forge an
+      // extra instruction line here.
+      ...(contract.repair ? [
+        "You already worked on this task in this workspace, and the owner has approved exactly one correction to it. Your earlier changes are still here; build on them rather than starting again.",
+        `The owner confirmed that promise ${contract.repair.checkId} is not met.`,
+        `The one correction to make: ${JSON.stringify(contract.repair.correction)}`,
+        "This is the only correction you will be asked for. Do not widen the task, add features, refactor beyond this correction, or change anything the promises above do not ask for.",
+        "Answer every cN again in your claims. Cairn reruns every one of its own checks after this and will not take your word for any of them.",
+      ] : []),
       "Cairn already created this task's brief. Do not create another brief or start another task.",
       "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",
       "Use Codex's built-in apply_patch tool for file edits. Do not invoke an apply_patch command inherited from PATH.",

@@ -4,6 +4,9 @@ import { test } from "node:test";
 import {
   SERIAL_CRITIQUE_MAX_OUTPUT_TOKENS,
   SERIAL_CRITIQUE_SYSTEM_PROMPT,
+  SERIAL_CRITIQUE_TEXT_CAP,
+  serialCandidateAllegationOpen,
+  serialCandidateRepairRequest,
   serialCritiqueCostBound,
   serialCritiquePricePerMillion,
   composeSerialCritiquePacket,
@@ -12,6 +15,7 @@ import {
   parseSerialCritiqueOutput,
   type SerialCritiquePacketV1,
 } from "../src/critique.js";
+import type { SerialTaskPromiseAnswerV1 } from "../src/taskcard.js";
 
 /**
  * A packet with two frozen rows and two citable artifacts. The frozen ids are
@@ -387,4 +391,127 @@ test("a per-token price Cairn cannot read yields nothing", () => {
     assert.equal(serialCritiquePricePerMillion(i as string, o as string, "USD"), null, `${i} ${o}`);
   }
   assert.equal(serialCritiquePricePerMillion("0.1", "0.1", "usd"), null, "currency must be canonical");
+});
+
+// ---------------------------------------------------------------------------
+// Task 244 - the confirmed allegation, and the one repair it may ask for.
+//
+// A repair request is the ONLY thing a critic finding can turn into, and it can
+// carry nothing the run did not already have: a frozen row id, and the critic's
+// own observation as the correction. There is no free text here, so "the repair
+// cannot widen the task" is a property of the shape rather than a promise.
+// ---------------------------------------------------------------------------
+
+/** One answered row, in the three-voice shape Core composes at the pause. */
+function answeredRow(
+  id: `c${number}`,
+  verification: SerialTaskPromiseAnswerV1["verification"],
+  cairn: SerialTaskPromiseAnswerV1["cairn"] = null,
+): SerialTaskPromiseAnswerV1 {
+  return Object.freeze({
+    id,
+    text: `row ${id}`,
+    source: "owner-stated" as const,
+    verification,
+    cairn,
+    worker: null,
+    owner: "pending" as const,
+  });
+}
+
+const CHECKED = Object.freeze({ kind: "cairn-check" as const, checkId: "typecheck" as const });
+const OBSERVED = Object.freeze({ kind: "owner-observation" as const });
+
+function checkOutcome(status: "passed" | "failed" | "unfinished"): SerialTaskPromiseAnswerV1["cairn"] {
+  return Object.freeze({
+    checkId: "typecheck" as const,
+    label: "Check the code still compiles",
+    command: "npm run typecheck",
+    status,
+    durationMs: 10,
+    exitCode: status === "passed" ? 0 : 1,
+  });
+}
+
+/** c1 is Cairn's and passed; c2 is the owner's and is unanswered. */
+function answersPassedAndObserved(): readonly SerialTaskPromiseAnswerV1[] {
+  return Object.freeze([
+    answeredRow("c1", CHECKED, checkOutcome("passed")),
+    answeredRow("c2", OBSERVED),
+  ]);
+}
+
+const REPAIR = Object.freeze({
+  version: "cairn-serial-candidate-repair/v1" as const,
+  checkId: "c2" as const,
+  correction: "The word counts on screen are 74, 477 and 251; c2 asked for 256.",
+});
+
+test("a repair carries one frozen row and the critic's own words, and nothing else", () => {
+  const repair = serialCandidateRepairRequest({ ...REPAIR }, answersPassedAndObserved());
+  assert.deepEqual(repair, REPAIR);
+});
+
+test("a repair against a row Cairn's own check already passed is refused", () => {
+  // The heart of it. Cairn holds deterministic evidence that c1 is met, so an
+  // allegation against c1 is disproved by Cairn itself and can never become a
+  // repair — no matter how confidently the critic asserted it.
+  const refused = serialCandidateRepairRequest(
+    { ...REPAIR, checkId: "c1" },
+    answersPassedAndObserved(),
+  );
+  assert.equal(refused, null);
+});
+
+test("a repair against a row whose check failed or never finished is allowed", () => {
+  for (const status of ["failed", "unfinished"] as const) {
+    const answers = Object.freeze([answeredRow("c1", CHECKED, checkOutcome(status))]);
+    const repair = serialCandidateRepairRequest({ ...REPAIR, checkId: "c1" }, answers);
+    assert.equal(repair?.checkId, "c1", status);
+  }
+});
+
+test("a repair against a row Cairn never ran is allowed", () => {
+  // A selected check the project can no longer answer leaves the row with no
+  // result at all. Cairn has disproved nothing, so the owner may still confirm.
+  const answers = Object.freeze([answeredRow("c1", CHECKED, null)]);
+  assert.equal(serialCandidateRepairRequest({ ...REPAIR, checkId: "c1" }, answers)?.checkId, "c1");
+});
+
+test("a repair naming a row this run never froze is refused", () => {
+  assert.equal(serialCandidateRepairRequest({ ...REPAIR, checkId: "c9" }, answersPassedAndObserved()), null);
+});
+
+test("a repair whose shape is not exactly Cairn's is refused", () => {
+  const answers = answersPassedAndObserved();
+  for (const bad of [
+    null, "repair", 42, [], { ...REPAIR, extra: "widen the task please" },
+    { version: REPAIR.version, checkId: "c2" },
+    { ...REPAIR, version: "cairn-serial-candidate-repair/v2" },
+    { ...REPAIR, checkId: "" },
+    Object.assign(Object.create({ correction: "inherited" }), { version: REPAIR.version, checkId: "c2" }),
+  ]) {
+    assert.equal(serialCandidateRepairRequest(bad, answers), null, JSON.stringify(bad));
+  }
+});
+
+test("a correction Cairn would not display is not one it will dispatch", () => {
+  const answers = answersPassedAndObserved();
+  // The same cap and the same character rules the critic's own observation had
+  // to pass, because that observation is exactly what this carries.
+  assert.equal(serialCandidateRepairRequest({ ...REPAIR, correction: "" }, answers), null);
+  assert.equal(
+    serialCandidateRepairRequest({ ...REPAIR, correction: "x".repeat(SERIAL_CRITIQUE_TEXT_CAP + 1) }, answers),
+    null,
+  );
+  for (const code of [0x00, 0x200b, 0x202e, 0x2066, 0xfeff]) {
+    const correction = `fix it${String.fromCharCode(code)} now`;
+    assert.equal(serialCandidateRepairRequest({ ...REPAIR, correction }, answers), null, `U+${code.toString(16)}`);
+  }
+});
+
+test("a not_met finding on a row Cairn proved is not something the owner is asked about", () => {
+  const answers = answersPassedAndObserved();
+  assert.equal(serialCandidateAllegationOpen(answers[0] as SerialTaskPromiseAnswerV1), false);
+  assert.equal(serialCandidateAllegationOpen(answers[1] as SerialTaskPromiseAnswerV1), true);
 });

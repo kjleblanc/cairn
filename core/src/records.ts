@@ -13,6 +13,7 @@ import {
   type TaskSpecV1,
 } from "./quality.js";
 import type { AdapterTaskContract } from "./routing.js";
+import type { SerialCandidateRepairRequestV1 } from "./critique.js";
 import type { SerialTaskPromiseAnswerV1 } from "./taskcard.js";
 import {
   isCriticCompletionAuthority,
@@ -374,6 +375,9 @@ export interface ComposedRecordInput {
   /** Task 238: the accepted promises and how each was answered. Absent on a
    * run that carried none, which leaves the report exactly as it was. */
   promiseAnswers?: readonly SerialTaskPromiseAnswerV1[];
+  /** Task 244: the one repair the owner approved, or absent when none was.
+   * A run nobody repaired renders exactly the report it rendered before. */
+  repair?: SerialCandidateRepairRequestV1 | null;
 }
 
 const ROW_CAP = 160;
@@ -633,6 +637,21 @@ function bulletsOrNone(items: readonly string[]): string {
  * worker said (named as the worker), and what the owner judged. A reader must
  * never have to guess which of the three is speaking.
  */
+/**
+ * Task 244. What the owner confirmed, what they asked to have corrected, and
+ * who checked afterwards. The correction is quarantined like every other piece
+ * of untrusted text on this page: it began life as a critic's sentence about
+ * the work, and a record must not let it read as Cairn's own finding.
+ */
+function repairBlock(repair: SerialCandidateRepairRequestV1, adapterLabel: string): string {
+  return [
+    `- You confirmed that ${repair.checkId} was not met, and approved one correction.`,
+    quarantineBlock(`  - The correction asked for: ${repair.correction}`),
+    `  - ${adapterLabel} was dispatched once more for that correction and nothing else.`,
+    "  - Cairn ran every check again afterwards. No second repair was available.",
+  ].join("\n");
+}
+
 function promiseAnswerBlock(
   answers: readonly SerialTaskPromiseAnswerV1[],
   adapterLabel: string,
@@ -750,6 +769,10 @@ export function composeWorkerReport(input: ComposedRecordInput): string {
   if (input.promiseAnswers && input.promiseAnswers.length > 0) {
     sections.push("## Promises and how each was answered");
     sections.push(promiseAnswerBlock(input.promiseAnswers, input.route.adapterLabel));
+  }
+  if (input.repair) {
+    sections.push("## The one repair you approved");
+    sections.push(repairBlock(input.repair, input.route.adapterLabel));
   }
   if (taskSpecRecord) {
     sections.push("## Task Spec evidence — separate from claims and envelope facts");

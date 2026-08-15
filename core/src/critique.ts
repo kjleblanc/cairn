@@ -478,3 +478,64 @@ export function serialCritiquePricePerMillion(
   if (inputPerMillion === null || outputPerMillion === null) return null;
   return Object.freeze({ inputPerMillion, outputPerMillion, currency });
 }
+
+export const SERIAL_CANDIDATE_REPAIR_VERSION = "cairn-serial-candidate-repair/v1" as const;
+
+const REPAIR_KEYS = Object.freeze(["version", "checkId", "correction"]);
+
+/**
+ * The one correction a confirmed allegation may ask a worker for.
+ *
+ * It carries a frozen row id and the critic's own observation, and there is
+ * deliberately nowhere to put anything else - no free text, no second row, no
+ * severity, no plan of work. That is what makes "a repair cannot widen the
+ * task" a fact about the shape rather than a promise about behaviour.
+ */
+export type SerialCandidateRepairRequestV1 = Readonly<{
+  version: typeof SERIAL_CANDIDATE_REPAIR_VERSION;
+  checkId: `c${number}`;
+  correction: string;
+}>;
+
+/**
+ * Whether an allegation against this row is still open for the owner to judge.
+ *
+ * A row Cairn ran itself and watched pass is disproved by evidence Cairn holds,
+ * so nobody is asked about it and no repair may name it - however confidently
+ * the critic asserted otherwise. Every other row has no such evidence: the
+ * owner's own, a check that failed, a check Cairn stopped, and a selected check
+ * the project can no longer answer. Those the owner decides.
+ */
+export function serialCandidateAllegationOpen(answer: SerialTaskPromiseAnswerV1): boolean {
+  return !(answer.verification.kind === "cairn-check"
+    && answer.cairn !== null
+    && answer.cairn.status === "passed");
+}
+
+/**
+ * Read a repair request against the rows this run actually froze.
+ *
+ * Fail closed. An unknown row, a row Cairn already proved, a shape that is not
+ * exactly Cairn's, or a correction Cairn would refuse to put on screen all
+ * return null, and the runner reads null as "do not repair". The correction is
+ * held to the critic's own display rules because it IS a critic observation:
+ * one cap and one character set, so the two can never drift apart.
+ */
+export function serialCandidateRepairRequest(
+  value: unknown,
+  answers: readonly SerialTaskPromiseAnswerV1[],
+): SerialCandidateRepairRequestV1 | null {
+  const record = plainRecord(value, REPAIR_KEYS);
+  if (record === null) return null;
+  if (REPAIR_KEYS.some((key) => !Object.hasOwn(record, key))) return null;
+  if (record.version !== SERIAL_CANDIDATE_REPAIR_VERSION) return null;
+  const correction = displayText(record.correction);
+  if (correction === null || correction.length === 0) return null;
+  const row = answers.find((answer) => answer.id === record.checkId);
+  if (row === undefined || !serialCandidateAllegationOpen(row)) return null;
+  return Object.freeze({
+    version: SERIAL_CANDIDATE_REPAIR_VERSION,
+    checkId: row.id,
+    correction,
+  });
+}

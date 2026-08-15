@@ -74,6 +74,43 @@ test("unsealed candidate paper: the folded record keeps every fact, and the deci
     "the folds close, then the second opinion, then the two choices");
 });
 
+/**
+ * Task 244. An allegation is the OWNER'S to confirm, the correction is the
+ * critic's own sentence, and there is exactly one repair. These are properties
+ * about what the surface does NOT offer — a text box, a second repair, a
+ * confirm button on a row Cairn already proved — so no behavioural test can
+ * see them.
+ */
+test("unsealed candidate paper: an allegation is the owner's to confirm, and one repair is the limit", () => {
+  const critique = source("src", "renderer", "components", "CandidateCritique.tsx");
+  const card = source("src", "renderer", "components", "UnsealedCandidate.tsx");
+  const shared = source("src", "shared", "unsealed-candidate.ts");
+
+  // Only a not_met finding, only on a row Cairn has not itself proved, and only
+  // while this pause still has its one repair to give.
+  assert.match(critique, /finding\.judgment === "not_met"/u);
+  assert.match(critique, /openRowIds\.includes\(finding\.checkId\)/u);
+  assert.match(critique, /repairAvailable/u);
+  // The correction IS the critic's observation. There is nowhere on this
+  // surface for the owner — or anything driving it — to type a wider one.
+  assert.match(critique, /onRepair\(finding\.checkId, finding\.observation\)/u);
+  assert.doesNotMatch(critique, /<input|<textarea|contentEditable/u);
+  // The renderer holds the confirm state and no authority at all.
+  assert.doesNotMatch(critique, /from\s+["'][^"']*main\//u);
+  assert.doesNotMatch(critique, /\b(?:fetch|spawn|exec)\s*\(/u);
+
+  // A repair already spent is stated on the candidate itself, above the
+  // decision, so the owner cannot judge repaired work without knowing it was.
+  assert.match(card, /candidate\.repairAsked/u);
+  assert.ok(card.indexOf("candidate.repairAsked") < card.indexOf("candidate.choices.map"),
+    "what was already repaired is said before the two choices");
+
+  // Two exact key sets on the one channel: a repair carries its correction, a
+  // continue never does, and a repair carries no row judgments to spend.
+  assert.match(shared, /checkpointId\\0choice\\0dir\\0ownerAnswers\\0repair/u);
+  assert.match(shared, /if \(Object\.keys\(answers\)\.length > 0\) return null;/u);
+});
+
 test("unsealed candidate paper: shared output carries no project path or authority", () => {
   const shared = source("src", "shared", "unsealed-candidate.ts");
   const projection = between(shared, "export type UnsealedCandidateProjectionV1", "export type UnsealedCandidateDecisionRequest");

@@ -22,6 +22,10 @@ import { RepairCallCard } from "../components/RepairCall";
 import { HarnessRevisionCard } from "../components/HarnessRevision";
 import { CandidateCritiqueCard } from "../components/CandidateCritique";
 import { UnsealedCandidateCard } from "../components/UnsealedCandidate";
+import {
+  UNSEALED_CANDIDATE_REPAIR_CHOICE,
+  unsealedCandidateOpenRowIds,
+} from "../../shared/unsealed-candidate";
 import { OWNER_OBSERVATION, TaskPromiseCard, taskCardRows } from "../components/TaskPromiseCard";
 import { Pill } from "../components/Ui";
 
@@ -1837,6 +1841,51 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     }
   }
 
+  /**
+   * Task 244. The owner confirmed one allegation and pressed for the one
+   * correction it named.
+   *
+   * Same channel, same pause. Main re-checks that these words really came from
+   * a critic for this checkpoint, and Core re-checks the row and the correction
+   * again before it dispatches anything, so nothing here is trusted.
+   */
+  async function askUnsealedCandidateRepair(
+    candidate: UnsealedCandidateProjectionV1,
+    checkId: string,
+    correction: string,
+  ): Promise<void> {
+    const held = session;
+    if (unsealedCandidateBusy || held?.phase !== "running" || held.unsealedCandidate !== candidate
+      || !candidate.repairAvailable) return;
+    setUnsealedCandidateBusy(true);
+    let recorded = false;
+    try {
+      const response = await cairn.unsealedCandidateDecide({
+        dir,
+        checkpointId: candidate.checkpointId,
+        choice: UNSEALED_CANDIDATE_REPAIR_CHOICE,
+        // A repair spends the owner's row judgments rather than carrying them:
+        // the code they judged is about to change under them.
+        ownerAnswers: {},
+        repair: { checkId, correction },
+      });
+      if (!response.ok) { setError(response.message); return; }
+      recorded = true;
+      setError(null);
+      setSession((current) => current?.phase === "running" && current.startedAt === held.startedAt
+        && current.unsealedCandidate?.checkpointId === candidate.checkpointId
+        ? { ...current, unsealedCandidate: undefined, unsealedCandidateCritique: undefined }
+        : current);
+      await refreshSession();
+    } catch {
+      setError(recorded
+        ? "That correction was requested, but Cairn could not refresh the running session."
+        : "Cairn could not ask for that correction.");
+    } finally {
+      setUnsealedCandidateBusy(false);
+    }
+  }
+
   async function decideHarnessRevision(request: Q9HarnessRevisionDecisionRequest): Promise<void> {
     const held = session;
     if (harnessRevisionBusy || held?.phase !== "running" || held.harnessRevision === undefined
@@ -2247,9 +2296,14 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                     ? (
                       <CandidateCritiqueCard
                         critique={session.unsealedCandidateCritique}
-                        busy={candidateCritiqueBusy}
+                        busy={candidateCritiqueBusy || unsealedCandidateBusy}
                         onDecide={(action) =>
                           void decideCandidateCritique(session.unsealedCandidateCritique!, action)}
+                        openRowIds={unsealedCandidateOpenRowIds(session.unsealedCandidate.promises)}
+                        repairAvailable={session.unsealedCandidate.repairAvailable}
+                        adapterLabel={session.unsealedCandidate.adapterLabel}
+                        onRepair={(checkId, correction) =>
+                          void askUnsealedCandidateRepair(session.unsealedCandidate!, checkId, correction)}
                       />
                     )
                     : undefined}

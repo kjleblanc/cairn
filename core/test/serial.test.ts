@@ -146,6 +146,7 @@ import {
   type SerialCandidateWriterIsolationV1,
   type SerialUnsealedCandidateV1,
 } from "../src/serial.js";
+import { SERIAL_CANDIDATE_REPAIR_VERSION } from "../src/critique.js";
 import { composeSerialTaskPromises } from "../src/taskcard.js";
 import {
   authorizeSerialAuthenticatedPendingJournal,
@@ -7854,4 +7855,368 @@ test("a stopped run still names the promise that went unanswered", async () => {
   assert.match(result.reportText, /## Promises and how each was answered/);
   assert.match(result.reportText, /Cairn ran `npm run typecheck`: failed/);
   assert.match(result.reportText, /Promise Worker says: all good, honest/);
+});
+
+// ---------------------------------------------------------------------------
+// Task 244 - confirm one allegation, permit one repair, then seal.
+//
+// The repair is a SECOND invocation of the already-chosen adapter inside the
+// SAME open run: same lock, same starting snapshot, same abort signal. Cairn
+// then refreshes everything it knows and reruns every original check before it
+// seals anything. One repair, and the pause reopens so nothing is sealed on
+// judgments the owner made about code that has since changed.
+// ---------------------------------------------------------------------------
+
+/** A check that fails exactly while `broken.txt` exists, so a repair that
+ * removes it moves Cairn's own finding from failed to passed. */
+const BREAKABLE_CHECK = "node -e \"process.exit(require('fs').existsSync('broken.txt')?1:0)\"";
+
+type RepairRun = Readonly<{ contract: AdapterTaskContract }>;
+
+/**
+ * One worker across two dispatches. `second` says what the repair attempt does:
+ * fix the breakage, introduce it, or fail outright without a result.
+ */
+function repairAdapter(
+  root: string,
+  runs: RepairRun[],
+  second: "fix" | "regress" | "fail" = "fix",
+  workerChecks: readonly { name: string; result: string }[] = [],
+): TaskAdapter {
+  return {
+    descriptor: {
+      id: "repair-worker", label: "Repair Worker", provider: "Fixture Provider",
+      model: "fixture-1", connected: true, capabilities: ["serial-task"], priority: 50,
+    },
+    async run(contract) {
+      runs.push(Object.freeze({ contract }));
+      const attempt = runs.length;
+      if (attempt > 1 && second === "fail") {
+        return {
+          kind: "worker-result/v2", taskNumber: contract.taskNumber,
+          requestSha256: contract.requestSha256, status: "failed",
+          claimsText: "", evidence: { fileChanges: 0 },
+        } as never;
+      }
+      writeFileSync(join(root, "visible.txt"), attempt === 1 ? "first attempt\n" : "repaired\n");
+      // Attempt one leaves the project's own check failing, unless the case is
+      // about a repair that BREAKS something which had passed.
+      const breaking = attempt === 1 ? second !== "regress" : second === "regress";
+      if (breaking) writeFileSync(join(root, "broken.txt"), "broken\n");
+      else if (existsSync(join(root, "broken.txt"))) rmSync(join(root, "broken.txt"));
+      return {
+        kind: "worker-result/v2", taskNumber: contract.taskNumber,
+        requestSha256: contract.requestSha256, status: "completed",
+        claimsText: claimsFence({
+          disposition: "DONE",
+          summary: attempt === 1 ? "Did the work." : "Made the one correction.",
+          changes: ["visible.txt - written"],
+          checks: [...workerChecks],
+          howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+        }),
+        evidence: { fileChanges: 1 },
+      } as never;
+    },
+  };
+}
+
+const CORRECTION = "c1 still reports a failure; the leftover broken.txt was never removed.";
+
+function repairOn(id: `c${number}`) {
+  return Object.freeze({
+    version: SERIAL_CANDIDATE_REPAIR_VERSION,
+    checkId: id,
+    correction: CORRECTION,
+  });
+}
+
+const briefOnDisk = (root: string): string =>
+  readFileSync(join(root, "docs", "ai-work", "tasks", "001-brief.md"), "utf8");
+
+test("a confirmed allegation dispatches one repair, and Cairn's own check answers again", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  const pauses: SerialUnsealedCandidateV1[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate(candidate) {
+      pauses.push(candidate);
+      return pauses.length === 1
+        ? { choice: "repair", repair: repairOn("c1") }
+        : { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(runs.length, 2, "the same worker ran once more, and only once more");
+  assert.equal(pauses.length, 2, "the owner saw the repaired candidate before anything sealed");
+  // Cairn's own check really ran again over the repaired tree: its answer moved.
+  assert.equal(pauses[0]?.answers[0]?.cairn?.status, "failed");
+  assert.equal(pauses[1]?.answers[0]?.cairn?.status, "passed");
+  // Git's own facts and the worker's claims are refreshed too, not carried over.
+  assert.equal(pauses[1]?.claims?.summary, "Made the one correction.");
+  assert.ok(!pauses[1]?.changedPaths.includes("broken.txt"), "the repaired tree is what the owner sees");
+  assert.equal(result.status, "done");
+  assert.equal(readFileSync(join(root, "visible.txt"), "utf8"), "repaired\n");
+});
+
+test("one repair, and only one: the reopened pause offers none and cannot spend another", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  const pauses: SerialUnsealedCandidateV1[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate(candidate) {
+      pauses.push(candidate);
+      // The second press asks for a repair the pause did not offer.
+      return { choice: "repair", repair: repairOn("c1") };
+    },
+  });
+
+  assert.equal(pauses[0]?.repairAvailable, true, "the first pause offers the one repair");
+  assert.equal(pauses[1]?.repairAvailable, false, "the reopened pause offers none");
+  assert.deepEqual(pauses[1]?.repair, repairOn("c1"), "and says what was already asked for");
+  assert.equal(runs.length, 2, "a repair pressed where none was offered dispatches nothing");
+  // Fail closed: a choice this pause never offered is not a continue.
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "OWNER_STOPPED_AT_CANDIDATE");
+});
+
+test("a repair cannot widen the task: same accepted request, same rows, same brief", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  let briefAtFirstPause = "";
+  await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() {
+      if (runs.length === 1) {
+        briefAtFirstPause = briefOnDisk(root);
+        return { choice: "repair", repair: repairOn("c1") };
+      }
+      return { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  const first = runs[0]?.contract as AdapterTaskContract;
+  const second = runs[1]?.contract as AdapterTaskContract;
+  assert.equal(second.requestSha256, first.requestSha256, "the accepted request is the same one");
+  assert.equal(second.taskNumber, first.taskNumber);
+  assert.deepEqual(second.intent, first.intent);
+  if (first.version !== "cairn-serial-task/v3" || second.version !== "cairn-serial-task/v3") {
+    assert.fail("the repair route is the live v3 contract");
+  }
+  assert.deepEqual(second.promises, first.promises, "the frozen rows are untouched");
+  // The one difference, and the only thing a repair may add.
+  assert.deepEqual(second.repair, repairOn("c1"));
+  assert.equal(first.repair, undefined, "the first dispatch is unchanged by this feature");
+  // The Task Card the owner approved is a record on disk. It is not rewritten.
+  assert.equal(briefOnDisk(root), briefAtFirstPause);
+  assert.ok(briefAtFirstPause.length > 0);
+});
+
+test("the worker is told what one correction to make, and told not to widen it", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  let dispatches = 0;
+  let stdin = "";
+  const fake: CodexExecProcess = {
+    kind: "fake",
+    async run(request) {
+      stdin = request.stdin;
+      dispatches += 1;
+      writeFileSync(join(root, "visible.txt"), "worker output\n");
+      if (dispatches === 1) writeFileSync(join(root, "broken.txt"), "broken\n");
+      else rmSync(join(root, "broken.txt"));
+      return {
+        exitCode: 0, terminalEvent: "turn.completed",
+        inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0,
+        agentMessageCount: 1, commandExecutionCount: 1, fileChangeCount: 1, failedToolItemCount: 0,
+        finalMessage: claimsFence({
+          disposition: "DONE", summary: "Did it.", changes: ["visible.txt - created"],
+          checks: [], howToTry: "Open visible.txt.", limitations: "None.", milestone: "NO",
+        }),
+      };
+    },
+  };
+  const adapter = createCodexExecAdapter(
+    root, { installed: true, connected: true }, authorizeCodexExecForIntent(root, intent), fake,
+  );
+
+  await runSerialTaskWithIntent(root, intent, {
+    adapters: [adapter],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() {
+      return dispatches === 1
+        ? { choice: "repair", repair: repairOn("c1") }
+        : { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(dispatches, 2);
+  // The row, the correction verbatim, and the two rules that keep it one repair.
+  assert.match(stdin, /c1/);
+  assert.match(stdin, /leftover broken\.txt was never removed/);
+  assert.match(stdin, /only correction/i);
+  assert.match(stdin, /Do not widen/i);
+});
+
+test("the owner's row judgments do not survive a repair", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  const pauses: SerialUnsealedCandidateV1[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate(candidate) {
+      pauses.push(candidate);
+      // The owner answered their own row "met", THEN asked for a repair. The
+      // code they judged has since changed, so that judgment is spent.
+      return pauses.length === 1
+        ? { choice: "repair", repair: repairOn("c1") }
+        : { choice: "continue", ownerAnswers: {} };
+    },
+  });
+
+  assert.equal(pauses[1]?.answers[1]?.owner, "pending", "the owner row is owed again");
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "TASK_PROMISE_NOT_MET");
+});
+
+test("a repair that breaks a check which had passed stops the run", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  const pauses: SerialUnsealedCandidateV1[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs, "regress")],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate(candidate) {
+      pauses.push(candidate);
+      return pauses.length === 1
+        ? { choice: "repair", repair: repairOn("c2") }
+        : { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(pauses[0]?.answers[0]?.cairn?.status, "passed");
+  assert.equal(pauses[1]?.answers[0]?.cairn?.status, "failed", "the rerun caught the regression");
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "TASK_PROMISE_NOT_MET");
+  assert.equal(git(root, ["diff", "--cached", "--name-only"]), "", "a regression stages nothing");
+});
+
+test("a repair whose worker fails closes honestly and never DONE", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const beforeHead = git(root, ["rev-parse", "HEAD"]);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  let pauses = 0;
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs, "fail")],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() {
+      pauses += 1;
+      return pauses === 1
+        ? { choice: "repair", repair: repairOn("c1") }
+        : { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(runs.length, 2);
+  assert.equal(pauses, 1, "a failed repair has no candidate to show");
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "ADAPTER_FAILED");
+  assert.equal(result.commit.status, "skipped");
+  assert.equal(git(root, ["rev-parse", "HEAD"]), beforeHead, "nothing is committed");
+  assert.match(result.reportText, /Disposition: \*\*STOPPED\*\*/);
+  // The first attempt's edits are still there to look at.
+  assert.equal(readFileSync(join(root, "visible.txt"), "utf8"), "first attempt\n");
+});
+
+test("a repair against a row Cairn's own check proved is refused by the runner", async () => {
+  const root = project();
+  // Nothing is broken, so Cairn's own c1 check passes and disproves any
+  // allegation against it before the owner is ever asked.
+  withCheckScript(root, "node -e \"process.exit(0)\"");
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs, "regress")],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() { return { choice: "repair", repair: repairOn("c1") }; },
+  });
+
+  assert.equal(runs.length, 1, "no repair was dispatched");
+  assert.equal(result.status, "stopped");
+  if (result.status !== "stopped") return;
+  assert.equal(result.reason, "OWNER_STOPPED_AT_CANDIDATE");
+});
+
+test("a run nobody repairs reaches exactly the close it reaches today", async () => {
+  const plainRoot = project();
+  const plainRan = { count: 0 };
+  const plain = await runSerialTask(plainRoot, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(plainRoot, CHECKPOINT_REQUEST, plainRan)],
+  });
+
+  const root = project();
+  const ran = { count: 0 };
+  const pauses: SerialUnsealedCandidateV1[] = [];
+  const offered = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST, ran)],
+    async onUnsealedCandidate(candidate) { pauses.push(candidate); return "continue"; },
+  });
+
+  // A promise-free run still says plainly that no repair is on offer, because
+  // there is no frozen row for an allegation to name.
+  assert.equal(pauses[0]?.repairAvailable, false);
+  assert.equal(pauses[0]?.repair, null);
+  assert.equal(ran.count, 1);
+  assert.equal(ran.count, plainRan.count);
+  assert.equal(offered.status, "done");
+  assert.equal(plain.status, "done");
+  if (offered.status !== "done" || plain.status !== "done") return;
+  assert.equal(offered.reportText, plain.reportText);
+  assert.deepEqual(offered.row, plain.row);
+  assert.deepEqual(offered.composed, plain.composed);
+});
+
+test("the record says a repair happened, what it corrected, and that Cairn rechecked", async () => {
+  const root = project();
+  withCheckScript(root, BREAKABLE_CHECK);
+  const intent = attributedRequest();
+  const runs: RepairRun[] = [];
+  const result = await runSerialTaskWithIntent(root, intent, {
+    adapters: [repairAdapter(root, runs)],
+    taskPromises: checkedThenObserved(intent),
+    async onUnsealedCandidate() {
+      return runs.length === 1
+        ? { choice: "repair", repair: repairOn("c1") }
+        : { choice: "continue", ownerAnswers: { c2: "met" } };
+    },
+  });
+
+  assert.equal(result.status, "done");
+  assert.match(result.reportText, /## The one repair you approved/);
+  assert.match(result.reportText, /c1/);
+  assert.match(result.reportText, /leftover broken\.txt was never removed/);
+  // Cairn's own words about its own authority, not the critic's.
+  assert.match(result.reportText, /Cairn ran every check again afterwards/);
 });

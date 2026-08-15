@@ -1,6 +1,7 @@
 import { ipcMain, type BrowserWindow } from "electron";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  SERIAL_CANDIDATE_REPAIR_VERSION,
   type SerialUnsealedCandidateV1,
   createDirectTaskIntent,
   previewSerialRoute,
@@ -613,6 +614,28 @@ function openCritiqueForCandidate(
   });
 }
 
+/**
+ * Task 244. The `not_met` sentences a critic really sent Cairn for the pause
+ * this press names, and nothing else.
+ *
+ * A finding the critic marked `met` or `unclear` alleges no failure, so it can
+ * start no repair. An unreadable press yields an empty list, which is the
+ * fail-closed answer: no allegation on record, no repair possible.
+ */
+function allegationsFor(
+  unsafeRequest: unknown,
+): readonly Readonly<{ checkId: string; observation: string }>[] {
+  const dir = (unsafeRequest as { dir?: unknown } | null)?.dir;
+  const checkpointId = (unsafeRequest as { checkpointId?: unknown } | null)?.checkpointId;
+  if (typeof dir !== "string" || typeof checkpointId !== "string") return Object.freeze([]);
+  const critique = currentCandidateCritique(dir);
+  if (critique === null || critique.checkpointId !== checkpointId
+    || critique.state !== "answered") return Object.freeze([]);
+  return Object.freeze(critique.findings.flatMap((finding) => finding.judgment === "not_met"
+    ? [Object.freeze({ checkId: finding.checkId, observation: finding.observation })]
+    : []));
+}
+
 export function registerTaskIpc(
   win: () => BrowserWindow | null,
   criticCalibration: CriticCalibrationOrchestrator | null = null,
@@ -901,9 +924,15 @@ export function registerTaskIpc(
   // call, so this only releases it into the close it was headed for. Stopping
   // takes Core's honest STOPPED door. Either way Main decides nothing about the
   // result itself.
+  //
+  // Task 244 adds a third answer, and one guard for it. The renderer holds the
+  // confirm/dismiss state, which makes it exactly the surface that could invent
+  // a correction — so Main hands Core only the `not_met` sentences a critic
+  // really sent, for this exact pause, and a repair naming anything else is
+  // refused here before it can become a dispatch.
   ipcMain.handle("task:candidate-decide", (_event, unsafeRequest: unknown): Result<UnsealedCandidateDecisionV1> => {
     try {
-      const outcome = decideUnsealedCandidate(unsafeRequest);
+      const outcome = decideUnsealedCandidate(unsafeRequest, allegationsFor(unsafeRequest));
       return outcome.ok
         ? { ok: true, value: outcome.decision }
         : { ok: false, message: `${outcome.code}: Cairn is not waiting on that unsealed candidate.` };
@@ -1466,11 +1495,24 @@ export function registerTaskIpc(
             contents.once("destroyed", close);
             try {
               // Main answers in Core's own words. `continue` carries the
-              // owner's row judgments; anything else is the honest stop.
+              // owner's row judgments; `repair` carries the one confirmed
+              // correction, which Core re-checks against its own frozen rows
+              // before it dispatches anything; anything else is the honest stop.
               const settlement = await opened.settled;
-              return settlement.choice === "continue"
-                ? { choice: "continue" as const, ownerAnswers: settlement.ownerAnswers }
-                : "stop";
+              if (settlement.choice === "continue") {
+                return { choice: "continue" as const, ownerAnswers: settlement.ownerAnswers };
+              }
+              if (settlement.choice === "repair") {
+                return {
+                  choice: "repair" as const,
+                  repair: {
+                    version: SERIAL_CANDIDATE_REPAIR_VERSION,
+                    checkId: settlement.repair.checkId as `c${number}`,
+                    correction: settlement.repair.correction,
+                  },
+                };
+              }
+              return "stop";
             } finally {
               signal?.removeEventListener("abort", close);
               if (!contents.isDestroyed()) contents.off("destroyed", close);

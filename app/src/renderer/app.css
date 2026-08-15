@@ -2553,6 +2553,22 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .task-promise-card-row-choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .task-promise-card-row-answerer { margin: 6px 0 0; font-size: .75rem; color: var(--lantern-soft); }
 
+/* Task 244: what one approved repair already corrected. It sits above the rows
+   the owner is about to judge, because those rows are about code that changed
+   after they last looked at it. */
+.unsealed-candidate-repaired {
+  margin-top: 10px; padding: 8px 0 2px 10px;
+  border-left: 2px solid var(--garden-amber);
+}
+.unsealed-candidate-repaired-row,
+.unsealed-candidate-repaired-correction,
+.unsealed-candidate-repaired-limit {
+  margin: 0 0 4px; font-size: .8rem; line-height: 1.45;
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.unsealed-candidate-repaired-limit { color: var(--lantern-soft); }
+.unsealed-candidate-repaired-limit strong { color: var(--lantern-ink); }
+
 .unsealed-candidate-promises { margin-top: 10px; }
 .unsealed-candidate-promise-list { margin: 0; padding: 0; list-style: none; }
 .unsealed-candidate-promise { padding: 8px 0; border-top: 1px solid var(--lantern-line); }
@@ -2654,6 +2670,27 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    opinion, not a failure Cairn has confirmed. */
 .candidate-critique-finding[data-judgment="not_met"] .candidate-critique-finding-text { color: var(--garden-amber); }
 .candidate-critique-finding[data-judgment="unclear"] .candidate-critique-finding-text { color: var(--lantern-soft); }
+
+/* Task 244: the allegation, and the one repair it may become. Both sit inside
+   the finding they belong to, so a reader never has to work out which row is
+   being talked about. Nothing here is emphasised more than the finding above
+   it: confirming an opinion is a decision, not an alarm. */
+.candidate-critique-allege { margin: 8px 0 2px; }
+.candidate-critique-dismissed {
+  margin: 6px 0 2px; font-size: .78rem; line-height: 1.45;
+  color: var(--lantern-soft); overflow-wrap: anywhere;
+}
+.candidate-critique-repair {
+  margin: 8px 0 2px; padding: 8px 0 2px 10px;
+  border-left: 2px solid var(--garden-amber);
+}
+.candidate-critique-repair-text,
+.candidate-critique-repair-limit {
+  margin: 0 0 4px; font-size: .8rem; line-height: 1.45;
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
+.candidate-critique-repair-limit { color: var(--lantern-soft); }
+.candidate-critique-repair-limit strong { color: var(--lantern-ink); }
 
 /* Task 240 (owner gate 2 of this task): the audit trail, one click away.
    The first screen answers who is asked, what they see, whether it can change

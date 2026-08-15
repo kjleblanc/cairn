@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, opendirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import type { SerialCandidateRepairRequestV1 } from "./critique.js";
 import type { TaskIntent } from "./intent.js";
 import type { EvidencePlanV1, TaskSpecReviewV1, TaskSpecV1 } from "./quality.js";
 import type { SerialTaskPromisesV1 } from "./taskcard.js";
@@ -52,6 +53,14 @@ export interface LegacyAdapterTaskContractV3 extends AdapterTaskContractCommon {
   version: "cairn-serial-task/v3";
   checks: readonly string[];
   promises?: SerialTaskPromisesV1;
+  /**
+   * Task 244 adds `repair`, present ONLY on the second dispatch of a run whose
+   * owner confirmed one allegation. Everything else on this contract — the
+   * accepted request, its digest, and the frozen rows above — is the same
+   * object the first dispatch received, which is what makes a repair unable to
+   * widen the task. Absent is the ordinary first dispatch, unchanged.
+   */
+  repair?: SerialCandidateRepairRequestV1;
 }
 
 /**
