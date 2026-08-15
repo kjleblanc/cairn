@@ -41,6 +41,39 @@ test("unsealed candidate paper: the card says what has not happened and attribut
   assert.doesNotMatch(card, /\b(?:fetch|spawn|exec)\s*\(/u);
 });
 
+/**
+ * Task 243. The exact record is FOLDED, never deleted, and nothing the owner
+ * decides from is folded away. Behavioural tests can see that a fact renders;
+ * only source can say the fact is still produced at all, so a later
+ * "simplification" that drops one fails here rather than quietly narrowing
+ * what Cairn shows.
+ */
+test("unsealed candidate paper: the folded record keeps every fact, and the decision stays outside it", () => {
+  const card = source("src", "renderer", "components", "UnsealedCandidate.tsx");
+  // Three folds, each a native <details> that opens with no script at all.
+  assert.equal(card.match(/<details className="unsealed-candidate-fold">/gu)?.length, 3);
+  // Git's own list, the bounded evidence line, and the worker's whole account
+  // are all still rendered from the projection, not summarized away.
+  assert.match(card, /candidate\.changedPaths\.map/u);
+  assert.match(card, /candidate\.evidenceSummary/u);
+  assert.match(card, /claims\.changes\.map/u);
+  assert.match(card, /claims\.checks\.map/u);
+  assert.match(card, /Remaining limitations:/u);
+
+  // Order is the whole point of the repair. The promise rows sit ABOVE every
+  // fold; the folds close before the critic offer; the offer comes before the
+  // two choices. Nothing a decision depends on is behind a click.
+  const firstFold = card.indexOf('<details className="unsealed-candidate-fold">');
+  const promises = card.indexOf("candidate.promises.map");
+  const lastFoldEnd = card.lastIndexOf("</details>");
+  const critiqueSlot = card.indexOf("{critique}");
+  const choices = card.indexOf("candidate.choices.map");
+  assert.ok(promises > 0 && promises < firstFold,
+    "the promise rows stay on the first screen, above every fold");
+  assert.ok(critiqueSlot > lastFoldEnd && choices > critiqueSlot,
+    "the folds close, then the second opinion, then the two choices");
+});
+
 test("unsealed candidate paper: shared output carries no project path or authority", () => {
   const shared = source("src", "shared", "unsealed-candidate.ts");
   const projection = between(shared, "export type UnsealedCandidateProjectionV1", "export type UnsealedCandidateDecisionRequest");

@@ -4627,6 +4627,21 @@ function workerSpawnCount(marker: string): number {
     : 0;
 }
 
+/**
+ * Toggle every fold on the candidate.
+ *
+ * Task 243 moved the exact record — the changed-path list, the worker's whole
+ * account, and the four nonterminal statements — behind native <details>. A
+ * test that means "this fact is reachable" must therefore OPEN them: reading
+ * the string out of a collapsed element proves it is in the DOM, not that an
+ * owner can ever see it.
+ */
+async function openCandidateFolds(candidate: Locator): Promise<void> {
+  for (const summary of await candidate.locator("details.unsealed-candidate-fold > summary").all()) {
+    await summary.click();
+  }
+}
+
 const CANDIDATE_SHOT = join(tmpdir(), "cairn-task-235-unsealed-candidate.png");
 const CANDIDATE_CONTEXT_SHOT = join(tmpdir(), "cairn-task-235-unsealed-candidate-window.png");
 
@@ -4651,12 +4666,21 @@ test("ordinary Chat pauses at an unsealed candidate, writes nothing terminal, th
     // claims, and one unmistakable nonterminal sentence.
     await expect(candidate).toContainText("Cairn has not declared this task complete");
     await expect(candidate).toContainText("Change the page title");
-    await expect(candidate).toContainText("visible.txt");
-    await expect(candidate).toContainText("Added the visible result.");
+    // These two provenance labels stay on the first screen, on the fold
+    // summaries themselves, so who is speaking is legible before opening
+    // anything.
     await expect(candidate).toContainText("reported, not checked");
     await expect(candidate).toContainText("checked by Cairn");
+    // Task 243 folded the exact record away from the decision. Open it: these
+    // facts must be REACHABLE, and a string read out of a collapsed <details>
+    // would prove only that it is in the DOM.
+    await openCandidateFolds(candidate);
+    await expect(candidate.locator(".unsealed-candidate-paths")).toContainText("visible.txt");
+    await expect(candidate.locator(".unsealed-candidate-claims-text").first())
+      .toContainText("Added the visible result.");
     // The worker's own verdict is shown AS the worker's, not as Cairn's.
-    await expect(candidate).toContainText("Codex Exec says: DONE");
+    await expect(candidate.locator(".unsealed-candidate-claims-said"))
+      .toContainText("Codex Exec says: DONE");
 
     // c2 — nothing terminal exists yet. The brief is the only task record.
     expect(existsSync(reportPath)).toBe(false);
@@ -4762,6 +4786,8 @@ test("cancelling while the unsealed candidate waits closes the run without a DON
 
 const PROMISE_CARD_SHOT = join(tmpdir(), "cairn-task-239-task-card.png");
 const PROMISE_CANDIDATE_SHOT = join(tmpdir(), "cairn-task-239-answered-candidate.png");
+/** Task 243: the same card, in the state the owner actually meets first. */
+const READABLE_CANDIDATE_SHOT = join(tmpdir(), "cairn-task-243-readable-candidate.png");
 
 const CAIRN_CHECK_BUTTON = "Check the code still compiles";
 const OWNER_CHECK_BUTTON = "I'll look at this myself";
@@ -4838,6 +4864,98 @@ test("the Task Card promises, Cairn checks them itself, and the owner answers th
     await expect(cont).toBeDisabled();
     await expect(candidate).toContainText("Answer c2 above before Cairn can finish this task.");
 
+    // -- Task 243: the decision must be readable by a beginner -----------
+    // c1 — measured through the ordinary route at 1440x2400 with these two
+    // promise rows, in the state the owner actually meets first (c2 still
+    // unanswered): the distance from the top of the card to the top of its
+    // two buttons, which is exactly what must be scrolled past before a
+    // choice can be made. The same probe on the unfolded card read 1,378px
+    // to the buttons and 1,509px for the whole card.
+    await win.setViewportSize({ width: 1440, height: 2400 });
+    const reach = await win.evaluate(() => {
+      const card = document.querySelector(".unsealed-candidate");
+      const actions = document.querySelector(".unsealed-candidate-actions");
+      if (!card || !actions) return null;
+      return {
+        toButtons: Math.round(
+          actions.getBoundingClientRect().top - card.getBoundingClientRect().top),
+        cardHeight: Math.round(card.getBoundingClientRect().height),
+      };
+    });
+    console.log(`[Task 243 c1] to buttons=${reach?.toButtons}px whole card=${reach?.cardHeight}px`);
+    expect(reach).not.toBeNull();
+    expect(reach!.toButtons).toBeLessThan(1000);
+
+    // c2 — nothing was deleted. Each fold is OPENED and its content asserted
+    // VISIBLE: still-in-the-DOM-while-collapsed is not "still there" to an
+    // owner who has to read it, so every assertion below is on a visible
+    // element rather than on the card's text content.
+    await expect(candidate.locator("details.unsealed-candidate-fold")).toHaveCount(3);
+    const paths = candidate.locator(".unsealed-candidate-paths");
+    const pending = candidate.locator(".unsealed-candidate-pending-list");
+    const evidence = candidate.locator(".unsealed-candidate-evidence");
+    const said = candidate.locator(".unsealed-candidate-claims-said");
+    await expect(paths).not.toBeVisible();
+    await expect(pending).not.toBeVisible();
+    await expect(evidence).not.toBeVisible();
+    await expect(said).not.toBeVisible();
+
+    await openCandidateFolds(candidate);
+
+    // Git's real changed paths, under the heading that never blames the
+    // worker — the list includes Cairn's own brief, which the worker never
+    // touched, so it stays "Files changed in your project".
+    await expect(candidate).toContainText("Files changed in your project");
+    await expect(candidate).toContainText("checked by Cairn");
+    await expect(paths).toBeVisible();
+    await expect(paths).toContainText("visible.txt");
+    await expect(paths).toContainText("docs/ai-work/tasks/001-brief.md");
+    // The bounded evidence line, still exact, key by key.
+    await expect(evidence).toBeVisible();
+    await expect(evidence).toContainText("Bounded worker evidence:");
+    await expect(evidence).toContainText("agentMessageCount=1");
+    await expect(evidence).toContainText("exitCode=0");
+    await expect(evidence).toContainText("reasoningOutputTokens=20");
+    // The worker's whole account, still attributed to the worker.
+    await expect(said).toBeVisible();
+    await expect(said).toContainText("Codex Exec says: DONE");
+    await expect(said).toContainText("this is the worker's own verdict, not Cairn's");
+    await expect(candidate.locator(".unsealed-candidate-claims-text").first()).toContainText(
+      "Added the visible result.");
+    await expect(candidate.locator(".unsealed-candidate-claims-text").last()).toContainText(
+      "Remaining limitations:");
+    // The four statements that keep the pause nonterminal.
+    await expect(pending).toBeVisible();
+    await expect(pending).toContainText("No task report is written.");
+    await expect(pending).toContainText("No row is added to the work log.");
+    await expect(pending).toContainText("Nothing is committed.");
+    await expect(pending).toContainText("Cairn has not said DONE or STOPPED.");
+
+    // c5 — the second opinion still sits above the decision, folds or no folds.
+    const offerStillFirst = await win.evaluate(() => {
+      const offer = document.querySelector(".candidate-critique");
+      const buttons = [...document.querySelectorAll(".unsealed-candidate-actions button")];
+      const decide = buttons.find((b) => (b.textContent ?? "").includes("Continue"));
+      if (!offer || !decide) return null;
+      return (offer.compareDocumentPosition(decide) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    expect(offerStillFirst).toBe(true);
+
+    // Shut them again: the first screen is what the owner is judging below.
+    await openCandidateFolds(candidate);
+    await expect(paths).not.toBeVisible();
+
+    // c8 — the picture the owner judges, in the state they actually meet
+    // first: folds shut, c2 still owed, both choices visible. Prove the
+    // decisive controls are really in frame before the shot, so a future
+    // crop fails this test rather than reaching the owner.
+    await candidate.scrollIntoViewIfNeeded();
+    await expect(cont).toBeInViewport();
+    await expect(candidate.getByRole("button", { name: "Stop and keep the work for inspection" }))
+      .toBeInViewport();
+    await expect(candidate.locator(".candidate-critique")).toBeInViewport();
+    await candidate.screenshot({ path: READABLE_CANDIDATE_SHOT });
+
     await c2.getByRole("button", { name: OWNER_MET_BUTTON }).click();
     await expect(cont).toBeEnabled();
 
@@ -4846,6 +4964,7 @@ test("the Task Card promises, Cairn checks them itself, and the owner answers th
     // show the choices cannot support a judgment about them. Give the window
     // room and prove both buttons are actually in frame before the shot.
     await win.setViewportSize({ width: 1440, height: 2400 });
+    await candidate.scrollIntoViewIfNeeded();
     await expect(cont).toBeInViewport();
     await expect(candidate.getByRole("button", { name: "Stop and keep the work for inspection" })).toBeInViewport();
     await candidate.screenshot({ path: PROMISE_CANDIDATE_SHOT });
@@ -4889,8 +5008,12 @@ test("a failing Cairn check stops the run even though the worker claims it passe
     await expect(candidate).toBeVisible({ timeout: 60_000 });
     // The worker said DONE; Cairn's own run of the check disagrees, and the
     // card shows both without letting the worker's word stand as evidence.
-    await expect(candidate).toContainText("Codex Exec says: DONE");
+    // Cairn's finding is on the first screen; the worker's verdict is one
+    // click away, which is the ordering this whole card exists to enforce.
     await expect(candidate.locator('[data-row="c1"]')).toContainText("Cairn ran npm run typecheck and it failed.");
+    await openCandidateFolds(candidate);
+    await expect(candidate.locator(".unsealed-candidate-claims-said"))
+      .toContainText("Codex Exec says: DONE");
 
     await candidate.locator('[data-row="c2"]').getByRole("button", { name: OWNER_MET_BUTTON }).click();
     await candidate.getByRole("button", { name: CONTINUE_BUTTON }).click();

@@ -2514,6 +2514,26 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 .unsealed-candidate-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 
+/* Task 243 — the exact record, folded out of the decision's way. This is the
+   same native <details> the owner already passed on the critic card: a plain
+   summary line on the first screen, every exact fact one click behind it.
+   `list-style-position: inside` because the card has a left rule and no left
+   padding, so an outside marker renders past the card's edge and clips. */
+.unsealed-candidate-fold > summary {
+  cursor: pointer; margin: 3px 0 0; padding: 3px 0;
+  color: var(--lantern-soft); font-size: .75rem;
+  font-weight: 600; letter-spacing: .025em; list-style-position: inside;
+}
+.unsealed-candidate-fold > summary:hover { color: var(--lantern-ink); }
+.unsealed-candidate-fold > summary:focus-visible {
+  outline: 3px solid var(--garden-cyan); outline-offset: 3px; border-radius: 4px;
+}
+.unsealed-candidate-fold[open] > summary { margin-bottom: 2px; }
+.unsealed-candidate-fold-body { padding-bottom: 4px; }
+/* Answers "how many?" without opening anything. */
+.unsealed-candidate-fold-count { margin-left: 6px; color: var(--lantern-ink); font-weight: 650; }
+.unsealed-candidate-fold > summary .unsealed-candidate-provenance { margin-left: 8px; }
+
 /* Task 238/239 — the promises a task makes, and how each one was answered.
    The three voices are visually separate because they are separate kinds of
    evidence: Cairn's own check, the worker's claim, and the owner's judgment. */

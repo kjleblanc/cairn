@@ -147,68 +147,96 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose, criti
         </section>
       )}
 
+      {/*
+       * Everything below is the exact record, folded rather than removed.
+       *
+       * A beginner decides from the rows above; the changed-path list, the
+       * worker's whole account and the four nonterminal statements are all
+       * still here, still exact and still attributed, one click away. The
+       * owner reached this screen twice and could not act on it — nine
+       * sections and 1,378 pixels stood between the top of the card and the
+       * two buttons — so the detail moves out of the decision's way.
+       *
+       * It is folded and NOT deleted on purpose. A fold keeps Cairn honest:
+       * the evidence is still on the screen the owner is looking at, and one
+       * click reaches it. Dropping any of it would quietly narrow what Cairn
+       * shows, which is a worse outcome than a long screen.
+       */}
       <section className="unsealed-candidate-changes" aria-label="Files changed in your project">
-        <h4 className="unsealed-candidate-section-title">
-          Files changed in your project
-          <span className="unsealed-candidate-provenance">checked by Cairn</span>
-        </h4>
-        {candidate.changedPaths.length === 0 ? (
-          <p className="unsealed-candidate-empty">No file in your project has changed.</p>
-        ) : (
-          <ul className="unsealed-candidate-paths">
-            {candidate.changedPaths.map((path) => (
-              <li key={path} className="mono">{path}</li>
-            ))}
-          </ul>
-        )}
-        {candidate.evidenceSummary
-          ? <p className="unsealed-candidate-evidence">{candidate.evidenceSummary}</p>
-          : null}
-      </section>
-
-      <section className="unsealed-candidate-claims" aria-label="What the worker says it did">
-        <h4 className="unsealed-candidate-section-title">
-          What {candidate.adapterLabel} says it did
-          <span className="unsealed-candidate-provenance">reported, not checked</span>
-        </h4>
-        {claims === null ? (
-          <p className="unsealed-candidate-empty">
-            The worker didn&apos;t leave a readable summary of what it did.
-          </p>
-        ) : (
-          <>
-            <p className="unsealed-candidate-claims-said">
-              {candidate.adapterLabel} says: <strong>{claims.disposition}</strong> — this is the
-              worker&apos;s own verdict, not Cairn&apos;s.
-            </p>
-            <p className="unsealed-candidate-claims-text">{claims.summary}</p>
-            {claims.changes.length === 0 ? null : (
-              <ul className="unsealed-candidate-claims-list">
-                {claims.changes.map((change, index) => <li key={`${index}-${change}`}>{change}</li>)}
-              </ul>
-            )}
-            {claims.checks.length === 0 ? null : (
-              <ul className="unsealed-candidate-claims-list">
-                {claims.checks.map((check, index) => (
-                  <li key={`${index}-${check.name}`}>{check.name}: {check.result}</li>
+        <details className="unsealed-candidate-fold">
+          <summary>
+            Files changed in your project
+            <span className="unsealed-candidate-fold-count">{candidate.changedPaths.length}</span>
+            <span className="unsealed-candidate-provenance">checked by Cairn</span>
+          </summary>
+          <div className="unsealed-candidate-fold-body">
+            {candidate.changedPaths.length === 0 ? (
+              <p className="unsealed-candidate-empty">No file in your project has changed.</p>
+            ) : (
+              <ul className="unsealed-candidate-paths">
+                {candidate.changedPaths.map((path) => (
+                  <li key={path} className="mono">{path}</li>
                 ))}
               </ul>
             )}
-            <p className="unsealed-candidate-claims-text">
-              Remaining limitations: {claims.limitations || "the worker reported none."}
-            </p>
-          </>
-        )}
+            {candidate.evidenceSummary
+              ? <p className="unsealed-candidate-evidence">{candidate.evidenceSummary}</p>
+              : null}
+          </div>
+        </details>
+      </section>
+
+      <section className="unsealed-candidate-claims" aria-label="What the worker says it did">
+        <details className="unsealed-candidate-fold">
+          <summary>
+            What {candidate.adapterLabel} says it did
+            <span className="unsealed-candidate-provenance">reported, not checked</span>
+          </summary>
+          <div className="unsealed-candidate-fold-body">
+            {claims === null ? (
+              <p className="unsealed-candidate-empty">
+                The worker didn&apos;t leave a readable summary of what it did.
+              </p>
+            ) : (
+              <>
+                <p className="unsealed-candidate-claims-said">
+                  {candidate.adapterLabel} says: <strong>{claims.disposition}</strong> — this is the
+                  worker&apos;s own verdict, not Cairn&apos;s.
+                </p>
+                <p className="unsealed-candidate-claims-text">{claims.summary}</p>
+                {claims.changes.length === 0 ? null : (
+                  <ul className="unsealed-candidate-claims-list">
+                    {claims.changes.map((change, index) => <li key={`${index}-${change}`}>{change}</li>)}
+                  </ul>
+                )}
+                {claims.checks.length === 0 ? null : (
+                  <ul className="unsealed-candidate-claims-list">
+                    {claims.checks.map((check, index) => (
+                      <li key={`${index}-${check.name}`}>{check.name}: {check.result}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="unsealed-candidate-claims-text">
+                  Remaining limitations: {claims.limitations || "the worker reported none."}
+                </p>
+              </>
+            )}
+          </div>
+        </details>
       </section>
 
       <section className="unsealed-candidate-pending" aria-label="What has not happened yet">
-        <h4 className="unsealed-candidate-section-title">What has not happened yet</h4>
-        <ul className="unsealed-candidate-pending-list">
-          <li>No task report is written.</li>
-          <li>No row is added to the work log.</li>
-          <li>Nothing is committed.</li>
-          <li>Cairn has not said DONE or STOPPED.</li>
-        </ul>
+        <details className="unsealed-candidate-fold">
+          <summary>What has not happened yet</summary>
+          <div className="unsealed-candidate-fold-body">
+            <ul className="unsealed-candidate-pending-list">
+              <li>No task report is written.</li>
+              <li>No row is added to the work log.</li>
+              <li>Nothing is committed.</li>
+              <li>Cairn has not said DONE or STOPPED.</li>
+            </ul>
+          </div>
+        </details>
       </section>
 
       {critique}
