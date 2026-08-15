@@ -4863,6 +4863,30 @@ test("the Task Card promises, Cairn checks them itself, and the owner answers th
     const cont = candidate.getByRole("button", { name: CONTINUE_BUTTON });
     await expect(cont).toBeDisabled();
     await expect(candidate).toContainText("Answer c2 above before Cairn can finish this task.");
+    // Task 245 — and the reason now reads ABOVE the button it disables, so a
+    // beginner reading top to bottom meets it before the dead control.
+    await expect(candidate.locator(".unsealed-candidate-owed")).toBeVisible();
+    const reasonComesFirst = await win.evaluate(() => {
+      const reason = document.querySelector(".unsealed-candidate-owed");
+      const buttons = [...document.querySelectorAll(".unsealed-candidate-actions button")];
+      const decide = buttons.find((b) => (b.textContent ?? "").includes("Continue"));
+      if (!reason || !decide) return null;
+      // DOCUMENT_POSITION_FOLLOWING (4) means `decide` comes after `reason`.
+      return (reason.compareDocumentPosition(decide) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    expect(reasonComesFirst).toBe(true);
+
+    // Task 245 — the accepted request is on this screen once, not twice. Both
+    // of its texts are VISIBLE on the rows that answer them, and the separate
+    // section that used to reprint them a hundred pixels higher is gone
+    // BECAUSE the rows carry them, not because it was deleted.
+    await expect(candidate.locator(".unsealed-candidate-request")).toHaveCount(0);
+    await expect(candidate.locator('[data-row="c1"] .unsealed-candidate-promise-text'))
+      .toContainText("Change the page title");
+    await expect(candidate.locator('[data-row="c2"] .unsealed-candidate-promise-text'))
+      .toContainText("Keep the counts 74, 477, 256 exactly.");
+    await expect(candidate.locator(".unsealed-candidate-promises"))
+      .toContainText("What you asked for, and how each part was answered");
 
     // -- Task 243: the decision must be readable by a beginner -----------
     // c1 — measured through the ordinary route at 1440x2400 with these two
@@ -5300,9 +5324,35 @@ function stamp(label: string): void {
   stampedAt = now;
 }
 
+/**
+ * Task 245. What must be scrolled past before a choice can be made, in the
+ * three states nobody had measured. Task 243's 881-899px was taken with no
+ * critic answer on screen at all; a card carrying findings, a confirm/dismiss
+ * pair, a repair offer, or a repaired-work banner is longer again, and these
+ * are the numbers this repair has to move.
+ */
+async function reachToButtons(win: Page, label: string): Promise<number> {
+  const reach = await win.evaluate(() => {
+    const card = document.querySelector(".unsealed-candidate");
+    const actions = document.querySelector(".unsealed-candidate-actions");
+    if (!card || !actions) return null;
+    return {
+      toButtons: Math.round(
+        actions.getBoundingClientRect().top - card.getBoundingClientRect().top),
+      cardHeight: Math.round(card.getBoundingClientRect().height),
+    };
+  });
+  expect(reach).not.toBeNull();
+  console.log(
+    `[Task 245 c5] ${label}: to buttons=${reach!.toButtons}px whole card=${reach!.cardHeight}px`);
+  return reach!.toButtons;
+}
+
 const ALLEGATION_SHOT = join(tmpdir(), "cairn-task-244-allegation.png");
 const REPAIR_OFFER_SHOT = join(tmpdir(), "cairn-task-244-repair-offer.png");
 const REPAIRED_CANDIDATE_SHOT = join(tmpdir(), "cairn-task-244-repaired-candidate.png");
+/** Task 245: the proof that folding Cairn's own answer concealed nothing. */
+const SETTLED_OPEN_SHOT = join(tmpdir(), "cairn-task-245-settled-opened.png");
 
 const CONFIRM_BUTTON = "Yes, that is not done";
 const DISMISS_BUTTON = "No, that is fine";
@@ -5377,16 +5427,67 @@ test("the owner confirms one allegation, approves one repair, and Cairn checks i
 
     // c2 - Cairn answers the allegation its OWN check already settled, and the
     // owner is never offered a button for it.
+    //
+    // Task 245: that answer is now FOLDED out of the decision's way, and the
+    // summary line carries the whole of it - how many, and who settled them.
+    // Proved both ways, the way Task 243 proves the record's folds, because
+    // toContainText reads hidden text and would let "still there" mean "still
+    // in the DOM".
     const c1 = critique.locator('[data-critique-row="c1"]');
+    const settledFold = critique.locator("details.candidate-critique-settled-fold");
+    await expect(settledFold).toBeVisible();
+    await expect(settledFold.locator("summary"))
+      .toContainText("1 more thing the reviewer raised, which Cairn checked itself and settled");
+    await expect(c1.locator('[data-dismissed-by="cairn"]')).not.toBeVisible();
+    await settledFold.locator("summary").click();
     await expect(c1.locator('[data-dismissed-by="cairn"]')).toBeVisible();
     await expect(c1.locator('[data-dismissed-by="cairn"]')).toContainText("checked this one itself");
+    // The reviewer's own words are still there, still exact, still attributed.
+    await expect(c1.locator(".candidate-critique-finding-observation")).toBeVisible();
+    await expect(c1.locator(".candidate-critique-finding-observation")).toContainText(C1_ALLEGATION);
+    // Task 245 c1 - and a row Cairn disproved is not painted as a live failure.
+    await expect(c1).toHaveAttribute("data-owed", "no");
     await expect(c1.getByRole("button", { name: CONFIRM_BUTTON })).toHaveCount(0);
+
+    // Task 245 c1, measured rather than eyeballed. This is the whole defect:
+    // a row Cairn's own check disproved used to be painted in exactly the same
+    // amber as a live one, directly above Cairn's line disproving it. So the
+    // settled row's judgment must NOT share the live row's colour, and inside
+    // it Cairn's answer must carry more ink than the claim it supersedes.
+    const tones = await win.evaluate(() => {
+      const settledRow = document.querySelector('[data-critique-row="c1"]');
+      const liveRow = document.querySelector('[data-critique-row="c2"]');
+      const answer = settledRow?.querySelector('[data-dismissed-by="cairn"]');
+      const claim = settledRow?.querySelector(".candidate-critique-finding-observation");
+      const settledWord = settledRow?.querySelector(".candidate-critique-judgment");
+      const liveWord = liveRow?.querySelector(".candidate-critique-judgment");
+      if (!answer || !claim || !settledWord || !liveWord) return null;
+      const colour = (el: Element) => getComputedStyle(el).color;
+      return {
+        settledWord: colour(settledWord), liveWord: colour(liveWord),
+        answer: colour(answer), claim: colour(claim),
+      };
+    });
+    expect(tones).not.toBeNull();
+    expect(tones!.settledWord).not.toBe(tones!.liveWord);
+    expect(tones!.answer).not.toBe(tones!.claim);
+
+    await candidate.scrollIntoViewIfNeeded();
+    await candidate.screenshot({ path: SETTLED_OPEN_SHOT });
+    // Back to the state the owner actually meets, before measuring or capturing.
+    await settledFold.locator("summary").click();
+    await expect(c1.locator('[data-dismissed-by="cairn"]')).not.toBeVisible();
 
     // The owner's own row is theirs, and both answers are on offer.
     const c2 = critique.locator('[data-critique-row="c2"]');
     await expect(c2).toContainText(C2_ALLEGATION);
     await expect(c2.getByRole("button", { name: CONFIRM_BUTTON })).toBeVisible();
     await expect(c2.getByRole("button", { name: DISMISS_BUTTON })).toBeVisible();
+    // Task 245 c2 - and it says, in the owner's own words, why it is theirs.
+    await expect(c2).toHaveAttribute("data-owed", "yes");
+    await expect(c2.locator(".candidate-critique-ask")).toBeVisible();
+    await expect(c2.locator(".candidate-critique-ask"))
+      .toContainText("Cairn cannot check this one itself");
 
     // c12 - the picture of the decision itself: one allegation Cairn answered,
     // one the owner must, and both of their answers in frame. Asserting in
@@ -5395,6 +5496,7 @@ test("the owner confirms one allegation, approves one repair, and Cairn checks i
     await candidate.scrollIntoViewIfNeeded();
     await expect(c2.getByRole("button", { name: CONFIRM_BUTTON })).toBeInViewport();
     await expect(c2.getByRole("button", { name: DISMISS_BUTTON })).toBeInViewport();
+    await reachToButtons(win, "findings on screen");
     await candidate.screenshot({ path: ALLEGATION_SHOT });
 
     // c3 - confirming is NOT yet a repair. It offers one, which needs its own
@@ -5411,6 +5513,7 @@ test("the owner confirms one allegation, approves one repair, and Cairn checks i
     // c12 - the first picture: the allegation and both of its answers, in frame.
     await candidate.scrollIntoViewIfNeeded();
     await expect(repair.getByRole("button", { name: REPAIR_BUTTON })).toBeInViewport();
+    await reachToButtons(win, "repair offered");
     await candidate.screenshot({ path: REPAIR_OFFER_SHOT });
 
     // c3 and c5 - the one approved repair, dispatched inside the same open run.
@@ -5435,6 +5538,7 @@ test("the owner confirms one allegation, approves one repair, and Cairn checks i
 
     // c12 - the second picture: the repaired candidate the owner now judges.
     await candidate.scrollIntoViewIfNeeded();
+    await reachToButtons(win, "after the repair");
     await candidate.screenshot({ path: REPAIRED_CANDIDATE_SHOT });
 
     // c6 - a second opinion is still available on the repaired work (two calls
@@ -5448,6 +5552,12 @@ test("the owner confirms one allegation, approves one repair, and Cairn checks i
     await expect(critique.locator('[data-critique-row="c2"]')).toContainText(C2_ALLEGATION);
     await expect(critique.getByRole("button", { name: CONFIRM_BUTTON })).toHaveCount(0);
     await expect(critique.getByRole("button", { name: REPAIR_BUTTON })).toHaveCount(0);
+    // Task 245 c2 - the state that used to render an amber accusation with no
+    // confirm, no dismiss and no explanation beside it at all now says what it
+    // is and why nothing can be asked for.
+    const spent = critique.locator('[data-critique-row="c2"] [data-dismissed-by="spent"]');
+    await expect(spent).toBeVisible();
+    await expect(spent).toContainText("one correction has already been used");
 
     // c7 - the owner's own row is owed AGAIN. They judged code that has since
     // changed, so that judgment was spent by the repair.

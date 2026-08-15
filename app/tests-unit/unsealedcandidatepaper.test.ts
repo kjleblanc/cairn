@@ -111,6 +111,29 @@ test("unsealed candidate paper: an allegation is the owner's to confirm, and one
   assert.match(shared, /if \(Object\.keys\(answers\)\.length > 0\) return null;/u);
 });
 
+/**
+ * Task 245. The accepted request is rendered ONCE, and the section carrying it
+ * is skipped only while the promise rows below already carry every one of its
+ * texts word for word. This is the guard that keeps a de-duplication from
+ * decaying into a deletion: a later change that simply drops the section, or
+ * that decides from how the rows are derived rather than from what they
+ * actually say, fails here.
+ */
+test("unsealed candidate paper: the accepted request is rendered once, never dropped", () => {
+  const card = source("src", "renderer", "components", "UnsealedCandidate.tsx");
+  // Still produced, both halves of it.
+  assert.match(card, /candidate\.acceptedRequest\.outcome\.text/u);
+  assert.match(card, /candidate\.acceptedRequest\.requirements\.map/u);
+  // Skipped only under a test of what the rows really say — every requirement
+  // matched against a row's own text, not an assumption about their origin.
+  assert.match(card, /candidate\.acceptedRequest\.requirements\.every/u);
+  assert.match(card, /row\.text === requirement\.text/u);
+  assert.match(card, /row\.text === candidate\.acceptedRequest\.outcome\.text/u);
+  assert.match(card, /\{requestEchoedByRows \? null : \(/u);
+  // And the rows that justify skipping it are themselves still rendered.
+  assert.match(card, /candidate\.promises\.map/u);
+});
+
 test("unsealed candidate paper: shared output carries no project path or authority", () => {
   const shared = source("src", "shared", "unsealed-candidate.ts");
   const projection = between(shared, "export type UnsealedCandidateProjectionV1", "export type UnsealedCandidateDecisionRequest");

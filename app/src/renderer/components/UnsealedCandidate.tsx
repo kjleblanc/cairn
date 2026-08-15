@@ -64,9 +64,31 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose, criti
   const [ownerAnswers, setOwnerAnswers] = useState<Record<string, UnsealedCandidateOwnerAnswer>>({});
   const ownerRows = candidate.promises.filter((row) => row.answeredBy === "owner");
   const unanswered = ownerRows.filter((row) => ownerAnswers[row.id] === undefined);
+
+  // Task 245. Every promise row IS one part of the accepted request, so when
+  // the rows below already carry the outcome and every requirement word for
+  // word, the section above them prints the same sentences a second time a
+  // hundred pixels earlier — which is exactly the "a lot of information being
+  // thrown at me" the owner reported.
+  //
+  // This removes no fact. It renders each one once, and it is decided from the
+  // text actually on the rows rather than from an assumption about how they
+  // are derived: the moment the rows stop covering the request, the section
+  // comes back by itself.
+  const requestEchoedByRows = candidate.promises.length > 0
+    && candidate.promises.some((row) => row.text === candidate.acceptedRequest.outcome.text)
+    && candidate.acceptedRequest.requirements.every((requirement) =>
+      candidate.promises.some((row) => row.text === requirement.text));
+  const promisesHeading = requestEchoedByRows
+    ? "What you asked for, and how each part was answered"
+    : "What this task promised";
+  // Task 245. "Unsealed candidate" is this project's own word for the pause,
+  // and the first thing a beginner reads should not be a term only Cairn's
+  // maintainers know. The class stays: it is what every test and every
+  // stylesheet locates this card by.
   return (
-    <section className="unsealed-candidate" aria-label="Unsealed candidate">
-      <h3 className="unsealed-candidate-title">Unsealed candidate</h3>
+    <section className="unsealed-candidate" aria-label="Cairn is waiting for you">
+      <h3 className="unsealed-candidate-title">Cairn is waiting for you</h3>
 
       {/* The whole point of the pause, in one sentence, before any detail. */}
       <p className="unsealed-candidate-sentence">
@@ -80,39 +102,42 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose, criti
           without knowing it was repaired is not a judgment Cairn should take. */}
       {candidate.repairAsked === null ? null : (
         <section className="unsealed-candidate-repaired" aria-label="The one repair you approved">
-          <h4 className="unsealed-candidate-section-title">
-            You asked for one correction, and Cairn checked again
-          </h4>
+          {/* One paragraph, not a fourth section with a heading of its own.
+              The owner has to know three things here and no more: what was
+              corrected, that nothing else was, and that this is the last time
+              they are asked. */}
           <p className="unsealed-candidate-repaired-row">
+            <strong>Cairn already made the one correction you asked for.</strong>{" "}
             You said <span className="mono">{candidate.repairAsked.checkId}</span> was
-            not met, and approved this one correction:
-          </p>
-          <p className="unsealed-candidate-repaired-correction">
-            {candidate.repairAsked.correction}
-          </p>
-          <p className="unsealed-candidate-repaired-limit">
-            Everything below is from <strong>after</strong> that correction: the
-            files, the worker's account, and Cairn's own checks all ran again.
-            There is no second repair, so this is the last time you are asked.
+            not met, so this was corrected —{" "}
+            <span className="unsealed-candidate-repaired-correction">
+              {candidate.repairAsked.correction}
+            </span>{" "}
+            — and nothing else. The files, the worker&apos;s account and
+            Cairn&apos;s own checks below all ran <strong>again</strong>
+            {" "}afterwards, and there is <strong>no second repair</strong>, so
+            this is the last time you are asked.
           </p>
         </section>
       )}
 
-      <section className="unsealed-candidate-request" aria-label="What you asked for">
-        <h4 className="unsealed-candidate-section-title">What you asked for</h4>
-        <p className="unsealed-candidate-outcome">{candidate.acceptedRequest.outcome.text}</p>
-        {candidate.acceptedRequest.requirements.length === 0 ? null : (
-          <ul className="unsealed-candidate-requirements">
-            {candidate.acceptedRequest.requirements.map((requirement, index) => (
-              <li key={`${index}-${requirement.text}`}>{requirement.text}</li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {requestEchoedByRows ? null : (
+        <section className="unsealed-candidate-request" aria-label="What you asked for">
+          <h4 className="unsealed-candidate-section-title">What you asked for</h4>
+          <p className="unsealed-candidate-outcome">{candidate.acceptedRequest.outcome.text}</p>
+          {candidate.acceptedRequest.requirements.length === 0 ? null : (
+            <ul className="unsealed-candidate-requirements">
+              {candidate.acceptedRequest.requirements.map((requirement, index) => (
+                <li key={`${index}-${requirement.text}`}>{requirement.text}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {candidate.promises.length === 0 ? null : (
-        <section className="unsealed-candidate-promises" aria-label="What this task promised">
-          <h4 className="unsealed-candidate-section-title">What this task promised</h4>
+        <section className="unsealed-candidate-promises" aria-label={promisesHeading}>
+          <h4 className="unsealed-candidate-section-title">{promisesHeading}</h4>
           <ol className="unsealed-candidate-promise-list">
             {candidate.promises.map((row) => (
               <li key={row.id} className="unsealed-candidate-promise" data-row={row.id}>
@@ -265,6 +290,18 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose, criti
 
       {critique}
 
+      {/* Task 245. The reason Continue is dead now reads BEFORE the dead
+          button rather than under it. A beginner reads top to bottom, so they
+          used to meet a button that would not press and only then the sentence
+          explaining why. */}
+      {unanswered.length > 0 ? (
+        <p className="unsealed-candidate-owed" role="status">
+          {unanswered.length === 1
+            ? `Answer ${unanswered[0]?.id} above before Cairn can finish this task.`
+            : `Answer ${unanswered.map((row) => row.id).join(", ")} above before Cairn can finish this task.`}
+        </p>
+      ) : null}
+
       {onChoose ? (
         <div className="unsealed-candidate-actions">
           {candidate.choices.map((choice) => (
@@ -282,13 +319,6 @@ export function UnsealedCandidateCard({ candidate, busy = false, onChoose, criti
             </button>
           ))}
         </div>
-      ) : null}
-      {unanswered.length > 0 ? (
-        <p className="unsealed-candidate-owed" role="status">
-          {unanswered.length === 1
-            ? `Answer ${unanswered[0]?.id} above before Cairn can finish this task.`
-            : `Answer ${unanswered.map((row) => row.id).join(", ")} above before Cairn can finish this task.`}
-        </p>
       ) : null}
     </section>
   );

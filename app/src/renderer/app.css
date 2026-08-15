@@ -2475,14 +2475,14 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   font-size: .86rem; font-weight: 650; letter-spacing: .01em;
 }
 .unsealed-candidate-sentence {
-  margin: 0 0 10px; padding: 8px 10px; line-height: 1.5;
+  margin: 0 0 8px; padding: 6px 10px; line-height: 1.45;
   border-radius: 8px; background: var(--garden-amber-soft);
   color: var(--lantern-ink); overflow-wrap: anywhere;
 }
 .unsealed-candidate-sentence strong { color: var(--garden-amber); }
 .unsealed-candidate-section-title {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
-  margin: 10px 0 4px; color: var(--lantern-soft);
+  margin: 8px 0 3px; color: var(--lantern-soft);
   font-size: .75rem; font-weight: 600; letter-spacing: .025em;
 }
 /* Who is speaking, on every evidence block, in the same place every time. */
@@ -2520,7 +2520,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    `list-style-position: inside` because the card has a left rule and no left
    padding, so an outside marker renders past the card's edge and clips. */
 .unsealed-candidate-fold > summary {
-  cursor: pointer; margin: 3px 0 0; padding: 3px 0;
+  cursor: pointer; margin: 2px 0 0; padding: 2px 0;
   color: var(--lantern-soft); font-size: .75rem;
   font-weight: 600; letter-spacing: .025em; list-style-position: inside;
 }
@@ -2560,18 +2560,19 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   margin-top: 10px; padding: 8px 0 2px 10px;
   border-left: 2px solid var(--garden-amber);
 }
-.unsealed-candidate-repaired-row,
-.unsealed-candidate-repaired-correction,
-.unsealed-candidate-repaired-limit {
-  margin: 0 0 4px; font-size: .8rem; line-height: 1.45;
-  color: var(--lantern-ink); overflow-wrap: anywhere;
+.unsealed-candidate-repaired-row {
+  margin: 0 0 2px; font-size: .8rem; line-height: 1.45;
+  color: var(--lantern-soft); overflow-wrap: anywhere;
 }
-.unsealed-candidate-repaired-limit { color: var(--lantern-soft); }
-.unsealed-candidate-repaired-limit strong { color: var(--lantern-ink); }
+.unsealed-candidate-repaired-row strong { color: var(--lantern-ink); }
+/* Task 245: the correction itself now sits inside that sentence rather than
+   in a paragraph of its own, so it still reads as the worker's exact
+   instruction while costing the card one block instead of three. */
+.unsealed-candidate-repaired-correction { color: var(--lantern-ink); font-style: italic; }
 
 .unsealed-candidate-promises { margin-top: 10px; }
 .unsealed-candidate-promise-list { margin: 0; padding: 0; list-style: none; }
-.unsealed-candidate-promise { padding: 8px 0; border-top: 1px solid var(--lantern-line); }
+.unsealed-candidate-promise { padding: 6px 0; border-top: 1px solid var(--lantern-line); }
 .unsealed-candidate-promise:first-child { border-top: none; }
 .unsealed-candidate-promise-text { margin: 0 0 4px; line-height: 1.45; }
 .unsealed-candidate-promise-id { color: var(--lantern-soft); margin-right: 6px; }
@@ -2617,7 +2618,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   font-size: .86rem; font-weight: 650; letter-spacing: .01em;
 }
 .candidate-critique-sentence {
-  margin: 0 0 10px; padding: 8px 10px; line-height: 1.5;
+  margin: 0 0 8px; padding: 6px 10px; line-height: 1.45;
   border-radius: 8px; background: var(--lantern-paper-lit);
   color: var(--lantern-ink); overflow-wrap: anywhere;
 }
@@ -2655,7 +2656,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .candidate-critique-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 
 .candidate-critique-finding-list { margin: 0; padding: 0; list-style: none; }
-.candidate-critique-finding { padding: 8px 0; border-top: 1px solid var(--line); }
+.candidate-critique-finding { padding: 6px 0; border-top: 1px solid var(--line); }
 .candidate-critique-finding:first-child { border-top: none; }
 .candidate-critique-finding-text { margin: 0 0 4px; line-height: 1.45; }
 .candidate-critique-finding-id { color: var(--lantern-soft); margin-right: 6px; }
@@ -2667,9 +2668,34 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .candidate-critique-finding-evidence { color: var(--lantern-soft); font-size: .76rem; }
 /* The judgment word is the one thing a reader scans for, so it is the one
    thing that carries colour - and "not met" is deliberately not red: it is an
-   opinion, not a failure Cairn has confirmed. */
-.candidate-critique-finding[data-judgment="not_met"] .candidate-critique-finding-text { color: var(--garden-amber); }
+   opinion, not a failure Cairn has confirmed.
+
+   Task 245: the colour follows what is still OWED, not what was alleged. Amber
+   on `data-judgment="not_met"` painted an accusation Cairn's own passing check
+   had already disproved in the colour of a live failure, directly above
+   Cairn's line disproving it - so a reader scanning colour first read the
+   opposite of what Cairn had found. A settled row is quiet. */
+.candidate-critique-finding[data-owed="yes"] .candidate-critique-finding-text { color: var(--garden-amber); }
 .candidate-critique-finding[data-judgment="unclear"] .candidate-critique-finding-text { color: var(--lantern-soft); }
+.candidate-critique-finding[data-finding-state="settled-by-cairn"] .candidate-critique-finding-text,
+.candidate-critique-finding[data-finding-state="settled-by-you"] .candidate-critique-finding-text {
+  color: var(--lantern-soft);
+}
+/* On a row Cairn settled, Cairn's answer is the operative fact and the
+   reviewer's claim is the superseded one, so the answer carries the weight.
+   Left alone, the observation inherited the brighter ink and the rebuttal the
+   dimmer - the same inversion in tone that the amber made in colour. */
+.candidate-critique-finding[data-finding-state="settled-by-cairn"] .candidate-critique-dismissed {
+  color: var(--lantern-ink);
+}
+.candidate-critique-finding[data-finding-state="settled-by-cairn"] .candidate-critique-finding-observation {
+  color: var(--lantern-soft);
+}
+/* The one question the owner is actually being asked, in their own words. */
+.candidate-critique-ask {
+  margin: 6px 0 2px; font-size: .8rem; line-height: 1.45;
+  color: var(--lantern-ink); overflow-wrap: anywhere;
+}
 
 /* Task 244: the allegation, and the one repair it may become. Both sit inside
    the finding they belong to, so a reader never has to work out which row is
@@ -2695,7 +2721,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 /* Task 240 (owner gate 2 of this task): the audit trail, one click away.
    The first screen answers who is asked, what they see, whether it can change
    anything, and what it costs. Everything exact lives in here. */
-.candidate-critique-detail { margin: 10px 0 4px; }
+.candidate-critique-detail { margin: 8px 0 3px; }
 .candidate-critique-detail > summary {
   cursor: pointer; color: var(--lantern-soft);
   font-size: .75rem; font-weight: 600; letter-spacing: .025em;
@@ -2710,8 +2736,25 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .candidate-critique-judgment {
   font-weight: 650; color: var(--lantern-ink);
 }
-.candidate-critique-finding[data-judgment="not_met"] .candidate-critique-judgment { color: var(--garden-amber); }
+.candidate-critique-finding[data-owed="yes"] .candidate-critique-judgment { color: var(--garden-amber); }
 .candidate-critique-finding[data-judgment="unclear"] .candidate-critique-judgment { color: var(--lantern-soft); }
+.candidate-critique-finding[data-owed="no"] .candidate-critique-judgment { color: var(--lantern-soft); font-weight: 600; }
+
+/* Task 245: what Cairn's own checks already settled, folded out of the way of
+   what still needs the owner. Same native <details> as the record above, so it
+   opens with no script, and the summary states the count and who settled them
+   - a fold that named nothing would be a fact removed rather than one kept. */
+.candidate-critique-settled-fold { margin: 8px 0 2px; }
+.candidate-critique-settled-fold > summary {
+  cursor: pointer; color: var(--lantern-soft);
+  font-size: .75rem; font-weight: 600; letter-spacing: .025em;
+  padding: 3px 0; list-style-position: inside;
+}
+.candidate-critique-settled-fold > summary:hover { color: var(--lantern-ink); }
+.candidate-critique-settled-fold > summary:focus-visible {
+  outline: 3px solid var(--garden-cyan); outline-offset: 3px; border-radius: 4px;
+}
+.candidate-critique-settled-fold[open] > summary { margin-bottom: 4px; }
 
 /* Task 241: the money. Given its own line and its own weight because it is
    the one fact on this card that spends something. */
