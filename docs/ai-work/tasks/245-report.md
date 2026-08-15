@@ -285,11 +285,27 @@ from that report - so that this task's diff could be isolated from it. Without
 that, my changes and Task 244's would have shared three files and no exact-path
 commit could have separated them.
 
-Two things in Task 244's records are worth a later reader's attention, and I
-did not edit another task's report to fix them: its `c11` table carries an
+Two things in Task 244's records were worth a later reader's attention, and I
+did not edit another task's report to fix them: its `c11` table carried an
 unreplaced `CORE_SUITE_RESULT` placeholder where the Core full-suite result
-should be, so that cell records nothing; and its own brief repeats the handoff's
-wrong guard count, which its report corrects.
+should be, so that cell recorded nothing; and its own brief repeats the
+handoff's wrong guard count, which its report corrects.
+
+**The first of those was fixed by another session while this task was running,
+and the correction is worth reading.** `4fa9eed` landed in this checkout
+between my brief claim and my own commit, filling the cell in with 507 tests,
+497 pass, 0 fail, 10 skipped - **and recording that the first full Core run
+FAILED and could not be reproduced**, with every file green in isolation, a
+green re-run, and the failing test never named. That is not my finding and not
+mine to settle; it is noted here because a reader of this report should not
+take the green Core suite as settled, and because I did not run Core at all.
+
+**Two sessions were writing this checkout at once**, which is exactly what the
+contract's lane rules forbid, and it is recorded for the same reason Task 243
+recorded it. Nothing was lost: `4fa9eed` touched only `244-report.md`, my own
+five paths were untouched by it, my commit sits cleanly on top, and the tree is
+clean. But it happened without either side knowing, and the next session should
+know it can happen here.
 
 ## How to try it
 
