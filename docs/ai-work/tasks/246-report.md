@@ -137,7 +137,7 @@ built first. This is the first green run of this package since Task 211.
 | `npm run typecheck` (root) | PASS, 11 s |
 | `npm run build` (root) | PASS, 8 s |
 | `npm test -w cairn-cli` | **24 / 24 / 0 fail**, 5 s |
-| `npm test -w @cairn/core` | **still running at commit time** — see below |
+| `npm test -w @cairn/core` | **508 tests, 498 pass, 0 fail, 10 skipped**, exit 0 |
 | `app: npm run test:unit` | **935 tests, 924 pass, 9 fail, 2 skipped**, 471 s |
 
 The app-unit baseline moved from 934 to 935 because Task 245 added a guard
@@ -162,6 +162,11 @@ That is strong evidence and it is not the same thing as a green full-suite run.
 Task 244 records that this suite can fail under concurrency where every file
 passes alone. If the run that was in flight comes back red, it needs its own
 investigation and this row must be corrected rather than explained away.
+
+**It came back green**, and the row above now carries the real result:
+**508 tests, 498 pass, 0 fail, 10 skipped**, exit 0. That is Task 244's 507
+plus this task's one added test, which is the arithmetic a reader should be
+able to check. No investigation was needed and nothing was explained away.
 
 ## A second timing flake, recorded
 
