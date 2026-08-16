@@ -11,3 +11,8 @@ test("the desktop window has no application menu bar", () => {
   const createWindow = main.slice(main.indexOf("export function createWindow"));
   assert.match(createWindow, /Menu\.setApplicationMenu\(null\);[\s\S]*?new BrowserWindow\(/u);
 });
+
+test("the desktop title bar keeps its window controls without Cairn branding", () => {
+  const createWindow = main.slice(main.indexOf("export function createWindow"));
+  assert.match(createWindow, /new BrowserWindow\(\{[\s\S]*?titleBarStyle: "hidden",[\s\S]*?titleBarOverlay: true,/u);
+});

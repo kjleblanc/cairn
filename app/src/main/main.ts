@@ -255,6 +255,8 @@ export function createWindow(): BrowserWindow {
     height: 820,
     minWidth: 760,
     minHeight: 620,
+    titleBarStyle: "hidden",
+    titleBarOverlay: true,
     backgroundColor: "#fbf7ee",
     ...(e2e ? offScreenParking() : {}),
     webPreferences: {
