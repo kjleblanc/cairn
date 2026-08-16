@@ -49,6 +49,89 @@ const LOCK_BYTE_CAP = 1024;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SAFE_HOST = /^[^\u0000-\u001f\u007f-\u009f\u2028\u2029]{1,255}$/u;
 
+/** Task 247. Cairn scrubs `GIT_CONFIG_GLOBAL` to the null device on every Git
+ * call so that a hostile global config cannot grant or redirect authority.
+ * `safe.directory` exceptions live in exactly that file, so when Git refuses a
+ * folder on ownership grounds its own printed remedy - add a `safe.directory`
+ * entry - is guaranteed to do nothing here. Repeating that advice sent the
+ * owner to a dead end they had already tried. The refusal is correct and
+ * unchanged; only what Cairn says about it is. */
+export interface GitOwnershipRefusalV1 {
+  /** The folder Git refused, exactly as Git spelled it. */
+  repository: string;
+  /** Present only when Git compared real accounts; absent when it did not. */
+  owningAccount: string | null;
+  currentAccount: string | null;
+}
+
+const DUBIOUS_OWNERSHIP = /detected dubious ownership in repository at '([^']*)'/u;
+const OWNING_ACCOUNT = /is owned by:[^\S\n]*\n([^\n]*)/u;
+const CURRENT_ACCOUNT = /but the current user is:[^\S\n]*\n([^\n]*)/u;
+
+/** Git names the accounts on the line after each marker, as `NAME (SID)` on
+ * Windows and `uid N` elsewhere. The trailing parenthesis is dropped: the SID
+ * is noise to the person reading this, and the name is what they must type. */
+function accountAfter(text: string, marker: RegExp): string | null {
+  const found = marker.exec(text);
+  if (!found) return null;
+  const named = found[1].replace(/\s*\([^)]*\)\s*$/u, "").trim();
+  return named.length > 0 && named.length <= 256 ? named : null;
+}
+
+export function gitOwnershipRefusal(text: string): GitOwnershipRefusalV1 | null {
+  if (typeof text !== "string") return null;
+  const found = DUBIOUS_OWNERSHIP.exec(text);
+  if (!found) return null;
+  return {
+    repository: found[1],
+    owningAccount: accountAfter(text, OWNING_ACCOUNT),
+    currentAccount: accountAfter(text, CURRENT_ACCOUNT),
+  };
+}
+
+export function gitOwnershipRefusalMessage(
+  refusal: GitOwnershipRefusalV1,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  // Git prints Windows accounts with a forward slash; NTAccount needs a
+  // backslash, so a remedy pasted as printed would fail.
+  const asAccount = refusal.currentAccount === null
+    ? "$env:USERDOMAIN\\$env:USERNAME"
+    : refusal.currentAccount.replace(/\//gu, "\\");
+  const remedy = platform === "win32"
+    ? [
+      "In PowerShell, with this project closed:",
+      `  $folder = "${refusal.repository}"`,
+      "  $acl = Get-Acl $folder",
+      `  $acl.SetOwner([System.Security.Principal.NTAccount]"${asAccount}")`,
+      "  Set-Acl -Path $folder -AclObject $acl",
+    ].join("\n")
+    : [
+      "In a terminal, with this project closed:",
+      `  chown "$(id -un)" '${refusal.repository}'`,
+    ].join("\n");
+  const accounts = refusal.owningAccount !== null && refusal.currentAccount !== null
+    ? [`  the folder belongs to   ${refusal.owningAccount}`,
+      `  you are signed in as    ${refusal.currentAccount}`].join("\n")
+    : null;
+  return [
+    "Cairn cannot use Git here, because this project's folder belongs to a"
+    + " different account than the one you are signed in as. Cairn has changed"
+    + " nothing and run nothing.",
+    `The folder: ${refusal.repository}`,
+    ...(accounts === null ? [] : [accounts]),
+    "Git suggests adding a safe.directory exception to your global Git"
+    + " configuration. That will not help here, and if you have already tried it"
+    + " this is why nothing changed: Cairn does not read your global Git"
+    + " configuration. That is deliberate - it is what stops a stray setting on"
+    + " this machine from redirecting Cairn's Git - so an exception written"
+    + " there is never seen.",
+    "What works is making the folder yours again.",
+    remedy,
+    "Then open this project again.",
+  ].join("\n\n");
+}
+
 function lockFilePath(root: string): string {
   if (!serialCandidateGitEnvironmentSafe()) throw new Error("UNSAFE_SERIAL_RUN_GIT_ENVIRONMENT");
   const environment: NodeJS.ProcessEnv = { ...process.env };
@@ -67,18 +150,27 @@ function lockFilePath(root: string): string {
     "GIT_TRACE_PERFORMANCE", "GIT_TRACE_SETUP", "GIT_TRACE_SHALLOW", "GIT_TRACE_CURL",
     "GIT_TRACE_FSMONITOR", "GIT_TRACE2", "GIT_TRACE2_EVENT", "GIT_TRACE2_PERF",
   ]) environment[name] = "0";
-  const common = execFileSync("git", [
-    "-c", "core.fsmonitor=false",
-    "-c", "trace2.normalTarget=0",
-    "-c", "trace2.eventTarget=0",
-    "-c", "trace2.perfTarget=0",
-    "rev-parse", "--git-common-dir",
-  ], {
-    cwd: root,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: environment,
-  }).trim();
+  let common: string;
+  try {
+    common = execFileSync("git", [
+      "-c", "core.fsmonitor=false",
+      "-c", "trace2.normalTarget=0",
+      "-c", "trace2.eventTarget=0",
+      "-c", "trace2.perfTarget=0",
+      "rev-parse", "--git-common-dir",
+    ], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: environment,
+    }).trim();
+  } catch (error) {
+    // Task 247. This is the first Git call in any run, so an ownership refusal
+    // lands here and nowhere later. Every other Git failure keeps its own text.
+    const refusal = gitOwnershipRefusal((error as Error)?.message ?? "");
+    if (!refusal) throw error;
+    throw new Error(gitOwnershipRefusalMessage(refusal));
+  }
   return join(resolve(root, common), "cairn-run.lock");
 }
 
