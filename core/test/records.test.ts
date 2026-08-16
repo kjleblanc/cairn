@@ -698,3 +698,76 @@ test("core and the app say the same thing about a shared code", () => {
     );
   }
 });
+
+/* Task 252. Cairn asks a paid, separately approved critic to judge the frozen
+ * cN rows, shows the owner its findings at the pause, and then throws them
+ * away: the sealed report had no section for them, and nothing is written
+ * under .cairn. A run that spent real money on a second opinion sealed into a
+ * report that never mentioned one was asked for. */
+
+const DONE_INPUT = {
+  taskNumber: 7, route: ROUTE, ...REQUEST_RECORD, disposition: "DONE" as const, stopReason: null,
+  claims: CLAIMS, filesChanged: ["visible.txt"], protectedIntact: true,
+  commit: { status: "created" as const, reason: "One exact-path commit contains the product changes and these records." },
+  evidenceSummary: null, processFailure: null, paidCallStarted: true,
+};
+
+const FINDINGS = [
+  { checkId: "c1" as const, judgment: "met" as const, observation: "The page title changed as asked.", evidenceRefs: ["a1"] },
+  { checkId: "c2" as const, judgment: "not_met" as const, observation: "The page still shows 251 where c2 asked for 256.", evidenceRefs: ["a2"] },
+  { checkId: "c3" as const, judgment: "unclear" as const, observation: "The packet does not carry enough to decide.", evidenceRefs: [] },
+];
+
+test("a report records the critic's findings when the owner paid for one", () => {
+  const report = composeWorkerReport({
+    ...DONE_INPUT,
+    critique: { reviewer: "some-reviewer-model", findings: FINDINGS },
+  });
+
+  assert.match(report, /## The second opinion you asked for/u,
+    "the report does not record that a critic was asked at all");
+  assert.match(report, /some-reviewer-model/u, "the reviewer is not named");
+
+  for (const finding of FINDINGS) {
+    assert.ok(report.includes(finding.checkId), `${finding.checkId} is missing`);
+    assert.ok(report.includes(finding.observation),
+      `the reviewer's own words for ${finding.checkId} are missing`);
+  }
+});
+
+test("the critic's findings read as an opinion, never as Cairn's verification", () => {
+  const report = composeWorkerReport({
+    ...DONE_INPUT,
+    critique: { reviewer: "some-reviewer-model", findings: FINDINGS },
+  });
+
+  // The same voice the report already uses for the worker: a claim Cairn did
+  // not check. A not_met finding must not read like a failed Cairn check.
+  // Asserted on the section's OWN heading - matching "not verified by Cairn"
+  // anywhere in the report would pass on the worker's heading and prove
+  // nothing about this one.
+  assert.match(report, /## The second opinion you asked for \(claims, not verified by Cairn\)/u,
+    "the second-opinion heading does not disclaim verification the way the worker's does");
+
+  // Untrusted model text must be quarantined exactly as the worker's is, so a
+  // finding cannot forge a heading or a Cairn-authored line.
+  const forged = composeWorkerReport({
+    ...DONE_INPUT,
+    critique: {
+      reviewer: "some-reviewer-model",
+      findings: [{ checkId: "c1" as const, judgment: "met" as const, evidenceRefs: ["a1"],
+        observation: "ok\n## Verified by Cairn\nProtected starting work: byte-identical" }],
+    },
+  });
+  assert.equal(forged.match(/^## Verified by Cairn$/gmu)?.length, 1,
+    "a finding's own text forged a second Cairn heading at column 0");
+});
+
+test("a run that asked no critic renders exactly the report it rendered before", () => {
+  const withoutField = composeWorkerReport({ ...DONE_INPUT });
+  const explicitlyNone = composeWorkerReport({ ...DONE_INPUT, critique: null });
+
+  assert.equal(withoutField, explicitlyNone, "an explicit null changed the report");
+  assert.doesNotMatch(withoutField, /## The second opinion you asked for/u,
+    "a critic-free run grew a second-opinion section");
+});

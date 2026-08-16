@@ -13,7 +13,7 @@ import {
   type TaskSpecV1,
 } from "./quality.js";
 import type { AdapterTaskContract } from "./routing.js";
-import type { SerialCandidateRepairRequestV1 } from "./critique.js";
+import type { SerialCandidateRepairRequestV1, SerialCritiqueFindingV1 } from "./critique.js";
 import type { SerialTaskPromiseAnswerV1 } from "./taskcard.js";
 import {
   isCriticCompletionAuthority,
@@ -378,6 +378,15 @@ export interface ComposedRecordInput {
   /** Task 244: the one repair the owner approved, or absent when none was.
    * A run nobody repaired renders exactly the report it rendered before. */
   repair?: SerialCandidateRepairRequestV1 | null;
+  /** Task 252: the separately approved critic's findings, or absent when the
+   * owner asked for none. Before this, a run that paid for a second opinion
+   * sealed into a report that never mentioned one — the findings lived only in
+   * Main's checkpoint sidecar, which dies with the pause. A run nobody asked a
+   * critic about renders exactly the report it rendered before. */
+  critique?: Readonly<{
+    reviewer: string;
+    findings: readonly SerialCritiqueFindingV1[];
+  }> | null;
 }
 
 const ROW_CAP = 160;
@@ -652,6 +661,36 @@ function repairBlock(repair: SerialCandidateRepairRequestV1, adapterLabel: strin
   ].join("\n");
 }
 
+/** Task 252. The critic's own words, kept so a run that paid for a second
+ * opinion can still show what it bought. Every sentence here is the reviewer's:
+ * the heading disclaims verification in the same voice the worker's account
+ * does, and the observation is quarantined like every other untrusted field, so
+ * a finding cannot forge a Cairn-authored heading at column 0. */
+/** Whole predicates, not adjectives: "could not tell" does not fit the sentence
+ * the other two make, and bending it to fit would cost the reader clarity. */
+const CRITIQUE_JUDGMENT_WORDS: Readonly<Record<SerialCritiqueFindingV1["judgment"], string>> = Object.freeze({
+  met: "said this was **met**",
+  not_met: "said this was **not met**",
+  unclear: "**could not tell**",
+});
+
+function critiqueBlock(critique: NonNullable<ComposedRecordInput["critique"]>): string {
+  const lines = [
+    `- You approved one review by ${critique.reviewer}, which read a summary of this`
+    + ` task and could not change anything.`,
+    "- Cairn did not check any of the statements below, and none of them changed"
+    + " a check result or this task's outcome.",
+  ];
+  for (const finding of critique.findings) {
+    lines.push(`- ${finding.checkId}: the reviewer ${CRITIQUE_JUDGMENT_WORDS[finding.judgment]}.`);
+    lines.push(quarantineBlock(`  - In its own words: ${finding.observation}`));
+    lines.push(finding.evidenceRefs.length === 0
+      ? "  - It cited nothing for this."
+      : `  - It cited: ${finding.evidenceRefs.join(", ")}.`);
+  }
+  return lines.join("\n");
+}
+
 function promiseAnswerBlock(
   answers: readonly SerialTaskPromiseAnswerV1[],
   adapterLabel: string,
@@ -769,6 +808,12 @@ export function composeWorkerReport(input: ComposedRecordInput): string {
   if (input.promiseAnswers && input.promiseAnswers.length > 0) {
     sections.push("## Promises and how each was answered");
     sections.push(promiseAnswerBlock(input.promiseAnswers, input.route.adapterLabel));
+  }
+  // Task 252: after the promises it judged and before the repair that may have
+  // followed from it, which is the order the run actually happened in.
+  if (input.critique && input.critique.findings.length > 0) {
+    sections.push("## The second opinion you asked for (claims, not verified by Cairn)");
+    sections.push(critiqueBlock(input.critique));
   }
   if (input.repair) {
     sections.push("## The one repair you approved");
