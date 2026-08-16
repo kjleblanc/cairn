@@ -261,9 +261,11 @@ with it.
   above. Task 246's report relies on Task 236's diagnosis.
 - **Whether the milestone moved** is always the owner's call; the log column
   stays a claim.
-- **218 local commits are not on the remote** as of this writing. **Never state
-  that count from memory** - run `git rev-list --count origin/main..main`.
-  Pushing is the owner's decision and needs its own approval.
+- **Local commits are not on the remote, and the count is deliberately not
+  written here.** Run `git rev-list --count origin/main..main`. Every previous
+  handoff wrote a number that was stale before the ink dried - the commit that
+  records the count increments the count - so the number is gone and only the
+  command remains. Pushing is the owner's decision and needs its own approval.
 - Inherited and still open: an owner who chooses nothing on the Task Card gets
   a promise-free run with no warning, no critic offer, and now no repair
   either, for the same reason - there are no frozen rows for an allegation to
