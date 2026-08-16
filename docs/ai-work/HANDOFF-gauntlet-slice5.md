@@ -1,12 +1,14 @@
-# Handoff - Slice 4 is done. What Slice 5 needs.
+# Handoff - Slice 5, and the three things it is waiting on
 
-Rewritten after Task 246 closed. The saved plan
+Written after Task 246 closed. The saved plan
 `docs/superpowers/plans/2026-08-14-cairn-gauntlet-restoration.md` is still the
 execution authority; this file is orientation.
 
-**This file previously handed off Slice 4 and said it was "Not started". Slice
-4 has been done since Task 244.** If you are looking for the Slice 4 brief, it
-is `docs/ai-work/tasks/244-brief.md`.
+**This file was `HANDOFF-gauntlet-slice4.md` until Task 246.** Tasks 244, 245
+and 246 reference it at that path, and Slices 1 to 4 are now all done, so it
+was renamed rather than left claiming to hand off finished work. The Slice 4
+brief is `docs/ai-work/tasks/244-brief.md`; the Slice 4 handoff as it stood
+before Slice 4 was executed is in Git history at `46715d8`.
 
 ## Where the restoration actually stands
 
@@ -160,7 +162,7 @@ docs/superpowers/plans/2026-08-14-cairn-gauntlet-restoration.md
 
 Read first, before editing anything:
 
-- docs/ai-work/HANDOFF-gauntlet-slice4.md (this handoff)
+- docs/ai-work/HANDOFF-gauntlet-slice5.md (this handoff)
 - docs/ai-work/tasks/244-report.md, 245-report.md and 246-report.md
 - AGENTS.md, and the complete Git status
 
