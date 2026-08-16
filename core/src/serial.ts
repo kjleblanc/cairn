@@ -108,6 +108,8 @@ import {
 import {
   serialCandidateRepairRequest,
   type SerialCandidateRepairRequestV1,
+  type SerialCritiqueFindingV1,
+  type SerialCritiqueJudgmentV1,
 } from "./critique.js";
 import {
   ADAPTER_COMMAND_ATTESTATION_VERSION,
@@ -267,14 +269,67 @@ export type SerialUnsealedCandidateV1 = Readonly<{
  * falls through to the honest stop, because a choice this pause never offered
  * is not a continue.
  */
+/** Task 252: what a separately approved critic said, carried from the pause
+ * into the seal. It is the reviewer's words and nothing more - recording it
+ * gives the critic no authority it did not already have, and the runner never
+ * reads a judgment to decide anything. */
+export type SerialRunCritiqueRecordV1 = Readonly<{
+  reviewer: string;
+  findings: readonly SerialCritiqueFindingV1[];
+}>;
+
 export type SerialUnsealedCandidateChoiceV1 =
   | "continue"
   | "stop"
   | Readonly<{
       choice: "continue";
       ownerAnswers: Readonly<Record<string, SerialTaskPromiseOwnerAnswerV1>>;
+      /** Task 252: optional, and purely a record. */
+      critique?: SerialRunCritiqueRecordV1;
     }>
-  | Readonly<{ choice: "repair"; repair: SerialCandidateRepairRequestV1 }>;
+  | Readonly<{
+      choice: "repair";
+      repair: SerialCandidateRepairRequestV1;
+      /** Task 252: carried here too, so a run that repairs and then stops still
+       * seals with what the critic said rather than losing it. */
+      critique?: SerialRunCritiqueRecordV1;
+    }>;
+
+/**
+ * Task 252. Fail closed, like every other value crossing this seam: a malformed
+ * critique records nothing rather than recording something wrong. Recording is
+ * all this does - no judgment here is ever read to decide an outcome, so the
+ * worst a bad parse can cost is an absent section, never a wrong seal.
+ */
+const CRITIQUE_JUDGMENTS: readonly SerialCritiqueJudgmentV1[] = ["met", "not_met", "unclear"];
+
+function unsealedCandidateCritique(value: unknown): SerialRunCritiqueRecordV1 | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as { reviewer?: unknown; findings?: unknown };
+  if (typeof record.reviewer !== "string" || record.reviewer.length === 0
+    || record.reviewer.length > 200 || !Array.isArray(record.findings)
+    || record.findings.length === 0 || record.findings.length > 12) return null;
+  const findings: SerialCritiqueFindingV1[] = [];
+  for (const entry of record.findings) {
+    if (entry === null || typeof entry !== "object") return null;
+    const finding = entry as {
+      checkId?: unknown; judgment?: unknown; observation?: unknown; evidenceRefs?: unknown;
+    };
+    if (typeof finding.checkId !== "string" || !/^c[1-9][0-9]?$/u.test(finding.checkId)) return null;
+    if (typeof finding.judgment !== "string"
+      || !CRITIQUE_JUDGMENTS.includes(finding.judgment as SerialCritiqueJudgmentV1)) return null;
+    if (typeof finding.observation !== "string" || finding.observation.length > 2000) return null;
+    if (!Array.isArray(finding.evidenceRefs)
+      || finding.evidenceRefs.some((ref) => typeof ref !== "string" || ref.length > 64)) return null;
+    findings.push(Object.freeze({
+      checkId: finding.checkId as `c${number}`,
+      judgment: finding.judgment as SerialCritiqueJudgmentV1,
+      observation: finding.observation,
+      evidenceRefs: Object.freeze([...finding.evidenceRefs as readonly string[]]),
+    }));
+  }
+  return Object.freeze({ reviewer: record.reviewer, findings: Object.freeze(findings) });
+}
 
 /** Fail closed: only an exact continue, in either accepted shape, seals. */
 function unsealedCandidateContinuation(
@@ -2376,6 +2431,9 @@ function composeCairnWorkerRecordValues(
   promiseAnswers?: readonly SerialTaskPromiseAnswerV1[],
   /** Task 244: the one approved repair, or nothing when none was. */
   repair?: SerialCandidateRepairRequestV1 | null,
+  /** Task 252: the separately approved critic's findings, so a run that paid
+   * for a second opinion seals with what it bought instead of losing it. */
+  critique?: SerialRunCritiqueRecordV1 | null,
 ): { reportText: string; row: LogRow; composed: ComposedRecordInput } {
   const taskSpecRunRecord = composeBoundRunRecord(
     contract,
@@ -2405,6 +2463,7 @@ function composeCairnWorkerRecordValues(
     recordRecovery: recovery?.disclosure ?? null,
     ...(promiseAnswers && promiseAnswers.length > 0 ? { promiseAnswers } : {}),
     ...(repair ? { repair } : {}),
+    ...(critique && critique.findings.length > 0 ? { critique } : {}),
   };
   const report = reportWithCandidateCustody(
     composeWorkerReport(input),
@@ -2458,6 +2517,8 @@ function cairnWorkerRecords(
   promiseAnswers?: readonly SerialTaskPromiseAnswerV1[],
   /** Task 244: the one approved repair, or nothing when none was. */
   repair?: SerialCandidateRepairRequestV1 | null,
+  /** Task 252: the separately approved critic's findings. */
+  critique?: SerialRunCritiqueRecordV1 | null,
 ): { reportText: string; row: LogRow; verified: boolean; composed: ComposedRecordInput } {
   const values = composeCairnWorkerRecordValues(
     root,
@@ -2476,6 +2537,7 @@ function cairnWorkerRecords(
     recordDate,
     promiseAnswers,
     repair,
+    critique,
   );
   const report = values.reportText;
   const row = values.row;
@@ -7299,6 +7361,9 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
       // These are facts about the RUN, so they live outside the loop below.
       let repairSpent = false;
       let acceptedRepair: SerialCandidateRepairRequestV1 | null = null;
+      // Task 252 — what the critic said, kept so the seal can record it. Purely
+      // a record: nothing below reads a judgment to decide anything.
+      let acceptedCritique: SerialRunCritiqueRecordV1 | null = null;
       // Everything from here to the terminal close runs ONCE per worker
       // attempt. A confirmed allegation reenters it with a second dispatch,
       // so the repaired tree meets exactly the same parse, the same owned-
@@ -7376,7 +7441,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
             // No candidate custody, files, terminal action, date or brief text on
             // this path; the trailing argument is Task 238's answered promises, so
             // a stop can name the promise that went unanswered.
-            undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair,
+            undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair, acceptedCritique,
           );
           if (!records.verified) {
             const restored = restoreLogBeforeThrow(projectRoot, start);
@@ -7574,6 +7639,12 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
           // still-open run: same lock, same starting snapshot, same chosen
           // adapter, same abort signal. `runSerialTask` is not reentered, so
           // there is no second writer and no nested run to reconcile.
+          const said = unsealedCandidateCritique((choice as { critique?: unknown } | null)?.critique);
+          // Captured before the branch below, so a run that goes on to repair
+          // still seals with what the critic said. A second review replaces the
+          // first on purpose: the first judged a tree that no longer exists.
+          if (said) acceptedCritique = said;
+
           const repair = unsealedCandidateRepair(choice, repairAvailable, shown);
           if (repair) {
             repairSpent = true;
@@ -7643,7 +7714,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
           const records = cairnWorkerRecords(
             projectRoot, contract, start, "DONE", null, claims, protectedValid, commit,
             workerResult?.evidence ?? null, undefined, taskSpecEvidence,
-            undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair,
+            undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair, acceptedCritique,
           );
           if (!records.verified) return closeRecordRewrite(records);
           emit(activities, options.events, { stage: "Check", state: "done", detail: "The worker result and protected work were verified; the dirty start keeps the product changes uncommitted." });
@@ -7665,7 +7736,7 @@ export async function runSerialTask(root: string, intent: TaskIntent, options: S
           workerResult?.evidence ?? null,
           undefined,
           taskSpecEvidence,
-          undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair,
+          undefined, undefined, undefined, undefined, undefined, promiseAnswers, acceptedRepair, acceptedCritique,
         );
         if (!records.verified) return closeRecordRewrite(records);
         const expectedCommitSet = [...new Set([...productPaths, ...contract.ownedRecords])];

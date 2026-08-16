@@ -201,6 +201,7 @@ export {
   type SerialCandidateRunResult,
   type SerialCandidateTerminalResult,
   type SerialRunEvents,
+  type SerialRunCritiqueRecordV1,
   type SerialRunOptions,
   type SerialRunResult,
   type SerialStage,

@@ -13,6 +13,7 @@ import {
   type SerialTaskPromisesV1,
   taskRequestView,
   type AdapterDescriptor,
+  type SerialRunCritiqueRecordV1,
   type SerialRunResult,
   type TaskIntent,
   type TaskSpecV1,
@@ -594,6 +595,31 @@ function priceCritiqueInBackground(dir: string, checkpointId: string, signal?: A
       session.unsealedCandidateCritique = priced;
     }
   }).catch(() => {});
+}
+
+/** Task 252. What a separately approved critic said, in the shape Core seals
+ * with. Findings used to reach the owner's screen and die with the pause,
+ * because the sealed report had nowhere to put them; this is the only thing
+ * that carries them across. It reads the same sidecar the screen reads, so the
+ * record cannot say something the owner was not shown. */
+function critiqueRecordForSeal(dir: string): { critique?: SerialRunCritiqueRecordV1 } {
+  const held = currentCandidateCritique(dir);
+  const reviewer = held?.disclosure?.model;
+  if (!held || typeof reviewer !== "string" || held.findings.length === 0) return {};
+  // The screen's projection widens checkId to string. Narrowing here is safe
+  // because Core re-parses this whole record fail-closed before it records
+  // anything, so a wrong id costs an absent section, never a wrong seal.
+  return {
+    critique: {
+      reviewer,
+      findings: held.findings.map((finding) => ({
+        checkId: finding.checkId as `c${number}`,
+        judgment: finding.judgment,
+        observation: finding.observation,
+        evidenceRefs: finding.evidenceRefs,
+      })),
+    },
+  };
 }
 
 function openCritiqueForCandidate(
@@ -1500,7 +1526,11 @@ export function registerTaskIpc(
               // before it dispatches anything; anything else is the honest stop.
               const settlement = await opened.settled;
               if (settlement.choice === "continue") {
-                return { choice: "continue" as const, ownerAnswers: settlement.ownerAnswers };
+                return {
+                  choice: "continue" as const,
+                  ownerAnswers: settlement.ownerAnswers,
+                  ...critiqueRecordForSeal(dir),
+                };
               }
               if (settlement.choice === "repair") {
                 return {

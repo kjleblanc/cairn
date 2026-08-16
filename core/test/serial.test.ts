@@ -144,6 +144,7 @@ import {
   type SerialRunOptions,
   type SerialCandidateRunOptions,
   type SerialCandidateWriterIsolationV1,
+  type SerialUnsealedCandidateChoiceV1,
   type SerialUnsealedCandidateV1,
 } from "../src/serial.js";
 import { SERIAL_CANDIDATE_REPAIR_VERSION } from "../src/critique.js";
@@ -8196,6 +8197,63 @@ test("a run nobody repairs reaches exactly the close it reaches today", async ()
   assert.equal(offered.reportText, plain.reportText);
   assert.deepEqual(offered.row, plain.row);
   assert.deepEqual(offered.composed, plain.composed);
+});
+
+/* Task 252. The critic's findings reached the owner's screen and then died with
+ * the pause: the sealed report had nowhere to put them, so a run that paid for
+ * a second opinion recorded that none was asked for. These drive the whole live
+ * path - the choice returned from the pause, through the runner, into the
+ * report Cairn writes - rather than handing the composer an input directly. */
+
+test("a critic's findings reach the sealed report through the pause", async () => {
+  const root = project();
+  const ran = { count: 0 };
+  const result = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST, ran)],
+    async onUnsealedCandidate() {
+      return {
+        choice: "continue",
+        ownerAnswers: {},
+        critique: {
+          reviewer: "some-reviewer-model",
+          findings: [
+            { checkId: "c1", judgment: "met", observation: "The change is present.", evidenceRefs: ["a1"] },
+            { checkId: "c2", judgment: "unclear", observation: "The packet does not say.", evidenceRefs: [] },
+          ],
+        },
+      };
+    },
+  });
+
+  assert.equal(result.status, "done");
+  if (result.status !== "done") return;
+  assert.match(result.reportText, /## The second opinion you asked for \(claims, not verified by Cairn\)/u,
+    "the seal lost the findings the owner paid for");
+  assert.match(result.reportText, /some-reviewer-model/u, "the reviewer is not named");
+  assert.match(result.reportText, /The packet does not say\./u, "the reviewer's own words are gone");
+  // Recording must not promote it: the critic still decides nothing.
+  assert.match(result.reportText, /Cairn did not check any of the statements below/u);
+});
+
+test("a malformed critique records nothing rather than something wrong", async () => {
+  const root = project();
+  const ran = { count: 0 };
+  const result = await runSerialTask(root, CHECKPOINT_REQUEST, {
+    adapters: [checkpointAdapter(root, CHECKPOINT_REQUEST, ran)],
+    async onUnsealedCandidate() {
+      return {
+        choice: "continue",
+        ownerAnswers: {},
+        // A judgment this slice does not define. Fail closed.
+        critique: { reviewer: "r", findings: [{ checkId: "c1", judgment: "probably", observation: "x", evidenceRefs: [] }] },
+      } as unknown as SerialUnsealedCandidateChoiceV1;
+    },
+  });
+
+  assert.equal(result.status, "done", "a bad critique must not cost the run its seal");
+  if (result.status !== "done") return;
+  assert.doesNotMatch(result.reportText, /## The second opinion you asked for/u,
+    "a malformed critique was recorded anyway");
 });
 
 test("the record says a repair happened, what it corrected, and that Cairn rechecked", async () => {
