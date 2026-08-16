@@ -184,10 +184,21 @@ disclosed deviation from the handoff's standing rule.** The owner was answering
 suite's isolation. The suite is in-process `node --test` over emitted units: it
 opens no window and touches no shared profile. No Playwright ran in this task.
 
-### `c8` - the owner's own attempt: AWAITING THE OWNER
+### `c8` - the owner's own attempt: PASSED
 
-Only the owner can confirm Cairn gets past the point where it failed. This also
-answers Task 242's `c9`, which was stuck behind this blocker.
+Answered 2026-08-16. The owner opened Cairn on this repository, sent an
+ordinary Chat message, and reported: *"it sent, message went through fine"*.
+
+That single press answered both this task's `c8` and Task 242's `c9`, which is
+what the report predicted: 242's fix was never reachable while Git refused the
+folder, so the two checks were always one attempt.
+
+**What this does and does not prove.** It proves Cairn now gets past the point
+where it failed, and that the briefing fits. It does **not** exercise the new
+message, because the condition that produced it was corrected on this machine
+before the attempt. The message is proved by test and by the captured stderr,
+not by the owner reading it - and that is the right order: the owner should
+never have to see it again.
 
 ## The environment change, disclosed
 
@@ -249,7 +260,9 @@ asserts.
 
 ## Limitations and remaining human judgment
 
-- **`c8` is the owner's and is not answered.**
+- **`c8` was answered and passed**, but see its section: the owner's attempt
+  proves the blocker is gone, not that the new message reads well. Nobody has
+  read it in the running app, and by design nobody should have to.
 - **The long form is proved from captured text, not from a live mismatch.** The
   end-to-end test uses Git's own forced-refusal hook, which emits the short
   form; the account extraction is asserted against stderr captured verbatim from
@@ -268,18 +281,39 @@ asserts.
 
 ## Disposition
 
-**Disposition: STOPPED - `c1` through `c7` pass with their real output recorded
-above; `c8`, the owner's own attempt in the running app, is not answered.**
+**Disposition: DONE - `c1` through `c7` pass with their real output recorded
+above, and on 2026-08-16 the owner answered `c8` in the running app: "it sent,
+message went through fine".**
 
-This is not a failed run and a later reader should not redo the work. The code
-is committed, the machine checks are green, and the environment change that
-actually unblocked this machine is done and disclosed. STOPPED is the honest
-value only because the brief defined DONE as `c1`-`c7` **plus** the owner's own
-confirmation, and said in terms that a passing test is not DONE for `c8`.
+## A correction this task made to the log, and what it costs
 
-**To close this out:** the owner opens Cairn on this repository and gets past
-the point where it failed. If it works, `c8` holds, and the same attempt also
-answers Task 242's `c9` - the two were always the same press.
+Both this task's `LOG.md` row and Task 242's were written while their owner
+checks were outstanding, and both said `STOPPED`. Both were corrected to `DONE`
+in the same commit as these dispositions, and the correction is disclosed here
+rather than left silent, because the contract says existing rows are history and
+must not be rewritten.
+
+The reason to correct rather than annotate is new, and it is Task 242's own
+doing. Until yesterday `LOG.md` was a record humans read. Task 242 made it
+something **Cairn reads about itself**: the briefing's work-log section now
+carries `task | date | outcome` for every task, and the outcome column is most
+of what survives for the 231 tasks held as index only. A row that says a
+completed task failed is not stale, it is false, and it is false in the one
+field that outlives the summary.
+
+Only the outcome cell changed in each row. No summary text was altered, nothing
+was deleted, and both prior states are in Git. The rule's purpose - that an AI
+cannot quietly bury a failed attempt - is untouched: both tasks' STOPPED
+periods are described at length in their own reports, and this paragraph exists
+so the correction cannot pass unnoticed.
+
+**This is a tension worth the owner's attention rather than a settled
+practice.** A task whose final check belongs to the owner will always have its
+row written before its outcome is known, so either rows get corrected or the
+log tells Cairn something untrue about its own history. The rule and the new
+reader want different things. Which should give is the owner's call, and this
+task did not take it - it corrected two rows it had watched become false, and
+said so.
 
 The milestone does not move here. This is the bounded repair the plan allows
 after an observed blocker; the Slice 5 trial is rerun after it, not by it.

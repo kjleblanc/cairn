@@ -227,10 +227,15 @@ by heading.
 
 ## Limitations and remaining human judgment
 
-- **`c9` is the owner's and is not answered.** Only the owner can send a real
-  message in their own Cairn and confirm it goes. Every machine check holds;
-  none of them is that. It is now answerable: the change is on `main`, in a
-  checkout that can run the app.
+- **`c9` was the owner's, and on 2026-08-16 they answered it: it sent.** Their
+  words: *"it sent, message went through fine"*. Cairn can be talked to about
+  its own repository again, which is what this task existed for and what Slice
+  5 requires.
+
+  It took two attempts. The first never reached the briefing at all - Git
+  refused the project folder on ownership grounds, for reasons that had nothing
+  to do with this task and are recorded in Task 247. Once that was cleared, the
+  message sent on the first try.
 - The conductor can no longer read what tasks 001-215 contained. It still
   knows they exist, their dates, and their outcomes, and the section tells it
   in plain words that it is not a source for their contents. Whether that
@@ -247,10 +252,15 @@ by heading.
 
 ## Disposition
 
-**Disposition: STOPPED — every machine check passes and the fix is verified by
-measurement; only `c9`, the owner's own confirmation in the running app, is
-outstanding, deferred by the owner's explicit choice to commit now and try the
-app later.**
+**Disposition: DONE — every machine check passes, the fix is verified by
+measurement, and on 2026-08-16 the owner confirmed `c9` in the running app:
+"it sent, message went through fine".**
+
+The paragraphs below were written while `c9` was still outstanding and are left
+as they were; this task was STOPPED for a day and is now closed. Its `LOG.md`
+row also predates the answer and says STOPPED, corrected in the same commit as
+this line - see Task 247's report for why that correction was made rather than
+left, and what it costs.
 
 This is not a failed run, and a later reader should not redo the work. Checks
 `c1`-`c8` pass with their real output recorded above, and the briefing on this
