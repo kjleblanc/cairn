@@ -1,220 +1,161 @@
 # Handoff — Cairn resident-program visual overhaul
 
-Written 2026-08-13 after Task 229 landed and Task 230 saved the authoritative
-implementation plan. The plan below is the execution authority; this file is
-orientation and a copy-ready start prompt.
+**This file always starts the NEXT unfinished slice.** It is refreshed when a
+slice closes, so if the ledger below disagrees with `git log`, trust `git log`
+and refresh this file before working from it.
 
-Copy the prompt below into a fresh Cairn/Codex conversation after Task 230 is
-committed and its report says `Disposition: DONE`.
+**Execution authority:** `docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md`.
+This file is orientation plus a copy-ready start prompt; the plan decides.
+
+## Where the overhaul stands
+
+| Slice | State | Evidence |
+|---|---|---|
+| 1 — Visual constitution and owner-approved system board | **DONE** | Task 255, commit `d9df42d`. Owner gate 1 approved 2026-08-16: *"Looks amazing. Passes all questions."* |
+| 2 — Extract neutral activity truth with no visible change | **NEXT** | prompt below |
+| 3 — Semantic foundations and CairnProgram primitive | not started | |
+| 4 — Chat-first workspace and Town/Pond retirement | not started | **Owner gate 2** falls at its end |
+| 5 — Core conversation surface | not started | |
+| 6 — Questions, proposals, approvals, operational papers | not started | |
+| 7 — Running, results, evidence, history, publication | not started | **Owner gate 3** at its end |
+| 8 — Welcome, projects, Dashboard, Settings, support | not started | |
+| 9 — Compact desktop and phone parity | not started | |
+| 10 — Retire obsolete Town/Pond implementation | not started | |
+| 11 — Whole-app qualification and final verdict | not started | **Owner gate 4** at its end |
+
+Slice 1 produced the written visual constitution at
+`docs/superpowers/specs/2026-08-13-cairn-resident-program-visual-design.md`, the
+lab board at `app/lab/resident-program.{html,tsx,css}`, and the two hash-checked
+approved references under `docs/visual-reference/`. Its tokens are a **proposal**
+and are deliberately not yet in `src/renderer/tokens.css` — promoting them is
+Slice 3's job, and Slice 3 must preserve the old aliases while unmigrated
+surfaces still consume them.
+
+## Start prompt for Slice 2
+
+Copy everything inside the fence into a fresh Cairn/Codex conversation.
 
 ```text
-Work on: Begin Cairn's app-wide resident-program visual overhaul described in:
+Work on: Slice 2 of Cairn's resident-program visual overhaul — extract neutral
+activity truth with no visible change.
 
-docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md
+Authority: docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md
+Read its Slice 2 section, section 3 (product truth that must survive), section 4
+(migration seams), and section 6 (global execution rules) completely.
 
-Own the roadmap, but execute it as separate serial Cairn tasks. In this
-conversation, complete only Slice 1 — the lab-only visual constitution and
-system board — and stop at Owner gate 1 with something rendered for me to
-inspect and exact safe trial steps. Do not start Slice 2 or cross an owner gate
-by guessing approval.
+Slice 1 closed DONE at commit d9df42d (Task 255) and was approved at Owner gate
+1. Read docs/ai-work/tasks/255-report.md before starting — its "Limitations" and
+its three disclosed defects are your inherited hazards.
 
-Start conditions
+Start conditions — verify each, do not assume:
 
-Do not edit anything until all of these are true:
+1. Project root: C:\Users\KenJL\Desktop\WebApp Projects\AI Coding Workflow Framework
+2. main is clean and between tasks.
+3. Task 255's report says Disposition: DONE.
+4. Claim the LOWEST genuinely free task number. List docs/ai-work/tasks/ across
+   the main checkout, EVERY registered worktree, and EVERY local branch. Any
+   filename beginning with a number takes it, including a report with no brief.
+   Do not trust a number quoted in any document, including this one: the handoff
+   that started Slice 1 named a number that was 25 short by the time it ran.
+   Commit the brief ALONE to claim your number.
+5. Ask the owner to confirm Lane A is free. Git cannot prove human lane
+   availability, and a registered worktree's existence proves nothing.
+6. Know what else is queued. At the time of writing, lane/h holds Task 254 as
+   DONE and UNLANDED — two commits ahead of main, four behind. It is waiting for
+   main to be between tasks so it can land. Landing is serial and first-ready
+   first-landed, so if lane/h lands while you are mid-task, re-sync main into
+   your work only BETWEEN tasks, never mid-task. Re-derive this yourself with
+   `git rev-list --count main..lane/h`; it will be stale.
 
-1. The project root is:
-   C:\Users\KenJL\Desktop\WebApp Projects\AI Coding Workflow Framework
-2. Task 229 is committed and its report says `Disposition: DONE`. Its observed
-   completion commit was `c3a9575`, but verify current history rather than
-   assuming it.
-3. Task 230's completion commit—after claim commit `77530e2`—contains its report
-   with `Disposition: DONE`, this plan, this handoff, and exactly one Task 230
-   LOG row. Verify the eventual completion commit rather than mistaking the
-   existing claim commit for completion.
-4. The complete working tree is clean and `main` is between tasks: no staged,
-   modified, or untracked paths.
-5. The owner confirms that no other lane is landing into `main` and Lane A is
-   available for this conversation; Git and worktree presence cannot prove
-   human lane availability.
-6. Do not create, delete, reuse,
-   reset, or move any registered worktree. A worktree's existence does not prove
-   its human lane is active or free.
-7. You have identified the lowest task number free in `docs/ai-work/tasks/` in
-   the main checkout and every registered worktree, and across every local
-   branch. Any filename beginning with that number—including a report without
-   a brief—takes it. Do not assume the next number.
+Do not create, delete, reuse, reset or move any registered worktree.
 
-If any condition fails, make no edits. Report the exact blocker and the smallest
-safe next step.
+THIS SLICE EDITS PRODUCTION CODE. That inverts Slice 1, which was forbidden to
+touch app/src/**. Three postures change here:
 
-Required reading before implementation
+- You will edit app/src/** for the first time in this overhaul.
+- Your Playwright scenarios DO need the app-token mutex. Slice 1's did not.
+- There is NO owner gate in this slice. Owner gate 2 falls at the end of Slice 4.
+  Do not ask the owner to approve a look; ask only at a real risk boundary.
 
-Read completely:
+Visible finish line: the running app looks EXACTLY as it does now, while its
+truthful runtime state stops living in a Town-named module, and a neutral
+activity projection can drive Cairn and written status without worker scenery.
+"No visible change" is the deliverable, not a side effect.
 
-- `AGENTS.md`
-- `docs/ai-work/PROJECT.md`
-- `docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md`
-- `docs/ai-work/tasks/229-brief.md`
-- `docs/ai-work/tasks/229-report.md`
-- `docs/ai-work/tasks/230-brief.md`
-- `docs/ai-work/tasks/230-report.md`
-- `docs/ai-work/HANDOFF-resident-program-visual-overhaul.md`
-- the latest relevant visual records named by the saved plan
+Work, in this order:
 
-Inspect current files rather than trusting historical line numbers, especially:
+1. Characterize app/src/renderer/town/presentation.ts BEFORE changing anything.
+   Capture its current behaviour as tests that pass against today's code. Those
+   characterization tests are the real deliverable; the new module is the easy
+   half.
+2. Create app/src/renderer/activity/presentation.ts and
+   app/tests-unit/activitypresentation.test.ts.
+3. Move consumers to it: app/src/renderer/screens/Workspace.tsx,
+   app/src/renderer/components/TownSquare.tsx,
+   app/src/renderer/components/PondLine.tsx, and app/tsconfig.unit.json.
+4. Separate truth fields from Town-only flight and landing positions WITHOUT
+   changing the rendered Town yet.
+5. Delete app/src/renderer/town/presentation.ts and
+   app/tests-unit/townpresentation.test.ts in the SAME task, only after every
+   import and characterization has moved.
+6. Touch app/tests-unit/pondline.test.ts only to change its import. Its outgoing
+   visual contract stays until Slice 4.
 
-- `app/src/renderer/App.tsx`
-- `app/src/renderer/screens/Workspace.tsx`
-- `app/src/renderer/screens/Chat.tsx`
-- `app/src/renderer/screens/Dashboard.tsx`
-- `app/src/renderer/screens/TaskRun.tsx`
-- `app/src/renderer/tokens.css`
-- `app/src/renderer/app.css`
-- `app/src/renderer/motion.css`
-- `app/src/renderer/town/presentation.ts`
-- `app/src/renderer/town/model.ts`
-- `app/src/renderer/components/ProjectRail.tsx`
-- `app/src/renderer/components/Scene.tsx`
-- `app/src/renderer/components/BuilderProposalReview.tsx`
-- `app/src/main/bridge/phonepage.ts`
-- the relevant lab, visual, accessibility, unit, and Playwright tests
+Preserve, and prove you preserved: monotonic snapshots, repeated-activity
+deduplication, dispatch/return/terminal cue ordering, stale-timer inertness,
+STOPPED to ERROR escalation, terminal settlement, new-run reset, commentary over
+a terminal result, reduced-motion semantic equality, current DOM and CSS, Town
+visuals, project switching, capture identity, poll intervals, and focus.
 
-Visually inspect the approved references before drawing or styling:
+Checks. Run from app/:
+  npm.cmd run typecheck
+  npm.cmd run test:unit
+  npm.cmd run build:vite
+then mutex-protected focused Playwright for run state, reattachment, STOPPED,
+ERROR and reduced motion, named in your brief. Keep workers: 1 — it protects the
+owner's real conductor connection and is not a performance preference. Acquire
+every required token location atomically (currently the OS-temp cairn-app-token
+and repository-local app/.app-token where the harness requires both), track what
+YOU created, and release only that, in finally. If acquisition fails, wait.
+Never remove a token another lane or the owner holds.
 
-- Darkened approved UI mockup:
-  `C:\Users\KenJL\.codex\generated_images\019ffd1c-5e39-7273-89bb-aeff037f9650\exec-916fd1da-c80e-47ca-8be7-b725b8a39398.png`
-  expected SHA-256:
-  `5B56B4A7018D35BA4D815DD161E591470092915E11A705873E758B3F698CF470`
-- Face audition board, with face D selected:
-  `C:\Users\KenJL\.codex\generated_images\019ffd1c-5e39-7273-89bb-aeff037f9650\exec-2d6630ac-e3b0-4191-9618-8c30e34589c5.png`
-  expected SHA-256:
-  `AFCAD4FF92CF8C07B7F1E00B34B1D28E2F2A12F70B964EDB454AF275738EC5D0`
-- Original mood references:
-  `C:\Users\KenJL\Desktop\CAIRN REF\ref1.png` through `ref8.png`
+Also required: causal state-transition tests, source mutants for stale snapshots
+and terminal regression, and a rendered no-visible-change assertion with
+controlled fonts, timers and motion wherever pixels are compared. Add no
+mutation-test framework and no dependency.
 
-Verify the two approved hashes before copying them into the tracked design
-reference area required by Slice 1. If either source is absent or differs, stop
-and ask me to reattach it. The generated mockup and D face are the approved
-target; the original images are mood influences, not assets or layouts to copy.
+Three hazards Task 255 created or hit. Do not repeat them:
 
-Fixed owner decisions
+- Any new Playwright config MUST declare its own outputDir. Playwright clears
+  that directory at the start of every run and the default is the shared
+  test-results; Task 255 destroyed Task 229's cited screenshot that way, and the
+  original was gitignored and is unrecoverable.
+- Never round-trip a source file through PowerShell Get-Content/Set-Content. It
+  double-encodes non-ASCII and can empty the file. Use the editing tools, and
+  use a BOM-free file for any git message written from PowerShell.
+- Re-run a test after you edit it. Task 255 shipped an edited assertion that had
+  never been run and was passing for the wrong reason; the full suite caught it.
 
-- Chat is the primary product surface.
-- Retire the pond, town, worker cast, literal stone scene, and visual task/agent
-  representation.
-- Cairn is a small resident software program, not a humanoid mascot, animal,
-  spider robot, orb, or fixed oversized avatar.
-- Cairn's approved body is three offset rounded software panes: warm amber front,
-  translucent teal rear panes, clipped top-right corner, and tiny cyan seam/data
-  marks.
-- Face D is the base: outlined square left eye, closed crescent right eye, and
-  tiny lopsided stepped smile.
-- The primary UI is a slightly darker dusty blue-gray shell around warm
-  parchment conversation paper, with deep blue-green ink, teal actions, apricot
-  owner notes, pale-blue activity, sage success, and restrained coral risk.
-- “Slightly darker” modifies the approved daylight shell by one step. It does
-  not mean returning to a dark/digital/neon workspace.
-- Preserve System, Light, and Dark choices. The Dark treatment is the same warm
-  desk after dusk, not the old garden.
-- The product is matte, tactile, calm, and lightly playful—not glassy,
-  circuit-board-like, ominous, generic “AI,” or a copy of any reference.
-- Cairn can inhabit the currently relevant surface but must not be repeated as
-  decoration everywhere.
-- Every important state remains written in plain language. Color, motion, and
-  expression reinforce truth but never carry it alone.
-- Face D itself is approved; the derived thinking/pushback/working/checking/
-  DONE/STOPPED/error expressions are not. Bring those to Owner gate 1.
+Boundaries. No dependency install, provider or model call, credential use, paid
+call, external service write, push, publication or deployment. Never delete or
+transform an owner's .cairn/town-square.json. Protect every tracked, staged,
+modified and untracked path, including untracked evidence under
+app/test-results/. Stage by exact name; never clean, stash, reset, broadly
+stage, or rewrite history. Subagents may perform read-only audits, but only one
+task and one writer may change this repository at a time.
 
-Behavior that must not change
+STOP if truth cannot be separated without changing runtime semantics, or if a
+stale project or run can paint the current project.
 
-This is presentation architecture, not a workflow rewrite. Preserve:
-
-- conversation, streaming, queues, pushback, questions, proposals, dispatch,
-  approvals, cancellation, stop/retry/take-back/new-conversation, reattachment,
-  results, evidence, commentary, follow-ups, push, and connection recovery;
-- all safety/authorization boundaries and exact provider/model/data/cost/
-  recovery disclosures;
-- verified facts versus worker-reported claims and owner context;
-- literal DONE/STOPPED/ERROR semantics;
-- App overlay mounting, inert background, keyboard behavior, and focus restore;
-- project switching, stale-project guards, serial runtime, and evidence-capture
-  identity/bounds;
-- runtime presentation truth. `town/presentation.ts` may be renamed only in a
-  later slice after equivalent monotonicity, dedupe, stale-timer, terminal, and
-  reduced-motion tests exist;
-- saved owner data. Never delete or transform `.cairn/town-square.json`;
-- Task 229's Builder proposal card as lab-only, literal, actionless,
-  nonterminal, and authority-free;
-- the phone companion's currently shipped self-contained, LAN-only/no-cloud/no-
-  third-party, read-only authority. This visual plan neither implements nor
-  cancels the separately accepted future full-parity direction;
-- Playwright's exact then-current mutex protocol and `workers: 1` discipline.
-  Track ownership for every required token location and release only what the
-  task created, in `finally`.
-
-No-go constraints
-
-- Do not begin by changing the production Workspace or app palette. Slice 1 is
-  a lab-only board and written visual constitution.
-- No big-bang rewrite of `Chat.tsx` or `app.css`.
-- No new dependency, font, browser install, remote image, image-generation call,
-  provider/model call, credential use, paid call, external write, push,
-  publication, or deployment.
-- No deletion of legacy presentation code until every consumer and truthful
-  behavior has migrated and replacement tests pass.
-- Do not bulk-delete old visual tests. Classify each as preserved, rewritten,
-  or replaced, with replacement proof.
-- No perpetual decorative motion, delayed typewriter text, or transformed
-  interactive container. Reduced motion reaches the same semantic end state.
-- Do not weaken contrast, touch targets, focus visibility, native semantics,
-  screen-reader status, minimum-window support, or long-copy containment.
-- Do not clean, stash, reset, broadly stage, overwrite, or disturb another
-  lane's work.
-- Subagents may perform read-only audits/reviews, but only one task and one
-  writer may change this repository at a time.
-- Slice 1 may write only its brief/records, the two exact tracked design-reference
-  copies, lab-only files, and focused lab/qualification tests/config. Do not edit
-  `app/src/**`, `core/**`, `app/src/main/bridge/phonepage.ts`, package manifests
-  or locks, IPC, stores, or production routes. Its phone view is synthetic lab
-  composition; production Cairn belongs to Slice 3.
-- “Product-dark” means absent from production imports, routes, and bundles—not
-  visually dark.
-
-First action
-
-Run a read-only preflight:
-
-- confirm the exact repository root;
-- inspect complete Git status and recent history;
-- confirm Task 229 and Task 230 DONE reports and commits;
-- confirm the saved plan and handoff are committed;
-- list registered worktrees and local branches;
-- inventory task filenames everywhere required by `AGENTS.md`;
-- establish that `main` is clean, between tasks, and not receiving a landing;
-- inspect Task 229's final lab/config/test paths so Slice 1 composes with them;
-- verify the approved reference hashes.
-
-Then restate Slice 1's owner-visible outcome in plain language. Claim the lowest
-genuinely free task number by writing its complete brief with stable `cN` checks
-and commit that brief alone before any source or reference-copy change.
-
-After that brief-only claim commit, copy the approved references only to:
-
-- `docs/visual-reference/cairn-resident-program-ui-approved-2026-08-13.png`
-- `docs/visual-reference/cairn-face-d-approved-2026-08-13.png`
-
-If either destination already exists, verify the expected hash and stop on any
-mismatch; never overwrite a different file.
-
-Implement and qualify only Slice 1 exactly as the saved plan defines it. Use code-native
-geometry and synthetic lab data. Bring me the rendered board—not code—to judge.
-Provide exact safe lab steps and screenshots for System, Light, Dark, wide,
-minimum, compact, and phone compositions. Test System through browser
-color-scheme emulation rather than changing my operating-system setting. Shut
-down all lab/browser processes afterward and prove the port and any task-owned
-token were released. Pause at Owner gate 1. Human-taste DONE requires my
-explicit verdict; do not continue automatically.
-After my verdict, close Slice 1 with its truthful report, one LOG row, and exact-
-path completion commit as DONE or STOPPED under `AGENTS.md`. Never begin Slice 2
-in this conversation.
+Close with a truthful report naming every file touched and every check's real
+result, one LOG row, and one exact-path completion commit as DONE or STOPPED
+under AGENTS.md. Then refresh this handoff for Slice 3. Do not begin Slice 3 in
+that conversation.
 ```
+
+## Required reading for any slice
+
+- `AGENTS.md` and `docs/ai-work/PROJECT.md`
+- the saved plan, and the preceding slice's report
+- the complete Git status, and the current files themselves rather than
+  historical line numbers
