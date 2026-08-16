@@ -139,6 +139,69 @@ Task 247's `c8` and Task 242's `c9` are now the same single press.
   the landing task masquerades as the most recent work in the very section
   Task 242 added. Move the row to its number and say so.
 
+## 2026-08-16: Cairn ran on Cairn, crashed, and taught us three things
+
+The owner ran a real task through Cairn on Cairn - request, pushback, Task
+Card, confirmed Codex Exec dispatch, real edits. **Cairn crashed before
+sealing.** Tasks 248 (Cairn's own, unsealed) and 249 (the adoption) hold the
+detail. Three findings, in order of how much they matter:
+
+1. **A candidate silently became the product.** `launch-cairn.ps1` compares
+   timestamps, saw `src` was newer, rebuilt, and started the app - so the Cairn
+   the owner reopened was **running the worker's unsealed edit**, with no
+   report, no log row and no commit anywhere. They reasonably concluded the
+   task was done, because the product showed them the finished result. Nothing
+   lied; Cairn never claimed `DONE`. But the evidence of completion reached the
+   owner **through the running app, around the envelope** that is supposed to
+   be the only thing allowed to say so. **Not fixed. No task claimed.** This is
+   the sharpest thing Slice 5 has produced and no fixture could have found it.
+2. **Abrupt-loss protection held under a real crash.** No `DONE`, no report, no
+   log row, no commit, edits inspectable. Proved by an actual crash rather than
+   a test, which is worth more than the test.
+3. **`npm start` is the wrong launcher and this handoff previously implied
+   otherwise.** It is `electron-forge start`, dev mode, which watches
+   `src/main/main.ts` and restarts Electron when it changes - so a Cairn task
+   that edits Cairn's main process kills the run that dispatched it. **Use
+   `app\launch-cairn.ps1`.**
+
+Also settled that day: Tasks 242 and 247 are **DONE** - the owner sent a real
+message on the Cairn repo and it went. Task 249 adopted the crashed run's two
+lines as reviewed work, mutation-proving the worker's inherited test rather
+than trusting it, and recorded two consequences nobody knew when the risk was
+set aside: **on macOS, removing the application menu stops copy and paste
+working in text fields** (this app builds for macOS; Windows is unaffected),
+and keyboard DevTools is gone on every platform.
+
+## Gate 3: what it is, and the runbook
+
+**Half of it does not exist.** The plan says the owner chooses `required` or
+`optional` mode. **Required is not implemented on the live route** - the
+`"required" | "optional"` types live in `app/src/shared/quality-preview.ts`,
+`task-review.ts` and `TaskReview.tsx`, all Q9/Builder shadow machinery, while
+the live `CandidateCritique.tsx` offers exactly **Ask for one review** and
+**Skip this**. The plan's recommended milestone mode cannot be honoured without
+new work. Gate 3 therefore reduces to approving the call.
+
+**What the call actually sends**, read out of `composeSerialCritiquePacket` in
+`core/src/critique.ts` rather than off the card: four artifacts - the accepted
+outcome, the changed file **paths**, Cairn's own check results with exit codes,
+and the worker's claims. **No file contents.** Section 8 of the plan permits up
+to eight tracked files and 32,000 characters under separate approval; this
+implementation sends none. One request, no retry. The card states its cost
+ceiling before anything is pressed.
+
+**Reaching the card:**
+
+1. Start with `app\launch-cairn.ps1`, **not** `npm start`.
+2. Ask for a small change, ideally **not** under `app/src/main/`.
+3. **Accept at least one check on the Task Card.** With zero promise rows
+   `composeSerialCritiquePacket` returns `null`, so there is **no critic offer
+   at all** and gate 3 is unreachable. It fails silently. This is the inherited
+   promise-free-run limitation, and this is where it bites.
+4. Approve the worker; wait for the unsealed candidate.
+5. The second-opinion card appears above the two choices. **That card is gate
+   3.**
+
 **3. Gate 3 is still unspent, and it is the owner's alone.** Slice 3's one real
 critic call has never been made. Everything around it is built and proved
 against the fixture conductor. It costs money and sends project data off the
