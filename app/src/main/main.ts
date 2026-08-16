@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, screen } from "electron";
+import { app, BrowserWindow, dialog, Menu, screen } from "electron";
 import { lstatSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -249,6 +249,7 @@ export function createWindow(): BrowserWindow {
   // Its cold-restore phase parks offscreen like every other automated run.
   const e2e = process.env.CAIRN_E2E === "1"
     && !(builderLiveE2eRequested && task233LivePhase === "call");
+  Menu.setApplicationMenu(null);
   const win = new BrowserWindow({
     width: 1320,
     height: 820,
