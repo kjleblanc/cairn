@@ -1,6 +1,11 @@
-# Handoff - Slice 5, and the three things it is waiting on
+# Handoff - Slice 5, partly proved on Cairn itself
 
-Written after Task 246 closed. The saved plan
+**Last refreshed 2026-08-16 after Task 252.** Read "2026-08-16, later: three
+real runs" first - it is the newest section and supersedes the older ones where
+they disagree. Sections above it are kept because they still explain how each
+slice was built, not because their status lines are current.
+
+Originally written after Task 246 closed. The saved plan
 `docs/superpowers/plans/2026-08-14-cairn-gauntlet-restoration.md` is still the
 execution authority; this file is orientation.
 
@@ -18,11 +23,17 @@ before Slice 4 was executed is in Git history at `46715d8`.
 | 2 - authoritative Task Card and checks | **Done** (Task 239) |
 | 3 - one separately approved tool-free critic | **Code complete and green. The live call has still never been made.** (Tasks 240, 241) |
 | 4 - confirm one allegation, permit one repair | **Done** (Task 244) |
-| 5 - prove the milestone on Cairn itself | Not started. **Waits only on gate 3 now** - the other two blockers are settled; see below |
+| 5 - prove the milestone on Cairn itself | **Partly done, for real.** Cairn ran on Cairn three times on 2026-08-16 and sealed one of them with its own commit. What is missing is a single run that carries the whole journey **and** leaves a durable record of it - see below |
 | 6 - retire the shadow routes | Not started; post-milestone by design |
 
 Recent commits, newest first:
 
+- `de9336a` **Task 252**: the critic's findings survive the seal
+- `0e22486` Task 252 part 1: the report can carry them
+- `6b9ac2f` / `1fc2407` / `65c3f01` **Task 253**: untrack the build log, adopt the run it stranded
+- `dcd3a60` **Task 250 - Cairn's own commit**, authored by Cairn
+- `574b85b` Close Tasks 242 and 247 DONE
+- `44b8428` **Task 249**: adopt the menu-bar change Cairn's crashed run left behind
 - `991b569` **Task 247**: say something true when Git refuses the project folder
 - `d48b65f` Claim Task 247
 - `d10805f` Stop the handoff quoting an unpushed count that cannot stay true
@@ -139,7 +150,59 @@ Task 247's `c8` and Task 242's `c9` are now the same single press.
   the landing task masquerades as the most recent work in the very section
   Task 242 added. Move the row to its number and say so.
 
-## 2026-08-16: Cairn ran on Cairn, crashed, and taught us three things
+## 2026-08-16, later: three real runs, one sealed, and what they cost to learn
+
+**Read this before the sections below it; where they disagree, this is newer.**
+
+Cairn ran on Cairn three times. Tasks 248, 250 and 251 are Cairn's own records,
+in Cairn's own words. **Task 250 sealed completely** - request, interpretation,
+a risk the owner set aside, confirmed Codex Exec dispatch, real edits, Cairn
+verifying the changed files against Git rather than against claims, Cairn
+authoring the report, **and Cairn's own exact-path commit `dcd3a60`**. That is
+most of the milestone's spine, done for real.
+
+Tasks 248 and 251 did not seal, for two different reasons, and both reasons are
+now fixed:
+
+| Run | What happened | Fixed by |
+|---|---|---|
+| 248 | Cairn crashed mid-run | not fixed - cause never established |
+| 250 | **sealed, with its own commit** | - |
+| 251 | completed, then **skipped its commit** | Task 253 |
+
+**Task 253 found the loop that cost 251 its commit.** `app/launch-build.log` was
+tracked by accident, and `launch-cairn.ps1` rewrites it on every rebuild - so
+launching Cairn dirtied the repo, and a dirty repo makes the next run skip its
+exact-path commit. Cairn edits your source, you relaunch to look, the log
+changes, the next run silently loses its work. Untracked and ignored now, proved
+by doing the thing that used to break it.
+
+**Task 252 fixed the record layer.** A run that paid for a critic sealed into a
+report that never mentioned one was asked for: `records.ts` had no section for
+findings, and they lived only in Main's foreground-only sidecar. They now reach
+the sealed report, attributed as the reviewer's claim and quarantined like every
+other untrusted field. **This is what makes the next gate-3 run leave evidence
+that outlives the window.**
+
+Three things remain open from those runs, none of them claimed:
+
+1. **A candidate silently became the product.** After 248 crashed, the launcher
+   rebuilt Cairn from the worker's *unsealed* edit, so the app the owner
+   reopened was running unverified code with no report, no log row and no commit
+   anywhere. They reasonably concluded the task was done, because the product
+   showed them the finished result. Nothing lied - Cairn never claimed `DONE` -
+   but the evidence of completion reached the owner **through the running app,
+   around the envelope**. Still true today.
+2. **"Protected starting work" names nothing.** A run that skips its commit tells
+   the owner only that. Task 253 removed the commonest cause without making the
+   sentence useful.
+3. **Why 248 crashed was never established.** No crash appeared in the Windows
+   event log. `npm start` (electron-forge dev mode) watches `src/main/main.ts`
+   and restarts on change, which a Cairn task editing that file would trigger and
+   which looks exactly like a crash - but the owner uses the `Cairn` desktop
+   shortcut, which runs `launch-cairn.ps1` and watches nothing. Unexplained.
+
+## Superseded: the earlier reading of that first crash
 
 The owner ran a real task through Cairn on Cairn - request, pushback, Task
 Card, confirmed Codex Exec dispatch, real edits. **Cairn crashed before
@@ -202,8 +265,20 @@ ceiling before anything is pressed.
 5. The second-opinion card appears above the two choices. **That card is gate
    3.**
 
-**3. Gate 3 is still unspent, and it is the owner's alone.** Slice 3's one real
-critic call has never been made. Everything around it is built and proved
+**3. Gate 3 - and this one is genuinely unresolved.** The owner reports that the
+review card appeared and that they pressed review, which would mean the first
+real critic call **has** been made. Nothing on disk agrees: Task 250 recorded no
+`cN` rows, and `app/src/main/critique.ts:121` returns `null` from
+`composeSerialCritiquePacket` when there are no rows, so the card cannot be
+offered on such a run. Both cannot be true.
+
+**The discriminator is concrete: the review card names a provider, a model and a
+dollar ceiling.** A press with no price on the card was the pause's *Continue*,
+not the review offer. Settle this before treating Task 241's `c9`/`c10` as
+closed, and before assuming money was or was not spent. Everything below in this
+older section was written believing the call had never happened.
+
+Slice 3's one real critic call may or may not have been made. Everything around it is built and proved
 against the fixture conductor. It costs money and sends project data off the
 machine; the card states its own ceiling before anything is pressed. **A new
 conversation must not spend it on its own initiative, and must not treat a
@@ -212,15 +287,19 @@ only unsettled blocker.
 
 ## Current baselines - measure against these
 
-Re-measured on merged `main` at `c543a70` on 2026-08-15 unless noted.
+Re-measured on `main` at `de9336a` on 2026-08-16.
 
 | Suite | Result |
 |---|---|
-| `npm test -w @cairn/core` | **508 / 498 pass / 0 fail / 10 skipped** (not re-run since Task 246) |
-| `app: npm run test:unit`, run **from `app/`** | **940 / 929 pass / 9 fail / 2 skipped**, 305-357s |
-| `npm test -w cairn-cli` | **24 / 24 pass / 0 fail**, 5s (not re-run) |
-| `npm run typecheck` (root) | PASS, **26s** |
-| `npm run build` (root) | PASS, **13.5s** |
+| `npm test -w @cairn/core` | **518 / 508 pass / 0 fail / 10 skipped**, ~21 min |
+| `app: npm run test:unit`, run **from `app/`** | **943 / 932 pass / 9 fail / 2 skipped**, 305-357s |
+| `npm test -w cairn-cli` | **24 / 24 pass / 0 fail**, 5s (last run Task 247) |
+| `npm run typecheck` (root) | PASS, ~26s |
+| `npm run build` (root) | PASS, ~14s |
+
+Core rose 508 -> 513 -> 518 across Tasks 247 and 252; app unit rose 940 -> 941 ->
+943 across Tasks 249, 250 and 251. Every rise is an added test, and the nine
+Builder failures have been diffed identical at every step.
 
 The app-unit count rose 935 -> 940 because Task 242 added five tests; the nine
 failures are unchanged and their names diff identically. Typecheck and build
@@ -282,9 +361,14 @@ fixed them and `cli` has been green since `fdcf896`.
 
 ## Copy-ready prompt
 
-**Gate 3 is the only blocker left, and Task 242's `c9` is the only owed
-answer.** Both are the owner's. Slice 5 becomes runnable the moment gate 3 is
-given; `c9` can be answered in a couple of minutes whenever they open Cairn.
+**Slice 5 is no longer blocked - it is partly done.** Cairn has run on itself
+and sealed a run with its own commit. What is missing is one run that carries
+the whole journey *and* records it, which is now possible for the first time:
+Task 253 restored Cairn's ability to commit, and Task 252 made the critic's
+findings survive the seal.
+
+**Settle the gate-3 question first** - see the discriminator above. It decides
+whether a paid call has already happened.
 
 ```text
 Work on: Continue Cairn's Gauntlet restoration described in:
@@ -297,16 +381,20 @@ Read first, before editing anything:
 - docs/ai-work/tasks/242-report.md, 244-report.md, 245-report.md, 246-report.md
 - AGENTS.md, and the complete Git status
 
-Slices 1 to 4 are done. Task 242 is landed and Task 245's c10 is answered
-(it FAILED and the owner deferred the fix - do not reopen it, and do not start
-a third readability attempt). Slice 5 - one whole Gauntlet journey on Cairn
-itself - now waits only on gate 3, the one real critic call, which is the
-owner's alone and costs money. Do not spend it on your own initiative, and do
-not begin Slice 6.
+Slices 1 to 4 are done. Task 245's c10 FAILED and the owner deferred the fix -
+do not reopen it and do not start a third readability attempt. Cairn has now
+run on itself three times and sealed one run with its own commit (dcd3a60), so
+Slice 5 is partly done rather than blocked. What is missing is one run that
+carries the whole journey AND records it, which Tasks 252 and 253 just made
+possible. Do not begin Slice 6.
 
-Task 242's c9 is still owed: the owner sends one ordinary Chat message in
-Cairn on this repo and says whether it goes. Steps are at the end of
-242-report.md. If it sends, record it and move 242 to DONE.
+Do not assume gate 3 is unspent OR spent - the handoff names a concrete
+discriminator; settle it with the owner before acting either way. Never spend a
+paid call on your own initiative.
+
+Three findings are recorded and unclaimed: a candidate can silently become the
+product on next launch, "protected starting work" names nothing, and the Task
+248 crash was never explained.
 
 No provider, model or credential work without the owner's approval on that
 exact call. A paid call needs its own gate, given after they read the card.
@@ -325,8 +413,21 @@ with it.
 
 ## Open owner decisions carried forward
 
-- **Gate 3: the one real critic call.** Unspent. The only remaining blocker.
-- **Task 242's `c9`.** Owed - one real Chat message on this repo. See above.
+- **Gate 3: whether the one real critic call has already happened.** Genuinely
+  unresolved - the owner reports pressing review, the records say the card could
+  not have been offered. The discriminator is whether the card showed a price.
+  Settle before treating Task 241's `c9`/`c10` as closed either way.
+- **Task 242's `c9`.** ANSWERED and passed - *"it sent, message went through
+  fine"*. Task 242 is DONE, as is Task 247, whose `c8` was the same press.
+- **A candidate can silently become the product.** After a crash the launcher
+  rebuilt Cairn from an unsealed candidate, and the owner reasonably read the
+  result as done. Recorded in Task 249's report; **no task claimed.**
+- **"Protected starting work" names nothing** when a run skips its commit. Task
+  253 removed the commonest cause without making the sentence useful. **No task
+  claimed.**
+- **Why Task 248 crashed was never established.** **No task claimed.**
+- **Main's half of Task 252 has no test**, and the on-screen result card still
+  does not carry critic findings - only the sealed report does.
 - **Task 245's `c10`.** ANSWERED and FAILED; the fix is deferred to a separate
   beginner-friendliness effort, not to a third attempt here. See above.
 - **Whether `maxLogDetailChars` should rise.** Task 242 landed it at 20,000,
