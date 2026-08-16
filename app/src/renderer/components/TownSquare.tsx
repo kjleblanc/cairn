@@ -12,7 +12,7 @@ import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../
 import { computeTownLayout, townShore, TOWN_BOUNDS, TOWN_CENTER, TOWN_SHORE_BESIDE_CHAT } from "../town/layout";
 import { TOWN_FACES, faceForAdapter, type TownFaceDef, type TownFaceState } from "../town/faces";
 import { townModelFromRuntime, type TownEntity, type TownRelationship } from "../town/model";
-import { townPresentationStatus, type TownRuntimePresentation, type TownTruth } from "../town/presentation";
+import { activityStatus, type ActivityPresentation, type ActivityTruth } from "../activity/presentation";
 import { TownDetail } from "./TownDetail";
 
 type SelectionKey = { kind: "entity" | "relationship"; id: string };
@@ -39,7 +39,7 @@ function relationshipMidpoint(from: TownPoint, control: TownPoint, to: TownPoint
   };
 }
 
-function cairnFaceState(truth: TownTruth): TownFaceState {
+function cairnFaceState(truth: ActivityTruth): TownFaceState {
   if (truth === "thinking" || truth === "starting") return "thinking";
   if (truth === "working" || truth === "checking") return "working";
   if (truth === "done") return "done";
@@ -47,11 +47,11 @@ function cairnFaceState(truth: TownTruth): TownFaceState {
   return "ready";
 }
 
-function cairnStateLabel(truth: TownTruth): string {
+function cairnStateLabel(truth: ActivityTruth): string {
   return truth === "quiet" ? "ready" : truth;
 }
 
-function visualTruth(presentation: TownRuntimePresentation): TownTruth {
+function visualTruth(presentation: ActivityPresentation): ActivityTruth {
   if (presentation.truth === "thinking") return "thinking";
   const cue = presentation.activeCue;
   if (cue?.kind === "dispatch" && (presentation.truth === "starting" || presentation.truth === "working")) return "working";
@@ -60,7 +60,7 @@ function visualTruth(presentation: TownRuntimePresentation): TownTruth {
   return presentation.truth;
 }
 
-function townGroundNote(hasWorker: boolean, truth: TownTruth): string {
+function townGroundNote(hasWorker: boolean, truth: ActivityTruth): string {
   if (hasWorker) return "Select a worker or its thread for live details.";
   if (truth === "thinking") return "Cairn is replying in the conversation.";
   if (truth === "starting") return "Cairn is preparing the approved handoff.";
@@ -183,7 +183,7 @@ export function TownSquare({
   projectName: string;
   task: RunSessionSnapshot | null;
   stream: ConductorStreamSnapshot | null;
-  presentation: TownRuntimePresentation;
+  presentation: ActivityPresentation;
   positions: Record<string, TownPoint>;
   /** True only while the narrow window is showing the pond whole, over the
    *  conversation. There is then no shore to keep the cast behind. */
@@ -352,7 +352,7 @@ export function TownSquare({
 
   const hasWorker = model.entities.some((entity) => entity.kind === "worker");
   const hasSavedPosition = Object.keys(positions).length > 0;
-  const status = townPresentationStatus(presentation);
+  const status = activityStatus(presentation);
   const visibleTruth = visualTruth(presentation);
   const cairnState = cairnStateLabel(visibleTruth);
   const cairnAccessibleState = cairnStateLabel(presentation.truth);

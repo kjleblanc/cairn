@@ -18,7 +18,7 @@ import { createRoot } from "react-dom/client";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../src/shared/ipc";
 import { cairn } from "../src/renderer/api";
 import { TownSquare } from "../src/renderer/components/TownSquare";
-import { hydrateTownPresentation } from "../src/renderer/town/presentation";
+import { hydrateActivityPresentation } from "../src/renderer/activity/presentation";
 
 const DIR = "C:\\lab\\garden-lab";
 
@@ -132,7 +132,7 @@ function ChatMock() {
             narrow-window line to open the pond with, so the cast keeps the
             shore the wide layout reserves for the conversation. */}
         <TownSquare projectName="Garden Lab (mock)" task={task} stream={stream}
-          presentation={hydrateTownPresentation(task, stream)}
+          presentation={hydrateActivityPresentation(task, stream)}
           positions={positions} onPositionsChange={setPositions}
           wholePond={false}
           onFocusChat={() => setOpen(true)} onOpenRun={() => undefined} />

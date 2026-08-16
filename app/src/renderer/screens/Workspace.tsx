@@ -14,11 +14,11 @@ import { ProjectRail } from "../components/ProjectRail";
 import { TownSquare } from "../components/TownSquare";
 import { ErrorCard } from "../components/Ui";
 import {
-  advanceTownCue,
-  hydrateTownPresentation,
-  observeTownPresentation,
-  settleTownPresentation,
-} from "../town/presentation";
+  advanceActivityCue,
+  hydrateActivityPresentation,
+  observeActivityPresentation,
+  settleActivityPresentation,
+} from "../activity/presentation";
 import { Chat } from "./Chat";
 import { Dashboard } from "./Dashboard";
 import { TaskRun } from "./TaskRun";
@@ -54,7 +54,7 @@ export function Workspace({
   const [conductor, setConductor] = useState<ConductorStatus | null>(null);
   const [townTask, setTownTask] = useState<RunSessionSnapshot | null>(null);
   const [townStream, setTownStream] = useState<ConductorStreamSnapshot | null>(null);
-  const [runtimePresentation, setRuntimePresentation] = useState(() => hydrateTownPresentation(null, null));
+  const [runtimePresentation, setRuntimePresentation] = useState(() => hydrateActivityPresentation(null, null));
   const [centerView, setCenterView] = useState<CenterView>("chat");
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
   // The narrow window (Decision 9). 1260px is the app's existing breakpoint;
@@ -123,8 +123,8 @@ export function Workspace({
     const hydrate = runtimeDirRef.current !== dir;
     const current = runtimePresentationRef.current;
     const next = hydrate
-      ? hydrateTownPresentation(task, stream)
-      : observeTownPresentation(
+      ? hydrateActivityPresentation(task, stream)
+      : observeActivityPresentation(
         current,
         task,
         stream,
@@ -181,7 +181,7 @@ export function Workspace({
     setTownTask(null);
     setTownStream(null);
     runtimeDirRef.current = null;
-    const reset = hydrateTownPresentation(null, null);
+    const reset = hydrateActivityPresentation(null, null);
     runtimePresentationRef.current = reset;
     setRuntimePresentation(reset);
     setTownPresentation(defaultTownPresentation());
@@ -207,7 +207,7 @@ export function Workspace({
       : 1_150;
     const timer = window.setTimeout(() => {
       setRuntimePresentation((current) => {
-        const next = advanceTownCue(current, cue.key);
+        const next = advanceActivityCue(current, cue.key);
         runtimePresentationRef.current = next;
         return next;
       });
@@ -218,7 +218,7 @@ export function Workspace({
   useEffect(() => {
     if (centerView === "chat" && !reducedMotion) return;
     setRuntimePresentation((current) => {
-      const next = settleTownPresentation(current);
+      const next = settleActivityPresentation(current);
       runtimePresentationRef.current = next;
       return next;
     });
@@ -257,7 +257,7 @@ export function Workspace({
       const session = detail.session as RunSessionSnapshot | null;
       if (!session || session.dir !== detail.dir || session.phase !== "closed" || !Array.isArray(session.activities)) return;
       const current = runtimePresentationRef.current;
-      const next = observeTownPresentation(
+      const next = observeActivityPresentation(
         current,
         session,
         null,
@@ -302,7 +302,7 @@ export function Workspace({
     setTownTask(null);
     setTownStream(null);
     runtimeDirRef.current = null;
-    const reset = hydrateTownPresentation(null, null);
+    const reset = hydrateActivityPresentation(null, null);
     runtimePresentationRef.current = reset;
     setRuntimePresentation(reset);
     setActiveDir(dir);

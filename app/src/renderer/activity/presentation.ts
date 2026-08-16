@@ -1,25 +1,55 @@
 import type { ConductorStreamSnapshot, RunSessionSnapshot } from "../../shared/ipc.js";
 
-export type TownTruth = "quiet" | "thinking" | "starting" | "working" | "checking" | "done" | "stopped" | "error";
-export type TownTerminalOutcome = "done" | "stopped" | "error";
-export type TownCueKind = "dispatch" | "return" | TownTerminalOutcome;
-export type TownCuePhase = "flight" | "landing";
+/**
+ * The single truthful projection of one runtime snapshot: what is happening,
+ * to whom, and how it ended. Task 257 (Slice 2 of the resident-program visual
+ * overhaul) moved this out of `renderer/town/presentation.ts` unchanged, so
+ * that Cairn and the written status can be driven without a Town, a pond, or
+ * any worker scenery.
+ *
+ * Nothing here knows about geometry, layout, faces, components or CSS. Its one
+ * import is the runtime snapshot contract it projects.
+ *
+ * Two functions at the bottom — `pondLineTone` and `pondLineLabel` — still
+ * carry the narrow-window Pond surface's own vocabulary. They are deliberately
+ * left here for one slice: Slice 2's whole deliverable is that nothing visible
+ * changes, and Slice 4 retires that surface and this wording with it. For the
+ * same reason `activityStatus` still says "Town is quiet.": rewording it would
+ * be a visible change, which this slice is not allowed to make.
+ */
 
-export type TownCue = {
-  kind: TownCueKind;
-  phase: TownCuePhase;
+/** What is actually happening. No motion, no scenery, no position. */
+export type ActivityTruth = "quiet" | "thinking" | "starting" | "working" | "checking" | "done" | "stopped" | "error";
+export type ActivityTerminalOutcome = "done" | "stopped" | "error";
+export type ActivityEventKind = "dispatch" | "return" | ActivityTerminalOutcome;
+
+/**
+ * One thing that happened, once. `key` is its identity: activities are
+ * identified by their index inside a stable run key, so polling and React
+ * Strict Mode cannot replay an event.
+ */
+export type ActivityEvent = {
+  kind: ActivityEventKind;
   key: string;
   workerId: string | null;
   adapterId: string | null;
 };
 
-export type TownRuntimePresentation = {
+/**
+ * Motion staging for a surface that chooses to animate an event. Truth is
+ * never decided from it — every guard below reads kinds and outcomes, never a
+ * phase — so a surface with no motion can ignore this half entirely.
+ */
+export type ActivityCuePhase = "flight" | "landing";
+export type ActivityCue = ActivityEvent & { phase: ActivityCuePhase };
+
+export type ActivityPresentation = {
   runKey: string | null;
   nextActivityIndex: number;
-  truth: TownTruth;
-  activeCue: TownCue | null;
-  queuedCues: TownCue[];
-  settledOutcome: TownTerminalOutcome | null;
+  truth: ActivityTruth;
+  activeCue: ActivityCue | null;
+  queuedCues: ActivityCue[];
+  settledOutcome: ActivityTerminalOutcome | null;
   workerId: string | null;
   workerName: string | null;
   adapterId: string | null;
@@ -31,9 +61,22 @@ function adapterName(adapterId: string): string {
   return `${adapterId.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} worker`;
 }
 
-export function townRunKey(task: RunSessionSnapshot | null): string | null {
+/**
+ * ASCII unit separator (31). It cannot appear in a directory path, an ISO
+ * timestamp, an adapter id, a conversation id or a task title, so no run key
+ * can be forged by concatenating two fields.
+ *
+ * Built from its code point rather than written inline. The old module spelled
+ * it as a unit-separator escape inside a string literal, and more than one
+ * tool in this repository's editing path silently turns that escape into the
+ * raw control byte, which then sits invisible in the source and survives every
+ * review. This form cannot be mangled that way and reads the same to a person.
+ */
+const RUN_KEY_SEPARATOR = String.fromCharCode(31);
+
+export function activityRunKey(task: RunSessionSnapshot | null): string | null {
   if (!task) return null;
-  return [task.dir, task.startedAt, task.adapterId ?? "none", task.conversationId ?? "none", task.outcome].join("\u001f");
+  return [task.dir, task.startedAt, task.adapterId ?? "none", task.conversationId ?? "none", task.outcome].join(RUN_KEY_SEPARATOR);
 }
 
 function realWorker(task: RunSessionSnapshot | null): boolean {
@@ -55,23 +98,23 @@ function stoppedByRuntime(task: RunSessionSnapshot): boolean {
     activity.state === "stopped" && (activity.stage === "Run" || activity.stage === "Check" || activity.stage === "Result"));
 }
 
-function terminalOutcome(task: RunSessionSnapshot | null): TownTerminalOutcome | null {
+function terminalOutcome(task: RunSessionSnapshot | null): ActivityTerminalOutcome | null {
   if (!task) return null;
   if (task.error) return "error";
   if (task.phase === "closed" && task.result?.status === "connection-required") return null;
   if (stoppedByRuntime(task)) return "stopped";
   const result = latestResultState(task);
-  // The offline demonstration has no worker handoff and does not color the
-  // pond as if a model-backed worker completed product work. An honest stopped
-  // demo can still use the coral stop state.
+  // The offline demonstration has no worker handoff and does not present
+  // itself as if a model-backed worker completed product work. An honest
+  // stopped demo can still use the stopped state.
   if (result === "done" && !realWorker(task)) return null;
   return result;
 }
 
-function truthFromRuntime(task: RunSessionSnapshot | null, stream: ConductorStreamSnapshot | null): TownTruth {
+function truthFromRuntime(task: RunSessionSnapshot | null, stream: ConductorStreamSnapshot | null): ActivityTruth {
   if (!task) return stream ? "thinking" : "quiet";
-  // A retained result remains the pond's semantic backdrop, but a real live
-  // Cairn turn owns Cairn's face and spoken status while that turn is active.
+  // A retained result remains the semantic backdrop, but a real live Cairn
+  // turn owns Cairn's face and spoken status while that turn is active.
   if (task.phase === "closed" && stream) return "thinking";
   if (task.error) return "error";
   if (task.phase === "closed" && task.result?.status === "connection-required") return stream ? "thinking" : "quiet";
@@ -87,7 +130,7 @@ function truthFromRuntime(task: RunSessionSnapshot | null, stream: ConductorStre
   return "starting";
 }
 
-function metadata(task: RunSessionSnapshot | null): Pick<TownRuntimePresentation, "workerId" | "workerName" | "adapterId" | "outcome"> {
+function metadata(task: RunSessionSnapshot | null): Pick<ActivityPresentation, "workerId" | "workerName" | "adapterId" | "outcome"> {
   const adapterId = realWorker(task) ? task!.adapterId : null;
   return {
     workerId: adapterId ? `worker:${adapterId}` : null,
@@ -97,12 +140,12 @@ function metadata(task: RunSessionSnapshot | null): Pick<TownRuntimePresentation
   };
 }
 
-export function hydrateTownPresentation(
+export function hydrateActivityPresentation(
   task: RunSessionSnapshot | null,
   stream: ConductorStreamSnapshot | null,
-): TownRuntimePresentation {
+): ActivityPresentation {
   return {
-    runKey: townRunKey(task),
+    runKey: activityRunKey(task),
     nextActivityIndex: task?.activities.length ?? 0,
     truth: truthFromRuntime(task, stream),
     activeCue: null,
@@ -113,10 +156,10 @@ export function hydrateTownPresentation(
 }
 
 function cueFor(
-  kind: TownCueKind,
+  kind: ActivityEventKind,
   key: string,
   task: RunSessionSnapshot,
-): TownCue {
+): ActivityCue {
   const adapterId = realWorker(task) ? task.adapterId : null;
   return {
     kind,
@@ -127,7 +170,7 @@ function cueFor(
   };
 }
 
-function activateFirst(state: TownRuntimePresentation): TownRuntimePresentation {
+function activateFirst(state: ActivityPresentation): ActivityPresentation {
   if (state.activeCue || state.queuedCues.length === 0) return state;
   const [activeCue, ...queuedCues] = state.queuedCues;
   const settledOutcome = activeCue && (activeCue.kind === "done" || activeCue.kind === "stopped" || activeCue.kind === "error")
@@ -136,7 +179,7 @@ function activateFirst(state: TownRuntimePresentation): TownRuntimePresentation 
   return { ...state, activeCue: activeCue ?? null, queuedCues, settledOutcome };
 }
 
-function finalOutcomeIn(state: TownRuntimePresentation): TownTerminalOutcome | null {
+function finalOutcomeIn(state: ActivityPresentation): ActivityTerminalOutcome | null {
   const cues = [state.activeCue, ...state.queuedCues];
   for (let index = cues.length - 1; index >= 0; index -= 1) {
     const kind = cues[index]?.kind;
@@ -148,39 +191,45 @@ function finalOutcomeIn(state: TownRuntimePresentation): TownTerminalOutcome | n
 /**
  * Observe one append-only runtime snapshot. Activities are identified by their
  * index inside a stable run key, so polling and React Strict Mode cannot replay
- * a cue. `animate=false` consumes the same truth directly into its stable
- * state; it is used while the Town is off-screen and for reduced motion.
+ * an event. `animate=false` consumes the same truth directly into its stable
+ * state; it is used while the animating surface is off-screen and for reduced
+ * motion.
  */
-export function observeTownPresentation(
-  previous: TownRuntimePresentation,
+export function observeActivityPresentation(
+  previous: ActivityPresentation,
   task: RunSessionSnapshot | null,
   stream: ConductorStreamSnapshot | null,
   animate: boolean,
-): TownRuntimePresentation {
-  if (!task) return hydrateTownPresentation(null, stream);
-  const runKey = townRunKey(task)!;
+): ActivityPresentation {
+  if (!task) return hydrateActivityPresentation(null, stream);
+  const runKey = activityRunKey(task)!;
 
   if (previous.runKey === runKey) {
     // Overlapping event-driven and two-second refreshes can resolve out of
     // order. An older prefix or terminal-less snapshot must never erase newer
     // truth. Look at retained/queued terminal evidence rather than `truth`:
     // live conductor commentary intentionally presents a terminal run as
-    // `thinking` while preserving its DONE/STOPPED/ERROR pond outcome.
+    // `thinking` while preserving its DONE/STOPPED/ERROR outcome.
+    //
+    // Returning `previous` ITSELF is load-bearing. `Workspace` accepts task,
+    // stream and presentation as one unit only when the reducer returns a new
+    // object, so an equal-but-fresh copy here would let a stale snapshot
+    // repopulate a worker while the outcome correctly stayed terminal.
     if (task.activities.length < previous.nextActivityIndex) return previous;
     const previousOutcome = finalOutcomeIn(previous);
     const incomingOutcome = terminalOutcome(task);
     // ERROR is a monotonic escalation: a run can truthfully emit STOPPED and
-    // then fail while writing or verifying its stop evidence. Never freeze the
-    // Town on the earlier, safer-looking disposition in that case. Every other
+    // then fail while writing or verifying its stop evidence. Never freeze on
+    // the earlier, safer-looking disposition in that case. Every other
     // terminal change is a stale or contradictory snapshot and stays rejected.
     if (previousOutcome && incomingOutcome !== previousOutcome && incomingOutcome !== "error") return previous;
   }
 
-  // Reduced motion and an off-screen Town settle accepted evidence directly,
-  // but they obey the same monotonic snapshot guard above.
-  if (!animate) return hydrateTownPresentation(task, stream);
+  // Reduced motion and an off-screen surface settle accepted evidence
+  // directly, but they obey the same monotonic snapshot guard above.
+  if (!animate) return hydrateActivityPresentation(task, stream);
 
-  let state: TownRuntimePresentation = previous.runKey === runKey
+  let state: ActivityPresentation = previous.runKey === runKey
     ? {
       ...previous,
       truth: truthFromRuntime(task, stream),
@@ -196,7 +245,7 @@ export function observeTownPresentation(
       ...metadata(task),
     };
 
-  const additions: TownCue[] = [];
+  const additions: ActivityCue[] = [];
   const isReal = realWorker(task);
   for (let index = state.nextActivityIndex; index < task.activities.length; index += 1) {
     const activity = task.activities[index];
@@ -238,7 +287,7 @@ export function observeTownPresentation(
 }
 
 /** Advance only the cue that owns the supplied key. Stale timers are inert. */
-export function advanceTownCue(state: TownRuntimePresentation, key: string): TownRuntimePresentation {
+export function advanceActivityCue(state: ActivityPresentation, key: string): ActivityPresentation {
   const cue = state.activeCue;
   if (!cue || cue.key !== key) return state;
   if ((cue.kind === "dispatch" || cue.kind === "return") && cue.phase === "flight") {
@@ -247,7 +296,7 @@ export function advanceTownCue(state: TownRuntimePresentation, key: string): Tow
   return activateFirst({ ...state, activeCue: null });
 }
 
-export function settleTownPresentation(state: TownRuntimePresentation): TownRuntimePresentation {
+export function settleActivityPresentation(state: ActivityPresentation): ActivityPresentation {
   return {
     ...state,
     activeCue: null,
@@ -256,7 +305,15 @@ export function settleTownPresentation(state: TownRuntimePresentation): TownRunt
   };
 }
 
-export function townPresentationStatus(state: TownRuntimePresentation): string {
+/**
+ * The one sentence that says what is happening. State is never colour-,
+ * face-, position- or motion-only, so every surface can speak from this.
+ *
+ * The wording is Task 257's inheritance, not its choice: Slice 2 must not
+ * change a visible word. "Town is quiet." and the two handoff sentences are
+ * retired with the Town itself in Slice 4/5.
+ */
+export function activityStatus(state: ActivityPresentation): string {
   if (state.truth === "thinking") return "Cairn is replying.";
   if (state.truth === "done") return "DONE — verified by Cairn.";
   if (state.truth === "stopped") return "STOPPED — check the result card.";
@@ -289,8 +346,11 @@ export type PondLineTone = "quiet" | "busy" | "needs-you" | "done" | "stopped";
  * `needsYou` is Task 155's signal, computed once in Chat and passed in. Two
  * independent answers to "is something waiting?" would eventually disagree,
  * and the line would be the one that lied.
+ *
+ * Retired with the Pond in Slice 4. It stays beside the neutral projection
+ * until then so this slice changes nothing the owner can see.
  */
-export function pondLineTone(state: TownRuntimePresentation, needsYou: boolean): PondLineTone {
+export function pondLineTone(state: ActivityPresentation, needsYou: boolean): PondLineTone {
   if (needsYou) return "needs-you";
   if (state.truth === "done") return "done";
   if (state.truth === "stopped" || state.truth === "error") return "stopped";
@@ -299,7 +359,7 @@ export function pondLineTone(state: TownRuntimePresentation, needsYou: boolean):
 }
 
 /** The line's words. Never a second notion of what the water is doing. */
-export function pondLineLabel(state: TownRuntimePresentation, needsYou: boolean): string {
+export function pondLineLabel(state: ActivityPresentation, needsYou: boolean): string {
   if (needsYou) return "Something in the conversation is waiting for you.";
-  return townPresentationStatus(state);
+  return activityStatus(state);
 }

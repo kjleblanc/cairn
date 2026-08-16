@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunSessionSnapshot } from "../src/shared/ipc.js";
 import {
-  hydrateTownPresentation,
+  hydrateActivityPresentation,
   pondLineLabel,
   pondLineTone,
-} from "../src/renderer/town/presentation.js";
+} from "../src/renderer/activity/presentation.js";
 import { TOWN_BOUNDS, TOWN_SHORE_BESIDE_CHAT, townShore } from "../src/renderer/town/layout.js";
 
 function session(overrides: Partial<RunSessionSnapshot> = {}): RunSessionSnapshot {
@@ -35,31 +35,31 @@ const runWorking = { stage: "Run", state: "working", detail: "Codex Exec is work
  * it cannot read as a shrunken one.
  */
 test("the line says who is working, in the pond's own words", () => {
-  const working = hydrateTownPresentation(session({ activities: [runWorking] }), null);
+  const working = hydrateActivityPresentation(session({ activities: [runWorking] }), null);
   assert.equal(pondLineLabel(working, false), "Codex Exec worker is working.");
   assert.equal(pondLineTone(working, false), "busy");
 });
 
 test("a waiting decision turns the line amber and changes what it says", () => {
-  const working = hydrateTownPresentation(session({ activities: [runWorking] }), null);
+  const working = hydrateActivityPresentation(session({ activities: [runWorking] }), null);
   assert.equal(pondLineTone(working, true), "needs-you");
   assert.notEqual(pondLineLabel(working, true), pondLineLabel(working, false));
   assert.match(pondLineLabel(working, true), /waiting for you/);
 });
 
 test("the line carries the water's settled state", () => {
-  const quiet = hydrateTownPresentation(null, null);
+  const quiet = hydrateActivityPresentation(null, null);
   assert.equal(pondLineTone(quiet, false), "quiet");
   assert.equal(pondLineLabel(quiet, false), "Town is quiet.");
 
-  const done = hydrateTownPresentation(session({
+  const done = hydrateActivityPresentation(session({
     activities: [runWorking, { stage: "Result", state: "done", detail: "DONE — verified." }],
     phase: "closed",
     result: { status: "done", disposition: "DONE" } as RunSessionSnapshot["result"],
   }), null);
   assert.equal(pondLineTone(done, false), "done");
 
-  const stopped = hydrateTownPresentation(session({
+  const stopped = hydrateActivityPresentation(session({
     activities: [{ stage: "Run", state: "stopped", detail: "The worker stopped safely." }],
     phase: "closed",
   }), null);
@@ -69,8 +69,8 @@ test("the line carries the water's settled state", () => {
 test("a decision waiting outranks everything else the water is doing", () => {
   // Amber is the one state the owner has to act on; nothing may bury it.
   for (const state of [
-    hydrateTownPresentation(null, null),
-    hydrateTownPresentation(session({ activities: [runWorking] }), null),
+    hydrateActivityPresentation(null, null),
+    hydrateActivityPresentation(session({ activities: [runWorking] }), null),
   ]) {
     assert.equal(pondLineTone(state, true), "needs-you");
   }

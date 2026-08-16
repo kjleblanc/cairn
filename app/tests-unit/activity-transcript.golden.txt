@@ -1,0 +1,117 @@
+still water — polling nothing makes nothing:
+  01 observe(animate=on,task=none,stream=none) truth=quiet settled=none idx=0 run=none active=none queued=[] workerId=none worker=none adapter=none task=none same=no status="Town is quiet."
+  02 observe(animate=on,task=none,stream=none) truth=quiet settled=none idx=0 run=none active=none queued=[] workerId=none worker=none adapter=none task=none same=no status="Town is quiet."
+  03 observe(animate=on,task=none,stream=none) truth=quiet settled=none idx=0 run=none active=none queued=[] workerId=none worker=none adapter=none task=none same=no status="Town is quiet."
+
+a live Cairn turn with no run at all:
+  01 hydrate(task=none,stream=yes) truth=thinking settled=none idx=0 run=none active=none queued=[] workerId=none worker=none adapter=none task=none same=no status="Cairn is replying."
+  02 observe(animate=on,task=none,stream=yes) truth=thinking settled=none idx=0 run=none active=none queued=[] workerId=none worker=none adapter=none task=none same=no status="Cairn is replying."
+
+dispatch flies, lands, and is never replayed:
+  01 observe(animate=on,task=yes,stream=none) truth=starting settled=none idx=0 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Cairn is confirming the dispatch."
+  02 observe(animate=on,task=yes,stream=none) truth=starting settled=none idx=1 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Cairn is confirming the dispatch."
+  03 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=2 run=set active=dispatch/flight:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Task → Codex Exec worker."
+  04 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=3 run=set active=dispatch/flight:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Task → Codex Exec worker."
+  05 advance(active) truth=working settled=none idx=3 run=set active=dispatch/landing:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Task arrived with Codex Exec worker."
+  06 advance(active) truth=working settled=none idx=3 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  07 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=3 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  08 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=3 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+
+a stale timer key is inert:
+  01 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=2 run=set active=dispatch/flight:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Task → Codex Exec worker."
+  02 advance("a key from a run that is over") truth=working settled=none idx=2 run=set active=dispatch/flight:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="Task → Codex Exec worker."
+  03 advance("") truth=working settled=none idx=2 run=set active=dispatch/flight:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="Task → Codex Exec worker."
+
+a collapsed first snapshot drops the obsolete dispatch:
+  01 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 advance(active) truth=done settled=none idx=6 run=set active=return/landing:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  03 advance(active) truth=done settled=done idx=6 run=set active=done/landing:terminal:done queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  04 advance(active) truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  05 observe(animate=on,task=yes,stream=none) truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+
+checking is immediate and repeated Check activities add no second return:
+  01 hydrate(task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  02 observe(animate=on,task=yes,stream=none) truth=checking settled=none idx=4 run=set active=return/flight:2:return queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Result → Cairn."
+  03 observe(animate=on,task=yes,stream=none) truth=checking settled=none idx=5 run=set active=return/flight:2:return queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Result → Cairn."
+
+an intermediate Run stop is STOPPED at once, with no return:
+  01 hydrate(task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  02 observe(animate=on,task=yes,stream=none) truth=stopped settled=stopped idx=3 run=set active=stopped/landing:terminal:stopped queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+
+an intermediate Check stop is STOPPED at once, with no return:
+  01 hydrate(task=yes,stream=none) truth=checking settled=none idx=4 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Result returned — Cairn is checking."
+  02 observe(animate=on,task=yes,stream=none) truth=stopped settled=stopped idx=5 run=set active=stopped/landing:terminal:stopped queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+
+a closed STOPPED result returns first, then settles stopped:
+  01 hydrate(task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  02 observe(animate=on,task=yes,stream=none) truth=stopped settled=none idx=4 run=set active=return/flight:2:return queued=[stopped/landing:terminal:stopped] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+  03 advance(active) truth=stopped settled=none idx=4 run=set active=return/landing:2:return queued=[stopped/landing:terminal:stopped] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+  04 advance(active) truth=stopped settled=stopped idx=4 run=set active=stopped/landing:terminal:stopped queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+  05 advance(active) truth=stopped settled=stopped idx=4 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+
+an exceptional close is ERROR, never a synthetic STOPPED or DONE:
+  01 hydrate(task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  02 observe(animate=on,task=yes,stream=none) truth=error settled=error idx=2 run=set active=error/landing:terminal:error queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Needs inspection — check the result card."
+
+STOPPED escalates to ERROR with motion:
+  01 hydrate(task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  02 observe(animate=on,task=yes,stream=none) truth=stopped settled=none idx=5 run=set active=return/flight:2:return queued=[stopped/landing:terminal:stopped] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+  03 observe(animate=on,task=yes,stream=none) truth=error settled=none idx=5 run=set active=return/flight:2:return queued=[stopped/landing:terminal:stopped error/landing:terminal:error] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Needs inspection — check the result card."
+
+STOPPED escalates to ERROR without motion:
+  01 hydrate(task=yes,stream=none) truth=stopped settled=stopped idx=5 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+  02 observe(animate=off,task=yes,stream=none) truth=error settled=error idx=5 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Needs inspection — check the result card."
+
+no other terminal change is accepted — DONE cannot become STOPPED:
+  01 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="DONE — verified by Cairn."
+
+reduced motion consumes the same evidence straight into the settled state:
+  01 observe(animate=off,task=yes,stream=none) truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 settle() truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+
+an older prefix is rejected by identity, animated:
+  01 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="DONE — verified by Cairn."
+  03 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="DONE — verified by Cairn."
+
+an older prefix is rejected by identity, reduced:
+  01 hydrate(task=yes,stream=none) truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 observe(animate=off,task=yes,stream=yes) truth=thinking settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Cairn is replying."
+  03 observe(animate=off,task=yes,stream=none) truth=thinking settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="Cairn is replying."
+
+a shorter NON-terminal snapshot is rejected by length alone:
+  01 hydrate(task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Codex Exec worker is working."
+  02 observe(animate=on,task=yes,stream=none) truth=checking settled=none idx=4 run=set active=return/flight:2:return queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Result → Cairn."
+  03 observe(animate=on,task=yes,stream=none) truth=checking settled=none idx=4 run=set active=return/flight:2:return queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="Result → Cairn."
+  04 observe(animate=off,task=yes,stream=none) truth=checking settled=none idx=4 run=set active=return/flight:2:return queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=yes status="Result → Cairn."
+  05 observe(animate=on,task=yes,stream=none) truth=checking settled=none idx=4 run=set active=return/flight:2:return queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Result → Cairn."
+
+live commentary speaks over a retained terminal outcome:
+  01 hydrate(task=yes,stream=none) truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 observe(animate=on,task=yes,stream=yes) truth=thinking settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Cairn is replying."
+  03 observe(animate=on,task=yes,stream=none) truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+
+a new run resets motion, outcome and identity:
+  01 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 settle() truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  03 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=2 run=set active=dispatch/flight:1:dispatch queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Task → Codex Exec worker."
+
+the offline demonstration never colours the water as verified work:
+  01 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=none worker=none adapter=none task="Make the pond explain the work" same=no status="Cairn is running the offline check."
+  02 observe(animate=on,task=yes,stream=none) truth=quiet settled=none idx=6 run=set active=none queued=[] workerId=none worker=none adapter=none task="Make the pond explain the work" same=no status="Town is quiet."
+
+an offline demonstration may still stop honestly:
+  01 observe(animate=on,task=yes,stream=none) truth=stopped settled=stopped idx=3 run=set active=stopped/landing:terminal:stopped queued=[] workerId=none worker=none adapter=none task="Make the pond explain the work" same=no status="STOPPED — check the result card."
+
+a connection-required close is quiet, or thinking when Cairn speaks:
+  01 hydrate(task=yes,stream=none) truth=quiet settled=none idx=1 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Town is quiet."
+  02 hydrate(task=yes,stream=yes) truth=thinking settled=none idx=1 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="Cairn is replying."
+
+settle drains every queued cue to the final outcome:
+  01 observe(animate=on,task=yes,stream=none) truth=done settled=none idx=6 run=set active=return/flight:2:return queued=[done/landing:terminal:done] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  02 settle() truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+  03 settle() truth=done settled=done idx=6 run=set active=none queued=[] workerId=worker:codex-exec worker=Codex Exec worker adapter=codex-exec task="Make the pond explain the work" same=no status="DONE — verified by Cairn."
+
+a task with no adapter carries no worker identity:
+  01 observe(animate=on,task=yes,stream=none) truth=working settled=none idx=2 run=set active=none queued=[] workerId=none worker=none adapter=none task="Make the pond explain the work" same=no status="Cairn is running the offline check."

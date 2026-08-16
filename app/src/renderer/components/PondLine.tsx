@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { pondLineLabel, pondLineTone, type TownRuntimePresentation } from "../town/presentation";
+import { pondLineLabel, pondLineTone, type ActivityPresentation } from "../activity/presentation";
 
 /**
  * The honest line (Decision 9, the narrow-window resolution, owner-approved
@@ -12,7 +12,7 @@ import { pondLineLabel, pondLineTone, type TownRuntimePresentation } from "../to
  */
 export function PondLine({ projectName, presentation, needsYou, open, onToggle }: {
   projectName: string;
-  presentation: TownRuntimePresentation;
+  presentation: ActivityPresentation;
   needsYou: boolean;
   open: boolean;
   onToggle: (open: boolean) => void;
