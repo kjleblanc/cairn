@@ -11,3 +11,4 @@ app/dist-unit/
 .lanes/
 docs-review/staged/
 app/shots/
+app/launch-build.log

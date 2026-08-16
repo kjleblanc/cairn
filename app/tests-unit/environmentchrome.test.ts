@@ -68,6 +68,16 @@ test("the selected project stays a pond wash while current context becomes an an
     "the current-project context still carries glass-card chrome");
 });
 
+test("the top header moves the frameless window without swallowing its controls", () => {
+  const header = rule(".town-square-header");
+  assert.ok(header.includes("-webkit-app-region: drag"),
+    "the visible top header is not a window drag region");
+
+  const controls = rule('.town-square-header :is(button, input, textarea, select, a, [role="button"])');
+  assert.ok(controls.includes("-webkit-app-region: no-drag"),
+    "interactive header controls are swallowed by the window drag region");
+});
+
 test("rail and current-project controls have unmistakable keyboard focus", () => {
   for (const selector of [
     ".rail-collapse:focus-visible",

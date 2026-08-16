@@ -1290,9 +1290,13 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .town-square-header {
   position: absolute; z-index: 6; inset: 0 0 auto; height: 62px; display: flex; align-items: center;
   justify-content: space-between; gap: 16px; padding: 11px 16px;
+  -webkit-app-region: drag;
   /* Open water remains visible between the two bits of context. The header is
      only a positioning layer; the controls themselves are pond islands. */
   background: transparent;
+}
+.town-square-header :is(button, input, textarea, select, a, [role="button"]) {
+  -webkit-app-region: no-drag;
 }
 .town-project-label,
 .town-header-actions {
