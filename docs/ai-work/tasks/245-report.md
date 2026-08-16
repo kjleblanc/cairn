@@ -258,7 +258,7 @@ Every app and Playwright run took the app token with
 `mkdir /c/Users/KenJL/AppData/Local/Temp/cairn-app-token` and released it only
 because that run created it.
 
-### `c10` - the owner can read it: AWAITING THE OWNER
+### `c10` - the owner can read it: FAILED, and deferred rather than retried
 
 Four captures, all taken by Playwright from the ordinary Chat route in the
 offscreen disposable-profile lane, under the app token, with the decisive
@@ -273,6 +273,49 @@ the test rather than reaching the owner:
 - `%TEMP%\cairn-task-244-repaired-candidate.png` - after the repair.
 
 Playwright, not the owner, exercised every press.
+
+**Answered 2026-08-15, by a later lane that put the four captures in front of
+the owner.** The brief's question was: "Could someone who knows nothing about
+this project look at this and tell what is being claimed, what Cairn has
+already settled, what is still theirs to answer, and what their two choices
+are?" The owner's own words:
+
+> I don't think so, but I don't want to spend time here fixing it. We've tried
+> twice now already and it's still overly complicated.
+
+So `c10` **fails**, and this task is STOPPED on its own terms rather than on
+the narrower grounds its brief listed - the screen was made readable enough to
+measure, and not readable enough to pass.
+
+**No third attempt follows, by the owner's decision and by rule.** This is the
+second consecutive stop on the same visible journey: Task 244's `c12` and this
+task's `c10`, judged by the same owner against substantially the same screens.
+The contract's "Repair inside the same task" says to step back and weigh a
+smaller goal, a different approach, experienced help, or deferral before a
+third; the restoration plan's anti-drift rule 4 says the same and adds "Do not
+start a third proof ladder". The owner chose deferral, to a separate
+beginner-friendliness effort they said in Task 244 they intend to staff
+elsewhere. A later lane must not read this FAILED as an invitation to reopen
+the surface.
+
+**What a reader should take from this.** The measurements in `c5` are real and
+the reductions held; the screen is roughly 17% shorter to its decision than
+Task 244 left it, and every self-contradiction the brief named was fixed and
+proved. None of that was sufficient. The remaining problem is stated by the
+owner as volume and complication rather than as any single defect, which is
+why no further local repair was attempted: there is no named confusion left to
+fix, and Task 244's report already carries the three specific ones written
+down for whoever takes the wider effort.
+
+**This does not block Slice 5 by itself.** Slice 5 puts a beginner in front of
+these screens, and the owner has judged them not beginner-ready while
+explicitly choosing to proceed anyway - their words in Task 244 were to focus
+on having it work for right now. Slice 5's own evidence should therefore be
+read as proof that the route works, never as proof that it reads well.
+
+**The `LOG.md` row for this task predates this answer** and says `c10` has not
+been answered. It is left exactly as written, because existing rows are
+history; this section is the later record.
 
 ## A note on Task 244's close
 
@@ -320,7 +363,9 @@ first, since the app and its end-to-end tests share one profile.
 
 ## Limitations and remaining owner decisions
 
-- **`c10` is the owner's and is not yet answered.** Everything else holds.
+- **`c10` was answered and FAILED.** The screen is still not readable enough
+  for a beginner, the owner has deferred the fix to a separate effort, and no
+  third attempt is to be made from this line of work. Everything else holds.
 - **One finding state is reasoned about but not exercised**: the "another row
   is holding the one repair" case needs two open alleged rows at once, and the
   fixture has one. It rendered nothing before and renders a sentence now.
@@ -340,7 +385,15 @@ first, since the app and its end-to-end tests share one profile.
   still not met.**
 - The milestone did not move. This is a repair, not a slice.
 
-**Disposition: STOPPED - waiting on the owner's `c10` judgment.** `c1` through
-`c9` all hold through the ordinary Chat path against the fixture conductor. The
-work is committed so it cannot be lost the way Task 244's nearly was; this
-report is updated and the disposition settled the moment the owner answers.
+**Disposition: STOPPED - the owner answered `c10` and it FAILED.** `c1` through
+`c9` all hold through the ordinary Chat path against the fixture conductor, and
+the work is committed and keeps its value: the contradictions are gone, the
+measurements are real, and nothing here is to be reverted. What did not hold is
+the one check only the owner could answer - the screen still reads as too
+complicated for a beginner.
+
+STOPPED is the honest value because the requested visible outcome was a
+readable screen and it does not hold. The owner has deferred the remedy to a
+separate beginner-friendliness effort rather than authorising a third attempt
+here, so this task is closed at STOPPED rather than left open: it is finished,
+and it did not succeed.
