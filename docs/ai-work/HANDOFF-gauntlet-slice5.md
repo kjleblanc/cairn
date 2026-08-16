@@ -23,6 +23,10 @@ before Slice 4 was executed is in Git history at `46715d8`.
 
 Recent commits, newest first:
 
+- `991b569` **Task 247**: say something true when Git refuses the project folder
+- `d48b65f` Claim Task 247
+- `d10805f` Stop the handoff quoting an unpushed count that cannot stay true
+- `1a11923` Update the handoff: two of Slice 5's three blockers are settled
 - `c543a70` Record Task 242's landing and re-verify its numbers on main
 - `ff53294` Put Task 242's log row back in order after the union merge
 - `56b5700` **Land Task 242** (merge of `claude/keen-hawking-b5dfb8`)
@@ -114,6 +118,16 @@ everything to 237 is number, date, and outcome. Nine rows, not the nineteen
 in Cairn on this repo. Task 242 stays STOPPED until they do. The exact steps
 are at the end of `242-report.md`. **The app token was released for that
 attempt** - take it again before any app or Playwright run.
+
+**The first attempt at `c9` did not reach the briefing at all - Task 247.**
+Cairn refused with `fatal: detected dubious ownership`, because this repo's
+root folder was owned by `Obelisk\CodexSandboxOffline` while everything inside
+it was the owner's. Cairn scrubs `GIT_CONFIG_GLOBAL` on every Git call, so the
+`safe.directory` exception the owner already had was never read - and Cairn
+then printed Git's advice to add one, which its own hardening guarantees cannot
+work. **The folder's owner was changed with the owner's approval and the
+machine is unblocked**; Task 247 fixed the message, deliberately not the check.
+Task 247's `c8` and Task 242's `c9` are now the same single press.
 
 **Two traps this landing hit, for whoever lands the next branch:**
 
