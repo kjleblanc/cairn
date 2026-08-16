@@ -156,11 +156,81 @@ npx tsc -p tsconfig.unit.json
 node --test dist-unit/tests-unit/context.test.js
 ```
 
+## Landed on main, and re-verified there
+
+**Added by the landing lane on 2026-08-15**, at the owner's decision, after
+this branch had sat unmerged while `main` advanced through tasks 243-246. The
+checks below were run in the **main checkout**, which unlike this task's own
+worktree has `app/node_modules` and can complete them - the gap this report's
+"A limitation of this worktree" section asked a later reader to close.
+
+**The command this report asks for cannot work.** `c8` and the section above
+name `npm run test:unit -w cairn-app`. `app` is not a workspace here - the root
+`package.json` declares only `core` and `cli` - and the app package is named
+`cairn-desktop`, so npm answers `No workspaces found: --workspace=cairn-app`.
+Run it from `app/` instead. This is a defect in the report's instructions, not
+in the change; nothing about the result depends on it.
+
+### The measurement, retaken on today's main
+
+`c7`'s figures are restated rather than trusted, because the log grew by four
+tasks while the branch waited. Both were measured by calling the real
+`assembleBriefing` against this repository, once with the change reverted and
+once with it applied:
+
+| | Before | After |
+|---|---|---|
+| `CONSTITUTION` | 7,628 | 7,628 |
+| briefing | 230,620 | **110,925** |
+| of which the work-log section | 145,403 | **26,047** |
+| **total against `PROMPT_CHAR_LIMIT` 200,000** | **238,248 - over by 38,248** | **118,553 - 81,447 to spare** |
+
+The section states its own counts: `Rows: 240 total - 9 rows in full, 231 as
+index only, 0 omitted.`
+
+**Nine rows in full, not the nineteen this report predicted.** That is this
+report's own limitation arriving early rather than a new defect: summaries have
+gone on growing, and tasks 243-246 are large. The budget remains a constant in
+`DEFAULT_CAPS` and remains cheap to revisit; the owner was shown this figure
+before approving the merge and chose to land the constant as written.
+
+### Nothing else moved
+
+| Check, run in the main checkout | Result |
+|---|---|
+| `npm run typecheck` (root) | **PASS**, 26s |
+| `npm run build` (root) | **PASS**, 13.5s |
+| `npm run test:unit` from `app/`, **baseline** without this branch | 935 tests, **924 pass**, 9 fail, 2 skipped |
+| `npm run test:unit` from `app/`, **with** this branch | 940 tests, **929 pass**, 9 fail, 2 skipped |
+| the two failure sets, sorted and diffed | **identical** |
+| the contract's settle check, rerun on merged `main` | 940 tests, **929 pass**, 9 fail, 2 skipped - failure set identical again |
+
+Five more tests and five more passes: this task's `c1`-`c6`. The nine failures
+are the pre-existing Task 224/231/233 Builder machinery, named individually in
+Task 245's report, and they moved in neither direction.
+
+### Two things the landing had to decide
+
+**The merge was clean, and its log row was then moved.** `LOG.md` carries
+Git's union merge attribute, so the merge appended this task's row after 246.
+`parseLog` does no sorting, so position in the file *is* recency - and this
+task's own new section reads the newest rows from the end. Left alone, Task 242
+would have presented itself to the conductor as the project's most recent work
+and spent detail budget as such. The row was moved to its number in a separate
+commit; its text is untouched, proved by sorting both versions and diffing.
+
+**The heading change has no other consumer.** This task replaced
+`## Work log (task | date | outcome | summary | milestone moved)` with
+`## Work log`. A search across `app`, `core`, and `cli` finds that string only
+in `context.ts` itself; the constitution refers to the work log in prose, never
+by heading.
+
 ## Limitations and remaining human judgment
 
 - **`c9` is the owner's and is not answered.** Only the owner can send a real
   message in their own Cairn and confirm it goes. Every machine check holds;
-  none of them is that.
+  none of them is that. It is now answerable: the change is on `main`, in a
+  checkout that can run the app.
 - The conductor can no longer read what tasks 001-215 contained. It still
   knows they exist, their dates, and their outcomes, and the section tells it
   in plain words that it is not a source for their contents. Whether that
@@ -195,6 +265,31 @@ project from a checkout carrying this branch. If it sends, `c9` holds and a
 short follow-up task can record that and move this to DONE. If it does not,
 the reason will be a new defect rather than this one, because the prompt now
 fits with 94,240 characters to spare.
+
+**Landing update, 2026-08-15.** The branch is now merged to `main`, so "a
+checkout carrying this branch" means the ordinary main checkout. The headroom
+figure is now 81,447 characters rather than 94,240, measured above. The app
+token was released for the owner's attempt. Exact steps:
+
+1. Close any Cairn window that is already open - the app, its end-to-end tests,
+   and the owner's own use share one profile.
+2. Start Cairn from the main checkout and open **this repository** as the
+   project.
+3. Start an ordinary Chat conversation and send any message.
+4. It should send. Before this change it refused with "Cairn did not send this
+   because the project briefing and conversation together are too large."
+
+If it sends, `c9` holds and this task is DONE. If it refuses, record the exact
+refusal text: this change moved the briefing from 38,248 characters over the
+limit to 81,447 under it, so a refusal now would be a different defect.
+
+A second thing is worth the owner's eye during that same attempt, and it is
+this task's real judgment call rather than a check: as the log stands today the
+conductor reads full summaries for tasks **238 to 246** and nothing more.
+Everything up to and including task **237** survives as number, date, and
+outcome only. It knows those tasks happened and how they ended, and the section
+tells it in plain words not to claim more. Whether that trade is right is what
+the first real conversation on this repository will show.
 
 The milestone does not move here. Slice 5 is unblocked by this task, not
 started by it.
