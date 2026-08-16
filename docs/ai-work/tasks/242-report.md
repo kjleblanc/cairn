@@ -1,0 +1,200 @@
+# Task 242 report - bound the briefing's work log so Cairn can talk about Cairn
+
+**Lane:** worktree `.claude/worktrees/keen-hawking-b5dfb8`, branch
+`claude/keen-hawking-b5dfb8`. **Base commit:** `6baf3c0`. **Brief claimed at:**
+`2299cad`.
+
+## Outcome
+
+The briefing's work-log section is now carried in two tiers under two caps
+instead of reproducing every row of `docs/ai-work/LOG.md` in full. On this
+repository the section fell from 133,267 characters to 25,647, and the
+constitution plus the briefing fell from 219,762 characters to 105,760 against
+a 200,000 limit - from 19,762 over, with an empty conversation, to 94,240
+characters of room for one.
+
+## What actually changed
+
+- **`app/src/main/conductor/context.ts`** - added `maxLogDetailChars` and
+  `maxLogIndexChars` to `BriefingCaps` (both 20,000 in `DEFAULT_CAPS`); added
+  the exported `BRIEFING_CHAR_BUDGET` (130,000) and `CONVERSATION_CHAR_FLOOR`
+  (50,000); added `workLogSection()`; and replaced the unbounded `logLines`
+  map in `assembleBriefing` with a call to it. The section heading changed
+  from `## Work log (task | date | outcome | summary | milestone moved)` to
+  `## Work log`, because the column shape now differs per tier and is stated
+  on each tier's own sub-heading.
+- **`app/tests-unit/context.test.ts`** - added five tests and three fixture
+  helpers (`logRow`, `withLogRows`, `workLogSection`).
+- **`docs/ai-work/tasks/242-brief.md`** - committed alone at `2299cad`.
+- **`docs/ai-work/tasks/242-report.md`** - this file.
+- **`docs/ai-work/LOG.md`** - one appended row.
+
+Nothing else was touched. `promptTooLarge`, `PROMPT_CHAR_LIMIT`, both
+constitutions and their version constants, the contract and its mirrors, and
+every package version are unchanged, as the brief required.
+
+## How the section is built
+
+Rows are walked from the newest end, kept in full while `maxLogDetailChars`
+lasts. Everything older becomes `| task | date | outcome |` under its own
+sub-heading, dropping from the oldest end if `maxLogIndexChars` is ever
+reached. The section opens by stating how many rows are in full, how many are
+index only, and how many were omitted.
+
+The index tier has no summary column by construction rather than by
+instruction. The constitution tells the conductor never to attribute to a
+source a fact that source cannot contain
+(`app/src/main/conductor/constitution.ts:116`), and `isAlreadyBriefed`
+(`app/src/main/conductor/context.ts:341` before this change) keeps `LOG.md`
+out of selected file contents, so a dropped summary is unreachable rather than
+merely absent. A missing column cannot be misread; a note asking for restraint
+could be.
+
+The newest row is never demoted or dropped. A row that alone exceeds the whole
+detail budget is cut to fit and marked `...(summary truncated)`, because
+losing the most recent task would defeat a cap meant to protect recent memory.
+
+## Check results
+
+Unless stated otherwise, run from `app/` after
+`npx tsc -p tsconfig.unit.json`:
+
+```text
+node --test dist-unit/tests-unit/context.test.js
+```
+
+That file is 23 tests, 23 passing, 0 failing: the 18 that existed before, plus
+the 5 below.
+
+- **`c1` - the section stays inside its budget as records accumulate.**
+  PASS. Test "a work log that grows without bound stays inside the briefing
+  budget (c1, c2)", 5,000 rows of ~2,000-character summaries. Red first: the
+  section measured **10,127,960** characters before the change.
+- **`c2` - the whole briefing stays inside `BRIEFING_CHAR_BUDGET`.** PASS,
+  same test. Red first at **10,140,097** characters.
+- **`c3` - the budget leaves room for a conversation.** PASS. Test "the
+  briefing budget leaves a conversation room inside the prompt limit":
+  7,628 + 130,000 + 50,000 = 187,628 against the 200,000 limit, asserted for
+  both `CONSTITUTION` and `QUALITY_CONSTITUTION`.
+  **This check never went red**, because it is arithmetic over constants this
+  task introduced. Rather than trust it, I proved it can fail: mutating
+  `BRIEFING_CHAR_BUDGET` to 145,000 in the compiled output failed this test
+  and only this test.
+- **`c4` - recent rows keep summaries, older rows do not pretend to.** PASS,
+  400-row fixture: the newest summary appears, an index-only row's summary
+  appears nowhere in the briefing, its index line appears, and the stated
+  counts equal the rows actually rendered. Red first. Mutation check:
+  overstating the full-row count by one failed this test.
+- **`c5` - an over-budget newest row is shown truncated and marked.** PASS.
+  Red first - the 60,000-character row was carried whole. Mutation check:
+  removing the "newest row always survives" branch failed this test.
+- **`c6` - every capped section at its ceiling.** PASS. A fixture with a
+  5,000-row log, a ~56,000-character PROJECT.md, three ~48,000-character
+  record pairs, and 400 source files of ~20,000 characters each assembles to
+  no more than 130,000 characters. Red first at 10,140,097. No other section
+  needed a cap.
+- **`c7` - the real Cairn briefing now fits.** PASS, measured by calling the
+  compiled `assembleBriefing` against this worktree:
+
+  | | before | after |
+  |---|---|---|
+  | work-log section | 133,267 | 25,647 |
+  | whole briefing | 212,134 | 98,132 |
+  | constitution + briefing | 219,762 | 105,760 |
+  | room left for a conversation | -19,762 | 94,240 |
+
+  The section now reads: `Rows: 235 total - 19 rows in full, 216 as index
+  only, 0 omitted.` These figures move slightly as commits land, because the
+  briefing also carries Git state and the three most recent records.
+
+- **`c8` - nothing else regressed.** PASS, by before-and-after comparison
+  rather than by assertion. I ran the whole emitted unit suite (83 files) at
+  the pre-change code and again with the change, and diffed the failure sets:
+  **18 failures before, 18 after, no difference in either direction.** Output
+  is at `%TEMP%\unit-before.txt` and `%TEMP%\unit-after.txt`.
+
+  To take the baseline I copied my two modified files to the session
+  scratchpad, restored them with `git checkout --` by exact path, measured,
+  and copied them back; the working tree was never cleaned, reset, or stashed.
+
+  `npx tsc --noEmit` reports 3,655 errors, **0 of which name either file this
+  task touched**; 2,875 are `TS7026` JSX errors from absent React types.
+
+## A limitation of this worktree, stated plainly
+
+This worktree has no `node_modules`, and Node resolution falls through to the
+repository root's partial install of 8 packages. `react`, `electron`, and a
+built `core/dist` are therefore absent. Consequently:
+
+- `npm run test:unit -w cairn-app` **cannot complete here**, because it is
+  `tsc ... && node --test ...` and the typecheck fails on the missing types.
+  I ran the emitted test output directly instead, which is why `c8` is a
+  before-and-after diff rather than a green suite.
+- All 18 failures in both runs are environmental or already known: 7 test
+  files cannot find `core/dist/src/main-pending.js`, one cannot find `react`,
+  one cannot find `electron`, and the named test failures are the
+  pre-existing `builderlivetransport` reds from Task 211 and the Task 232
+  selection refusal that Task 236 diagnosed.
+
+Installing dependencies is on the concrete-risk list, so I did not. The main
+checkout does have `app/node_modules` (360 entries), so **`npm run test:unit
+-w cairn-app` should be re-run there before this branch lands**, where it can
+actually complete. I did not run the Core serial suite: this change is
+confined to `app/`, and `core/` is neither touched nor built here.
+
+## How to try it
+
+Open Cairn on the Cairn project itself, start an ordinary Chat conversation,
+and send a message. It should send. Before this change it refused with "Cairn
+did not send this because the project briefing and conversation together are
+too large."
+
+To see the numbers rather than the behaviour, from `app/`:
+
+```text
+npx tsc -p tsconfig.unit.json
+node --test dist-unit/tests-unit/context.test.js
+```
+
+## Limitations and remaining human judgment
+
+- **`c9` is the owner's and is not answered.** Only the owner can send a real
+  message in their own Cairn and confirm it goes. Every machine check holds;
+  none of them is that.
+- The conductor can no longer read what tasks 001-215 contained. It still
+  knows they exist, their dates, and their outcomes, and the section tells it
+  in plain words that it is not a source for their contents. Whether that
+  trade is right in practice is a judgment the first few real conversations
+  will inform.
+- The 20,000-character detail budget buys 19 rows today. Recent summaries have
+  been growing - tasks 216, 217, and 218 are 2,939, 4,526, and 4,593
+  characters - so if that trend continues the number of rows held in full will
+  fall. The budget is a constant in `DEFAULT_CAPS` and is cheap to revisit.
+- `BRIEFING_CHAR_BUDGET` is 130,000 against a measured 98,132, so there is
+  about 32,000 characters of headroom before the test starts failing on
+  ordinary growth. That is deliberate: the test should fail while there is
+  still room to act, not once Chat is already broken.
+
+## Disposition
+
+**Disposition: STOPPED — every machine check passes and the fix is verified by
+measurement; only `c9`, the owner's own confirmation in the running app, is
+outstanding, deferred by the owner's explicit choice to commit now and try the
+app later.**
+
+This is not a failed run, and a later reader should not redo the work. Checks
+`c1`-`c8` pass with their real output recorded above, and the briefing on this
+repository now measures 105,760 characters against the 200,000 limit where it
+measured 219,762 before. STOPPED is the honest value only because this task's
+brief defined DONE as `c1`-`c8` plus the owner's own confirmation that a real
+message sent, and said in terms that a passing fixture is not DONE for `c9`.
+The owner has not withdrawn that check; they have deferred it.
+
+**To close this out:** the owner sends one ordinary Chat message on the Cairn
+project from a checkout carrying this branch. If it sends, `c9` holds and a
+short follow-up task can record that and move this to DONE. If it does not,
+the reason will be a new defect rather than this one, because the prompt now
+fits with 94,240 characters to spare.
+
+The milestone does not move here. Slice 5 is unblocked by this task, not
+started by it.

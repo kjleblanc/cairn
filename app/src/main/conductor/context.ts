@@ -12,7 +12,7 @@ import {
   statSync,
 } from "node:fs";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
-import { parseFacts, parseLog, paths } from "@cairn/core";
+import { parseFacts, parseLog, paths, type LogRow } from "@cairn/core";
 
 export interface BriefingCaps {
   maxDepth: number;
@@ -23,6 +23,8 @@ export interface BriefingCaps {
   maxContentChars: number;
   maxContentCandidates: number;
   maxScanBytes: number;
+  maxLogDetailChars: number;
+  maxLogIndexChars: number;
 }
 
 export const DEFAULT_CAPS: BriefingCaps = {
@@ -34,7 +36,20 @@ export const DEFAULT_CAPS: BriefingCaps = {
   maxContentChars: 32000,
   maxContentCandidates: 32,
   maxScanBytes: 1024 * 1024,
+  maxLogDetailChars: 20000,
+  maxLogIndexChars: 20000,
 };
+
+/** Task 242. The whole assembled briefing must fit here, leaving
+ * `CONVERSATION_CHAR_FLOOR` for the conversation inside the transport's
+ * `PROMPT_CHAR_LIMIT`. Before this budget existed, nothing tied the
+ * briefing's size to the limit it must live inside, and the work log grew
+ * past it one completed task at a time. */
+export const BRIEFING_CHAR_BUDGET = 130_000;
+
+/** The conversation's guaranteed share of the prompt: history, the owner's
+ * turn, and any result card, after the constitution and a full briefing. */
+export const CONVERSATION_CHAR_FLOOR = 50_000;
 
 const GENERATED_DIRS = new Set([
   "node_modules", "dist", "dist-unit", "out", "build", "coverage", "vendor",
@@ -594,14 +609,79 @@ function selectedFileContents(root: string, caps: BriefingCaps, ownerText: strin
   return [...manifest, ...notes, ...sections].join("\n\n");
 }
 
+/** Task 242. The work log is the one briefing section that grows forever: one
+ * row per completed task, and on Cairn itself it had reached 133,267 of the
+ * briefing's 212,134 characters, so nothing could be sent at all.
+ *
+ * It is carried in two tiers under two caps. The newest rows keep their
+ * summaries until `maxLogDetailChars` is spent; every older row survives as a
+ * line of task, date, and outcome. The index tier deliberately has NO summary
+ * column: the constitution tells the conductor never to attribute to a source
+ * a fact that source cannot contain, and `isAlreadyBriefed` keeps LOG.md out
+ * of selected file contents, so a dropped summary is unreachable rather than
+ * merely absent. A missing column cannot be misread; a note asking for
+ * restraint could be. */
+function workLogSection(root: string, caps: BriefingCaps): string {
+  const rows = parseLog(root);
+  if (rows.length === 0) return "(empty)";
+  const fullLine = (row: LogRow, summary: string) =>
+    `| ${row.task} | ${row.date} | ${row.outcome} | ${summary} | moved: ${row.moved} |`;
+  const indexLine = (row: LogRow) => `| ${row.task} | ${row.date} | ${row.outcome} |`;
+
+  const full: string[] = [];
+  let oldestShownInFull = rows.length;
+  let detailRemaining = Math.max(0, caps.maxLogDetailChars);
+  for (let position = rows.length - 1; position >= 0; position -= 1) {
+    const row = rows[position];
+    const line = fullLine(row, row.summary);
+    if (line.length + 1 > detailRemaining) {
+      // The newest row is never demoted to the index or dropped: losing the
+      // most recent task would defeat a cap meant to protect recent memory.
+      // A row that alone exceeds the whole budget is cut and says so.
+      if (full.length === 0) {
+        const overhead = fullLine(row, "").length + " ...(summary truncated)".length + 1;
+        full.unshift(fullLine(row, `${boundedSlice(row.summary, Math.max(0, detailRemaining - overhead))} ...(summary truncated)`));
+        oldestShownInFull = position;
+      }
+      break;
+    }
+    detailRemaining -= line.length + 1;
+    full.unshift(line);
+    oldestShownInFull = position;
+  }
+
+  const older = rows.slice(0, oldestShownInFull);
+  const index: string[] = [];
+  let indexRemaining = Math.max(0, caps.maxLogIndexChars);
+  for (let position = older.length - 1; position >= 0; position -= 1) {
+    const line = indexLine(older[position]);
+    if (line.length + 1 > indexRemaining) break;
+    indexRemaining -= line.length + 1;
+    index.unshift(line);
+  }
+  const omitted = older.length - index.length;
+
+  return [
+    `Rows: ${rows.length} total - ${full.length} ${full.length === 1 ? "row" : "rows"} in full, `
+    + `${index.length} as index only, ${omitted} omitted.`,
+    "Index lines carry task, date, and outcome only. They carry no summary, so this briefing is not a"
+    + " source for what an index-only task contained; say so rather than guessing. Omitted rows are not"
+    + " here in any form.",
+    ...(index.length > 0
+      ? ["### Older tasks (index only: task | date | outcome)", index.join("\n")]
+      : []),
+    ...(full.length > 0
+      ? ["### Recent tasks in full (task | date | outcome | summary | milestone moved)", full.join("\n")]
+      : []),
+  ].join("\n\n");
+}
+
 export function assembleBriefing(
   root: string,
   caps: BriefingCaps = DEFAULT_CAPS,
   latestOwnerMessage = "",
 ): string {
   const facts = parseFacts(root);
-  const log = parseLog(root);
-  const logLines = log.map((row) => `| ${row.task} | ${row.date} | ${row.outcome} | ${row.summary} | moved: ${row.moved} |`).join("\n");
   const tree = fileTree(root, caps);
   return [
     "# Project briefing (assembled by Cairn's code, not by a model)",
@@ -609,8 +689,8 @@ export function assembleBriefing(
     `Project: ${facts.name}\nBuilding: ${facts.what}\nUsers: ${facts.who}\nCurrent milestone: ${facts.milestone}\nContract status: ${facts.status}`,
     "## PROJECT.md",
     clip(safeRead(paths.project(root)), caps.maxRecordChars),
-    "## Work log (task | date | outcome | summary | milestone moved)",
-    logLines || "(empty)",
+    "## Work log",
+    workLogSection(root, caps),
     "## Recent task records (last 3)",
     recentRecords(root, caps),
     "## Git",

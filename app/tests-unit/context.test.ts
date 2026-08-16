@@ -4,7 +4,15 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assembleBriefing, DEFAULT_CAPS, sameFileIdentity } from "../src/main/conductor/context.js";
+import {
+  assembleBriefing,
+  BRIEFING_CHAR_BUDGET,
+  CONVERSATION_CHAR_FLOOR,
+  DEFAULT_CAPS,
+  sameFileIdentity,
+} from "../src/main/conductor/context.js";
+import { CONSTITUTION, QUALITY_CONSTITUTION } from "../src/main/conductor/constitution.js";
+import { PROMPT_CHAR_LIMIT } from "../src/main/conductor/transports/types.js";
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" });
@@ -364,4 +372,126 @@ test("a briefing is deterministic for an unchanged project", () => {
   const root = fixtureProject();
   const ownerText = "Please inspect src/index.ts";
   assert.equal(assembleBriefing(root, DEFAULT_CAPS, ownerText), assembleBriefing(root, DEFAULT_CAPS, ownerText));
+});
+
+/* Task 242. The work log was the one briefing section with no cap: on Cairn
+ * itself it reached 133,267 characters of a 212,134-character briefing, so
+ * the constitution and briefing together exceeded PROMPT_CHAR_LIMIT before
+ * the owner typed anything and ordinary Chat could not send at all. These
+ * tests bound the section and tie the briefing's budget to the prompt limit
+ * it must live inside. */
+
+function logRow(task: number, summary: string, date = "2026-07-23"): string {
+  return `| ${String(task).padStart(3, "0")} | ${date} | Standard | Applied | DONE | completed | ${summary} | NO |`;
+}
+
+function withLogRows(root: string, rows: string[]): string {
+  writeFileSync(join(root, "docs", "ai-work", "LOG.md"), [
+    "| Task | Date | Lane | Draft/Final | Outcome | Decision | One-line summary | Milestone moved? |",
+    "|---|---|---|---|---|---|---|---|",
+    ...rows,
+    "",
+  ].join("\n"));
+  return root;
+}
+
+function workLogSection(briefing: string): string {
+  const start = briefing.indexOf("## Work log");
+  const end = briefing.indexOf("## Recent task records", start);
+  assert.ok(start >= 0, "briefing carries a distinct work-log section");
+  assert.ok(end > start, "the work-log section ends before the recent records");
+  return briefing.slice(start, end);
+}
+
+/** The section's own headings and honesty note, over and above the two row
+ * budgets it is allowed to spend on rows. */
+const SECTION_OVERHEAD_ALLOWANCE = 2000;
+
+test("a work log that grows without bound stays inside the briefing budget (c1, c2)", () => {
+  const rows = Array.from({ length: 5000 }, (_, index) =>
+    logRow(index + 1, `Task ${index + 1} did a thing. ${"detail ".repeat(280)}`));
+  const root = withLogRows(fixtureProject(), rows);
+
+  const briefing = assembleBriefing(root, DEFAULT_CAPS, "");
+  const section = workLogSection(briefing);
+
+  assert.ok(
+    section.length <= DEFAULT_CAPS.maxLogDetailChars + DEFAULT_CAPS.maxLogIndexChars + SECTION_OVERHEAD_ALLOWANCE,
+    `work-log section was ${section.length} characters`,
+  );
+  assert.ok(briefing.length <= BRIEFING_CHAR_BUDGET, `briefing was ${briefing.length} characters`);
+});
+
+test("the briefing budget leaves a conversation room inside the prompt limit (c3)", () => {
+  assert.ok(
+    CONSTITUTION.length + BRIEFING_CHAR_BUDGET + CONVERSATION_CHAR_FLOOR <= PROMPT_CHAR_LIMIT,
+    `constitution ${CONSTITUTION.length} + briefing budget ${BRIEFING_CHAR_BUDGET} `
+    + `+ conversation floor ${CONVERSATION_CHAR_FLOOR} exceeds the ${PROMPT_CHAR_LIMIT} prompt limit`,
+  );
+  assert.ok(
+    QUALITY_CONSTITUTION.length + BRIEFING_CHAR_BUDGET + CONVERSATION_CHAR_FLOOR <= PROMPT_CHAR_LIMIT,
+    "the quality-preview constitution must also fit beside a budgeted briefing",
+  );
+});
+
+test("recent rows keep their summaries, older rows carry no summary column, and the stated counts are true (c4)", () => {
+  const rows = Array.from({ length: 400 }, (_, index) =>
+    logRow(index + 1, `SUMMARYMARKER${index + 1}ENDS ${"filler ".repeat(60)}`));
+  const root = withLogRows(fixtureProject(), rows);
+
+  const briefing = assembleBriefing(root, DEFAULT_CAPS, "");
+  const section = workLogSection(briefing);
+
+  assert.match(section, /SUMMARYMARKER400ENDS/, "the newest row keeps its summary");
+  assert.doesNotMatch(briefing, /SUMMARYMARKER1ENDS/, "an index-only row's summary is nowhere in the briefing");
+  assert.match(section, /^\| 001 \| 2026-07-23 \| DONE \|$/mu, "an index-only row is still listed by number, date, and outcome");
+
+  const stated = /(\d+) rows? in full, (\d+) as index only, (\d+) omitted/u.exec(section);
+  assert.ok(stated, `the section states its own counts; section began:\n${section.slice(0, 400)}`);
+  const lines = section.split("\n");
+  const full = lines.filter((line) => /^\| \d{3} \|.*\| moved: /u.test(line)).length;
+  const index = lines.filter((line) => /^\| \d{3} \| [\d-]+ \| \w+ \|$/u.test(line)).length;
+  assert.equal(Number(stated[1]), full, "the stated full-row count matches the rows actually rendered in full");
+  assert.equal(Number(stated[2]), index, "the stated index-row count matches the index lines actually rendered");
+  assert.equal(full + index + Number(stated[3]), rows.length, "every row is accounted for as full, index, or omitted");
+});
+
+test("one row larger than the whole detail budget is still shown, truncated and marked (c5)", () => {
+  const root = withLogRows(fixtureProject(), [
+    logRow(1, "OLDESTROWMARKER a modest early summary"),
+    logRow(2, `GIANTROWSTARTS ${"x ".repeat(30000)} GIANTROWENDS`),
+  ]);
+
+  const section = workLogSection(assembleBriefing(root, DEFAULT_CAPS, ""));
+
+  assert.match(section, /GIANTROWSTARTS/, "the newest row survives even when it alone exceeds the detail budget");
+  assert.doesNotMatch(section, /GIANTROWENDS/, "and is cut at the budget rather than carried whole");
+  assert.match(section, /summary truncated/u, "a cut summary says so");
+  assert.ok(
+    section.length <= DEFAULT_CAPS.maxLogDetailChars + DEFAULT_CAPS.maxLogIndexChars + SECTION_OVERHEAD_ALLOWANCE,
+    `work-log section was ${section.length} characters`,
+  );
+});
+
+test("every capped section at its ceiling still assembles inside the briefing budget (c6)", () => {
+  const root = withLogRows(
+    fixtureProject(),
+    Array.from({ length: 5000 }, (_, index) => logRow(index + 1, `Row ${index + 1}. ${"detail ".repeat(280)}`)),
+  );
+  writeFileSync(join(root, "docs", "ai-work", "PROJECT.md"), `# Fixture\n\n${"project prose ".repeat(4000)}`);
+  for (const number of ["001", "002", "003"]) {
+    writeFileSync(join(root, "docs", "ai-work", "tasks", `${number}-brief.md`), `# Task ${number} brief\n\n${"brief prose ".repeat(4000)}`);
+    writeFileSync(join(root, "docs", "ai-work", "tasks", `${number}-report.md`), `# Task ${number} report\n\n${"report prose ".repeat(4000)}`);
+  }
+  mkdirSync(join(root, "src", "deep", "nested"), { recursive: true });
+  for (let index = 0; index < 400; index += 1) {
+    writeFileSync(
+      join(root, "src", "deep", "nested", `a-fairly-long-source-file-name-number-${index}.ts`),
+      `export const marker${index} = "${"payload ".repeat(2500)}";\n`,
+    );
+  }
+  commitAll(root, "ceiling fixture");
+
+  const briefing = assembleBriefing(root, DEFAULT_CAPS, "Please read every source file.");
+  assert.ok(briefing.length <= BRIEFING_CHAR_BUDGET, `briefing was ${briefing.length} characters`);
 });
