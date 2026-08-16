@@ -52,5 +52,11 @@ export function mountControls(): void {
   builderProposals.textContent = "Builder proposals";
   builderProposals.title = "review two synthetic proposal-only Builder examples";
   panel.appendChild(builderProposals);
+  const residentProgram = document.createElement("a");
+  residentProgram.className = "lab-controls-button lab-controls-link";
+  residentProgram.href = "/lab/resident-program.html";
+  residentProgram.textContent = "Resident program";
+  residentProgram.title = "the proposed visual constitution and Cairn's state board";
+  panel.appendChild(residentProgram);
   document.body.appendChild(panel);
 }

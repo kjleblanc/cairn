@@ -1,0 +1,909 @@
+/*
+ * Task 255 - the resident-program visual constitution, drawn.
+ *
+ * LAB ONLY. Nothing here is imported by `app/src/**`, no production route
+ * reaches it, and `resident-program-bundle-dark.test.mjs` proves that after a
+ * fresh production build. The semantic tokens below are a PROPOSAL for
+ * Slice 3's `src/renderer/tokens.css`; they deliberately do not touch the
+ * shipped `--garden-*` / `--lantern-*` set, so the running app is unchanged.
+ *
+ * Every token is prefixed `--rp-`. Values marked "measured" were sampled from
+ * the approved mockup at docs/visual-reference/. Values marked "derived" exist
+ * because the measured colour did not clear its WCAG floor for the use it was
+ * put to; `tests-unit/residentprogramboard.test.ts` recomputes every one of
+ * them from this file, so a future edit that breaks contrast fails a test
+ * rather than shipping.
+ */
+
+/* ---------------------------------------------------------------- tokens */
+
+:root,
+[data-rp-scheme="light"] {
+  color-scheme: light;
+
+  /* Structure. The approved mockup's shell measures #C1C8CD; the owner asked
+     for "slightly darker", which the plan defines as exactly one step. */
+  --rp-field: #b4c1c7;
+  --rp-field-edge: #a3b2ba;
+  --rp-chrome: #dbdcdd;          /* measured */
+  --rp-rail: #c6cccf;
+
+  /* Paper. */
+  --rp-paper: #f6ecdc;           /* measured */
+  --rp-paper-raised: #fbf4e7;    /* measured */
+  --rp-paper-chrome: #f0e8dc;    /* measured */
+
+  /* Ink. */
+  --rp-ink: #15384b;             /* approved seed */
+  --rp-ink-strong: #0d2634;      /* derived: decisive headings */
+  --rp-ink-muted: #47606d;       /* derived: #5c7480 measured 4.21:1, short */
+
+  /* Cairn and action. */
+  --rp-teal: #177f8c;            /* approved seed - surfaces and fills */
+  --rp-teal-ink: #0f5f6b;        /* derived: teal TEXT needs 4.5:1 on paper */
+  --rp-teal-press: #10606b;
+  --rp-on-teal: #ffffff;         /* the label ON a teal fill */
+  --rp-on-amber: #3d2c05;        /* the label ON an amber fill */
+  --rp-amber: #f0c65a;           /* approved seed - Cairn's front pane */
+  --rp-amber-low: #e7bb52;       /* the pane's lower edge, a single soft step */
+  --rp-amber-edge: #c99b33;
+  --rp-amber-ink: #7d5a12;       /* derived: attention TEXT */
+  --rp-seam: #5fd8dc;            /* the cyan seam pane */
+  --rp-rear: #7fb0a8;            /* translucent teal rear panes */
+  --rp-mark-sage: #97a97c;       /* measured - upper data square */
+  --rp-mark-amber: #d6b472;      /* measured - lower data square */
+
+  /* Semantic surfaces. Each pairs a quiet ground with an ink that clears 4.5:1
+     on it, because state is always written, never coloured alone. */
+  --rp-apricot: #f7dbb9;         /* measured - owner notes */
+  --rp-apricot-ink: #4a3212;
+  --rp-activity: #d2e2e9;        /* approved seed - live work */
+  --rp-activity-ink: #12505e;
+  --rp-sage: #d9e4c9;            /* approved seed - connected / verified */
+  --rp-sage-ink: #33562f;
+  --rp-coral: #f2ddd9;           /* restrained: coral is the ink, not a flood */
+  --rp-coral-line: #bf5f56;      /* derived: the seed #C86F67 measured 3.03:1 */
+  --rp-coral-ink: #9a453e;       /* derived: STOPPED and ERROR TEXT */
+
+  /* Depth. Hairlines and shadows, never glass. */
+  /* Two different jobs, and conflating them was a real accessibility bug.
+     The hairlines are DECORATION - seams between paper surfaces - and WCAG
+     asks nothing of them. `--rp-control-edge` is the visible boundary OF a
+     control, which 1.4.11 holds to 3:1; it was drawn with the decorative
+     hairline at 1.68:1. */
+  --rp-hairline: rgb(21 56 75 / 16%);
+  --rp-hairline-strong: rgb(21 56 75 / 28%);
+  --rp-control-edge: #61757f;
+  --rp-shadow-low: 0 1px 2px rgb(18 44 58 / 10%);
+  --rp-shadow-paper: 0 10px 26px rgb(18 44 58 / 12%), 0 2px 5px rgb(18 44 58 / 8%);
+  --rp-shadow-lift: 0 4px 12px rgb(18 44 58 / 14%);
+  --rp-focus: #0f5f6b;
+  --rp-focus-halo: rgb(15 95 107 / 22%);
+
+  /* One restrained, static paper texture. Never animated. Reused, not
+     reinvented per surface - five bespoke noises would read as five textures. */
+  --rp-grain-opacity: .34;
+  --rp-grain-blend: multiply;
+}
+
+:root[data-theme="dark"],
+[data-rp-scheme="dark"] {
+  color-scheme: dark;
+
+  /* Dark is the SAME warm desk after dusk. The paper is still the lightest,
+     warmest thing in the frame - it is lit by a lamp, not turned off - and the
+     shell recedes to a cool slate. This is not the retired night garden and
+     not an inverted daylight theme. */
+  --rp-field: #1e2427;
+  --rp-field-edge: #161b1e;
+  --rp-chrome: #2b3236;
+  --rp-rail: #232a2d;
+
+  --rp-paper: #37332c;
+  --rp-paper-raised: #423d34;
+  --rp-paper-chrome: #2f2c26;
+
+  --rp-ink: #f2e8d7;
+  --rp-ink-strong: #fdf6e9;
+  --rp-ink-muted: #bdb2a0;
+
+  --rp-teal: #63b9bd;
+  --rp-teal-ink: #86d0d2;
+  --rp-teal-press: #4da3a8;
+  /* Dark inverts which side of the teal the label sits on: white on a light
+     teal measures 2.28:1, so the label goes dark instead. */
+  --rp-on-teal: #10262a;
+  --rp-on-amber: #3d2c05;
+  --rp-amber: #e9bb58;
+  --rp-amber-low: #dcaf4c;
+  --rp-amber-edge: #a37f2c;
+  --rp-amber-ink: #eec97a;
+  --rp-seam: #6fdadd;
+  --rp-rear: #6fa19a;
+  --rp-mark-sage: #93a67a;
+  --rp-mark-amber: #cfae6e;
+
+  --rp-apricot: #4c3f2d;
+  --rp-apricot-ink: #f6ddb9;
+  --rp-activity: #2c3c44;
+  --rp-activity-ink: #a9cfdb;
+  --rp-sage: #33422e;
+  --rp-sage-ink: #bcd4a5;
+  --rp-coral: #452e2a;
+  --rp-coral-line: #d98077;
+  --rp-coral-ink: #f2ab9f;
+
+  --rp-hairline: rgb(242 232 215 / 16%);
+  --rp-hairline-strong: rgb(242 232 215 / 28%);
+  --rp-control-edge: #968d7e;
+  --rp-shadow-low: 0 1px 2px rgb(0 0 0 / 30%);
+  --rp-shadow-paper: 0 12px 30px rgb(0 0 0 / 40%), 0 2px 6px rgb(0 0 0 / 26%);
+  --rp-shadow-lift: 0 4px 14px rgb(0 0 0 / 36%);
+  --rp-focus: #86d0d2;
+  --rp-focus-halo: rgb(134 208 210 / 24%);
+
+  --rp-grain-opacity: .20;
+  --rp-grain-blend: overlay;
+}
+
+/* System: no explicit choice on the page root, so follow the operating system.
+   The browser resolves this; the qualification emulates it rather than
+   touching the owner's OS setting. An explicit [data-theme="light"] wins. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --rp-field: #1e2427;
+    --rp-field-edge: #161b1e;
+    --rp-chrome: #2b3236;
+    --rp-rail: #232a2d;
+    --rp-paper: #37332c;
+    --rp-paper-raised: #423d34;
+    --rp-paper-chrome: #2f2c26;
+    --rp-ink: #f2e8d7;
+    --rp-ink-strong: #fdf6e9;
+    --rp-ink-muted: #bdb2a0;
+    --rp-teal: #63b9bd;
+    --rp-teal-ink: #86d0d2;
+    --rp-teal-press: #4da3a8;
+    --rp-on-teal: #10262a;
+    --rp-on-amber: #3d2c05;
+    --rp-amber: #e9bb58;
+    --rp-amber-low: #dcaf4c;
+    --rp-amber-edge: #a37f2c;
+    --rp-amber-ink: #eec97a;
+    --rp-seam: #6fdadd;
+    --rp-rear: #6fa19a;
+    --rp-mark-sage: #93a67a;
+    --rp-mark-amber: #cfae6e;
+    --rp-apricot: #4c3f2d;
+    --rp-apricot-ink: #f6ddb9;
+    --rp-activity: #2c3c44;
+    --rp-activity-ink: #a9cfdb;
+    --rp-sage: #33422e;
+    --rp-sage-ink: #bcd4a5;
+    --rp-coral: #452e2a;
+    --rp-coral-line: #d98077;
+    --rp-coral-ink: #f2ab9f;
+    --rp-hairline: rgb(242 232 215 / 16%);
+    --rp-hairline-strong: rgb(242 232 215 / 28%);
+    --rp-control-edge: #968d7e;
+    --rp-shadow-low: 0 1px 2px rgb(0 0 0 / 30%);
+    --rp-shadow-paper: 0 12px 30px rgb(0 0 0 / 40%), 0 2px 6px rgb(0 0 0 / 26%);
+    --rp-shadow-lift: 0 4px 14px rgb(0 0 0 / 36%);
+    --rp-focus: #86d0d2;
+    --rp-focus-halo: rgb(134 208 210 / 24%);
+    --rp-grain-opacity: .20;
+    --rp-grain-blend: overlay;
+  }
+}
+
+/* An explicitly-scoped island always wins over the page theme, so the board can
+   show Light and Dark beside each other on one screen. */
+[data-rp-scheme="light"] { color-scheme: light; }
+[data-rp-scheme="dark"] { color-scheme: dark; }
+
+/* ------------------------------------------------------- shared geometry */
+
+:root {
+  --rp-r-lg: 20px;
+  --rp-r-md: 14px;
+  --rp-r-sm: 9px;
+  --rp-mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+  --rp-sans: Quicksand, "Segoe UI", system-ui, sans-serif;
+  /* Motion: finite, event-driven, transform/opacity only. */
+  --rp-settle: cubic-bezier(.22, .9, .3, 1);
+  --rp-arrive: cubic-bezier(.34, 1.4, .64, 1);
+  /* One static fibre. Monochrome, faint, and shared by every paper surface. */
+  --rp-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.62' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+}
+
+/* --------------------------------------------------------------- page */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--rp-field);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+#rp-badge {
+  /* In flow, deliberately. Sticky and fixed both overlay whatever scrolls
+     under them, and this banner was covering the first row of faces - the
+     exact thing the owner came here to look at. The page states what it is in
+     its own lede and again in its footer, so the banner does not have to
+     follow you down the page to keep the claim honest. */
+  padding: 6px 14px;
+  /* Fixed in both themes on purpose: a "this is not the product" banner must
+     not change weight when the theme does. */
+  background: #9a453e;
+  color: #fff;
+  font: 600 12px/1.4 var(--rp-sans);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.rp-board {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 24px 96px;
+}
+/* The page header sits directly on the desk field, which is the darkest ground
+   any text on this page meets. Muted ink and the teal kicker both fall under
+   4.5:1 there, so the header gets its own paper rather than a special ink -
+   the field is an approved colour and the fix belongs on the surface. */
+.rp-board > header {
+  margin-bottom: 36px;
+  padding: 26px 26px 30px;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-lg);
+  background: var(--rp-chrome);
+  box-shadow: var(--rp-shadow-low);
+}
+@media (max-width: 640px) {
+  .rp-board { padding: 20px 14px 64px; }
+  .rp-section { padding: 18px 16px 22px; }
+}
+
+/* --------------------------------------------------------- typography */
+
+.rp-kicker {
+  margin: 0 0 6px;
+  color: var(--rp-teal-ink);
+  font: 600 13px/1.4 var(--rp-sans);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+h1 { margin: 0 0 14px; font: 700 34px/1.25 var(--rp-sans); color: var(--rp-ink-strong); }
+h2 { margin: 0 0 8px; font: 700 24px/1.3 var(--rp-sans); color: var(--rp-ink-strong); }
+h3 { margin: 0 0 6px; font: 600 17px/1.35 var(--rp-sans); color: var(--rp-ink); }
+p { margin: 0 0 12px; max-width: 68ch; }
+.rp-lede { font-size: 18px; line-height: 1.6; }
+.rp-muted { color: var(--rp-ink-muted); }
+.rp-small { font-size: 14px; line-height: 1.5; }
+code, .rp-mono { font-family: var(--rp-mono); font-size: .92em; }
+
+/* ------------------------------------------------------------ sections */
+
+.rp-section {
+  margin: 0 0 44px;
+  padding: 26px 26px 30px;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-lg);
+  background: var(--rp-chrome);
+  box-shadow: var(--rp-shadow-low);
+}
+.rp-section > header { margin-bottom: 20px; }
+.rp-decision {
+  border-left: 5px solid var(--rp-amber);
+}
+.rp-decision-flag {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--rp-amber);
+  color: var(--rp-on-amber);
+  font: 700 12px/1.5 var(--rp-sans);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------ paper surfaces */
+
+.rp-paper,
+.rp-paper-raised {
+  position: relative;
+  border-radius: var(--rp-r-md);
+  isolation: isolate;
+}
+.rp-paper { background: var(--rp-paper); }
+.rp-paper-raised { background: var(--rp-paper-raised); box-shadow: var(--rp-shadow-low); }
+.rp-paper::before,
+.rp-paper-raised::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-image: var(--rp-grain);
+  background-size: 160px 160px;
+  opacity: var(--rp-grain-opacity);
+  mix-blend-mode: var(--rp-grain-blend);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------- the resident program */
+
+.rp-program { display: block; overflow: visible; }
+
+/* Size row: every mark is drawn from ONE geometry at its true pixel size.
+   Nothing here is magnified - what the owner sees is what ships. */
+.rp-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 34px;
+  align-items: flex-end;
+  padding: 26px 22px;
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper);
+}
+.rp-size { text-align: center; }
+.rp-size figcaption {
+  margin-top: 12px;
+  color: var(--rp-ink-muted);
+  font: 600 13px/1.4 var(--rp-sans);
+}
+.rp-size-note { display: block; font-weight: 400; font-size: 12px; }
+
+/* ---------------------------------------------------- expression board */
+
+.rp-states {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 16px;
+}
+.rp-state {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 20px;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper);
+}
+.rp-state-figure {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 92px;
+}
+.rp-state-truth {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font: 700 12.5px/1.5 var(--rp-sans);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.rp-truth-quiet { background: var(--rp-paper-raised); color: var(--rp-ink-muted); border: 1px solid var(--rp-hairline); }
+.rp-truth-teal { background: var(--rp-activity); color: var(--rp-activity-ink); }
+.rp-truth-amber { background: var(--rp-apricot); color: var(--rp-apricot-ink); }
+.rp-truth-sage { background: var(--rp-sage); color: var(--rp-sage-ink); }
+.rp-truth-coral { background: var(--rp-coral); color: var(--rp-coral-ink); }
+/* STOPPED and ERROR must carry their effect and recovery in plain words, not
+   just a badge. This is the required truth, so it is full ink, not muted. */
+.rp-state-consequence {
+  margin: 0;
+  color: var(--rp-ink);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.rp-state-rule {
+  margin: 0;
+  color: var(--rp-ink-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.rp-state-rule b { color: var(--rp-ink); font-weight: 600; }
+
+/* A shape token beside every risk colour, so STOPPED and ERROR never differ
+   by colour alone - they differ by word, by shape, and by colour. */
+.rp-glyph {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+}
+.rp-glyph-stop { border-radius: 2px; }
+.rp-glyph-error { border-radius: 50%; }
+.rp-glyph-done { border: 0; }
+
+/* ----------------------------------------------------------- swatches */
+
+.rp-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
+  gap: 12px;
+}
+.rp-swatch {
+  overflow: hidden;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+}
+.rp-swatch-chip {
+  display: flex;
+  align-items: flex-end;
+  height: 68px;
+  padding: 8px 10px;
+  font: 600 13px/1.3 var(--rp-sans);
+}
+.rp-swatch-body { padding: 9px 11px 11px; }
+.rp-swatch-role { font: 600 13.5px/1.4 var(--rp-sans); }
+.rp-swatch-meta { color: var(--rp-ink-muted); font: 400 12px/1.5 var(--rp-mono); }
+
+/* ----------------------------------------------------------- controls */
+
+.rp-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+.rp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 20px;
+  border: 1px solid transparent;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-teal);
+  color: var(--rp-on-teal);
+  font: 600 15.5px/1 var(--rp-sans);
+  cursor: pointer;
+  transition: transform 140ms var(--rp-settle), background-color 140ms var(--rp-settle);
+}
+.rp-btn:hover { background: var(--rp-teal-press); }
+.rp-btn:active { transform: translateY(1px); }
+.rp-btn-quiet {
+  background: var(--rp-paper-raised);
+  border-color: var(--rp-control-edge);
+  color: var(--rp-ink);
+}
+.rp-btn-quiet:hover { background: var(--rp-paper); }
+.rp-btn:disabled,
+.rp-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  background: var(--rp-paper-chrome);
+  border-color: var(--rp-hairline);
+  color: var(--rp-ink-muted);
+  transform: none;
+}
+.rp-btn[aria-busy="true"] { cursor: progress; background: var(--rp-teal-press); }
+/* A drawn stand-in for a control the board must not actually offer.
+   It uses explicit colours rather than `opacity`, because opacity composites
+   the fill and its label together and lands the label at 3.25:1 - a number no
+   token-level test can see, since neither token has that value. */
+.rp-btn-inert {
+  cursor: default;
+  background: var(--rp-teal-press);
+  color: var(--rp-on-teal);
+}
+.rp-btn-quiet.rp-btn-inert {
+  background: var(--rp-paper-chrome);
+  border-color: var(--rp-hairline-strong);
+  color: var(--rp-ink-muted);
+}
+
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+  border-radius: var(--rp-r-sm);
+}
+
+.rp-field-input {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  color: var(--rp-ink);
+  font: 400 16px/1.5 var(--rp-sans);
+}
+.rp-field-input::placeholder { color: var(--rp-ink-muted); }
+.rp-field-input:hover { border-color: var(--rp-focus); }
+
+.rp-toggle {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: 999px;
+  background: var(--rp-paper-raised);
+}
+.rp-toggle button {
+  min-height: 44px;
+  min-width: 76px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--rp-ink-muted);
+  font: 600 14.5px/1 var(--rp-sans);
+  cursor: pointer;
+  transition: background-color 140ms var(--rp-settle), color 140ms var(--rp-settle);
+}
+/* Hover is designed, not left to the browser - section 2.4 asks for every
+   interaction state, and an unpressed toggle option had none. */
+.rp-toggle button:hover { background: var(--rp-paper); color: var(--rp-ink); }
+.rp-toggle button[aria-pressed="true"]:hover { background: var(--rp-teal-press); }
+.rp-toggle button[aria-pressed="true"] { background: var(--rp-teal); color: var(--rp-on-teal); }
+
+/* --------------------------------------------------- activity capsule */
+
+.rp-capsule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  width: 100%;
+  max-width: 560px;
+  padding: 12px 16px;
+  /* A stadium while it is one line; a rounded card once the label wraps. The
+     activity capsule must be able to get narrow - it is the one thing that
+     must never be pushed off the screen. */
+  border-radius: 22px;
+  border: 1px solid var(--rp-hairline);
+  background: var(--rp-activity);
+  color: var(--rp-activity-ink);
+}
+.rp-capsule-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--rp-paper-raised);
+}
+.rp-capsule-label {
+  min-width: 0;
+  font: 700 13.5px/1.4 var(--rp-sans);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.rp-capsule-detail { margin-left: auto; font-size: 13.5px; }
+/* Under the compact breakpoint the detail goes, exactly as the compact
+   treatment describes; the state itself never does. */
+@media (max-width: 640px) {
+  .rp-capsule-detail { display: none; }
+}
+
+/* ------------------------------------------------ conversation sequence */
+
+.rp-sequence {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 28px 26px;
+  border-radius: var(--rp-r-lg);
+  background: var(--rp-paper);
+}
+.rp-owner-note {
+  align-self: flex-end;
+  max-width: 30rem;
+  padding: 14px 18px;
+  border-radius: var(--rp-r-md);
+  background: var(--rp-apricot);
+  color: var(--rp-apricot-ink);
+  font-size: 17px;
+}
+.rp-cairn-turn { display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
+.rp-cairn-turn > svg { flex: none; margin-top: 2px; }
+/* 66ch, inside the constitution's 65-75 character measure. It was 62ch, which
+   was outside the band the plan sets and which no test caught, because the
+   test pinned the wrong number while its own message quoted the right one. */
+.rp-cairn-prose { margin: 0; min-width: 0; max-width: 66ch; font-size: 18px; line-height: 1.6; }
+
+.rp-decision-card,
+.rp-receipt {
+  padding: 20px 22px;
+  border: 1px solid var(--rp-hairline-strong);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper-raised);
+  box-shadow: var(--rp-shadow-low);
+}
+.rp-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.rp-card-title { margin: 0; font: 700 18px/1.3 var(--rp-sans); }
+.rp-facts { margin: 0 0 16px; display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; }
+.rp-facts dt { color: var(--rp-ink-muted); font: 600 13.5px/1.5 var(--rp-sans); }
+.rp-facts dd { margin: 0; font-size: 14.5px; overflow-wrap: anywhere; }
+.rp-receipt { border-left: 5px solid var(--rp-sage-ink); }
+.rp-receipt-stopped { border-left-color: var(--rp-coral-line); }
+.rp-claim {
+  padding: 10px 14px;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-chrome);
+  font-size: 14.5px;
+}
+.rp-claim b { font-weight: 700; }
+
+/* ------------------------------------------------------- compositions */
+
+.rp-comps { display: grid; gap: 22px; }
+.rp-comp-frame {
+  /* A deliberately WIDE composition viewed on a narrow screen scrolls inside
+     its own frame. The page itself never scrolls sideways - that is the rule,
+     and this is how a wide artifact obeys it. */
+  overflow: hidden auto;
+  border: 1px solid var(--rp-hairline-strong);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-field);
+  box-shadow: var(--rp-shadow-paper);
+}
+.rp-comp-scroll { overflow-x: auto; }
+.rp-comp-caption {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rp-hairline);
+  background: var(--rp-paper-chrome);
+  color: var(--rp-ink-muted);
+  font: 600 13px/1.4 var(--rp-sans);
+}
+
+/* The synthetic workspace shell, drawn to the approved mockup's proportions. */
+.rp-shell { display: flex; height: 100%; padding: 12px; gap: 12px; background: var(--rp-field); }
+.rp-shell-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 62px;
+  padding: 14px 0;
+  border-radius: var(--rp-r-md);
+  background: var(--rp-rail);
+}
+.rp-rail-chip {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  color: var(--rp-amber-ink);
+  font: 700 14px/1 var(--rp-sans);
+  box-shadow: var(--rp-shadow-low);
+}
+.rp-rail-glyph { color: var(--rp-ink-muted); }
+.rp-rail-spacer { flex: 1; }
+.rp-shell-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  border-radius: var(--rp-r-md);
+  background: var(--rp-chrome);
+  overflow: hidden;
+}
+.rp-shell-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rp-hairline);
+  background: var(--rp-paper-chrome);
+}
+.rp-wordmark { flex: none; font: 700 18px/1 var(--rp-sans); letter-spacing: .12em; color: var(--rp-ink-strong); }
+.rp-header-rule { flex: none; width: 1px; height: 22px; background: var(--rp-hairline-strong); }
+/* A long project name shortens rather than pushing the connection state off
+   the screen; which project you are in is legible, but WHETHER you are
+   connected must never be the thing that gets pushed out. */
+.rp-header-project {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--rp-ink-muted);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-header-right { display: flex; flex: none; align-items: center; gap: 10px; margin-left: auto; }
+.rp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--rp-sage);
+  color: var(--rp-sage-ink);
+  font: 700 11.5px/1.5 var(--rp-sans);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.rp-pill-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.rp-shell-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px;
+  overflow: hidden;
+}
+.rp-conversation {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px;
+  border-radius: var(--rp-r-lg);
+}
+/* History scrolls; nothing else does. */
+.rp-transcript {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+}
+.rp-composer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 18px;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-lg);
+  background: var(--rp-paper-raised);
+}
+.rp-composer-placeholder { flex: 1; color: var(--rp-ink-muted); font-size: 16px; }
+
+/* Compact and phone are the same components under less room - not a second
+   design. Below the supported 760 px minimum the shell keeps containing its
+   content; that width is a stress test, never a supported size. */
+.rp-comp-compact .rp-shell-rail { width: 52px; }
+.rp-comp-compact .rp-header-project,
+.rp-comp-compact .rp-capsule-detail { display: none; }
+.rp-comp-compact .rp-wordmark { font-size: 15px; }
+
+.rp-phone {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  background: var(--rp-field);
+}
+.rp-phone-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--rp-paper-chrome);
+  border-bottom: 1px solid var(--rp-hairline);
+}
+.rp-phone-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  overflow: hidden;
+}
+.rp-phone-foot {
+  padding: 12px 16px;
+  border-top: 1px solid var(--rp-hairline);
+  background: var(--rp-paper-chrome);
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* --------------------------------------------------- theme comparison */
+
+.rp-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.rp-pair > * { min-width: 0; }
+.rp-island {
+  padding: 20px;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-chrome);
+  color: var(--rp-ink);
+}
+
+/* --------------------------------------------------------- long copy */
+
+.rp-longcopy {
+  max-width: 100%;
+  padding: 18px 20px;
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper);
+}
+.rp-longcopy p { max-width: 70ch; }
+.rp-longcopy .rp-mono {
+  display: block;
+  padding: 10px 12px;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-chrome);
+  overflow-wrap: anywhere;
+}
+
+/* ----------------------------------------------------------- motion */
+
+/* Every animation below is finite: one arrival, one settle, then done.
+   None is applied to a container that holds an interactive control. */
+@keyframes rp-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rp-settle {
+  from { transform: scale(.94); }
+  to { transform: none; }
+}
+.rp-anim-arrive { animation: rp-arrive 340ms var(--rp-arrive) both; }
+.rp-anim-settle { animation: rp-settle 260ms var(--rp-settle) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The end state is identical; only the travel is removed. Nothing is left
+     mid-animation, hidden, or waiting for an event that will not arrive. */
+  .rp-anim-arrive,
+  .rp-anim-settle { animation: none; opacity: 1; transform: none; }
+  .rp-btn { transition: none; }
+  .rp-btn:active { transform: none; }
+}
+
+/* ------------------------------------------------------------- lists */
+
+.rp-list { margin: 0; padding-left: 20px; max-width: 68ch; }
+.rp-list li { margin-bottom: 6px; }
+.rp-inline-note {
+  padding: 14px 16px;
+  border-left: 4px solid var(--rp-teal);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-paper);
+  font-size: 14.5px;
+}
+
+.rp-motion-demo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: center;
+  margin-top: 18px;
+  padding: 20px 22px;
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper);
+}
+/* The stage is a fixed box so the arrival cannot reflow the page around it.
+   It holds no control, so animating what sits inside it is safe. */
+.rp-motion-stage {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 190px;
+  height: 180px;
+}
+.rp-motion-demo > div:last-child { flex: 1; min-width: 260px; }
+
+.rp-type-sample { padding: 20px 22px; border-radius: var(--rp-r-md); background: var(--rp-paper); }
+.rp-type-sample > * + * { margin-top: 16px; }
+.rp-type-row { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; }
+.rp-type-tag { flex: none; width: 15rem; color: var(--rp-ink-muted); font: 400 12.5px/1.5 var(--rp-mono); }

@@ -8,8 +8,11 @@
 The plan's handoff was written when Task 230 landed and expected the next free
 number to be near 231. Twenty-three unrelated tasks have landed since. 255 is
 the lowest number free across the main checkout, every registered worktree, and
-every local branch: 236 is held by `claude/vigorous-tharp-0cbd3c`, and 248 and
-254 are held by `lane/h`. The plan anticipated this and claims no future number.
+every local branch. The numbers below 255 that are not on `main`'s tip are
+still taken: 236 exists only on `claude/vigorous-tharp-0cbd3c`, 248 is a brief
+with no report (tracked on `main` and on `lane/h`), and 254 is claimed on
+`lane/h`. Under the contract any file beginning with a number takes it. The
+plan anticipated this and claims no future number.
 
 ## Requested visible outcome
 
@@ -75,14 +78,20 @@ approved and are here only for a fidelity verdict.
   call, credential use, paid call, external write, push, publication or
   deployment. No stored owner data is read, written or deleted; `.cairn` is
   untouched.
-- **Concurrency.** `lane/h` holds an in-flight Task 254 and the three
-  `claude/*` worktrees hold their own uncommitted records. Protect every
-  existing tracked, staged, modified and untracked path; stage by exact name;
-  never clean, stash, reset, broadly stage or rewrite history.
-- **Task 229 stands.** Its lab entry, build input and the lab-only, literal,
-  actionless, authority-free Builder proposal card are unchanged. Playwright
-  stays at `workers: 1`; any app token this task creates is released in
-  `finally`, and no token another lane or the owner holds is ever removed.
+- **Concurrency.** `lane/h` has Task 254 claimed on its branch. Every other
+  registered worktree is clean. Protect every existing tracked, staged,
+  modified and untracked path; stage by exact name; never clean, stash, reset,
+  broadly stage or rewrite history. Untracked files belonging to another task's
+  record — including generated evidence under `app/test-results/` — count as
+  protected work.
+- **Task 229 stands.** Its lab entry, build input, cited screenshot and the
+  lab-only, literal, actionless, authority-free Builder proposal card are
+  unchanged. Playwright stays at `workers: 1`. This task's board config takes
+  **no** app token: like Task 229's own board config it declares no
+  `globalSetup`, drives only a local lab server, and never launches Electron or
+  touches the owner's profile. It must also declare its own `outputDir`,
+  because Playwright clears that directory at the start of every run and the
+  default is shared.
 
 ## Checks
 
@@ -106,11 +115,20 @@ approved and are here only for a fidelity verdict.
    rule. A test proves the board renders all nine and that each one's literal
    status text is present in the DOM.
 4. **`c4` - the visual system is measurably legible.** A test computes WCAG
-   contrast from the board's own token values and proves body ink on paper and
-   on chrome clears 4.5:1, and that large text, the teal action, focus ring,
-   hairlines and every state colour clear 3:1, in both Light and Dark. Type
-   sizes, line height and measure fall inside the plan's section 2.4 bounds, and
-   every interactive control on the board is at least 44×44 px.
+   contrast from the board's own token values and proves that every text the
+   board renders clears 4.5:1 on the ground it is rendered on, in both Light
+   and Dark, including each palette specimen on its own swatch — those pairs
+   are derived from the board's own table, not hand-listed, so a new swatch
+   cannot escape the check. The focus ring and every control's own visible
+   boundary clear the 3:1 non-text floor, and a test proves each control draws
+   that boundary with the control-edge token rather than a decorative hairline.
+   Hairlines are seams between paper surfaces, not control boundaries; they are
+   measured composited over each ground and proved visible, and this brief does
+   not claim WCAG's non-text floor for pure decoration. Type sizes, line height
+   and measure fall inside the
+   plan's section 2.4 bounds, read from the stylesheet rather than pinned to a
+   literal, and every interactive control on the board is at least 44×44 px
+   measured from its real rendered box.
 5. **`c5` - the board holds together across theme and size.** The browser
    qualification renders the board at 1320×980, at the supported minimum
    760×620, at a below-minimum 540×900 containment stress, and at a 390×700
@@ -130,11 +148,14 @@ approved and are here only for a fidelity verdict.
    publish or approve anything, because none exists.
 8. **`c8` - verification, evidence and records are exact.** Typecheck, the unit
    test, both builds, the bundle-dark test and the browser qualification run
-   with their exact commands and real results recorded. Every lab and browser
-   process is shut down afterwards and the strict port and any task-owned token
-   are proved released. The final diff and Git status contain only this task's
-   exact paths; one LOG row and one exact-path completion commit answer every id
-   above, and the report names the owner's Gate 1 verdict.
+   with their exact commands, and **the report** records each one's real result
+   and answers every id above. Every lab and browser process is shut down
+   afterwards, and the strict port is proved released; this task takes no app
+   token, and the report says so rather than claiming to release one. Task
+   229's cited screenshot is present and its command is named. The final diff
+   and Git status contain only this task's exact paths, one LOG row is
+   appended, one exact-path completion commit closes the task, and the report
+   names the owner's Gate 1 verdict.
 
 ## DONE and STOPPED
 

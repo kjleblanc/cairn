@@ -63,6 +63,7 @@ export default defineConfig({
         worldboard: "lab/worldboard.html",
         castboard: "lab/castboard.html",
         builderproposal: "lab/builderproposal.html",
+        residentprogram: "lab/resident-program.html",
       },
     },
   },
