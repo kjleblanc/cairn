@@ -18,11 +18,16 @@ before Slice 4 was executed is in Git history at `46715d8`.
 | 2 - authoritative Task Card and checks | **Done** (Task 239) |
 | 3 - one separately approved tool-free critic | **Code complete and green. The live call has still never been made.** (Tasks 240, 241) |
 | 4 - confirm one allegation, permit one repair | **Done** (Task 244) |
-| 5 - prove the milestone on Cairn itself | Not started. Three things are owed first - see below |
+| 5 - prove the milestone on Cairn itself | Not started. **Waits only on gate 3 now** - the other two blockers are settled; see below |
 | 6 - retire the shadow routes | Not started; post-milestone by design |
 
 Recent commits, newest first:
 
+- `c543a70` Record Task 242's landing and re-verify its numbers on main
+- `ff53294` Put Task 242's log row back in order after the union merge
+- `56b5700` **Land Task 242** (merge of `claude/keen-hawking-b5dfb8`)
+- `01ed7b9` Record the owner's `c10` answer: it failed, and it is deferred
+- `4ec95fb` Retitle the renamed handoff and fix its self-reference
 - `425b7a4` Record Task 246's Core suite result: green
 - `fdcf896` Complete Task 246: a check menu Cairn can actually pass
 - `851e32a` Claim Task 246
@@ -72,44 +77,93 @@ script. Both are mutation-proved on **exit codes**, which is what
 `runProjectCheck` actually reads: a type error in core gives exit 2, one in app
 gives exit 2, a clean tree gives 0.
 
-## The three things Slice 5 is waiting on
+## What Slice 5 is waiting on - two of the three are now settled
 
-**1. Task 245's `c10` is the owner's, and unanswered.** Its disposition is
-**STOPPED** pending that judgment. Four captures are waiting:
+**Updated 2026-08-15.** Two of the three blockers below are closed. Read this
+section rather than the older prose above it where they disagree.
 
-- `%TEMP%\cairn-task-244-allegation.png`
-- `%TEMP%\cairn-task-245-settled-opened.png`
-- `%TEMP%\cairn-task-244-repair-offer.png`
-- `%TEMP%\cairn-task-244-repaired-candidate.png`
+**1. Task 245's `c10` - ANSWERED, and it FAILED.** The owner was shown the four
+captures and said: *"I don't think so, but I don't want to spend time here
+fixing it. We've tried twice now already and it's still overly complicated."*
+Recorded in `245-report.md` at `01ed7b9`; Task 245 is closed STOPPED.
 
-Slice 5 puts a beginner in front of exactly these screens, so this judgment
-gates it. The owner's words on the previous round were: *"It's not good enough
-for a beginner, but I am going to have another agent work on making everything
-more beginner friendly, so let's focus on having it work for right now."*
+**Do not open a third readability attempt.** Task 244's `c12` and Task 245's
+`c10` are two consecutive stops on the same visible journey by the same judge.
+The contract's repair rule and the plan's anti-drift rule 4 both require
+weighing deferral before a third, and the owner chose deferral to a separate
+beginner-friendliness effort. **Slice 5 is no longer gated on this** - the
+owner has judged the screens not beginner-ready and elected to proceed anyway.
+Slice 5's evidence therefore proves the route works, never that it reads well.
 
-**2. Task 242 is STOPPED and unmerged.** It lives on
-`claude/keen-hawking-b5dfb8` (`6a01ba2`). Cairn's project briefing emits the
-**whole** work log uncapped - 133,272 characters against a 200,000 prompt
-budget when Task 241 measured it, growing with every task - so ordinary Chat
-refuses to send on the Cairn repo itself. **Cairn cannot be talked to about its
-own repository until this lands**, which is precisely what Slice 5 requires.
+**2. Task 242 - LANDED.** Merged at `56b5700`, its log row put back in order at
+`ff53294`, its record re-verified at `c543a70`. Its numbers were retaken on
+today's `main` rather than trusted, because the log had grown by four tasks
+while the branch waited:
+
+| Measured on `main` | Before | After |
+|---|---|---|
+| briefing + constitution vs the 200,000 limit | **238,248 - over by 38,248** | **118,553 - 81,447 to spare** |
+| the work-log section | 145,403 | **26,047** |
+
+The section now reports `240 rows total - 9 in full, 231 as index only, 0
+omitted`. **The conductor reads full summaries for tasks 238-246 only**;
+everything to 237 is number, date, and outcome. Nine rows, not the nineteen
+242's own report predicted - summaries kept growing, exactly as it warned.
+
+**`c9` is still open and is the owner's**: they must send one real Chat message
+in Cairn on this repo. Task 242 stays STOPPED until they do. The exact steps
+are at the end of `242-report.md`. **The app token was released for that
+attempt** - take it again before any app or Playwright run.
+
+**Two traps this landing hit, for whoever lands the next branch:**
+
+- **`npm run test:unit -w cairn-app` cannot work.** `app` is not a workspace -
+  the root declares only `core` and `cli` - and the package is `cairn-desktop`.
+  Run it from `app/`. Task 242's own report asks for the broken form.
+- **`LOG.md`'s union merge appends, and `parseLog` does not sort.** A landed
+  branch's row arrives *after* the newest task, and since position is recency,
+  the landing task masquerades as the most recent work in the very section
+  Task 242 added. Move the row to its number and say so.
 
 **3. Gate 3 is still unspent, and it is the owner's alone.** Slice 3's one real
 critic call has never been made. Everything around it is built and proved
 against the fixture conductor. It costs money and sends project data off the
 machine; the card states its own ceiling before anything is pressed. **A new
 conversation must not spend it on its own initiative, and must not treat a
-passing fixture test as having closed `c9`/`c10` of Task 241.**
+passing fixture test as having closed `c9`/`c10` of Task 241.** This is now the
+only unsettled blocker.
 
 ## Current baselines - measure against these
 
+Re-measured on merged `main` at `c543a70` on 2026-08-15 unless noted.
+
 | Suite | Result |
 |---|---|
-| `npm test -w @cairn/core` | **508 / 498 pass / 0 fail / 10 skipped** |
-| `app: npm run test:unit` | **935 / 924 pass / 9 fail / 2 skipped**, and it takes **471 seconds** |
-| `npm test -w cairn-cli` | **24 / 24 pass / 0 fail**, 5s |
-| `npm run typecheck` (root) | PASS, 11s |
-| `npm run build` (root) | PASS, 8s |
+| `npm test -w @cairn/core` | **508 / 498 pass / 0 fail / 10 skipped** (not re-run since Task 246) |
+| `app: npm run test:unit`, run **from `app/`** | **940 / 929 pass / 9 fail / 2 skipped**, 305-357s |
+| `npm test -w cairn-cli` | **24 / 24 pass / 0 fail**, 5s (not re-run) |
+| `npm run typecheck` (root) | PASS, **26s** |
+| `npm run build` (root) | PASS, **13.5s** |
+
+The app-unit count rose 935 -> 940 because Task 242 added five tests; the nine
+failures are unchanged and their names diff identically. Typecheck and build
+are slower than Task 246 measured (11s and 8s) but far inside the 120s cap -
+treat 246's figures as one machine's reading, not a bound.
+
+## Other unmerged work nobody has been tracking
+
+Found while landing Task 242. None of it blocks Slice 5; none of it is
+abandoned on purpose as far as any record says.
+
+| Branch | Ahead | What |
+|---|---|---|
+| `lane/f` | **15** | Tasks 200 and 202, the press/acknowledgement design |
+| `claude/vigorous-tharp-0cbd3c` | 2 | **Task 236**, the hard-link-guard diagnosis Task 246's report relies on |
+| `lane/b` / `lane/c` / `lane/d` | 2 each | Stopped Tasks 180, 195, 163 |
+| `codex/recovery-main-stopped-180-183` | 1 | A recovery snapshot |
+
+Task 236 is the one worth a decision: Task 246 cites its diagnosis while that
+diagnosis has never been on `main`.
 
 ## Known reds that are NOT yours
 
@@ -151,9 +205,9 @@ fixed them and `cli` has been green since `fdcf896`.
 
 ## Copy-ready prompt
 
-Slice 5 is not runnable until items 1-3 above are settled. If the owner wants
-the next bounded step instead, the honest candidates are: land Task 242, answer
-Task 245's `c10`, or make Slice 3's real call under gate 3.
+**Gate 3 is the only blocker left, and Task 242's `c9` is the only owed
+answer.** Both are the owner's. Slice 5 becomes runnable the moment gate 3 is
+given; `c9` can be answered in a couple of minutes whenever they open Cairn.
 
 ```text
 Work on: Continue Cairn's Gauntlet restoration described in:
@@ -163,19 +217,25 @@ docs/superpowers/plans/2026-08-14-cairn-gauntlet-restoration.md
 Read first, before editing anything:
 
 - docs/ai-work/HANDOFF-gauntlet-slice5.md (this handoff)
-- docs/ai-work/tasks/244-report.md, 245-report.md and 246-report.md
+- docs/ai-work/tasks/242-report.md, 244-report.md, 245-report.md, 246-report.md
 - AGENTS.md, and the complete Git status
 
-Slices 1 to 4 are done. Slice 5 - one whole Gauntlet journey on Cairn itself -
-is blocked on three things this handoff names: Task 245's unanswered c10, Task
-242 unmerged on claude/keen-hawking-b5dfb8, and gate 3 unspent. Do not start
-Slice 5 until the owner has settled them, and do not begin Slice 6.
+Slices 1 to 4 are done. Task 242 is landed and Task 245's c10 is answered
+(it FAILED and the owner deferred the fix - do not reopen it, and do not start
+a third readability attempt). Slice 5 - one whole Gauntlet journey on Cairn
+itself - now waits only on gate 3, the one real critic call, which is the
+owner's alone and costs money. Do not spend it on your own initiative, and do
+not begin Slice 6.
+
+Task 242's c9 is still owed: the owner sends one ordinary Chat message in
+Cairn on this repo and says whether it goes. Steps are at the end of
+242-report.md. If it sends, record it and move 242 to DONE.
 
 No provider, model or credential work without the owner's approval on that
 exact call. A paid call needs its own gate, given after they read the card.
 
 Take the app token before any app or Playwright run and release it in a
-finally only if that run created it.
+finally only if that run created it. It is currently FREE.
 
 Not yours: the nine Builder unit failures, conductor.spec.ts:3314, and the
 full-suite worker-teardown EPERM.
@@ -188,11 +248,20 @@ with it.
 
 ## Open owner decisions carried forward
 
-- **Gate 3: the one real critic call.** Unspent. See above.
-- **Task 245's `c10`.** Unanswered. See above.
+- **Gate 3: the one real critic call.** Unspent. The only remaining blocker.
+- **Task 242's `c9`.** Owed - one real Chat message on this repo. See above.
+- **Task 245's `c10`.** ANSWERED and FAILED; the fix is deferred to a separate
+  beginner-friendliness effort, not to a third attempt here. See above.
+- **Whether `maxLogDetailChars` should rise.** Task 242 landed it at 20,000,
+  which today keeps only 9 tasks' summaries. There is room - the briefing sits
+  19,075 under its own budget and 81,447 under the prompt limit. The owner was
+  shown this and chose to land the constant as written; revisiting it is cheap
+  and is a design change, not a bug fix.
+- **Task 236 and `lane/f` have never landed.** See the unmerged-work table
+  above. Task 246's report relies on Task 236's diagnosis.
 - **Whether the milestone moved** is always the owner's call; the log column
   stays a claim.
-- **209 local commits are not on the remote** as of this writing. **Never state
+- **218 local commits are not on the remote** as of this writing. **Never state
   that count from memory** - run `git rev-list --count origin/main..main`.
   Pushing is the owner's decision and needs its own approval.
 - Inherited and still open: an owner who chooses nothing on the Task Card gets
