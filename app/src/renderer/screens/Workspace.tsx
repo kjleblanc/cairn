@@ -5,13 +5,10 @@ import type {
   ConductorStreamSnapshot,
   RecentProject,
   RunSessionSnapshot,
-  TownPoint,
-  TownPresentationState,
 } from "../../shared/ipc";
 import { cairn } from "../api";
-import { PondLine } from "../components/PondLine";
+import { ActivityCapsule } from "../components/ActivityCapsule";
 import { ProjectRail } from "../components/ProjectRail";
-import { TownSquare } from "../components/TownSquare";
 import { ErrorCard } from "../components/Ui";
 import {
   advanceActivityCue,
@@ -19,18 +16,29 @@ import {
   observeActivityPresentation,
   settleActivityPresentation,
 } from "../activity/presentation";
+import { resolveCairnPresence } from "../activity/presence";
 import { Chat } from "./Chat";
 import { Dashboard } from "./Dashboard";
 import { TaskRun } from "./TaskRun";
 
 type CenterView = "chat" | "dashboard" | "task";
 
-function defaultTownPresentation(): TownPresentationState {
-  // dividerWidth is kept in the saved shape for compatibility with files
-  // written before the villager bubble (Task 146); it is no longer rendered.
-  return { version: 1, positions: {}, dividerWidth: 620 };
-}
-
+/**
+ * Task 259 (Slice 4 of the resident-program visual overhaul) replaced the town
+ * square and the pond with the chat-first desk: a slim rail, a quiet header, a
+ * written activity capsule, and the warm paper that holds the exchange.
+ *
+ * WHAT DID NOT CHANGE is the load-bearing half of this file. The active
+ * project, the polling and its stale guards, the capture identity attributes,
+ * the project-generation counter, view routing and the Chat focus signal are
+ * behaviour rather than scenery, and Slice 2's suites exist to catch a slip in
+ * any of them.
+ *
+ * TownSquare, PondLine and the saved-position persistence are gone from this
+ * screen but still exist on disk. Slice 10 deletes them, and an owner's
+ * `.cairn/town-square.json` is never deleted or transformed — an obsolete file
+ * may safely remain unread.
+ */
 export function Workspace({
   initialDir,
   initialStatus,
@@ -52,16 +60,13 @@ export function Workspace({
   const [projectStatus, setProjectStatus] = useState(initialStatus);
   const [projects, setProjects] = useState<RecentProject[]>([]);
   const [conductor, setConductor] = useState<ConductorStatus | null>(null);
-  const [townTask, setTownTask] = useState<RunSessionSnapshot | null>(null);
-  const [townStream, setTownStream] = useState<ConductorStreamSnapshot | null>(null);
+  // The raw task and stream snapshots are no longer held in state. They fed the
+  // Town's worker nodes; the capsule reads the projection alone, and keeping a
+  // second copy of a runtime snapshot that nothing renders is how two sources
+  // of the same truth start.
   const [runtimePresentation, setRuntimePresentation] = useState(() => hydrateActivityPresentation(null, null));
   const [centerView, setCenterView] = useState<CenterView>("chat");
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
-  // The narrow window (Decision 9). 1260px is the app's existing breakpoint;
-  // this mirrors it in JS only because the cast's shore depends on it, and
-  // CSS cannot tell the layout algorithm anything.
-  const [narrow, setNarrow] = useState(() => window.matchMedia?.("(max-width: 1260px)").matches ?? false);
-  const [pondOpen, setPondOpen] = useState(false);
   const [chatNeedsYou, setChatNeedsYou] = useState(false);
   // Task 186: projects are a shelf at the edge of the world, not the first
   // thing that claims the room. It opens on demand and remains fully named in
@@ -69,13 +74,11 @@ export function Workspace({
   const [railCollapsed, setRailCollapsed] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([initialDir]));
   const [manualExpansion, setManualExpansion] = useState<Set<string>>(() => new Set());
-  const [townPresentation, setTownPresentation] = useState<TownPresentationState>(defaultTownPresentation);
-  // Bumped on every explicit "talk" intent (rail action, Cairn's node, the
-  // dashboard's Talk button); Chat untucks and focuses on the change.
+  // Bumped on every explicit "talk" intent (rail action, the dashboard's Talk
+  // button); Chat focuses its composer on the change.
   const [chatFocusSignal, setChatFocusSignal] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const activeDirRef = useRef(activeDir);
-  const townPresentationRef = useRef(townPresentation);
   const centerViewRef = useRef(centerView);
   const reducedMotionRef = useRef(reducedMotion);
   const runtimeDirRef = useRef<string | null>(null);
@@ -92,7 +95,6 @@ export function Workspace({
     };
   }
   activeDirRef.current = activeDir;
-  townPresentationRef.current = townPresentation;
   centerViewRef.current = centerView;
   reducedMotionRef.current = reducedMotion;
   runtimePresentationRef.current = runtimePresentation;
@@ -131,15 +133,13 @@ export function Workspace({
         centerViewRef.current === "chat" && !reducedMotionRef.current,
       );
     // The reducer returns the same object when an older prefix or regressed
-    // terminal snapshot loses the monotonicity check. Accept task, stream, and
-    // presentation as one unit so stale data cannot repopulate a worker while
-    // the pond correctly remains terminal.
+    // terminal snapshot loses the monotonicity check. Rejecting the whole
+    // observation there is what stops a stale snapshot from walking the capsule
+    // back off a terminal outcome it has already reported.
     if (!hydrate && next === current) return;
     runtimeAppliedRef.current = request;
     runtimeDirRef.current = dir;
     runtimePresentationRef.current = next;
-    setTownTask(task);
-    setTownStream(stream);
     setRuntimePresentation(next);
   }, []);
 
@@ -157,43 +157,22 @@ export function Workspace({
   }, []);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 1260px)");
-    const update = () => setNarrow(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-
-  // The pond is a narrow-window state and nothing else. Widening past 1260px
-  // leaves the wide layout showing with `pondOpen` still true, so narrowing
-  // again would land on an open pond with the conversation already put away —
-  // a state the owner never asked for and cannot see coming.
-  useEffect(() => {
-    if (!narrow) setPondOpen(false);
-  }, [narrow]);
-
-  useEffect(() => {
     // A new active project is a new context: a stale error card from the old
-    // one never follows the owner across it, and neither does an open pond.
+    // one never follows the owner across it, and neither does a waiting
+    // decision or a run the previous project was in the middle of.
     setError(null);
-    setPondOpen(false);
     setChatNeedsYou(false);
-    setTownTask(null);
-    setTownStream(null);
     runtimeDirRef.current = null;
     const reset = hydrateActivityPresentation(null, null);
     runtimePresentationRef.current = reset;
     setRuntimePresentation(reset);
-    setTownPresentation(defaultTownPresentation());
     void refreshActiveRuntime(activeDir);
-    void cairn.townLoad(activeDir).then((response) => {
-      if (activeDirRef.current !== activeDir) return;
-      if (!response.ok) {
-        setError(response.message);
-        return;
-      }
-      setTownPresentation(response.value);
-    });
+    // The connection is resolved against the current project, so it is asked
+    // again immediately rather than waiting out the two-second poll. Without
+    // this the header and the capsule spend up to two seconds reporting the
+    // PREVIOUS project's connection — visible before Task 259 only in the
+    // rail's small label, and unmissable now that the desk says it in words.
+    void cairn.conductorStatus().then(setConductor);
   }, [activeDir, refreshActiveRuntime]);
 
   // Motion never gates truth. A keyed timer advances the one cue on screen;
@@ -249,7 +228,7 @@ export function Workspace({
 
   // Main dispatches this only after a worker has settled and before taking the
   // terminal picture. Chat/TaskRun apply the closed session synchronously;
-  // Workspace also refreshes the town projection so its worker state follows.
+  // Workspace also refreshes the activity projection so the capsule follows.
   useEffect(() => {
     const onRefresh = (event: Event) => {
       const detail = (event as CustomEvent<{ dir?: unknown; session?: unknown }>).detail;
@@ -265,8 +244,6 @@ export function Workspace({
       );
       runtimeDirRef.current = session.dir;
       runtimePresentationRef.current = next;
-      setTownTask(session);
-      setTownStream(null);
       setRuntimePresentation(next);
     };
     window.addEventListener("cairn:task-session-refresh", onRefresh);
@@ -278,6 +255,22 @@ export function Workspace({
     const rest = projects.filter((project) => project.dir !== activeDir);
     return active ? [active, ...rest] : rest;
   }, [activeDir, projects]);
+
+  const connected = conductor?.connected ?? false;
+  const consentRequired = conductor?.consentRequired ?? false;
+
+  // ONE resolved value behind the written line and Cairn's face. Two
+  // independent answers to "is something waiting?" would eventually disagree,
+  // and the line would be the one that lied.
+  const presence = useMemo(
+    () => resolveCairnPresence({ activity: runtimePresentation, needsOwner: chatNeedsYou, connected }),
+    [runtimePresentation, chatNeedsYou, connected],
+  );
+
+  const connectionState = consentRequired ? "consent" : connected ? "connected" : "none";
+  const connectionLabel = consentRequired
+    ? "Permission needed"
+    : connected ? "Connected" : "Not connected";
 
   async function selectProject(dir: string): Promise<void> {
     if (dir === activeDir) {
@@ -292,15 +285,14 @@ export function Workspace({
     }
     // Invalidate every old-project request before React commits the new
     // selection. An event or poll already in flight can no longer paint the
-    // previous Town or overwrite the new project's name.
+    // previous project's run or overwrite the new project's name.
     activeDirRef.current = dir;
     runtimeAppliedRef.current = ++runtimeRequestRef.current;
     statusAppliedRef.current = ++statusRequestRef.current;
     setError(null);
-    // Project name, Town truth, and motion anchor change as one visible batch;
-    // the new project never paints for a frame with the old project's run.
-    setTownTask(null);
-    setTownStream(null);
+    // Project name, activity truth, and the capsule change as one visible
+    // batch; the new project never paints for a frame with the old project's
+    // run.
     runtimeDirRef.current = null;
     const reset = hydrateActivityPresentation(null, null);
     runtimePresentationRef.current = reset;
@@ -337,21 +329,15 @@ export function Workspace({
     setChatFocusSignal((n) => n + 1);
   }
 
-  function persistTownPresentation(dir: string, state: TownPresentationState): void {
-    setTownPresentation(state);
-    townPresentationRef.current = state;
-    void cairn.townSave(dir, state).then((response) => {
-      if (activeDirRef.current === dir && !response.ok) setError(response.message);
-    });
-  }
+  const projectName = projectStatus.facts.name || "Project";
 
   return (
-    <div className={`workspace-shell${railCollapsed ? " workspace-rail-collapsed" : ""}`}>
+    <div className="rp-desk">
       {error ? <div className="app-error-overlay"><ErrorCard message={error} onDismiss={() => setError(null)} /></div> : null}
       <ProjectRail activeDir={activeDir} projects={orderedProjects}
         collapsed={railCollapsed} expanded={expanded}
-        connected={conductor?.connected ?? false}
-        consentRequired={conductor?.consentRequired ?? false}
+        connected={connected}
+        consentRequired={consentRequired}
         bodyLabel={conductor?.connected ? `${conductor.provider} · ${conductor.model}` : ""}
         onToggleCollapsed={() => setRailCollapsed((value) => !value)}
         onToggleProject={toggleProject}
@@ -362,48 +348,46 @@ export function Workspace({
 
       {/* Main compares this trusted renderer value with the accepted run root
           before capture, so switching projects cannot mislabel another
-          project's stage as evidence for the run that just settled. */}
-      <section className="workspace-stage" data-project-dir={activeDir}
+          project's stage as evidence for the run that just settled.
+
+          `workspace-stage` IS THE CAPTURE SELECTOR. `src/main/evidencecapture.ts`
+          exports it as WORKSPACE_STAGE_SELECTOR and reads both attributes below
+          off the element carrying it. The class stays whatever the composition
+          around it becomes; `tests-unit/deskcomposition.test.ts` pins the two
+          together so a rename here cannot silently blind the capture. */}
+      <section className="workspace-stage rp-desk-stage" data-project-dir={activeDir}
         data-project-generation={captureProjectRef.current.generation}>
-        {centerView === "chat" ? (
-          /* One world: the town fills the stage and the conversation lives
-             inside it as the villager bubble anchored to Cairn. */
-          <section className={`workspace-town-pane${pondOpen ? " workspace-town-pane-pond-open" : ""}`}
-            aria-label="Town square">
-            <PondLine projectName={projectStatus.facts.name || "Project"}
-              presentation={runtimePresentation} needsYou={chatNeedsYou}
-              open={pondOpen} onToggle={setPondOpen} />
-            <TownSquare key={`town:${activeDir}`} projectName={projectStatus.facts.name || "Project"}
-              task={townTask} stream={townStream}
-              presentation={runtimePresentation}
-              positions={townPresentation.positions}
-              wholePond={narrow && pondOpen}
-              onPositionsChange={(positions: Record<string, TownPoint>) => {
-                const state = { ...townPresentationRef.current, positions };
-                persistTownPresentation(activeDirRef.current, state);
-              }}
-              onFocusChat={focusChat}
-              onOpenRun={() => setCenterView("task")} />
+        {/* The quiet header: a long project name shortens, and whether you are
+            connected never does. */}
+        <header className="rp-desk-header">
+          <span className="rp-desk-title" title={projectName}>{projectName}</span>
+          <span className="rp-desk-connection" data-rp-connection={connectionState}>{connectionLabel}</span>
+        </header>
+
+        <ActivityCapsule presence={presence} />
+
+        <main className="rp-desk-view">
+          {centerView === "chat" ? (
             <Chat key={`chat:${activeDir}`} dir={activeDir} embedded focusSignal={chatFocusSignal}
               initialComposer={composerSeedRef.current ?? undefined}
               onNeedsYouChange={setChatNeedsYou}
               onBack={openDashboard}
               onOpenRun={() => setCenterView("task")} />
-          </section>
-        ) : centerView === "dashboard" ? (
-          <div className="workspace-scroll">
-            <Dashboard dir={activeDir} status={projectStatus}
-              onStartTask={() => setCenterView("task")}
-              onTalkWithCairn={focusChat}
-              onSwitch={onOpenProjects}
-              onOpenProject={(dir) => void selectProject(dir)}
-              onSettings={onSettings} />
-          </div>
-        ) : (
-          <div className="workspace-scroll">
-            <TaskRun key={activeDir} dir={activeDir} demoAvailable={demoAvailable} onBack={openDashboard} />
-          </div>
-        )}
+          ) : centerView === "dashboard" ? (
+            <div className="workspace-scroll">
+              <Dashboard dir={activeDir} status={projectStatus}
+                onStartTask={() => setCenterView("task")}
+                onTalkWithCairn={focusChat}
+                onSwitch={onOpenProjects}
+                onOpenProject={(dir) => void selectProject(dir)}
+                onSettings={onSettings} />
+            </div>
+          ) : (
+            <div className="workspace-scroll">
+              <TaskRun key={activeDir} dir={activeDir} demoAvailable={demoAvailable} onBack={openDashboard} />
+            </div>
+          )}
+        </main>
       </section>
     </div>
   );

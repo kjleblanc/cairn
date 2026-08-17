@@ -625,10 +625,11 @@ test("the projection's own API is neutrally named, and its two exceptions are de
   const exported = [...MODULE_SOURCE.matchAll(/^export (?:function|type|const) (\w+)/gm)].map((match) => match[1]);
   assert.ok(exported.length >= 10, "the export scan found almost nothing, so it proves nothing");
   const scenic = exported.filter((name) => /town|pond/i.test(name));
-  // Slice 2 must change nothing visible, so the narrow-window Pond line keeps
-  // its own wording for one more slice. Those two names and their type are the
-  // ONLY surface vocabulary allowed to remain; Slice 4 retires all three.
-  assert.deepEqual(scenic.sort(), ["PondLineTone", "pondLineLabel", "pondLineTone"]);
+  // Slice 2 left `pondLineTone`, `pondLineLabel` and `PondLineTone` here so
+  // that slice could change nothing visible. Task 259 (Slice 4) retired the
+  // surface and moved their job into `activity/presence.ts`, which answers it
+  // for Cairn's face as well as the words. No surface vocabulary remains.
+  assert.deepEqual(scenic.sort(), []);
 });
 
 test("written status is derived from truth and events alone", () => {

@@ -623,9 +623,6 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   // invisibly: the composer looked ready while every send was refused.
   const [commentary, setCommentary] = useState(false);
   const [composer, setComposer] = useState(initialComposer);
-  // Villager bubble (Task 146): tucked, the dialog collapses to a one-line
-  // chip floating by Cairn's node.
-  const [tucked, setTucked] = useState(false);
   // Queue instead of bounce (Task 155): messages sent while Cairn is
   // answering — or while the envelope's comment streams — wait here, each
   // visible with its own take-back, and flush in order the moment the stream
@@ -773,7 +770,6 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     setSettledAnnouncement({ sequence, text });
     pendingFocusRef.current = { kind: "recovery" };
     setSettlementFocusPending(true);
-    setTucked(false);
     setFocusEpoch((epoch) => epoch + 1);
   }, []);
 
@@ -795,16 +791,15 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
       ? { kind: "reply" }
       : { kind: "action", actionId: next.actionId };
     setSettlementFocusPending(true);
-    setTucked(false);
     setFocusEpoch((epoch) => epoch + 1);
   }, [focusRecovery]);
 
-  // Villager bubble (Task 146): an explicit "talk" intent from the shell —
-  // the rail, Cairn's node, or the dashboard's Talk button — untucks the
-  // dialog and focuses the composer.
+  // An explicit "talk" intent from the shell — a rail action or the
+  // dashboard's Talk button — focuses the composer. Task 259 retired the
+  // tucked state this used to have to undo first; the intent, and what it
+  // does with the keyboard, are unchanged.
   useEffect(() => {
     if (!focusSignal) return;
-    setTucked(false);
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }, [focusSignal]);
 
@@ -2038,9 +2033,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   const latestNonBuilderTurnIndex = turns.reduce(
     (found, turn, i) => (turn.role === "builder-review" ? found : i), -1,
   );
-  // Needs-you dot (Task 155): tucked away, the chip says when something
-  // inside waits on the owner — a proposed task to decide, a dispatch to
-  // confirm, or a push to approve.
+  // The needs-you signal (Task 155): something inside waits on the owner — a
+  // proposed task to decide, a dispatch to confirm, or a push to approve. It
+  // lit a dot on the tucked chip until Task 259 retired that surface; it now
+  // feeds the desk's activity capsule, where it is spoken rather than dotted.
   const actionCurrent = action !== null
     && actionRef.current?.actionId === action.actionId
     && action.conversationId === conversationId;
@@ -2119,8 +2115,23 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
   ) : null;
 
   const column = (
-      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " chat-column-villager" : ""}`}
-        role={embedded ? "dialog" : undefined} aria-label={embedded ? "Conversation with Cairn" : undefined}
+      /* Task 259 (Slice 4): a REGION inside the desk's main content, not a
+         permanently mounted dialog floating over a world. A dialog implies
+         something to dismiss and something behind it to return to; the
+         conversation is the thing itself, so it is a named region and the
+         desk's `<main>` holds it. */
+      /* `chat-column-villager` stays, and it is not an oversight. That class is
+         the hook for roughly two hundred rules that give the cards, panels and
+         decision surfaces INSIDE the conversation their paper — the dispatch
+         panel's flat rules, the result card's disposition marks, the question
+         card, the push confirmation. Those interiors are Slice 5's and Slice
+         6's work, not this slice's, and dropping the hook silently reverted
+         them to a pre-Task-186 card language nobody approved. The name is
+         inherited from a surface that is gone; `rp-conversation` re-points the
+         paired tokens those rules are written against, so they re-tone onto
+         warm paper instead of being rewritten two slices early. */
+      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " rp-conversation chat-column-villager" : ""}`}
+        role={embedded ? "region" : undefined} aria-label={embedded ? "Conversation with Cairn" : undefined}
         data-conversation-restore={restoringConversation ? "pending" : "settled"}>
         <div className="row spread chat-topbar">
           <Pill kind="quiet" onClick={onBack}>← Project home</Pill>
@@ -2129,10 +2140,11 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
               onModelSaved={(model) => setStatus((s) => (s ? { ...s, model } : s))}
               onDisconnected={() => { void newConversation(); void refreshStatus(); }} />
           ) : null}
-          {embedded ? (
-            <button type="button" className="chat-tuck" onClick={() => setTucked(true)}
-              aria-label="Tuck the conversation away">tuck away ↘</button>
-          ) : null}
+          {/* Task 259: the tuck control is retired with the world it put the
+              conversation away from. There is nothing behind the conversation
+              to look at any more, so putting it away would reveal an empty
+              desk — and what Cairn is doing now lives in the activity capsule
+              above, which never scrolls away and never needs opening. */}
         </div>
 
         {status === null ? <p className="muted">Getting ready…</p> : null}
@@ -2481,24 +2493,10 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
     );
   }
 
-  /* The villager bubble (Task 146): the conversation is a tailed dialog
-     anchored beside Cairn's node — or, tucked, a one-line chip floating by
-     him carrying his last line. The overlay root is click-transparent so the
-     town stays alive around the dialog. */
-  return (
-    <div className="chat-villager-root">
-      {tucked ? (
-        <button type="button" className="chat-villager-chip"
-          onClick={() => { setTucked(false); window.requestAnimationFrame(() => composerRef.current?.focus()); }}
-          aria-label={needsYou
-            ? "Open the conversation with Cairn — a decision is waiting for you"
-            : "Open the conversation with Cairn"}>
-          {/* The needs-you dot (Task 155): a decision waits inside — the
-            * owner learns it from the chip, without opening the dialog. */}
-          {needsYou ? <span className="chat-villager-chip-dot" aria-hidden="true" /> : null}
-          <span className="chat-villager-chip-text">{lastReply?.role === "cairn" ? lastReply.text : "Talk with Cairn"}</span>
-        </button>
-      ) : column}
-    </div>
-  );
+  /* Task 259 (Slice 4): the conversation is the desk's centre of gravity, so
+     it is returned plainly and the desk's own grid places it. The overlay root
+     and the tucked chip are gone with the world they floated over; the
+     needs-you signal they carried is published to the shell instead, and the
+     activity capsule speaks it in words that never have to be opened. */
+  return column;
 }

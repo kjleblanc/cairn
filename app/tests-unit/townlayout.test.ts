@@ -1,6 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeTownLayout, TOWN_BOUNDS, TOWN_CENTER, type TownLayoutNode } from "../src/renderer/town/layout.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  computeTownLayout,
+  TOWN_BOUNDS,
+  TOWN_CENTER,
+  TOWN_SHORE_BESIDE_CHAT,
+  townShore,
+  type TownLayoutNode,
+} from "../src/renderer/town/layout.js";
 
 function crowdedTown(): { nodes: TownLayoutNode[]; links: Array<{ source: string; target: string }> } {
   const workers = Array.from({ length: 8 }, (_, index) => ({ id: `worker:run-${index}`, radius: 0.105 }));
@@ -61,4 +70,31 @@ test("out-of-range saved points are clamped without moving Cairn", () => {
   );
   assert.deepEqual(layout["worker:pinned"], { x: TOWN_BOUNDS.minX, y: TOWN_BOUNDS.maxY });
   assert.deepEqual(layout.cairn, TOWN_CENTER);
+});
+
+/* ------------------------------------------------------------------------ *
+ * MOVED HERE by Task 259 (Slice 4), which deleted `pondline.test.ts` with the
+ * surface that file was named after. These two tests are not about the pond:
+ * they are about the Town's own shore, they still pass unchanged, and Slice 10
+ * — which deletes the Town — is the slice that should decide their fate. The
+ * Town no longer mounts in the running app, so `wholePond` is unreachable from
+ * production; the visual lab's mock still renders the component.
+ * ------------------------------------------------------------------------ */
+
+test("the whole pond gives the cast the whole width", () => {
+  // Beside the conversation a villager stops at the shore; with the pond whole
+  // there is no conversation to stay clear of. Reverting this to a constant
+  // used to leave every other assertion green.
+  assert.equal(townShore(false), TOWN_SHORE_BESIDE_CHAT);
+  assert.equal(townShore(true), TOWN_BOUNDS.maxX);
+  assert.ok(townShore(true) > townShore(false), "the whole pond is no wider than the shore");
+});
+
+test("the whole-pond shore is wired to the prop, not pinned to a constant", () => {
+  // townShore's value table is pinned above, but a call site that passed a
+  // literal would keep every one of those assertions green.
+  const town = readFileSync(
+    join(__dirname, "..", "..", "src", "renderer", "components", "TownSquare.tsx"), "utf8");
+  assert.match(town, /const shore = townShore\(wholePond\)/,
+    "the render clamp is not wired to the wholePond prop");
 });

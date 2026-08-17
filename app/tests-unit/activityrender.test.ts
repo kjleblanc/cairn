@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ConductorStreamSnapshot, RunSessionSnapshot, TownPoint } from "../src/shared/ipc.js";
-import { PondLine } from "../src/renderer/components/PondLine.js";
 import { TownSquare } from "../src/renderer/components/TownSquare.js";
 /* ------------------------------------------------------------------------ *
  * Task 257, `c5` — the rendered no-visible-change assertion.
@@ -201,40 +200,18 @@ function renderTown(entry: Case): string {
   }));
 }
 
-function renderPond(state: Presentation, needsYou: boolean, open: boolean): string {
-  return renderToStaticMarkup(createElement(PondLine, {
-    projectName: "Garden",
-    presentation: state,
-    needsYou,
-    open,
-    onToggle: () => undefined,
-  }));
-}
-
-/** The narrow-window line reads only truth and `needsYou`, so it gets its own
- *  small matrix instead of 68 near-identical copies of the same four lines. */
-function pondCases(): { name: string; markup: string }[] {
-  const byTruth = new Map<string, Presentation>();
-  for (const entry of CASES) if (!byTruth.has(entry.state.truth)) byTruth.set(entry.state.truth, entry.state);
-  const sections: { name: string; markup: string }[] = [];
-  for (const [truth, state] of [...byTruth].sort(([a], [b]) => a.localeCompare(b))) {
-    for (const needsYou of [false, true]) {
-      for (const open of [false, true]) {
-        sections.push({
-          name: `PondLine · truth=${truth} needsYou=${needsYou} open=${open}`,
-          markup: readable(renderPond(state, needsYou, open)),
-        });
-      }
-    }
-  }
-  return sections;
-}
-
+/*
+ * The 32 `PondLine · …` sections stood here until Task 259 (Slice 4) deleted
+ * the component. **The 18 TownSquare hashes below are unchanged, byte for
+ * byte** — the golden file lost its last 32 lines and not one character of its
+ * first 18, which is the evidence that removing the pond disturbed nothing
+ * else. What the pond's sections proved — that a waiting decision outranks
+ * every other state, and that the words follow truth — is proved for the
+ * surface that replaced them in `cairnpresence.test.ts` and
+ * `activitycapsule.test.ts`, which also carry its live region.
+ */
 function sections(): { name: string; markup: string }[] {
-  return [
-    ...CASES.map((entry) => ({ name: `TownSquare · ${entry.name}`, markup: readable(renderTown(entry)) })),
-    ...pondCases(),
-  ];
+  return CASES.map((entry) => ({ name: `TownSquare · ${entry.name}`, markup: readable(renderTown(entry)) }));
 }
 
 function sha256(text: string): string {
@@ -327,19 +304,15 @@ test("c5: Cairn's node, its accessible name and the spoken status stay joined to
   }
 });
 
-test("c5: the narrow-window line's tone and words stay joined to truth", () => {
-  for (const entry of CASES) {
-    const quiet = renderPond(entry.state, false, false);
-    const waiting = renderPond(entry.state, true, false);
-    assert.match(quiet, /class="pond-line pond-line-(quiet|busy|done|stopped)"/,
-      `${entry.name}: the line took a tone it should not have`);
-    assert.match(waiting, /class="pond-line pond-line-needs-you"/,
-      `${entry.name}: a waiting decision failed to outrank the water`);
-    assert.ok(waiting.includes("Something in the conversation is waiting for you."));
-    // Task 155's rule: one answer to "is something waiting?", never two.
-    assert.ok(!quiet.includes("waiting for you"), `${entry.name}: the line invented a second waiting signal`);
-  }
-});
+/*
+ * "c5: the narrow-window line's tone and words stay joined to truth" stood
+ * here. REPLACED by Task 259 (Slice 4): the component it rendered no longer
+ * exists, and the rule it enforced — a waiting decision outranks everything
+ * else, in words, with one answer and never two — is now enforced against the
+ * surface that carries it, in `cairnpresence.test.ts` ("a waiting decision
+ * outranks everything else, exactly as the pond's line did") and
+ * `activitycapsule.test.ts`.
+ */
 
 test("c5: the matrix really exercises every truth and every cue kind", () => {
   const truths = new Set(CASES.map((entry) => entry.state.truth));

@@ -6,6 +6,18 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+/**
+ * Owner gate 2 evidence (Task 259, Slice 4). Real production screenshots.
+ *
+ * `app/shots/` and not `app/test-results/`: Playwright clears its output
+ * directory at the start of every run, and it cleared `test-results` WHOLE
+ * during this task — taking Task 229's and Task 255's untracked evidence with
+ * it, which had to be restored from a backup. `shots/` is the owner's existing
+ * review directory, it is gitignored, and nothing clears it.
+ */
+const GATE = join(__dirname, "..", "shots", "task259-gate");
+mkdirSync(GATE, { recursive: true });
+
 // Task 007: load (reopen where the owner left off), switch (in place, one click),
 // track (the projects screen tells the truth about broken entries).
 //
@@ -122,52 +134,53 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(projectHome).toBeVisible({ timeout: 30000 });
     const railProjects = win.locator(".rail-project-select");
     await expect(railProjects).toHaveCount(2);
-    await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+    const rail = win.locator(".project-rail");
+    await expect(rail).toHaveClass(/rp-desk-rail-slim/);
     await expect(win.getByRole("button", { name: /^Beta, idle/ })).toBeVisible();
     await win.getByRole("button", { name: "Expand project rail" }).click();
     await expect(railProjects.nth(0)).toContainText("Beta");
     await expect(railProjects.nth(1)).toContainText("Alpha");
     await win.getByRole("button", { name: "Collapse project rail" }).click();
-    await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+    await expect(rail).toHaveClass(/rp-desk-rail-slim/);
     await win.getByRole("button", { name: "Expand project rail" }).click();
 
-    // The villager bubble (Task 146): no divider, no tabs — the conversation
-    // is a tailed dialog anchored to Cairn inside the town, at any width.
-    const dialog = win.getByRole("dialog", { name: "Conversation with Cairn" });
-    await expect(dialog).toBeVisible();
-    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
+    /* REWRITTEN by Task 259 (Slice 4). This asserted the conversation was a
+       DIALOG anchored beside Cairn inside a town square, and that tucking it
+       away left a chip to bring it back. The desk retires all three: the
+       conversation is a named region and the centre of gravity, the town is
+       gone, and nothing puts the conversation away because there is nothing
+       behind it to look at. What the test still proves is unchanged — the
+       conversation survives a project switch and every width, and the project
+       you are in is legible while it does. */
+    const conversation = win.getByRole("region", { name: "Conversation with Cairn" });
+    await expect(conversation).toBeVisible();
+    await expect(win.getByRole("dialog", { name: "Conversation with Cairn" })).toHaveCount(0);
+    const deskTitle = win.locator(".rp-desk-title");
+    await expect(deskTitle).toHaveText("Beta");
 
     await win.locator(".rail-project-select", { hasText: "Alpha" }).click();
-    await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
-    await expect(dialog).toBeVisible();
+    await expect(deskTitle).toHaveText("Alpha");
+    await expect(conversation).toBeVisible();
     await win.locator(".rail-project-select", { hasText: "Beta" }).click();
-    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
+    await expect(deskTitle).toHaveText("Beta");
 
-    // Narrow or wide, the bubble stays in the world; the Chat/Town tabs are gone.
+    // Narrow or wide, the conversation stays; the Chat/Town tabs are gone, and
+    // so is everything that used to be able to hide it.
     await win.setViewportSize({ width: 900, height: 720 });
     await expect(win.getByRole("tab", { name: "Chat" })).toHaveCount(0);
-    await expect(dialog).toBeVisible();
-    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
-
-    // Tucked, the conversation is a chip by Cairn, and the chip brings the
-    // dialog back. Below 1260px that is the affordance: the cast waits behind
-    // the pond line, because the pond is never shrunk to fit beside the
-    // conversation (Task 171). Cairn's own node is checked wide, just below.
-    await win.getByRole("button", { name: "Tuck the conversation away" }).click();
-    await expect(dialog).toHaveCount(0);
-    const chip = win.getByRole("button", { name: "Open the conversation with Cairn" });
-    await expect(chip).toBeVisible();
-    // Force: the chip bobs gently on purpose (the approved mock look), and a
-    // perpetually animating element never reads "stable" to Playwright.
-    await chip.click({ force: true });
-    await expect(dialog).toBeVisible();
+    await expect(conversation).toBeVisible();
+    await expect(win.locator(".town-square")).toHaveCount(0);
+    await expect(win.locator(".pond-line")).toHaveCount(0);
+    await expect(win.getByRole("button", { name: "Tuck the conversation away" })).toHaveCount(0);
 
     await win.setViewportSize({ width: 1320, height: 820 });
-    // Wide, the pond sits beside the conversation, so Cairn's own node is the
-    // other way back.
-    await win.getByRole("button", { name: "Tuck the conversation away" }).click();
-    await win.getByRole("button", { name: "Cairn, ready" }).click();
-    await expect(dialog).toBeVisible();
+    await expect(conversation).toBeVisible();
+    /* The activity capsule speaks at every width, and never has to be opened.
+       This suite never connects a conductor, so the honest thing for it to say
+       is that there is no connection — which is also the precedence table
+       working: `disconnected` sits below every real run state and above a
+       quiet desk, so with nothing running it is what shows. */
+    await expect(win.locator(".rp-activity-status")).toHaveText("Not connected");
 
     await projectHome.click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
@@ -180,16 +193,22 @@ test.describe("remembered projects: load, switch, track", () => {
     const alphaItem = win.locator(".switcher-item", { hasText: "Alpha" });
     await expect(alphaItem).toContainText("0 stones");
     await alphaItem.click();
-    await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
+    await expect(win.locator(".rp-desk-title")).toHaveText("Alpha");
     await win.getByRole("button", { name: "← Project home" }).click();
     await expect(win.getByRole("heading", { name: "Alpha" })).toBeVisible();
     await app.close();
   });
 
-  test("project chrome opens tucked in the paper field at wide and compact sizes", async () => {
-    // This proof deliberately does not use Project Home or Dashboard. Task 186
-    // is visual environment work, so its evidence stays valid if that older
+  test("the desk's chrome contains itself at wide and compact sizes", async () => {
+    // This proof deliberately does not use Project Home or Dashboard. It is
+    // visual environment work, so its evidence stays valid if that older
     // navigation path is retired in a later, separately reconciled task.
+    //
+    // REWRITTEN by Task 259 (Slice 4). It measured the town square's header
+    // inside the town pane, and asserted the pond line replaced that header
+    // below 1260 px. The desk has one header at every width and an activity
+    // capsule that never hides, so the containment contract is the same and
+    // the surfaces it is measured on are not.
     const file = registryFile();
     const registryBefore = readFileSync(file);
     writeFileSync(file, JSON.stringify({ recent: [
@@ -205,61 +224,102 @@ test.describe("remembered projects: load, switch, track", () => {
 
         const railProjects = win.locator(".rail-project-select");
         await expect(railProjects).toHaveCount(2);
-        await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+        await expect(win.locator(".project-rail")).toHaveClass(/rp-desk-rail-slim/);
         await expect(win.getByRole("button", { name: /^Beta, idle/ })).toHaveAttribute("aria-current", "page");
         await win.getByRole("button", { name: "Expand project rail" }).click();
         await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Beta");
 
         await win.locator(".rail-project-select", { hasText: "Alpha" }).click();
-        await expect(win.getByRole("region", { name: "Alpha town square" })).toBeVisible();
+        await expect(win.locator(".rp-desk-title")).toHaveText("Alpha");
         await expect(win.locator(".rail-project-select[aria-current='page']")).toContainText("Alpha");
         await win.locator(".rail-project-select", { hasText: "Beta" }).click();
         // Project switching reorders the rail under the pointer. Move onto the
-        // open water so the evidence does not mistake an incidental hover for
-        // a second selected project.
+        // desk so the evidence does not mistake an incidental hover for a
+        // second selected project.
         await win.mouse.move(700, 500);
         await win.getByRole("button", { name: "Collapse project rail" }).click();
-        await expect(win.locator(".workspace-shell")).toHaveClass(/workspace-rail-collapsed/);
+        await expect(win.locator(".project-rail")).toHaveClass(/rp-desk-rail-slim/);
 
-        const betaTown = win.getByRole("region", { name: "Beta town square" });
-        const dialog = win.getByRole("dialog", { name: "Conversation with Cairn" });
-        const townHeader = betaTown.locator(".town-square-header");
-        await expect(betaTown).toBeVisible();
+        const conversation = win.getByRole("region", { name: "Conversation with Cairn" });
+        const header = win.locator(".rp-desk-header");
+        const capsule = win.locator(".rp-activity");
+        await expect(conversation).toBeVisible();
         await expect(win.locator(".rail-project-select[aria-current='page']"))
           .toHaveAttribute("aria-label", /^Beta, idle/);
-        await expect(win.locator(".pond-line")).toBeHidden();
-        await expect(townHeader).toBeVisible();
-        await expect(townHeader.locator(".town-project-label strong")).toHaveText("Beta");
-        await expect(townHeader.locator("[role='status']")).toBeVisible();
-        await expect.poll(() => dialog.evaluate((element) =>
+        await expect(win.locator(".town-square")).toHaveCount(0);
+        await expect(win.locator(".pond-line")).toHaveCount(0);
+        await expect(header).toBeVisible();
+        await expect(win.locator(".rp-desk-title")).toHaveText("Beta");
+        await expect(win.locator(".rp-desk-connection")).toBeVisible();
+        await expect(capsule.locator("[role='status']")).toBeVisible();
+        await expect.poll(() => conversation.evaluate((element) =>
           element.getAnimations().every((animation) => animation.playState !== "running"))).toBe(true);
 
         const chromeBounds = await win.evaluate(() => {
           const rail = document.querySelector<HTMLElement>(".project-rail")!.getBoundingClientRect();
           const stage = document.querySelector<HTMLElement>(".workspace-stage")!.getBoundingClientRect();
-          const pane = document.querySelector<HTMLElement>(".workspace-town-pane")!.getBoundingClientRect();
-          const header = document.querySelector<HTMLElement>(".town-square-header")!.getBoundingClientRect();
+          const view = document.querySelector<HTMLElement>(".rp-desk-view")!.getBoundingClientRect();
+          const bar = document.querySelector<HTMLElement>(".rp-desk-header")!.getBoundingClientRect();
+          const state = document.querySelector<HTMLElement>(".rp-desk-connection")!.getBoundingClientRect();
+          const activity = document.querySelector<HTMLElement>(".rp-activity")!.getBoundingClientRect();
+          const paper = document.querySelector<HTMLElement>(".rp-conversation")!.getBoundingClientRect();
           return {
-            railRight: rail.right,
-            stageLeft: stage.left,
-            paneLeft: pane.left,
-            paneRight: pane.right,
-            headerLeft: header.left,
-            headerRight: header.right,
+            railRight: rail.right, stageLeft: stage.left,
+            stageLeft2: stage.left, stageRight: stage.right,
+            barLeft: bar.left, barRight: bar.right, barBottom: bar.bottom,
+            stateRight: state.right,
+            activityTop: activity.top, activityBottom: activity.bottom,
+            viewTop: view.top, viewLeft: view.left, viewRight: view.right,
+            paperLeft: paper.left, paperRight: paper.right, paperBottom: paper.bottom,
+            viewBottom: view.bottom,
           };
         });
         expect(Math.abs(chromeBounds.railRight - chromeBounds.stageLeft)).toBeLessThanOrEqual(1);
-        expect(chromeBounds.headerLeft).toBeGreaterThanOrEqual(chromeBounds.paneLeft);
-        expect(chromeBounds.headerRight).toBeLessThanOrEqual(chromeBounds.paneRight);
+        // The header spans the stage, and the connection state is inside it —
+        // whether you are connected is never the thing pushed off the edge.
+        expect(chromeBounds.barLeft).toBeGreaterThanOrEqual(chromeBounds.stageLeft2 - 1);
+        expect(chromeBounds.barRight).toBeLessThanOrEqual(chromeBounds.stageRight + 1);
+        expect(chromeBounds.stateRight).toBeLessThanOrEqual(chromeBounds.barRight);
+        // Header, capsule and view stack without overlapping, in that order.
+        expect(chromeBounds.activityTop).toBeGreaterThanOrEqual(chromeBounds.barBottom - 1);
+        expect(chromeBounds.viewTop).toBeGreaterThanOrEqual(chromeBounds.activityBottom - 1);
+        // The conversation is centred paper inside the view, not spilling out.
+        expect(chromeBounds.paperLeft).toBeGreaterThanOrEqual(chromeBounds.viewLeft - 1);
+        expect(chromeBounds.paperRight).toBeLessThanOrEqual(chromeBounds.viewRight + 1);
+        expect(chromeBounds.paperBottom).toBeLessThanOrEqual(chromeBounds.viewBottom + 1);
         expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-        await win.screenshot({ path: join(tmpdir(), "cairn-task-186-quiet-paper-field-wide.png") });
+        await win.screenshot({ path: join(tmpdir(), "cairn-task-259-desk-wide.png") });
+        // Owner gate 2 evidence, in the repository rather than the temp
+        // directory, because a gate's screenshots have to outlive the run.
+        await win.setViewportSize({ width: 1320, height: 980 });
+        await win.screenshot({ path: join(GATE, "01-empty-wide-1320x980.png") });
 
-        await win.setViewportSize({ width: 900, height: 720 });
-        await expect(townHeader).toBeHidden();
-        await expect(win.locator(".pond-line")).toBeVisible();
-        await expect(win.locator(".pond-line")).toContainText("Beta · Town is quiet.");
+        // Compact: the project name drops and the activity DETAIL drops. The
+        // activity STATE never does.
+        await win.setViewportSize({ width: 760, height: 620 });
+        await expect(win.locator(".rp-desk-title")).toBeHidden();
+        await expect(capsule).toBeVisible();
+        await expect(win.locator(".rp-activity-status")).toHaveText("Not connected");
+        await expect(win.locator(".rp-desk-connection")).toBeVisible();
+        await expect(conversation).toBeVisible();
         expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-        await win.screenshot({ path: join(tmpdir(), "cairn-task-186-quiet-paper-field-compact.png") });
+        await win.screenshot({ path: join(tmpdir(), "cairn-task-259-desk-minimum.png") });
+        await win.screenshot({ path: join(GATE, "02-empty-minimum-760x620.png") });
+
+        /* The test-only containment stress, 540×900. This is BELOW the
+           supported 760 px minimum and is not a supported size; the plan does
+           not lower that minimum. What must hold is only that a deliberately
+           wide composition contains itself — the page never scrolls sideways,
+           and the written state is still readable. */
+        await win.setViewportSize({ width: 540, height: 900 });
+        await expect(capsule).toBeVisible();
+        await expect(win.locator(".rp-activity-status")).toHaveText("Not connected");
+        await expect(win.locator(".rp-desk-connection")).toBeVisible();
+        await expect(conversation).toBeVisible();
+        expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+          "the desk scrolls sideways at the 540px containment stress").toBe(true);
+        await win.screenshot({ path: join(GATE, "03-empty-stress-540x900.png") });
+        await win.setViewportSize({ width: 1320, height: 820 });
       } finally {
         await app.close();
       }
@@ -307,7 +367,7 @@ test.describe("remembered projects: load, switch, track", () => {
 
     // The screen is still a working picker: Beta opens from here.
     await win.getByText("Beta", { exact: true }).click();
-    await expect(win.getByRole("region", { name: "Beta town square" })).toBeVisible();
+    await expect(win.locator(".rp-desk-title")).toHaveText("Beta");
     await win.getByRole("button", { name: "← Project home" }).click();
     await expect(win.getByRole("heading", { name: "Beta" })).toBeVisible();
     await app.close();
@@ -376,10 +436,19 @@ test.describe("remembered projects: load, switch, track", () => {
 
     const app = await electron.launch({ args: ["."], env: baseEnv() });
     const win = await app.firstWindow();
-    await expect(win.getByRole("region", { name: "Gamma town square" })).toBeVisible({ timeout: 30_000 });
+    await expect(win.locator(".rp-desk-title")).toHaveText("Gamma", { timeout: 30_000 });
 
-    // The overlay lists Beta healthy…
-    await win.getByRole("button", { name: "Open project" }).click();
+    /* The overlay lists Beta healthy…
+       `"Open project"` stood here and matched nothing. The rail's button
+       carries `aria-label="Open a project"`, which wins over its content, and
+       Playwright's name option is a case-insensitive SUBSTRING match — "open
+       project" is not a substring of "open a project". Collapsed, which is the
+       rail's default, the button has no text child at all. This was already
+       failing on `main` at 19e7584, where the same line and the same
+       `aria-label` both exist unchanged; Task 259 found it while rewriting the
+       surfaces around it and fixed it in place rather than leaving a red the
+       next slice would have to re-diagnose. */
+    await win.getByRole("button", { name: "Open a project" }).click();
     const overlay = win.getByRole("dialog", { name: "Your projects" });
     const betaCard = overlay.locator(".card", { hasText: "Beta" });
     await expect(betaCard).toBeVisible();
@@ -409,7 +478,7 @@ test.describe("remembered projects: load, switch, track", () => {
     await expect(errorOverlay).toHaveCount(0);
 
     // …and the world underneath was alive the whole time.
-    await expect(win.getByRole("region", { name: "Gamma town square" })).toBeVisible();
+    await expect(win.locator(".rp-desk-title")).toHaveText("Gamma");
     await app.close();
   });
 });

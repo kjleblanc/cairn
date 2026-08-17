@@ -42,7 +42,13 @@ export function ProjectRail({
   onSettings: () => void;
 }) {
   return (
-    <aside className={`project-rail${collapsed ? " project-rail-collapsed" : ""}`} aria-label="Cairn projects">
+    /* Task 259: the slim rail of the chat-first desk. `rp-desk-rail` carries
+       the desk's material and re-points the paired `--rail-*` tokens every
+       rule below is already written against; `project-rail` stays because
+       those rules — and the existing CSS compaction — key off it. Navigation
+       is subordinate furniture here, so nothing about its behaviour moved. */
+    <aside className={`project-rail rp-desk-rail${collapsed ? " project-rail-collapsed rp-desk-rail-slim" : ""}`}
+      aria-label="Cairn projects">
       <div className="rail-identity">
         <span className={`rail-cairn-mark${connected ? " rail-cairn-connected" : consentRequired ? " rail-cairn-paused" : ""}`} aria-hidden="true">C</span>
         {!collapsed ? (

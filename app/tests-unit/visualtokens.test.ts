@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /* ------------------------------------------------------------------------ *
@@ -395,7 +395,32 @@ test("c4: the System block and the explicit-dark block are identical, token for 
 });
 
 /* ------------------------------------------------------------------------ *
- * `c8` — a foundation slice cannot reach a surface it does not own.
+ * `c8` — the boundary between the new system and the retired one.
+ *
+ * REWRITTEN by Task 259 (Slice 4). Slice 3 wrote these three tests to prove
+ * that `.rp-` reached NOTHING: no production markup carried the prefix, so a
+ * stylesheet matching only `.rp-` selectors could not change a pixel. That was
+ * the right guard for a foundation nobody consumed, and it is the wrong one
+ * the moment the foundation is consumed — which is Slice 4's whole deliverable.
+ *
+ * Left as it was, the first test would have kept passing while meaning
+ * nothing, and the third would have failed for a reason that is now correct
+ * behaviour. So the boundary is restated as the thing that must STILL be true:
+ *
+ *   1. Every selector in the new sheets is ANCHORED on an `.rp-` class. A rule
+ *      may reach an old class name — `.rp-conversation .chat-topbar` has to —
+ *      but only inside a surface that opted in by carrying an `.rp-` class.
+ *      Nothing outside the migrated desk can be recoloured from here.
+ *   2. `app.css` still declares no `.rp-` selector. The retired night garden
+ *      and the new system stay in separate files, so Slice 10 can delete one
+ *      without reading the other.
+ *   3. Production markup DOES now carry `rp-` classes. Without this the first
+ *      test would silently go back to guarding a stylesheet nobody uses, which
+ *      is exactly how Task 257 turned a bundle check into a comment check.
+ *   4. Custom properties may be declared only inside an `.rp-`-anchored rule.
+ *      Slice 3 banned them outright to stop a new sheet recolouring the app
+ *      globally; a SCOPED re-point cannot do that, and it is the mechanism the
+ *      migration runs on.
  * ------------------------------------------------------------------------ */
 
 const NEW_SHEETS = ["surfaces.css", "workspace.css", "cairn-program.css"] as const;
@@ -416,38 +441,114 @@ function selectors(css: string): string[] {
   return out;
 }
 
-test("c8: every new selector is .rp- prefixed, so no unmigrated surface can be reached", () => {
-  // This is what makes Slice 3 safe to land before Slice 4 swaps the
-  // composition: nothing in the running app carries an `rp-` class, so a
-  // stylesheet that can only match those cannot change a single pixel.
+/** A rule and its own body, brace-tracked. `selectors()` above throws the
+ *  bodies away, and a scoped-declaration check needs them. */
+function rules(css: string): { selector: string; body: string }[] {
+  const stripped = withoutComments(css);
+  const out: { selector: string; body: string }[] = [];
+  const stack: { selector: string; start: number }[] = [];
+  let token = "";
+  for (let index = 0; index < stripped.length; index += 1) {
+    const character = stripped[index]!;
+    if (character === "{") {
+      stack.push({ selector: token.trim().replace(/\s+/gu, " "), start: index + 1 });
+      token = "";
+    } else if (character === "}") {
+      const open = stack.pop();
+      if (open !== undefined) out.push({ selector: open.selector, body: stripped.slice(open.start, index) });
+      token = "";
+    } else token += character;
+  }
+  assert.equal(stack.length, 0, "unbalanced braces");
+  return out;
+}
+
+/** Anchored: the selector's FIRST compound carries an `.rp-` class, so the rule
+ *  cannot match anything that has not opted in. */
+function anchored(selector: string): boolean {
+  return /^\.rp-[a-z0-9-]+/u.test(selector);
+}
+
+test("c8: every new selector is anchored on an .rp- class, so nothing outside the desk can be reached", () => {
   for (const sheet of NEW_SHEETS) {
     for (const selector of selectors(readFileSync(join(RENDERER, sheet), "utf8"))) {
       // Media queries are containers, not selectors.
       if (selector.startsWith("@media")) continue;
       for (const one of selector.split(",").map((part) => part.trim()).filter(Boolean)) {
-        assert.ok(
-          /^\.rp-[a-z0-9-]+/u.test(one),
-          `${sheet}: "${one}" is not .rp- prefixed and could reach a surface this slice does not own`,
-        );
+        assert.ok(anchored(one),
+          `${sheet}: "${one}" is not anchored on an .rp- class and could reach a surface outside the desk`);
       }
     }
   }
 });
 
-test("c8: the prefix is genuinely unused elsewhere, or the guard above proves nothing", () => {
-  // The whole argument rests on `rp-` appearing nowhere else in production.
+test("c8: the two systems stay in separate files, so one can be deleted without reading the other", () => {
   const appCss = readFileSync(join(RENDERER, "app.css"), "utf8");
-  assert.ok(!/\.rp-/u.test(appCss), "app.css already uses the rp- prefix");
-  assert.ok(!/className="[^"]*\brp-/u.test(readFileSync(join(RENDERER, "App.tsx"), "utf8")),
-    "a production component already renders an rp- class");
+  assert.ok(!/\.rp-/u.test(appCss),
+    "app.css declares an rp- selector; the retired cascade and the new system must not interleave");
 });
 
-test("c8: the new stylesheets add no token and no global rule of their own", () => {
+test("c8: production really does carry rp- classes now, or the anchor guard proves nothing", () => {
+  // The positive control. Slice 3's version of this test asserted the OPPOSITE
+  // — that no production component rendered an `rp-` class — which was true and
+  // load-bearing while the foundation had no consumer. Slice 4 gave it one, so
+  // the guard above only means something if the classes it constrains are
+  // actually on screen.
+  const carriers: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = join(directory, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.tsx$/u.test(entry.name) && /\brp-[a-z]/u.test(readFileSync(full, "utf8"))) {
+        carriers.push(entry.name);
+      }
+    }
+  };
+  walk(RENDERER);
+  assert.ok(carriers.includes("Workspace.tsx"),
+    "the workspace no longer renders an rp- class, so the desk composition is not mounted");
+  assert.ok(carriers.includes("ActivityCapsule.tsx"), "the activity capsule is not on the desk");
+  assert.ok(carriers.length >= 3, `only ${carriers.length} components carry the prefix: ${carriers.join(", ")}`);
+});
+
+test("c8: the new stylesheets declare tokens only inside an .rp- scope, and no global rule", () => {
+  // A SCOPED re-point cannot recolour an unmigrated surface — that is the whole
+  // difference between it and a `:root` declaration, and it is the mechanism
+  // the migration runs on: the interior of the conversation is already written
+  // against the paired tokens, so re-pointing them once re-tones the paper
+  // instead of two hundred rules being rewritten a slice early.
   for (const sheet of NEW_SHEETS) {
     const css = readFileSync(join(RENDERER, sheet), "utf8");
-    assert.equal(declarations(css).length, 0,
-      `${sheet} declares custom properties; tokens belong in tokens.css where c1 guards them`);
     assert.ok(!/^\s*(?:html|body|:root|\*)\b/mu.test(withoutComments(css)),
       `${sheet} carries a global selector`);
+    let declaring = 0;
+    for (const rule of rules(css)) {
+      if (rule.selector.startsWith("@")) continue;
+      if (!/--[A-Za-z0-9-]+\s*:/u.test(rule.body)) continue;
+      declaring += 1;
+      for (const one of rule.selector.split(",").map((part) => part.trim()).filter(Boolean)) {
+        assert.ok(anchored(one),
+          `${sheet}: "${one}" declares a custom property from outside an .rp- scope`);
+      }
+    }
+    // Every declaration the file-wide scan finds must have been attributed to
+    // one of those rules; a token declared at top level would be counted by
+    // `declarations` and by no rule at all.
+    if (declarations(css).length > 0) {
+      assert.ok(declaring > 0, `${sheet} declares a token that belongs to no rule`);
+    }
   }
+});
+
+test("c7: the desk adds no breakpoint of its own", () => {
+  // The composition replaced a 1260 px open/closed state; it did not move a
+  // width or invent one. 820 px is Slice 3's compact block and 1260 px is where
+  // app.css already narrows the rail.
+  const widths = new Set<string>();
+  for (const sheet of NEW_SHEETS) {
+    for (const match of readFileSync(join(RENDERER, sheet), "utf8")
+      .matchAll(/@media \(m(?:in|ax)-width: (\d+)px\)/gu)) widths.add(match[1]!);
+  }
+  assert.deepEqual([...widths].sort(), ["1260", "820"],
+    "the desk introduced a breakpoint the retired composition did not already have");
 });

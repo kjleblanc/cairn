@@ -10,12 +10,12 @@ import type { ConductorStreamSnapshot, RunSessionSnapshot } from "../../shared/i
  * Nothing here knows about geometry, layout, faces, components or CSS. Its one
  * import is the runtime snapshot contract it projects.
  *
- * Two functions at the bottom — `pondLineTone` and `pondLineLabel` — still
- * carry the narrow-window Pond surface's own vocabulary. They are deliberately
- * left here for one slice: Slice 2's whole deliverable is that nothing visible
- * changes, and Slice 4 retires that surface and this wording with it. For the
- * same reason `activityStatus` still says "Town is quiet.": rewording it would
- * be a visible change, which this slice is not allowed to make.
+ * Task 259 (Slice 4) removed the last of the Pond's vocabulary from this file.
+ * What remains that still speaks in the old world's words is `activityStatus`,
+ * whose "Town is quiet." is read by `TownSquare` alone — a component the
+ * running app no longer mounts and Slice 10 deletes. The desk's own words come
+ * from `activity/presence.ts` instead, so nothing an owner can see says
+ * "Town", and no sentence here is written twice.
  */
 
 /** What is actually happening. No motion, no scenery, no position. */
@@ -335,31 +335,11 @@ export function activityStatus(state: ActivityPresentation): string {
   return "Town is quiet.";
 }
 
-export type PondLineTone = "quiet" | "busy" | "needs-you" | "done" | "stopped";
-
-/**
- * The narrow window's status line (Decision 9, resolved 2026-08-03). Below
- * 1260px the conversation takes the window and the pond becomes a sentence the
- * owner can go and look at — so this line carries who is working and what
- * state the water is in, and turns amber when a decision is waiting.
- *
- * `needsYou` is Task 155's signal, computed once in Chat and passed in. Two
- * independent answers to "is something waiting?" would eventually disagree,
- * and the line would be the one that lied.
- *
- * Retired with the Pond in Slice 4. It stays beside the neutral projection
- * until then so this slice changes nothing the owner can see.
+/*
+ * `pondLineTone`, `pondLineLabel` and `PondLineTone` stood here until Task 259
+ * (Slice 4) retired the surface they were named for. Their job — resolving a
+ * waiting decision against what the runtime is doing, and saying so in words —
+ * moved to `activity/presence.ts`, which now answers it for Cairn's face as
+ * well as for the line. The rule they encoded survived them: the needs-owner
+ * signal is still computed once in Chat and passed in, never recomputed.
  */
-export function pondLineTone(state: ActivityPresentation, needsYou: boolean): PondLineTone {
-  if (needsYou) return "needs-you";
-  if (state.truth === "done") return "done";
-  if (state.truth === "stopped" || state.truth === "error") return "stopped";
-  if (state.truth === "quiet") return "quiet";
-  return "busy";
-}
-
-/** The line's words. Never a second notion of what the water is doing. */
-export function pondLineLabel(state: ActivityPresentation, needsYou: boolean): string {
-  if (needsYou) return "Something in the conversation is waiting for you.";
-  return activityStatus(state);
-}

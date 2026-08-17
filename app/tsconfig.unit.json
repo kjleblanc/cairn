@@ -69,13 +69,14 @@
     "src/renderer/components/BuilderProposalReview.tsx",
     "lab/builderproposal-fixtures.ts",
     "src/renderer/components/CairnProgram.tsx",
-    "src/renderer/components/PondLine.tsx",
+    "src/renderer/components/ActivityCapsule.tsx",
     "src/renderer/components/TownSquare.tsx",
     "src/renderer/components/TownDetail.tsx",
     "src/renderer/town/model.ts",
     "src/renderer/town/layout.ts",
     "src/renderer/town/faces.ts",
     "src/renderer/activity/presentation.ts",
+    "src/renderer/activity/presence.ts",
     "tests/fixtures/fake-model-provider.mjs",
     "tests-unit/**/*.ts"
   ]

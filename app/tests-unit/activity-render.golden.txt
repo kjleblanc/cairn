@@ -16,35 +16,3 @@ f109f05bbff46a458d32cd6f663de564c2b7287df0b49b36422619f3f43f455f  TownSquare · 
 9c0bbd7756af666a585147c516937feddd2ff0f4a0c3408f048029ccf5e8045e  TownSquare · the whole pond — no shore reserved for the conversation
 11f47ecfddb90ffc672c733f527c877026b2c197bf0e9997cab2936ed3081952  TownSquare · a first observation of a finished run — the obsolete dispatch is dropped
 ea1cd08c4fd60efdcd545073596743a98b8d558f311181c41b8ecf42bdb3f3ab  TownSquare · reduced motion — the same DONE with no cue at all
-805fd7316f29290f24c7f527903b29ef1fe62ce3dfe6a00a4f8bf20143b763a2  PondLine · truth=checking needsYou=false open=false
-04da20f65a4689f3613b55894593e968b59c8b63e5b076cb426030c03e390712  PondLine · truth=checking needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=checking needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=checking needsYou=true open=true
-fe9fea7ac32b3f7a8b4753243156e8c2f30026378bbcf961b1855b0d8c709010  PondLine · truth=done needsYou=false open=false
-abce447b578ac609001ee4580c09f3f49e0f2ee08abe9dcea5b496276a03afc5  PondLine · truth=done needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=done needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=done needsYou=true open=true
-6a8a0e8edb2f1d28a64ba5154cfed14378171c30dd6970f437d888937b80a7bb  PondLine · truth=error needsYou=false open=false
-06cfb10d7f2450e68ef241ddeda2403212abed6ad0b2256826a979fcb3cebfa8  PondLine · truth=error needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=error needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=error needsYou=true open=true
-1048d2653f2531a969ffa55640363c6120fdc75c1cb2cafc1dab056ce510a113  PondLine · truth=quiet needsYou=false open=false
-1daab6eb94d5ec7e54bee9798bbaf6cc1ad7192c17bd86dafed3d1fd23af59eb  PondLine · truth=quiet needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=quiet needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=quiet needsYou=true open=true
-a2c2fac34b995dd0b508f8892decc41b493808844b1529d2cf86a7a71f46eef8  PondLine · truth=starting needsYou=false open=false
-925546bff0f51f750fff73dd74166c466360f9ed95291165c6ccfda66502f628  PondLine · truth=starting needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=starting needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=starting needsYou=true open=true
-296c01acfa2bd781807b8b63de7bc6fdc865e90e1c74760b133db7b82a2f156a  PondLine · truth=stopped needsYou=false open=false
-46be8811f3a990438a7c8428375c4bd4d404cf23b0b413c9657dd79213f84bb8  PondLine · truth=stopped needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=stopped needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=stopped needsYou=true open=true
-dd2aa2e2722948de89b4dd00b22ade5bddb2e75fc66be06a23564cdea7ae92b6  PondLine · truth=thinking needsYou=false open=false
-1c866c83b8c968548c8e0aedb953e6a01971ec33fc4d0dfb8d06ff412ad51047  PondLine · truth=thinking needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=thinking needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=thinking needsYou=true open=true
-7215900bd34d4e676cfc77bfa5b9035f4c778d5fd96acfe4ad77d29cd87e5e07  PondLine · truth=working needsYou=false open=false
-eb28643cf92a2f9c9fca295bd1cacd9c2560ea794f40ef8525d080217fe55ad9  PondLine · truth=working needsYou=false open=true
-7d4b94a8f1e9fd30e11e9d5ae2752244c7e844b47b2a462f4c8432a021d99b1d  PondLine · truth=working needsYou=true open=false
-9ae50fbb0b9276e780a05d06ae5dbacaba65e71deb0447a2f044e1c6fe31e282  PondLine · truth=working needsYou=true open=true

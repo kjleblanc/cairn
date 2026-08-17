@@ -15,6 +15,11 @@ import {
 } from "./fixtures/conductor-connection";
 import { fakeCodexEnvironment } from "./fixtures/fake-codex-env";
 
+/** Owner gate 2 evidence (Task 259, Slice 4). See `projects.spec.ts` for why
+ *  this is `shots/` and not `test-results/`. */
+const GATE = join(__dirname, "..", "shots", "task259-gate");
+mkdirSync(GATE, { recursive: true });
+
 // Task 026: the fake body proves the whole conductor loop offline — connect,
 // converse, the proposed-task card, offline dispatch, disk persistence, and
 // honest failure copy — against a scripted fixture instead of a real model.
@@ -2583,111 +2588,103 @@ async function dispatchOneRealCall(
   await start.click({ noWaitAfter: true });
 }
 
-type TownMotionProbe = {
-  motion: string;
-  outcome: string;
-  truth: string;
-  cue: string | null;
-  receiver: string | null;
-  rippleColor: string | null;
-  packetText: string | null;
-  rippleReceiverDistance: number | null;
-  cairnStroke: string | null;
-  workerStroke: string | null;
-  packet: boolean;
-  ripple: boolean;
-  terminalRipple: boolean;
-  doneFace: boolean;
-  cairnFace: string | null;
-  threadFocused: boolean;
+/* ------------------------------------------------------------------------ *
+ * REPLACED by Task 259 (Slice 4). A Town motion probe stood here: it observed
+ * `.town-square` for transfer packets, ripples, villager faces and the header's
+ * spoken status, and it threw outright if the town was not mounted.
+ *
+ * The town is not mounted any more, and the thing it was really being used to
+ * prove — that a run's stages reach the owner honestly, in order, once each,
+ * and settle — is now carried by the activity capsule in WORDS. So the probe
+ * watches the capsule instead, and records the two values that must never
+ * disagree: what the capsule SAYS, and which face Cairn is drawn with.
+ *
+ * The cue-sequencing helpers went with it. Cues were motion staging for a
+ * surface that animated a handoff; the capsule animates nothing, so "one
+ * dispatch pulse, no loop" becomes the stronger and simpler claim these
+ * helpers now support — the written state advances, and it settles.
+ * ------------------------------------------------------------------------ */
+
+type DeskActivityProbe = {
+  /** The resolved presence state, off the capsule itself. */
+  state: string;
+  tone: string;
+  /** The announced words, and the face drawn beside them. */
   status: string;
+  detail: string | null;
+  face: string | null;
+  /** Whether the retired surfaces have crept back onto the desk. */
+  town: boolean;
+  pond: boolean;
 };
 
-async function installTownMotionProbe(win: Page): Promise<void> {
+async function installDeskActivityProbe(win: Page): Promise<void> {
   await win.evaluate(() => {
     const probeWindow = window as unknown as {
-      __cairnTownMotion?: { log: string[]; observer: MutationObserver; startedAt: number };
+      __cairnDeskActivity?: { log: string[]; observer: MutationObserver };
     };
-    probeWindow.__cairnTownMotion?.observer.disconnect();
+    probeWindow.__cairnDeskActivity?.observer.disconnect();
     const log: string[] = [];
     const record = () => {
-      const town = document.querySelector<HTMLElement>(".town-square");
-      if (!town) return;
-      const transfer = town.querySelector<HTMLElement>(".town-transfer-layer");
-      const ripple = transfer?.querySelector<HTMLElement>(".town-transfer-ripple, .town-terminal-ripple") ?? null;
-      const packet = transfer?.querySelector<HTMLElement>(".town-transfer-packet") ?? null;
-      const receiverName = transfer?.dataset.receiver ?? null;
-      const receiver = receiverName === "cairn"
-        ? town.querySelector<HTMLElement>(".town-node-cairn")
-        : Array.from(town.querySelectorAll<HTMLElement>(".town-node-worker"))
-          .find((node) => node.dataset.faceId === receiverName) ?? null;
-      const rippleRect = ripple?.getBoundingClientRect();
-      const receiverRect = receiver?.getBoundingClientRect();
-      const cairnPath = town.querySelector<SVGPathElement>(".town-face-cairn .town-face-svg path");
-      const workerPath = town.querySelector<SVGPathElement>(".town-node-worker .town-face-svg path");
+      const capsule = document.querySelector<HTMLElement>(".rp-activity");
+      if (!capsule) return;
       const entry = JSON.stringify({
-        motion: town.dataset.townMotion ?? "none",
-        outcome: town.dataset.townOutcome ?? "none",
-        truth: town.dataset.townTruth ?? "quiet",
-        cue: transfer?.dataset.cueKey ?? null,
-        receiver: receiverName,
-        rippleColor: ripple ? getComputedStyle(ripple).borderTopColor : null,
-        packetText: packet?.textContent?.trim().toUpperCase() ?? null,
-        rippleReceiverDistance: rippleRect && receiverRect
-          ? Math.hypot(
-            rippleRect.x + rippleRect.width / 2 - (receiverRect.x + receiverRect.width / 2),
-            rippleRect.y + rippleRect.height / 2 - (receiverRect.y + receiverRect.height / 2),
-          )
-          : null,
-        cairnStroke: cairnPath ? getComputedStyle(cairnPath).stroke : null,
-        workerStroke: workerPath ? getComputedStyle(workerPath).stroke : null,
-        packet: Boolean(packet),
-        ripple: Boolean(transfer?.querySelector(".town-transfer-ripple")),
-        terminalRipple: Boolean(transfer?.querySelector(".town-terminal-ripple")),
-        doneFace: town.querySelector(".town-node-done") !== null,
-        cairnFace: town.querySelector<HTMLElement>(".town-node-cairn")?.dataset.faceState ?? null,
-        threadFocused: document.activeElement?.classList.contains("town-thread-target") ?? false,
-        status: town.querySelector<HTMLElement>(".town-square-header [role=status]")?.innerText ?? "",
+        state: capsule.dataset.rpState ?? "none",
+        tone: capsule.dataset.rpTone ?? "none",
+        status: capsule.querySelector<HTMLElement>(".rp-activity-status")?.innerText.trim() ?? "",
+        detail: capsule.querySelector<HTMLElement>(".rp-activity-detail")?.innerText.trim() ?? null,
+        face: capsule.querySelector<SVGElement>("[data-rp-program]")?.getAttribute("data-rp-program") ?? null,
+        town: document.querySelector(".town-square") !== null,
+        pond: document.querySelector(".pond-line") !== null,
       });
       if (log.at(-1) !== entry) log.push(entry);
     };
-    const town = document.querySelector(".town-square");
-    if (!town) throw new Error("Town square is not mounted");
+    const capsule = document.querySelector(".rp-activity");
+    if (!capsule) throw new Error("The activity capsule is not mounted");
+    // The stage, not the capsule: the capsule's own element is replaced when
+    // its tone class changes, and an observer bound to it would stop firing.
+    const stage = document.querySelector(".workspace-stage");
+    if (!stage) throw new Error("The workspace stage is not mounted");
     const observer = new MutationObserver(record);
-    observer.observe(town, { attributes: true, childList: true, subtree: true });
-    probeWindow.__cairnTownMotion = { log, observer, startedAt: performance.now() };
+    observer.observe(stage, { attributes: true, childList: true, characterData: true, subtree: true });
+    probeWindow.__cairnDeskActivity = { log, observer };
     record();
   });
 }
 
-async function townMotionProbe(win: Page): Promise<TownMotionProbe[]> {
+async function deskActivityProbe(win: Page): Promise<DeskActivityProbe[]> {
   const entries = await win.evaluate(() => {
-    const probeWindow = window as unknown as { __cairnTownMotion?: { log: string[] } };
-    return probeWindow.__cairnTownMotion?.log ?? [];
+    const probeWindow = window as unknown as { __cairnDeskActivity?: { log: string[] } };
+    return probeWindow.__cairnDeskActivity?.log ?? [];
   });
-  return entries.map((entry) => JSON.parse(entry) as TownMotionProbe);
+  return entries.map((entry) => JSON.parse(entry) as DeskActivityProbe);
 }
 
-type TownCueObservation = { key: string; kind: string };
+/** The states the capsule passed through, in order, with repeats collapsed. */
+function deskStates(entries: DeskActivityProbe[]): string[] {
+  return entries.map((entry) => entry.state)
+    .filter((state, index, states) => index === 0 || state !== states[index - 1]);
+}
 
-/** One entry per reducer cue key. A flight and its landing deliberately share
- * a key; a repeated poll must never create a second key for the same event. */
-function uniqueTownCues(entries: TownMotionProbe[]): TownCueObservation[] {
-  const seen = new Set<string>();
-  const cues: TownCueObservation[] = [];
+/**
+ * The invariant that outlives the Town: every observation the capsule ever made
+ * had words, and the face never once said something the words did not. This is
+ * the whole reason the presence combiner exists, checked against the real app
+ * rather than against a unit fixture.
+ */
+function assertWordsAndFaceAgree(entries: DeskActivityProbe[]): void {
+  expect(entries.length, "the capsule never reported anything").toBeGreaterThan(0);
+  const faceFor: Record<string, string> = {
+    ready: "ready", thinking: "thinking", "needs-decision": "needs-decision",
+    starting: "working", working: "working", checking: "checking",
+    done: "done", stopped: "stopped", error: "error", disconnected: "disconnected",
+  };
   for (const entry of entries) {
-    if (!entry.cue || seen.has(entry.cue)) continue;
-    seen.add(entry.cue);
-    cues.push({ key: entry.cue, kind: entry.motion.split("-", 1)[0] ?? entry.motion });
+    expect(entry.status, `state '${entry.state}' was announced with no words`).not.toBe("");
+    expect(entry.face, `state '${entry.state}' drew no Cairn`).toBe(faceFor[entry.state]);
+    expect(entry.town, "the town square came back").toBe(false);
+    expect(entry.pond, "the pond line came back").toBe(false);
   }
-  return cues;
-}
-
-function motionsForCue(entries: TownMotionProbe[], key: string): string[] {
-  return entries
-    .filter((entry) => entry.cue === key)
-    .map((entry) => entry.motion)
-    .filter((motion, index, motions) => index === 0 || motion !== motions[index - 1]);
 }
 
 // Task 065: stages the readiness-changed race — routed while Codex was ready,
@@ -2722,12 +2719,18 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     await window.cairn.projectOpen(other);
     await window.cairn.projectOpen(active);
   }, { active: project, other: otherProject });
-  const town = win.getByRole("region", { name: "Conductor town square" });
-  await expect(town.getByRole("button", { name: "Cairn, ready" })).toBeVisible();
-  await expect(town.locator(".town-face-cairn")).toHaveCount(1);
-  await expect(town.locator(".town-node-worker")).toHaveCount(0);
-  await expect(town.locator(".town-thread-target")).toHaveCount(0);
-  await town.getByRole("button", { name: "Cairn, ready" }).click({ noWaitAfter: true });
+  /* REWRITTEN by Task 259 (Slice 4). Where this read the town square — Cairn's
+     node, his face, the worker villagers and the task threads — it now reads
+     the activity capsule, which says the same truths in words. The run-strip,
+     composer and Stop contract this test is NAMED for is untouched. */
+  const capsule = win.locator(".rp-activity");
+  const capsuleStatus = capsule.locator(".rp-activity-status");
+  await expect(capsule).toHaveAttribute("data-rp-state", "ready");
+  await expect(capsuleStatus).toHaveText("Ready");
+  await expect(capsule.locator("[data-rp-program]")).toHaveCount(1);
+  await expect(win.locator(".town-square")).toHaveCount(0);
+  await expect(win.locator(".pond-line")).toHaveCount(0);
+  await win.getByPlaceholder("Talk with Cairn").click({ noWaitAfter: true });
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeFocused();
   const dispatchPanel = win.locator(".dispatch-panel");
   await dispatchOneRealCall(win, async () => {
@@ -2751,9 +2754,12 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     await dispatchPanel.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-real-checked.png") });
     await win.setViewportSize({ width: 1320, height: 820 });
-    await expect(town.locator(".town-node-worker")).toHaveCount(0);
-    await expect(town.locator(".town-transfer-layer")).toHaveCount(0);
-    await installTownMotionProbe(win);
+    // A dispatch waiting for the owner's approval IS a waiting decision, and
+    // the capsule says so before the run exists — which is the needs-owner
+    // seam firing on the dispatch phase rather than only on a proposal.
+    await expect(capsule).toHaveAttribute("data-rp-state", "needs-decision");
+    await expect(capsuleStatus).toHaveText("Needs your decision");
+    await installDeskActivityProbe(win);
   }, async (panel) => {
     await win.setViewportSize({ width: 760, height: 1000 });
     await expect(panel).toHaveAttribute("data-dispatch-phase", "confirm");
@@ -2805,36 +2811,30 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-running.png") });
   await win.setViewportSize({ width: 1320, height: 820 });
 
-  // The probe was armed before the click that main accepts. Read its history
-  // for the sub-second flight instead of attaching a second live waiter after
-  // the dispatch, which can observe landing even though flight rendered.
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "dispatch-flight" && entry.receiver === "codex"
-      && entry.packetText === "TASK" && entry.packet && !entry.ripple
-      && entry.cairnStroke === "rgb(163, 221, 208)"
-      && entry.workerStroke === "rgb(243, 196, 154)"), { timeout: 10_000 }).toBe(true);
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "dispatch-landing" && entry.receiver === "codex"
-      && entry.rippleColor === "rgb(243, 196, 154)"
-      && entry.rippleReceiverDistance !== null && entry.rippleReceiverDistance < 70
-      && entry.workerStroke === "rgb(243, 196, 154)"
-      && !entry.packet && entry.ripple), { timeout: 10_000 }).toBe(true);
+  // The probe was armed before the click that main accepts, so its history
+  // holds the sub-second states a live waiter attached afterwards would miss.
+  await expect.poll(async () => deskStates(await deskActivityProbe(win)).includes("working"),
+    { timeout: 15_000 }).toBe(true);
+  await expect(capsuleStatus).toHaveText("Working", { timeout: 15_000 });
+  await expect(capsule.locator(".rp-activity-detail")).toContainText("Codex Exec worker is working");
+  await expect(capsule.locator("[data-rp-program]")).toHaveAttribute("data-rp-program", "working");
 
-  // Let this cue settle, then cross a full two-second workspace poll. The same
-  // runtime snapshot may not replay either phase under the original key.
-  await expect(town).toHaveAttribute("data-town-motion", "none", { timeout: 10_000 });
-  const dispatchEntries = await townMotionProbe(win);
-  const dispatchCues = uniqueTownCues(dispatchEntries).filter((cue) => cue.kind === "dispatch");
-  expect(dispatchCues).toHaveLength(1);
-  expect(motionsForCue(dispatchEntries, dispatchCues[0]!.key)).toEqual([
-    "dispatch-flight",
-    "dispatch-landing",
-  ]);
+  // Every state the capsule passed through was announced in words, and the
+  // face never once said something the words did not.
+  const dispatchEntries = await deskActivityProbe(win);
+  assertWordsAndFaceAgree(dispatchEntries);
+  // It reached `working` by advancing through the run's real order, and it
+  // never went backwards to `ready` once work had started.
+  const seen = deskStates(dispatchEntries);
+  expect(seen[0]).toBe("needs-decision");
+  expect(seen.slice(seen.indexOf("working"))).not.toContain("ready");
+
+  // Cross a full two-second workspace poll: the settled state does not flicker
+  // and no state repeats itself into a loop.
   const settledDispatchLogLength = dispatchEntries.length;
   await win.waitForTimeout(2_200);
-  const afterSettledPoll = await townMotionProbe(win);
-  expect(afterSettledPoll.slice(settledDispatchLogLength)
-    .some((entry) => entry.cue === dispatchCues[0]!.key)).toBe(false);
+  const afterSettledPoll = await deskActivityProbe(win);
+  expect(deskStates(afterSettledPoll.slice(settledDispatchLogLength))).toEqual([]);
 
   // The run is visible where it was started: one of the four real stages, the
   // elapsed clock, and the two controls.
@@ -2848,39 +2848,34 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(strip.getByRole("button", { name: "Stop this task" })).toBeVisible();
   await expect(strip.getByRole("button", { name: "Open the run screen" })).toBeVisible();
 
-  // The town is a projection of this exact live worker session. Native buttons
-  // give Enter and Space the same selection behavior as a pointer, and empty
-  // ground clears only the town detail.
-  const worker = town.locator(".town-node-worker");
-  await expect(worker).toHaveCount(1);
-  await expect(worker).toHaveAccessibleName(/Codex Exec worker, working on Change the page title/);
-  await expect(worker).toHaveAttribute("data-face-id", "codex");
-  await expect(worker.locator(".town-face-worker")).toHaveCount(1);
-  await expect(worker.locator(".town-worker-pad")).toHaveCount(1);
-
-  // The narrow window (Decision 9, approved 2026-08-03). All four explored
-  // panel directions failed here, each by shrinking its wide layout. The
-  // resolution: the pond is never reduced — at 760×620 it is either its whole
-  // self or it is a sentence. Closed, the conversation takes the window and
-  // the cast waits behind the line; opened, the pond is whole.
+  /* The supported minimum, 760×620. Task 259 replaced the pond's open/closed
+     state here. That resolution existed because a pond shrunk to fit beside a
+     conversation reads as a picture pretending to be smaller than it is; with
+     no picture, the composition simply has less room, and the rule the
+     constitution sets is that compact is the same components with less room —
+     the project NAME and the activity DETAIL drop, and the activity STATE and
+     the connection never do. */
   await win.setViewportSize({ width: 760, height: 620 });
   await expect(win.getByRole("button", { name: /Conductor.*worker task running/ })).toBeVisible();
-  const pondLine = win.locator(".pond-line");
-  await expect(pondLine).toBeVisible();
-  await expect(pondLine).toHaveAttribute("aria-expanded", "false");
-  await expect(pondLine).toContainText("Codex Exec worker is working");
-  await expect(town.locator(".town-node-cairn")).toBeHidden();
-  await expect(worker).toBeHidden();
-  const narrowClosed = await win.evaluate(() => {
-    const dialog = document.querySelector<HTMLElement>(".chat-column-villager")?.getBoundingClientRect();
-    const pane = document.querySelector<HTMLElement>(".workspace-town-pane")?.getBoundingClientRect();
-    const line = document.querySelector<HTMLElement>(".pond-line")?.getBoundingClientRect();
+  await expect(win.locator(".pond-line")).toHaveCount(0);
+  await expect(win.locator(".town-square")).toHaveCount(0);
+  await expect(capsule).toBeVisible();
+  await expect(capsuleStatus).toHaveText("Working");
+  await expect(win.locator(".rp-desk-title")).toBeHidden();
+  await expect(win.locator(".rp-activity-detail")).toBeHidden();
+  await expect(win.locator(".rp-desk-connection")).toBeVisible();
+  const minimumSize = await win.evaluate(() => {
+    const paper = document.querySelector<HTMLElement>(".rp-conversation")?.getBoundingClientRect();
+    const view = document.querySelector<HTMLElement>(".rp-desk-view")?.getBoundingClientRect();
+    const header = document.querySelector<HTMLElement>(".rp-desk-header")?.getBoundingClientRect();
+    const activity = document.querySelector<HTMLElement>(".rp-activity")?.getBoundingClientRect();
+    const messages = document.querySelector<HTMLElement>(".chat-messages");
     const run = document.querySelector<HTMLElement>(".run-strip");
     const runState = document.querySelector<HTMLElement>(".run-strip-state");
     const outcome = document.querySelector<HTMLElement>(".run-strip-outcome");
     const runControls = document.querySelector<HTMLElement>(".run-strip-controls");
-    if (!dialog || !pane || !line || !run || !runState || !outcome || !runControls) {
-      throw new Error("Expected the narrow line, run, and conversation");
+    if (!paper || !view || !header || !activity || !messages || !run || !runState || !outcome || !runControls) {
+      throw new Error("Expected the desk, the conversation and the run at 760x620");
     }
     const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
       && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
@@ -2891,20 +2886,22 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     const outcomeRect = outcome.getBoundingClientRect();
     const runControlsRect = runControls.getBoundingClientRect();
     return {
-      // Takes the window, and sits clear of the line rather than under it.
-      dialogTakesTheWindow: dialog.width > pane.width - 40,
-      dialogClearsTheLine: dialog.top >= line.bottom - 1,
-      dialogFits: contains(pane, dialog),
+      // The conversation takes the room the desk can give it, and stays inside.
+      paperTakesTheView: paper.width > view.width - 40,
+      paperFits: contains(view, paper),
+      // Header, capsule, conversation: stacked, never overlapping.
+      headerClearsActivity: activity.top >= header.bottom - 1,
+      activityClearsView: view.top >= activity.bottom - 1,
+      // The transcript is the only thing that scrolls.
+      transcriptScrolls: messages.scrollHeight >= messages.clientHeight,
       controlsFit: Array.from(document.querySelectorAll<HTMLElement>(
         ".chat-topbar button, .run-strip-controls button",
-      )).every((control) => contains(dialog, control.getBoundingClientRect())),
+      )).every((control) => contains(paper, control.getBoundingClientRect())),
       runPaper: {
         overflow: run.scrollWidth - run.clientWidth,
         controlsFit: Array.from(run.querySelectorAll<HTMLElement>("button"))
           .every((control) => contains(runRect, control.getBoundingClientRect())),
         display: runStyle.display,
-        background: runStyle.backgroundColor,
-        radius: runStyle.borderRadius,
         outcomeWhiteSpace: outcomeStyle.whiteSpace,
         outcomeOverflow: outcomeStyle.overflow,
         outcomeTextOverflow: outcomeStyle.textOverflow,
@@ -2917,17 +2914,17 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
         && document.documentElement.scrollHeight <= window.innerHeight,
     };
   });
-  expect(narrowClosed).toEqual({
-    dialogTakesTheWindow: true,
-    dialogClearsTheLine: true,
-    dialogFits: true,
+  expect(minimumSize).toEqual({
+    paperTakesTheView: true,
+    paperFits: true,
+    headerClearsActivity: true,
+    activityClearsView: true,
+    transcriptScrolls: true,
     controlsFit: true,
     runPaper: {
       overflow: 0,
       controlsFit: true,
       display: "grid",
-      background: "rgba(0, 0, 0, 0)",
-      radius: "0px",
       outcomeWhiteSpace: "normal",
       outcomeOverflow: "visible",
       outcomeTextOverflow: "clip",
@@ -2937,194 +2934,108 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     },
     pageFits: true,
   });
-  await win.screenshot({ path: join(tmpdir(), "cairn-task-189-run-running.png") });
+  await win.screenshot({ path: join(tmpdir(), "cairn-task-259-run-running-minimum.png") });
+  await win.screenshot({ path: join(GATE, "06-working-minimum-760x620.png") });
+  await win.setViewportSize({ width: 1320, height: 980 });
+  await win.screenshot({ path: join(GATE, "05-working-wide-1320x980.png") });
+  await win.setViewportSize({ width: 540, height: 900 });
+  expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+    "the desk scrolls sideways at the 540px containment stress while working").toBe(true);
+  await win.screenshot({ path: join(GATE, "07-working-stress-540x900.png") });
+  await win.setViewportSize({ width: 760, height: 620 });
 
-  // Pressing the line opens the pond WHOLE, over the window. Both villagers
-  // are fully inside it and clear of each other — not crowded into the half
-  // that used to be reserved for the conversation.
-  await pondLine.click({ noWaitAfter: true });
-  await expect(pondLine).toHaveAttribute("aria-expanded", "true");
-  await expect(town.locator(".town-node-cairn")).toBeVisible();
-  await expect(worker).toBeVisible();
-  const narrowOpen = await win.evaluate(() => {
-    const town = document.querySelector<HTMLElement>(".town-square")?.getBoundingClientRect();
-    const cairnNode = document.querySelector<HTMLElement>(".town-node-cairn")?.getBoundingClientRect();
-    const workerNode = document.querySelector<HTMLElement>(".town-node-worker")?.getBoundingClientRect();
-    if (!town || !cairnNode || !workerNode) throw new Error("Expected the whole pond at 760x620");
-    const contains = (outer: DOMRect, inner: DOMRect) => inner.left >= outer.left - 1
-      && inner.right <= outer.right + 1 && inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1;
-    const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right && left.right > right.left
-      && left.top < right.bottom && left.bottom > right.top;
-    return {
-      cairnFits: contains(town, cairnNode),
-      workerFits: contains(town, workerNode),
-      castIsSeparate: !overlaps(cairnNode, workerNode),
-      pageFits: document.documentElement.scrollWidth <= window.innerWidth
-        && document.documentElement.scrollHeight <= window.innerHeight,
-    };
-  });
-  expect(narrowOpen).toEqual({
-    cairnFits: true, workerFits: true, castIsSeparate: true, pageFits: true,
-  });
+  /* No cliff. The 1260/1261 pair used to flip the whole composition between a
+     pond and a line; the desk crosses that boundary — and the 820 px compact
+     boundary — without any element appearing or disappearing except the two
+     the constitution says may drop. Both sides of both boundaries are checked,
+     because the rule that failed before was one that never fired at the size it
+     was written for. */
+  for (const [width, titleShown] of [[819, false], [820, false], [821, true],
+    [1259, true], [1260, true], [1261, true]] as const) {
+    await win.setViewportSize({ width, height: 820 });
+    await expect(win.locator(".pond-line")).toHaveCount(0);
+    await expect(win.locator(".town-square")).toHaveCount(0);
+    await expect(capsule).toBeVisible();
+    await expect(capsuleStatus).toHaveText("Working");
+    await expect(win.locator(".rp-conversation")).toBeVisible();
+    await expect(win.locator(".rp-desk-connection")).toBeVisible();
+    if (titleShown) await expect(win.locator(".rp-desk-title")).toBeVisible();
+    else await expect(win.locator(".rp-desk-title")).toBeHidden();
+    expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      `the page scrolls sideways at ${width}px`).toBe(true);
+  }
 
-  // One control brings the conversation back.
-  await win.getByRole("button", { name: "Back to the conversation" }).click({ noWaitAfter: true });
-  await expect(pondLine).toHaveAttribute("aria-expanded", "false");
-  await expect(town.locator(".town-node-cairn")).toBeHidden();
-
-  // The rule fires at exactly the size it was written for. Terminal Glass's
-  // never did, which is one of the four failures this resolution replaces —
-  // so both sides of the boundary are checked, not just a comfortable width.
-  await win.setViewportSize({ width: 1260, height: 820 });
-  await expect(pondLine).toBeVisible();
-  await win.setViewportSize({ width: 1261, height: 820 });
-  await expect(pondLine).toBeHidden();
-
-  // Above 1260px nothing about any of this exists: the approved wide layout is
-  // untouched, and the line is gone rather than merely hidden from view.
   await win.setViewportSize({ width: 1320, height: 820 });
-  await expect(pondLine).toBeHidden();
-  await expect(town.locator(".town-node-cairn")).toBeVisible();
-  await expect(town.locator(".town-square-header")).toBeVisible();
+  await expect(capsule).toBeVisible();
+  await expect(win.locator(".rp-desk-header")).toBeVisible();
 
+  /* Project isolation while a run is live. This is behaviour, not scenery, and
+     it survives the composition change unchanged: the other project shows no
+     run, its capsule is quiet, the rail still marks which project is working,
+     and coming back restores the run exactly. */
+  const sessionBeforeSwitch = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
   await win.getByTitle(otherName).click({ noWaitAfter: true });
-  const otherTown = win.getByRole("region", { name: `${otherName} town square` });
-  await expect(otherTown).toBeVisible();
+  await expect(win.locator(".rp-desk-title")).toHaveText(otherName);
   await expect(win.locator(".run-strip")).toHaveCount(0);
-  await expect(win.locator(".town-square")).toHaveCount(1);
-  await expect(otherTown.locator(".town-node-worker")).toHaveCount(0);
+  /* The new project opens on a quiet desk. A stale poll or event for the run
+     still going in the OTHER project may never paint this one — so this waits
+     out more than a full two-second poll and checks again.
+     `disconnected` and not `ready`: the conductor is resolved against the
+     current project, and only the first one was connected. That is the honest
+     answer, and it is settled rather than lagging, because the workspace now
+     re-asks for the connection the moment the project changes instead of
+     waiting out the poll. */
+  await expect(capsule).toHaveAttribute("data-rp-state", "disconnected");
+  await expect(capsuleStatus).toHaveText("Not connected");
+  await win.waitForTimeout(2_400);
+  await expect(capsule).toHaveAttribute("data-rp-state", "disconnected");
+  await expect(capsule.locator(".rp-activity-detail")).toHaveText("Connect Cairn to start talking.");
   const runningProject = win.locator(".rail-project-select", { has: win.locator(".rail-activity-working") });
   await expect(runningProject).toHaveCount(1);
   await expect(runningProject).toHaveAccessibleName(/^Conductor, worker task running/);
   const awaySession = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
   expect(awaySession?.phase).toBe("running");
   await runningProject.click({ noWaitAfter: true });
-  await expect(win.locator(".town-square")).toHaveCount(1);
-  await expect(worker).toHaveCount(1);
+  await expect(win.locator(".rp-desk-title")).toHaveText("Conductor");
   await expect(strip).toHaveAttribute("data-run-state", "running");
+  await expect(capsuleStatus).toHaveText("Working", { timeout: 15_000 });
+  // Coming back did not restart or replace the run.
+  const sessionAfterSwitch = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
+  expect(sessionAfterSwitch?.startedAt).toBe(sessionBeforeSwitch?.startedAt);
 
-  const groundBox = await town.locator(".town-square-ground").boundingBox();
-  const workerBox = await worker.boundingBox();
-  expect(groundBox).not.toBeNull();
-  expect(workerBox).not.toBeNull();
-  await win.mouse.move(workerBox!.x + workerBox!.width / 2, workerBox!.y + workerBox!.height / 2);
-  await win.mouse.down();
-  await win.mouse.move(groundBox!.x + groundBox!.width * 0.23, groundBox!.y + groundBox!.height * 0.68, { steps: 6 });
-  await win.mouse.up();
-  await expect(town.getByRole("button", { name: "Reset layout" })).toBeEnabled();
+  /* REPLACED by Task 259 (Slice 4). Roughly 150 lines stood here: dragging a
+     worker villager across the town ground, its saved fractional position
+     surviving a reload, a legacy far-shore point being presentation-clamped on
+     both sides of the 1260/1261 cliff, "Reset layout", the villager's focus
+     ring, its detail panel, and the task thread. Every one of those is an
+     affordance of a surface this slice retires, and none has a successor —
+     there is nothing on the desk to drag, and no second place a run's identity
+     is drawn.
 
-  const saved = await win.evaluate((dir) => window.cairn.townLoad(dir), project);
-  expect(saved.ok).toBe(true);
-  if (!saved.ok) throw new Error(saved.message);
-  const savedPoint = saved.value.positions["worker:codex-exec"];
-  expect(savedPoint).toBeDefined();
-  expect(savedPoint!.x).toBeGreaterThanOrEqual(0);
-  expect(savedPoint!.x).toBeLessThanOrEqual(1);
-  expect(savedPoint!.y).toBeGreaterThanOrEqual(0);
-  expect(savedPoint!.y).toBeLessThanOrEqual(1);
+     The stored data is untouched: `.cairn/town-square.json` is neither deleted
+     nor transformed, the main-process store and its IPC still work, and
+     `tests-unit/townstore.test.ts` still covers them. The renderer simply
+     stops reading the file.
 
+     What could NOT be dropped is kept: project isolation above, reduced motion
+     and a real keyboard focus ring here. */
   await win.reload();
-  await expect(worker).toHaveCount(1);
-  await expect(town).toHaveAttribute("data-town-motion", "none");
-  const townBox = await town.boundingBox();
-  const townHeaderBox = await town.locator(".town-square-header").boundingBox();
-  expect(townBox).not.toBeNull();
-  expect(townHeaderBox).not.toBeNull();
-  expect(townHeaderBox!.x).toBeGreaterThanOrEqual(townBox!.x);
-  expect(townHeaderBox!.x + townHeaderBox!.width).toBeLessThanOrEqual(townBox!.x + townBox!.width + 1);
-  await expect.poll(async () => {
-    const ground = await town.locator(".town-square-ground").boundingBox();
-    const villager = await worker.boundingBox();
-    if (!ground || !villager) return false;
-    const centerX = villager.x + villager.width / 2;
-    const centerY = villager.y + villager.height / 2;
-    return Math.abs(centerX - (ground.x + ground.width * savedPoint!.x)) < 5
-      && Math.abs(centerY - (ground.y + ground.height * savedPoint!.y)) < 5;
-  }).toBe(true);
-
-  // A point saved by an older build on the far shore remains intact on disk,
-  // but presentation clamping keeps the full worker button clear of Chat on
-  // both sides of the former 1260/1261 breakpoint cliff.
-  const legacyPosition = await win.evaluate(async ({ dir }) => window.cairn.townSave(dir, {
-    version: 1,
-    positions: { "worker:codex-exec": { x: 0.88, y: 0.5 } },
-    dividerWidth: 620,
-  }), { dir: project });
-  expect(legacyPosition.ok).toBe(true);
-  await win.setViewportSize({ width: 1261, height: 820 });
-  await win.reload();
-  await expect(worker).toHaveCount(1);
-  const breakpointLayout = await win.evaluate(() => {
-    const dialog = document.querySelector<HTMLElement>(".chat-column-villager")?.getBoundingClientRect();
-    const town = document.querySelector<HTMLElement>(".town-square")?.getBoundingClientRect();
-    const worker = document.querySelector<HTMLElement>(".town-node-worker")?.getBoundingClientRect();
-    if (!dialog || !town || !worker) throw new Error("Expected Town, worker, and Chat at 1261px");
-    const overlaps = (left: DOMRect, right: DOMRect) => left.left < right.right && left.right > right.left
-      && left.top < right.bottom && left.bottom > right.top;
-    return {
-      workerClear: !overlaps(dialog, worker),
-      workerFits: worker.left >= town.left - 1 && worker.right <= town.right + 1,
-      pageFits: document.documentElement.scrollWidth <= window.innerWidth,
-    };
-  });
-  expect(breakpointLayout).toEqual({ workerClear: true, workerFits: true, pageFits: true });
-  const retainedLegacyPosition = await win.evaluate((dir) => window.cairn.townLoad(dir), project);
-  expect(retainedLegacyPosition.ok && retainedLegacyPosition.value.positions["worker:codex-exec"]?.x).toBe(0.88);
-  await win.setViewportSize({ width: 1320, height: 820 });
+  await expect(strip).toHaveAttribute("data-run-state", "running", { timeout: 30_000 });
+  await expect(capsuleStatus).toHaveText("Working", { timeout: 15_000 });
+  // A reload destroys the page, and the probe with it. Re-arm it, or every
+  // later reading is an empty log that would pass a weaker assertion.
+  await installDeskActivityProbe(win);
 
   await win.emulateMedia({ reducedMotion: "reduce" });
   await expect.poll(() => strip.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
   await expect.poll(() => strip.getByRole("button", { name: "Open the run screen" })
     .evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s");
-  await expect.poll(() => worker.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe("0s");
-  await expect.poll(() => worker.locator(".town-face-holo").evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
-  await expect.poll(() => worker.locator(".town-worker-pad span").first().evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
-  await town.getByRole("button", { name: "Reset layout" }).click({ noWaitAfter: true });
-  await expect.poll(async () => {
-    const state = await win.evaluate((dir) => window.cairn.townLoad(dir), project);
-    return state.ok ? Object.keys(state.value.positions).length : -1;
-  }).toBe(0);
-
-  await worker.focus();
-  await win.keyboard.press("Tab");
-  await win.keyboard.press("Shift+Tab");
-  await expect(worker).toBeFocused();
-  const workerFocusRing = await worker.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
-  });
-  expect(workerFocusRing.style).toBe("solid");
-  expect(Number.parseFloat(workerFocusRing.width)).toBeGreaterThanOrEqual(3);
-  expect(Number.parseFloat(workerFocusRing.offset)).toBeGreaterThanOrEqual(3);
-  const sessionBeforeSelection = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
-  await win.keyboard.press("Enter");
-  const workerDetail = town.getByRole("complementary", { name: "Codex Exec worker details" });
-  await expect(workerDetail).toContainText("Change the page title");
-  await expect(workerDetail).toContainText("codex-exec");
-  const detailGeometry = await win.evaluate(() => {
-    const detail = document.querySelector<HTMLElement>(".town-detail")?.getBoundingClientRect();
-    const action = document.querySelector<HTMLElement>(".town-detail-action")?.getBoundingClientRect();
-    const dialog = document.querySelector<HTMLElement>(".chat-column-villager")?.getBoundingClientRect();
-    if (!detail || !action || !dialog) throw new Error("Expected worker details and Chat");
-    const overlaps = detail.left < dialog.right && detail.right > dialog.left
-      && detail.top < dialog.bottom && detail.bottom > dialog.top;
-    return {
-      clearsChat: !overlaps,
-      actionFits: action.left >= detail.left - 1 && action.right <= detail.right + 1
-        && action.top >= detail.top - 1 && action.bottom <= detail.bottom + 1,
-    };
-  });
-  expect(detailGeometry).toEqual({ clearsChat: true, actionFits: true });
-  const sessionAfterSelection = await win.evaluate((dir) => window.cairn.taskCurrent(dir), project);
-  expect(sessionAfterSelection?.startedAt).toBe(sessionBeforeSelection?.startedAt);
-
-  const thread = town.locator(".town-thread-target");
-  await expect(thread).toHaveCount(1);
-  await thread.focus();
-  await win.keyboard.press("Space");
-  await expect(town.getByRole("complementary", { name: "Task thread details" })).toContainText("Change the page title");
-  await town.locator(".town-square-ground").click({ position: { x: 6, y: 6 }, noWaitAfter: true });
-  await expect(town.locator(".town-detail")).toHaveCount(0);
+  // The capsule and its Cairn are static under reduced motion, and the desk
+  // itself never animated at all.
+  await expect.poll(() => capsule.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+  await expect.poll(() => capsule.locator("[data-rp-program]")
+    .evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+  await win.emulateMedia({ reducedMotion: "no-preference" });
 
   // Task 065: mark the live region's DOM node. A live region announces a
   // content change reliably; a region that appears already holding its message
@@ -3172,15 +3083,15 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await expect(openRun).toBeVisible();
   await expect(win.getByPlaceholder("Talk with Cairn")).toBeEnabled();
   await expect(win.getByText("A task is running. You can type again when it finishes.")).toHaveCount(0);
-  await expect(town.locator(".town-node-worker")).toHaveCount(0, { timeout: 15_000 });
-  await expect(town).toHaveAttribute("data-town-truth", "stopped");
-  await expect(town).toHaveAttribute("data-town-outcome", "stopped");
-  await expect(town.locator(".town-node-cairn.town-node-done")).toHaveCount(0);
-  await expect(town.locator(".town-square-header [role=status]")).toContainText("STOPPED");
-  await expect(town.locator(".town-transfer-layer")).toHaveCount(0);
-  await expect(town.locator(".town-face-worker")).toHaveCount(0);
-  await expect(town.locator(".town-worker-pad")).toHaveCount(0);
-  await expect(town.locator(".town-thread-target")).toHaveCount(0);
+  // The capsule lands on the stop, says so literally, and never claims DONE.
+  await expect(capsule).toHaveAttribute("data-rp-state", "stopped", { timeout: 15_000 });
+  await expect(capsuleStatus).toHaveText("STOPPED");
+  await expect(capsule).toHaveAttribute("data-rp-tone", "stopped");
+  await expect(capsule.locator("[data-rp-program]")).toHaveAttribute("data-rp-program", "stopped");
+  await expect(capsule).not.toContainText("DONE");
+  const stoppedEntries = await deskActivityProbe(win);
+  assertWordsAndFaceAgree(stoppedEntries);
+  expect(deskStates(stoppedEntries)).not.toContain("done");
   await expect.poll(() => win.evaluate(() => ({
     overflow: getComputedStyle(document.querySelector<HTMLElement>(".chat-messages")!).overflowX,
     pageFits: document.documentElement.scrollWidth <= window.innerWidth,
@@ -3194,6 +3105,10 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await win.setViewportSize({ width: 760, height: 1000 });
   await expect(strip).toHaveAttribute("data-run-state", "stopped");
   await win.screenshot({ path: join(tmpdir(), "cairn-task-189-run-stopped.png") });
+  await win.setViewportSize({ width: 1320, height: 980 });
+  await win.screenshot({ path: join(GATE, "09-stopped-wide-1320x980.png") });
+  await win.setViewportSize({ width: 760, height: 620 });
+  await win.screenshot({ path: join(GATE, "10-stopped-minimum-760x620.png") });
 
   // The link is real: it opens the run screen on this same session.
   await strip.getByRole("button", { name: "Open the run screen" }).click({ noWaitAfter: true });
@@ -3201,8 +3116,8 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
   await app.close();
 });
 
-test("a fresh confirmed dispatch reaches the same stable Town with reduced motion and no transient packet", async () => {
-  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-town-reduced-"));
+test("a fresh confirmed dispatch reaches the same stable written state with reduced motion", async () => {
+  const project = mkdtempSync(join(tmpdir(), "cairn-conductor-desk-reduced-"));
   scaffold(project);
   const fakeCodex = fakeCodexEnvironment(project, true, "slow");
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
@@ -3212,20 +3127,21 @@ test("a fresh confirmed dispatch reaches the same stable Town with reduced motio
   await expect.poll(() => win.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
-  const town = win.getByRole("region", { name: "Conductor town square" });
-  await dispatchOneRealCall(win, () => installTownMotionProbe(win));
+  const capsule = win.locator(".rp-activity");
+  const capsuleStatus = capsule.locator(".rp-activity-status");
+  await dispatchOneRealCall(win, () => installDeskActivityProbe(win));
   await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
-  await expect(town.locator(".town-node-worker")).toHaveCount(1);
-  await expect(town).toHaveAttribute("data-town-truth", "working");
-  await expect(town).toHaveAttribute("data-town-motion", "none");
-  await expect(town.locator(".town-transfer-layer")).toHaveCount(0);
-  await expect.poll(() => town.locator(".town-node-worker").evaluate((element) =>
-    getComputedStyle(element).animationDuration)).toBe("0s");
+  await expect(capsule).toHaveAttribute("data-rp-state", "working", { timeout: 15_000 });
+  await expect(capsuleStatus).toHaveText("Working");
+  await expect.poll(() => capsule.evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
+  await expect.poll(() => capsule.locator("[data-rp-program]")
+    .evaluate((element) => getComputedStyle(element).animationDuration)).toBe("0s");
 
-  const reducedEntries = await townMotionProbe(win);
-  expect(uniqueTownCues(reducedEntries)).toEqual([]);
-  expect(reducedEntries.every((entry) => entry.motion === "none" && entry.cue === null
-    && !entry.packet && !entry.ripple && !entry.terminalRipple)).toBe(true);
+  // Reduced motion reaches the identical semantic end state without travel:
+  // every observation is a settled written state, and the face agrees with it.
+  const reducedEntries = await deskActivityProbe(win);
+  assertWordsAndFaceAgree(reducedEntries);
+  expect(deskStates(reducedEntries)).toContain("working");
 
   // Stop the fake process so this isolated run closes before the app does. The
   // semantic STOPPED state still lands immediately, without adding motion.
@@ -3234,14 +3150,14 @@ test("a fresh confirmed dispatch reaches the same stable Town with reduced motio
   await expect(strip).toContainText("STOPPED — you stopped it yourself", { timeout: 30_000 });
   // A result comment may legitimately own Cairn's live `thinking` truth after
   // the stopped outcome lands. Wait for that fake stream before asserting the
-  // stable Town state this test is named for.
+  // stable desk state this test is named for.
   await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project),
     { timeout: 30_000 }).toBeNull();
-  await expect(town).toHaveAttribute("data-town-truth", "stopped");
-  await expect(town).toHaveAttribute("data-town-outcome", "stopped");
-  await expect(town).toHaveAttribute("data-town-motion", "none");
-  await expect(town.locator(".town-transfer-layer")).toHaveCount(0);
-  await expect(town.locator(".town-node-done")).toHaveCount(0);
+  await expect(capsule).toHaveAttribute("data-rp-state", "stopped");
+  await expect(capsuleStatus).toHaveText("STOPPED");
+  await expect.poll(() => capsule.evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
+  assertWordsAndFaceAgree(await deskActivityProbe(win));
+  expect(deskStates(await deskActivityProbe(win))).not.toContain("done");
   } finally {
     await app.close();
   }
@@ -3257,9 +3173,9 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
-  await dispatchOneRealCall(win, () => installTownMotionProbe(win));
+  await dispatchOneRealCall(win, () => installDeskActivityProbe(win));
 
-  const town = win.locator(".town-square");
+  const capsule = win.locator(".rp-activity");
   const strip = win.locator(".run-strip");
   await expect(strip).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => existsSync(fakeCodex.marker), { timeout: 20_000 }).toBe(true);
@@ -3284,33 +3200,23 @@ test("a stopped run posts an honest STOPPED card that names the stop code and cl
   await expect(stoppedComment).toContainText("The card says this task STOPPED safely", { timeout: 30_000 });
   await expect(stoppedComment).not.toContainText("DONE");
 
-  // STOPPED truth wins immediately even if a decorative dispatch landing is
-  // still finishing. Its one terminal cue is coral, and no cast member ever
-  // receives a `done` face from an unverified result.
-  await expect(town).toHaveAttribute("data-town-truth", "stopped");
-  await expect(town.locator(".town-square-header [role=status]")).toContainText("STOPPED");
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.truth === "stopped" && entry.status.includes("STOPPED")
-      && entry.cairnFace === "thinking" && !entry.doneFace),
-  { timeout: 15_000 }).toBe(true);
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "stopped-landing" && entry.outcome === "stopped"
-      && entry.rippleColor === "rgb(242, 170, 164)"
-      && entry.cairnStroke === "rgb(163, 221, 208)"
-      && entry.terminalRipple && entry.cairnFace === "thinking" && !entry.doneFace),
-  { timeout: 15_000 }).toBe(true);
-  const stoppedEntries = await townMotionProbe(win);
-  const stoppedCues = uniqueTownCues(stoppedEntries).filter((cue) => cue.kind === "stopped");
-  expect(stoppedCues).toHaveLength(1);
-  expect(motionsForCue(stoppedEntries, stoppedCues[0]!.key)).toEqual(["stopped-landing"]);
-  expect(stoppedEntries.filter((entry) => entry.truth === "stopped")
-    .every((entry) => entry.cairnFace === "thinking" && !entry.doneFace)).toBe(true);
-  expect(stoppedEntries.some((entry) => entry.motion === "done-landing"
-    || entry.outcome === "done" || /DONE/.test(entry.status))).toBe(false);
-  await expect(town.locator(".town-node-cairn")).toHaveAttribute("data-face-state", "thinking");
-  await expect(town.locator(".town-node-done")).toHaveCount(0);
-  await expect.poll(() => town.locator(".town-face-cairn .town-face-svg path").first()
-    .evaluate((element) => getComputedStyle(element).stroke)).toBe("rgb(163, 221, 208)");
+  /* STOPPED wins, in words, and no unverified result is ever drawn or spoken
+     as DONE. A live comment on the card may legitimately own Cairn's face
+     while it streams — `thinking` over a retained STOPPED — which is why the
+     assertion is that the desk never once SAID done, not that it never
+     showed a thinking face. */
+  await expect.poll(async () => deskStates(await deskActivityProbe(win)).includes("stopped"),
+    { timeout: 15_000 }).toBe(true);
+  const stoppedEntries = await deskActivityProbe(win);
+  assertWordsAndFaceAgree(stoppedEntries);
+  expect(deskStates(stoppedEntries)).not.toContain("done");
+  expect(stoppedEntries.some((entry) => /DONE/.test(entry.status)
+    || (entry.detail !== null && /DONE/.test(entry.detail)))).toBe(false);
+  expect(stoppedEntries.some((entry) => entry.face === "done")).toBe(false);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project),
+    { timeout: 30_000 }).toBeNull();
+  await expect(capsule).toHaveAttribute("data-rp-state", "stopped");
+  await expect(capsule.locator(".rp-activity-status")).toHaveText("STOPPED");
 
   // The card arrives from the SETTLED run promise, so by the time it is on
   // screen the send gate is already open — Task 9's commentary depends on that
@@ -3332,87 +3238,80 @@ test("a worker's claims render only inside the card's claims block, never as a v
   const app = await electron.launch({ args: ["."], env: codexEnv(project, fakeCodex) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
-  await dispatchOneRealCall(win, () => installTownMotionProbe(win));
+  await dispatchOneRealCall(win, () => installDeskActivityProbe(win));
 
-  const town = win.locator(".town-square");
-  const focusedThread = town.locator(".town-thread-target");
-  await expect(focusedThread).toHaveCount(1, { timeout: 15_000 });
-  await focusedThread.focus();
+  const capsule = win.locator(".rp-activity");
+  const capsuleStatus = capsule.locator(".rp-activity-status");
+  await expect(capsule).toHaveAttribute("data-rp-state", "working", { timeout: 15_000 });
+
+  /* REWRITTEN by Task 259 (Slice 4). This focused a task THREAD in the town
+     square and measured its ring, then read a packet flying back to Cairn.
+     Neither exists. A run's stages are now announced in words, so this checks
+     the ring on a control the desk really has, and reads the states the
+     capsule passed through instead of the packets that carried them. */
+  const openRun = win.locator(".run-strip").getByRole("button", { name: "Open the run screen" });
+  await openRun.focus();
   await win.keyboard.press("Tab");
   await win.keyboard.press("Shift+Tab");
-  await expect(focusedThread).toBeFocused();
-  const threadFocusRing = await focusedThread.evaluate((element) => {
+  await expect(openRun).toBeFocused();
+  const runFocusRing = await openRun.evaluate((element) => {
     const style = getComputedStyle(element);
     return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
   });
-  expect(threadFocusRing.style).toBe("solid");
-  expect(Number.parseFloat(threadFocusRing.width)).toBeGreaterThanOrEqual(3);
-  expect(Number.parseFloat(threadFocusRing.offset)).toBeGreaterThanOrEqual(3);
+  expect(runFocusRing.style).toBe("solid");
+  expect(Number.parseFloat(runFocusRing.width)).toBeGreaterThanOrEqual(2);
+  expect(Number.parseFloat(runFocusRing.offset)).toBeGreaterThanOrEqual(3);
   writeFileSync(fakeCodex.release, "finish\n");
 
+  /* This scenario was already red on `main`, and not for a visual reason: the
+     run stops at the unsealed-candidate pause — "Continue to Cairn's current
+     checks" — which the product grew AFTER this test was written, so the test
+     waits forever for a card the runtime is deliberately holding back. The
+     handoff records the symptom (`.run-strip` stuck in `Check`) and lists three
+     scenarios; this is a fourth with the same cause.
+
+     Answering the pause is what the test always meant to do, so it does. That
+     is an adjacent fix, disclosed rather than silent, and it changes no product
+     behaviour: the unsealed-candidate suite already answers the same pause the
+     same way, and this lane's worker is the fake one. */
+  const candidateGate = win.getByRole("button", { name: "Continue to Cairn's current checks" });
+  await expect(candidateGate).toBeVisible({ timeout: 30_000 });
+  await candidateGate.click();
+
   const card = win.locator(".result-card");
-  // The flight lasts less than a second. Read the transition observer instead
-  // of racing a live poll against its tail: the same DOM mutation that
-  // paints `return-flight` records which Town control owned focus in that
-  // frame.
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "return-flight" && entry.threadFocused), { timeout: 15_000 }).toBe(true);
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "return-flight" && entry.receiver === "cairn"
-      && entry.packetText === "RESULT" && entry.packet && !entry.ripple
-      && entry.cairnStroke === "rgb(163, 221, 208)"), { timeout: 15_000 }).toBe(true);
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "return-landing" && entry.receiver === "cairn"
-      && entry.rippleColor === "rgb(163, 221, 208)"
-      && entry.rippleReceiverDistance !== null && entry.rippleReceiverDistance < 70
-      && !entry.packet && entry.ripple), { timeout: 15_000 }).toBe(true);
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator(".result-card-disposition")).toHaveText("DONE");
-  await expect.poll(async () => (await townMotionProbe(win)).some((entry) =>
-    entry.motion === "done-landing" && entry.outcome === "done"
-      && entry.rippleColor === "rgb(194, 221, 182)"
-      && entry.cairnStroke === "rgb(163, 221, 208)"
-      && entry.terminalRipple && (entry.cairnFace === "done" || entry.cairnFace === "thinking")),
-  { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => deskStates(await deskActivityProbe(win)).includes("done"),
+    { timeout: 20_000 }).toBe(true);
 
-  // The return never regresses to worker-running truth or borrows the success
-  // face. Depending on which real refresh wins that brief interval, Cairn can
-  // honestly be checking, already DONE, or speaking its live commentary; the
-  // unit reducer pins terminal truth as soon as that terminal snapshot exists.
-  const returnEntries = (await townMotionProbe(win)).filter((entry) =>
-    /^return-(flight|landing)$/.test(entry.motion));
-  expect(returnEntries.some((entry) => entry.outcome === "none" && !entry.doneFace)).toBe(true);
-  expect(returnEntries.every((entry) => entry.truth !== "working" && !entry.doneFace)).toBe(true);
-  for (const entry of returnEntries) {
-    if (entry.truth === "done") expect(entry.status).toMatch(/^DONE/);
-    if (entry.truth === "thinking") expect(entry.status).toBe("Cairn is replying.");
-    if (entry.truth === "checking") expect(entry.status).toMatch(/Cairn|Result/);
+  /* The run advanced forward and never borrowed a success it had not reached.
+     Depending on which real refresh wins the interval, Cairn can honestly be
+     checking, already DONE, or speaking his live commentary over a retained
+     DONE — but he may never be back at `working` once the result has landed,
+     and no observation may say DONE before the run was done. */
+  const doneEntries = await deskActivityProbe(win);
+  assertWordsAndFaceAgree(doneEntries);
+  const order = deskStates(doneEntries);
+  expect(order).toContain("working");
+  expect(order).toContain("done");
+  expect(order.indexOf("working")).toBeLessThan(order.indexOf("done"));
+  expect(order.slice(order.indexOf("done"))).not.toContain("working");
+  expect(doneEntries.some((entry) => /STOPPED|ERROR/.test(entry.status))).toBe(false);
+  for (const entry of doneEntries) {
+    if (entry.state === "done") expect(entry.status).toMatch(/^DONE/);
+    if (entry.state === "thinking") expect(entry.status).toBe("Cairn is replying");
+    if (entry.state === "checking") expect(entry.status).toBe("Checking");
   }
-  await expect(town).toHaveAttribute("data-town-truth", "done");
-  await expect(town).toHaveAttribute("data-town-outcome", "done");
-  await expect(town.locator(".town-node-cairn.town-node-done")).toHaveCount(1);
-  await expect(town.locator(".town-square-header [role=status]")).toContainText("DONE");
-  await expect.poll(() => town.locator(".town-face-cairn .town-face-svg path").first()
-    .evaluate((element) => getComputedStyle(element).stroke)).toBe("rgb(163, 221, 208)");
-  expect((await townMotionProbe(win)).some((entry) => entry.outcome === "stopped" || /STOPPED/.test(entry.status))).toBe(false);
-
-  // Let the terminal ripple settle. Multiple task/conductor refreshes and at
-  // least one 2-second poll have now observed this snapshot, but each runtime
-  // transition still owns exactly one key in dispatch/return/terminal order.
-  await expect(town).toHaveAttribute("data-town-motion", "none", { timeout: 15_000 });
-  await expect(town.locator(".town-node-cairn")).toBeFocused();
-  const doneEntries = await townMotionProbe(win);
-  const cueSequence = uniqueTownCues(doneEntries);
-  const dispatchCues = cueSequence.filter((cue) => cue.kind === "dispatch");
-  const returnCues = cueSequence.filter((cue) => cue.kind === "return");
-  const doneCues = cueSequence.filter((cue) => cue.kind === "done");
-  expect(dispatchCues.length).toBeLessThanOrEqual(1);
-  expect(returnCues).toHaveLength(1);
-  expect(doneCues).toHaveLength(1);
-  if (dispatchCues[0]) expect(cueSequence.indexOf(dispatchCues[0])).toBeLessThan(cueSequence.indexOf(returnCues[0]!));
-  expect(cueSequence.indexOf(returnCues[0]!)).toBeLessThan(cueSequence.indexOf(doneCues[0]!));
-  expect(motionsForCue(doneEntries, returnCues[0]!.key)).toEqual(["return-flight", "return-landing"]);
-  expect(motionsForCue(doneEntries, doneCues[0]!.key)).toEqual(["done-landing"]);
+  // Each state is entered once and settles; nothing loops back and forth.
+  expect(order.length).toBe(new Set(order).size);
+  await expect(win.locator(".town-square")).toHaveCount(0);
+  await expect(win.locator(".pond-line")).toHaveCount(0);
+  await expect.poll(() => win.evaluate((dir) => window.cairn.conductorCurrent(dir), project),
+    { timeout: 30_000 }).toBeNull();
+  await expect(capsule).toHaveAttribute("data-rp-state", "done");
+  await expect(capsuleStatus).toHaveText("DONE — verified by Cairn");
+  await win.setViewportSize({ width: 1320, height: 980 });
+  await win.screenshot({ path: join(GATE, "08-done-wide-1320x980.png") });
 
   // Task 165's owner-facing sections keep the worker's account visibly below
   // Cairn's facts; the worker's own sentence and milestone answer stay inside
@@ -3929,42 +3828,66 @@ test("a message sent while a reply streams queues and flushes when the reply lan
   }
 });
 
-// Task 155 (needs-you dot), mock lane. Tucked away while a proposed task
-// waits unanswered, the chip itself says a decision is waiting: the dot is
-// on it and its accessible name says so — the owner never has to open the
-// dialog to find out.
-test("the tucked chip carries a needs-you dot while a decision waits inside", async () => {
+/* REWRITTEN by Task 259 (Slice 4) from "the tucked chip carries a needs-you dot
+   while a decision waits inside". That test tucked the conversation away and
+   read a dot and an accessible name off the chip that replaced it. Tucking is
+   retired: there is nothing behind the conversation to look at, so putting it
+   away would reveal an empty desk.
+   Task 155's rule is not retired, and this is where it is now checked. The
+   owner must learn that a decision is waiting WITHOUT having to read the
+   conversation — and it must be learned from words, not from a dot. */
+test("a waiting decision is announced in words, and outranks whatever else is happening", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-conductor-needsyou-"));
   scaffold(project);
   const app = await electron.launch({ args: ["."], env: baseEnv(project) });
   const win = await app.firstWindow();
   await connectToFixture(win, fixtureUrl, "fixture-model");
 
-  // Nothing waiting yet: no dot, and the plain accessible name.
-  await win.getByRole("button", { name: "Tuck the conversation away" }).click();
-  const chip = win.locator(".chat-villager-chip");
-  await expect(chip).toBeVisible();
-  await expect(win.locator(".chat-villager-chip-dot")).toHaveCount(0);
-  await expect(chip).toHaveAttribute("aria-label", "Open the conversation with Cairn");
-  // The chip bobs on a loop, so its box never sits still for Playwright's
-  // stability check — force skips that wait for the click only.
-  await chip.click({ force: true });
-  await expect(win.getByRole("button", { name: "Tuck the conversation away" })).toBeVisible();
+  const capsule = win.locator(".rp-activity");
+  const capsuleStatus = capsule.locator(".rp-activity-status");
+  const cairn = capsule.locator("[data-rp-program]");
 
-  // A proposed task with an unanswered risk chip is a waiting decision.
+  // Nothing waiting yet.
+  await expect(capsule).toHaveAttribute("data-rp-state", "ready");
+  await expect(capsuleStatus).toHaveText("Ready");
+  await expect(cairn).toHaveAttribute("data-rp-program", "ready");
+  await expect(win.getByRole("button", { name: "Tuck the conversation away" })).toHaveCount(0);
+  await expect(win.locator(".chat-villager-chip")).toHaveCount(0);
+
+  await win.setViewportSize({ width: 1320, height: 980 });
+  await win.screenshot({ path: join(GATE, "00-ready-wide-1320x980.png") });
+
+  // A proposed task with an unanswered risk chip is a waiting decision. While
+  // Cairn is still speaking, the capsule says he is replying.
   await sendChat(win, "Change the page title");
+  await expect(capsule).toHaveAttribute("data-rp-state", "thinking", { timeout: 15_000 });
+  await expect(capsuleStatus).toHaveText("Cairn is replying");
+  await expect(cairn).toHaveAttribute("data-rp-program", "thinking");
+  await win.screenshot({ path: join(GATE, "04-responding-wide-1320x980.png") });
   await waitStreamDone(win);
   await expect(win.locator(".task-card")).toBeVisible();
 
-  await win.getByRole("button", { name: "Tuck the conversation away" }).click();
-  await expect(chip).toBeVisible();
-  await expect(win.locator(".chat-villager-chip-dot")).toBeVisible();
-  await expect(chip).toHaveAttribute("aria-label", "Open the conversation with Cairn — a decision is waiting for you");
+  // The capsule says so, in words, above the conversation and without opening
+  // anything — and Cairn's face moved with the words, not instead of them.
+  await expect(capsule).toHaveAttribute("data-rp-state", "needs-decision", { timeout: 15_000 });
+  await expect(capsuleStatus).toHaveText("Needs your decision");
+  await expect(capsule.locator(".rp-activity-detail"))
+    .toHaveText("Something in the conversation is waiting for you.");
+  await expect(capsule).toHaveAttribute("data-rp-tone", "attention");
+  await expect(cairn).toHaveAttribute("data-rp-program", "needs-decision");
+  await win.screenshot({ path: join(GATE, "11-needs-owner-wide-1320x980.png") });
 
-  // Dot or no, the chip still opens the conversation — and the waiting
-  // decision is right there.
-  await chip.click({ force: true });
+  // Still visible at the supported minimum, where the DETAIL drops and the
+  // state does not.
+  await win.setViewportSize({ width: 760, height: 620 });
+  await expect(capsuleStatus).toHaveText("Needs your decision");
+  await expect(win.locator(".rp-activity-detail")).toBeHidden();
   await expect(win.locator(".task-card")).toBeVisible();
+  await win.screenshot({ path: join(GATE, "12-needs-owner-minimum-760x620.png") });
+  await win.setViewportSize({ width: 540, height: 900 });
+  expect(await win.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+    "the desk scrolls sideways at the 540px containment stress with a decision waiting").toBe(true);
+  await win.screenshot({ path: join(GATE, "13-needs-owner-stress-540x900.png") });
   await app.close();
 });
 

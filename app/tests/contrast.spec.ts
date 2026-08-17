@@ -124,7 +124,19 @@ function scaffold(project: string): void {
   ]);
 }
 
-test("lantern text clears the contrast floor against the lit field it now sits on", async () => {
+/*
+ * REPOINTED by Task 259 (Slice 4). This swept `.chat-column-villager`, the
+ * conversation panel floating over the pond. That panel is retired: the
+ * conversation is now warm paper on the desk, and the desk grew a header and
+ * an activity capsule that carry state in words.
+ *
+ * The root moved OUT to `.workspace-stage`, so the sweep now measures the
+ * whole composition rather than one panel inside it — the same conversation
+ * elements as before, plus the two new chrome rows. Narrowing it back to the
+ * conversation would leave the capsule, which is where DONE, STOPPED and a
+ * waiting decision are actually announced, unmeasured.
+ */
+test("the desk's text clears the contrast floor against the field it sits on", async () => {
   const project = mkdtempSync(join(tmpdir(), "cairn-contrast-"));
   scaffold(project);
   const env: { [key: string]: string } = {};
@@ -138,15 +150,27 @@ test("lantern text clears the contrast floor against the lit field it now sits o
     // Wide: the widest viewport puts the most of the key light's falloff
     // behind the surface, which is the worst case this check is for.
     await win.setViewportSize({ width: 1320, height: 980 });
-    const lantern = win.locator(".chat-column-villager");
-    await expect(lantern).toBeVisible({ timeout: 20_000 });
-    // Let the entrance animation settle, or the capture catches it mid-rise
-    // and samples a surface that is still moving and still part-transparent.
+    const desk = win.locator(".workspace-stage");
+    await expect(desk).toBeVisible({ timeout: 20_000 });
+    await expect(win.locator(".rp-conversation")).toBeVisible({ timeout: 20_000 });
+    /* WHAT THIS SWEEP DOES NOT REACH. This lane runs with `CAIRN_MOCK` and no
+       conductor connection, so the conversation shows its connect card rather
+       than a composer, and no task card, risk chip, dispatch panel or result
+       card is on the paper to measure. That was true before Task 259 as well —
+       the sweep has always run in this state — and widening its root to the
+       whole stage added the header and the capsule to what it covers.
+       An attempt to drive a real proposal into it as part of Slice 4 failed
+       here: reaching one needs a connected conductor fixture, which is
+       conductor.spec's machinery and not this file's. The decision surfaces
+       are Slice 6's, and Slice 6 should bring them under this measurement. */
+
+    // Let any entrance settle, or the capture catches a surface that is still
+    // moving and still part-transparent.
     await win.waitForTimeout(1200);
 
-    const samples = await lantern.locator("p, h1, h2, h3, h4, span, strong, button, summary, label")
+    const samples = await desk.locator("p, h1, h2, h3, h4, span, strong, button, summary, label")
       .filter({ hasText: /\S/ }).all();
-    expect(samples.length, "no lantern text was found to measure").toBeGreaterThan(3);
+    expect(samples.length, "no desk text was found to measure").toBeGreaterThan(3);
 
     const failures: string[] = [];
     let measured = 0;
