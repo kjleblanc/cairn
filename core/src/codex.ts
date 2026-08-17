@@ -1480,7 +1480,7 @@ function taskPrompt(contract: AdapterTaskContract): string {
   const criteria = contract.taskSpecReview.criteria.map((criterion) =>
     `- ${criterion.id}: ${JSON.stringify(criterion.promise)}`);
   const preferences = contract.taskSpecReview.preferences.map((preference) =>
-    `- ${preference.id}: ${JSON.stringify(preference.dimension)} â€” ${JSON.stringify(preference.desiredDirection)}`);
+    `- ${preference.id}: ${JSON.stringify(preference.dimension)} — ${JSON.stringify(preference.desiredDirection)}`);
   const claimsExample = {
     version: "cairn-task-spec-worker-claims/v1",
     taskSpecSha256: contract.taskSpecSha256,
@@ -1504,9 +1504,9 @@ function taskPrompt(contract: AdapterTaskContract): string {
     "For You said so, the exact owner words govern if they conflict with Cairn’s interpretation.",
     "You weren’t sure is a starting point, not a fixed rule. Cairn chose is Cairn’s choice, not evidence of owner preference.",
     acceptedRequest,
-    "Required Task Spec promises â€” every cN must be answered. These are distinct from envelope checks:",
+    "Required Task Spec promises — every cN must be answered. These are distinct from envelope checks:",
     ...criteria,
-    "Advisory Task Spec preferences â€” pN guides quality but never gates DONE:",
+    "Advisory Task Spec preferences — pN guides quality but never gates DONE:",
     ...(preferences.length > 0 ? preferences : ["- None."]),
     "Cairn already created this task's brief. Do not create another brief or start another task.",
     "The owner already confirmed Cairn's displayed provider, model, project, data scope, and one-call quota for this exact request. Do not ask for that confirmation again. This grants no authority beyond this one call and in-scope local reversible work.",

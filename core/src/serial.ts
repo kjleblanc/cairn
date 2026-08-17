@@ -4697,12 +4697,7 @@ function projectedTerminalActivities(
       state: "stopped",
       detail: `Stopped safely: ${stopReasonInPlainWords(reason)} (${reason}).`,
     });
-    projected.push({ stage: "Result", state: "stopped", detail: `STOPPED â€” ${stopReasonInPlainWords(reason)}` });
-    projected[projected.length - 1] = {
-      stage: "Result",
-      state: "stopped",
-      detail: `STOPPED — ${stopReasonInPlainWords(reason)}`,
-    };
+    projected.push({ stage: "Result", state: "stopped", detail: `STOPPED — ${stopReasonInPlainWords(reason)}` });
     return Object.freeze(projected);
   }
   projected.push({
@@ -4712,12 +4707,7 @@ function projectedTerminalActivities(
       ? "The sealed candidate, custody record, protected work, and exact-path commit were verified."
       : "The sealed candidate and protected work were verified; the dirty start keeps changes uncommitted.",
   });
-  projected.push({ stage: "Result", state: "done", detail: "DONE â€” the pre-seal candidate was finalized once." });
-  projected[projected.length - 1] = {
-    stage: "Result",
-    state: "done",
-    detail: "DONE — the pre-seal candidate was finalized once.",
-  };
+  projected.push({ stage: "Result", state: "done", detail: "DONE — the pre-seal candidate was finalized once." });
   return Object.freeze(projected);
 }
 

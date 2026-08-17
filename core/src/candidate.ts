@@ -3319,7 +3319,7 @@ export function restoreSerialCandidateQ9ForPending(
   // never completed: that orphan must not reappear as owner or repair
   // authority after restart.  An owner-resolution policy may have a different
   // policy-decision digest from the original waiting-owner decision, so the
-  // immutable call/assessment identities â€” not the later policy digest â€” are
+  // immutable call/assessment identities — not the later policy digest — are
   // the exact lineage join here.
   const assessmentAttemptExact = assessment === null && assessmentRestartCustody === null
     ? policyDecision?.assessmentStatus !== "available"

@@ -38,7 +38,7 @@ export function HarnessRevisionCard({ dir, revision, busy = false, onDecide }: {
         <div><dt>Task</dt><dd>{revision.taskNumber}</dd></div>
         <div><dt>Original check</dt><dd className="mono">{revision.criterionId}</dd></div>
         <div><dt>Failure</dt><dd>{revision.failureCode} (exit {revision.exitCode})</dd></div>
-        <div><dt>Mechanical change</dt><dd>{revision.changeKind}: {revision.originalTimeoutMs / 1000}s â†’ {revision.revisedTimeoutMs / 1000}s</dd></div>
+        <div><dt>Mechanical change</dt><dd>{revision.changeKind}: {revision.originalTimeoutMs / 1000}s → {revision.revisedTimeoutMs / 1000}s</dd></div>
       </dl>
       <p><strong>Captured failed output:</strong></p>
       <pre>{revision.boundedOutput}</pre>
