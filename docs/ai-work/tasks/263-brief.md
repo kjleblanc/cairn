@@ -1,33 +1,49 @@
-# Task 262 brief — questions, proposals, approvals and the operational papers
+# Task 263 brief — questions, proposals, approvals and the operational papers
 
 **Lane:** A (the main checkout), owner-confirmed free. **Base commit:**
-`e0b4272`. **Slice:** 6 of 11 in
+`6b6295a`. **Slice:** 6 of 11 in
 `docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md`.
 
-**This task is a RENUMBER, and the reason is disclosed rather than tidied away.**
-It first claimed 261 at `e0b4272`, and that claim was wrong twice over. A second
-session in this same checkout had already claimed 261 at `e9242d4` for the
-owner-verdict document repairs — a commit that landed on `main` in the minutes
-between this task's enumeration and its write — and this task then used a
-whole-file write on a path it had verified as free earlier, overwriting that
-session's brief. AGENTS.md is explicit that the later claimant renumbers, so
-this task moved to 262; the other session's brief was restored byte-exact from
-`e9242d4` (blob `5b3c3ac5`, verified by hash) in the same commit that creates
-this file. Nothing of theirs was lost, and the erroneous commit stays in the log
-rather than being amended away.
+**This task was renumbered TWICE, and both reasons are disclosed rather than
+tidied away.** A second session was working the same checkout, and the two of us
+raced for a number three times in ten minutes.
 
-**The lesson, for whoever reads this next:** enumerating the free numbers and
-then writing the brief are two moments, and `main` moves between them when
-another session is live. Re-read `git log` immediately before the write, not
-only before the commit — and never use a whole-file write on a task path.
+1. **261 → 262.** The other session claimed 261 at `e9242d4` for the
+   owner-verdict document repairs; that commit landed on `main` in the minutes
+   between this task's enumeration and its write, and this task then used a
+   whole-file write on a path it had verified free earlier, **overwriting their
+   brief** (`e0b4272`). Their brief was restored byte-exact from `e9242d4`
+   (blob `5b3c3ac5`, verified by hash on `main` afterwards) in `6b6295a`.
+   Nothing of theirs was lost.
+2. **262 → 263.** While this task was renumbering to 262 on `main`, that session
+   was independently renumbering to 262 on its own new branch. Their claim
+   `ae29482` is timestamped `11:47:52`; this task's `6b6295a` is `11:48:36`.
+   **They were first by 44 seconds**, so under AGENTS.md the later claimant —
+   this task — moves again, to 263.
 
-**Number claimed by this commit.** At the time of this claim, task files across
-the main checkout, all nine registered worktrees and all thirteen local branches
-run unbroken `001`–`261` with no gap, so `262` is the lowest genuinely free
-number. **Note for the owner-verdict session:** your Task 261 brief names 262 as
-your follow-up contract-amendment task. That number had no file when this was
-claimed, so it was free under the contract's own rule, and your follow-up needs
-a fresh number. The evidence-spec repair at `cf6033b` claimed no number.
+**Two lessons, for whoever reads this next.**
+
+- Enumerating the free numbers and writing the brief are two moments, and `main`
+  moves between them when another session is live. Re-read `git log`
+  **immediately before the write**, not only before the commit — and never use a
+  whole-file write on a task path.
+- A number verified free can be claimed by someone else *while you are claiming
+  it*. Neither session did anything wrong the second time; the checkout was the
+  problem. That session has since moved into its own worktree (`.lanes/i`,
+  branch `lane/i`), which is what AGENTS.md asks for and what stops this.
+
+**A merge hazard this leaves behind, for the `lane/i` session.** `lane/i`
+branched from `e0b4272` — the commit carrying the overwrite — so on that branch
+`docs/ai-work/tasks/261-brief.md` holds **this task's** Slice 6 text, while on
+`main` it holds **your** owner-verdict text, restored. When `lane/i` lands, that
+path will conflict: **take `main`'s side.** 261 stays a consumed number carrying
+your superseded claim; your live brief is 262.
+
+**Number claimed by this commit.** Immediately before this write, every filename
+beginning with a number was listed across `main`, `lane/i`, every other local and
+remote branch, and every worktree working directory: the run is unbroken
+`001`–`262` and `263` occurs nowhere. The evidence-spec repair at `cf6033b`
+claimed no number.
 
 There is no owner gate at the end of this slice. The next owner judgment is
 gate 3, at the end of Slice 7.
