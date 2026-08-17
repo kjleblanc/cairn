@@ -137,6 +137,24 @@
 .rp-anim-arrive { animation: rp-arrive 340ms var(--rp-arrive) both; }
 .rp-anim-settle { animation: rp-settle 260ms var(--rp-settle) both; }
 
+/* =======================================================================
+   Task 260 (Slice 5) — the conversation's turns do not travel.
+
+   `chat-arrive` at the top of this file slides and SCALES every `.bubble`.
+   Three of the four bubble kinds hold an interactive control — the streaming
+   turn holds Stop, a queued message holds Take back, and a refusal holds Try
+   again — and the constitution is explicit that no transform is applied to a
+   container that holds interactive controls. A scaled container also blurs the
+   text inside it mid-flight, on the one surface whose whole content is text.
+
+   So inside the conversation a turn simply appears. That is not less honest
+   motion, it is the absence of motion nobody asked for: the arrival the owner
+   caused is the words themselves. Everywhere the conversation is not — the
+   result card, the task card, the run strip, the push chip — keeps Task 126's
+   entrance until its own slice.
+   ======================================================================= */
+.rp-conversation .bubble { animation: none; }
+
 @media (prefers-reduced-motion: reduce) {
   /* The end state is identical; only the travel is removed. Nothing is left
      mid-animation, hidden, or waiting for an event that will not arrive. */
@@ -165,4 +183,27 @@
   .town-node-done .town-face-svg,
   .town-node-stopped .town-face-svg,
   .town-node-error .town-face-svg { animation: none; }
+
+  /*
+   * Task 260 (Slice 5). The conversation's own controls and its next-step
+   * notes reach the SAME final state without travelling. They live here rather
+   * than in `app.css`'s late reduced-motion block for one reason: `app.css`
+   * declares no `.rp-` selector at all, so the retired cascade and the new
+   * system can be deleted independently — a boundary `visualtokens.test.ts`
+   * asserts. This file is imported last, so source order settles every tie
+   * these rules could lose on specificity.
+   */
+  .rp-conversation .followup-note,
+  .rp-conversation .chat-topbar .pill,
+  .rp-conversation .chat-composer-actions .pill,
+  .rp-conversation .bubble-pending-controls .pill,
+  .rp-conversation .bubble-system .pill,
+  .rp-conversation .rp-composer { animation: none; transition: none; }
+  .rp-conversation .followup-note:hover:not(:disabled),
+  .rp-conversation .followup-note:active:not(:disabled),
+  .rp-conversation .chat-composer-actions .pill:hover:not(:disabled),
+  .rp-conversation .chat-composer-actions .pill:active:not(:disabled),
+  .rp-conversation .chat-topbar .pill:hover:not(:disabled),
+  .rp-conversation .bubble-pending-controls .pill:hover:not(:disabled),
+  .rp-conversation .bubble-system .pill:hover:not(:disabled) { transform: none; }
 }

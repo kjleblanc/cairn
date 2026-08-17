@@ -512,6 +512,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 /* Task 179 end. */
 .body-pill-wrap { position: relative; }
 .body-pill-panel { position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; width: 260px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: 0 6px 24px rgba(0, 0, 0, .14); padding: 14px; color: var(--card-ink); }
+/* Task 260 (Slice 5): four inline styles left BodyPill.tsx for these classes.
+   Three were spacing; the fourth set a refusal's colour from `var(--stop)`,
+   which is one of the paired tokens the conversation re-points — so a semantic
+   colour was being decided in TypeScript where no stylesheet check could see
+   it. The values here are exactly what the inline styles produced. */
+.body-pill-error { color: var(--stop); }
+.body-pill-field-label { display: block; margin-bottom: 4px; }
+.body-pill-actions { margin-top: 10px; }
+.body-pill-usage { margin-top: 10px; }
 
 .workspace-shell {
   position: fixed; inset: 0; display: grid; grid-template-columns: 248px minmax(0, 1fr);
@@ -905,11 +914,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager > * { flex-shrink: 0; }
 .chat-column-villager > .chat-messages { flex-shrink: 1; min-height: 0; overflow-x: hidden; }
 /* The top bar's provider·model pill takes the leftover space and ellipsizes
- * instead of forcing a wrap: flex-wrap decides lines by HYPOTHETICAL sizes,
- * so only a zero basis keeps the three top-bar items on one line. */
-.chat-column-villager .chat-topbar { row-gap: 4px; }
-.chat-column-villager .body-pill-wrap { flex: 1 1 0; min-width: 0; }
-.chat-column-villager .body-pill-wrap > .pill { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ * instead of forcing a wrap. These three rules were duplicated verbatim into
+ * `workspace.css` by Task 259, scoped to the conversation's own class, where
+ * they outrank this copy on specificity; Task 260 removes the copy rather than
+ * leaving two statements of the same rule to drift apart.
+ * (This file may not NAME that class — `visualtokens.test.ts` regexes the whole
+ * of app.css, comments included, so the two cascades stay separable.) */
 /* Cards' fact grids and long mono paths fit the narrower measure. */
 .chat-column-villager .route-facts { grid-template-columns: 1fr 1fr; }
 .chat-column-villager .route-facts strong,
@@ -950,30 +960,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 }
 
 /* Inside the lantern (Decision 9). Everything not named here re-tones through
-   the paired tokens re-pointed on the panel itself. */
-.chat-column-villager .chat-topbar {
-  padding-bottom: 14px; border-bottom: 1px solid rgb(246 236 225 / 9%);
-}
-.chat-column-villager .chat-messages { gap: 13px; padding: 15px 3px 10px; }
-/* Task 187: Cairn is a line in the correspondence, not another speech card.
-   One short registration stroke keeps the speaker scannable without enclosing
-   the prose or adding another avatar. */
-.chat-column-villager .bubble-cairn {
-  position: relative; line-height: 1.62; padding: 3px 5px; padding-left: 16px;
-}
-.chat-column-villager .bubble-cairn::before {
-  content: ""; position: absolute; left: 1px; top: .88em; width: 8px; height: 2px;
-  border-radius: 2px; background: var(--garden-cyan); opacity: .44;
-}
-/* The owner's own voice keeps a fill so the two stay scannable — the mockup's
-   warm peach, which is the one bright thing on the dark paper. */
-.chat-column-villager .bubble-owner {
-  min-width: 0; max-width: 78%; padding: 9px 17px 10px 13px;
-  background: linear-gradient(165deg, #fae3c8, #f3d0a8); color: #453120;
-  border: 0; border-radius: 10px 2px 3px 10px; box-shadow: none;
-  overflow-wrap: anywhere;
-  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
-}
+   the paired tokens re-pointed on the panel itself.
+
+   Task 260 (Slice 5) took the top bar, the transcript and the two voices out of
+   here. Task 187's idea survives whole in `surfaces.css` — Cairn is a line in
+   the correspondence with one short registration stroke, the owner keeps a
+   fill and a paper-cut corner so the two stay scannable — but the stroke is the
+   constitution's teal rather than the pond's cyan at 44% opacity, and the
+   owner's note is the measured apricot pair rather than a hard-coded peach
+   gradient that had no dark value and no ink guaranteed against it. */
 .chat-column-villager .task-intent-row,
 .chat-column-villager .task-risk,
 .chat-column-villager .task-card-details,
@@ -1211,25 +1206,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .chat-column-villager .result-card-footer { align-items: flex-start; }
   .chat-column-villager .result-card-path { flex-basis: 100%; text-align: left; }
 }
-.chat-column-villager .chat-composer {
-  border-radius: 15px 18px 14px 16px;
-  background-color: rgb(246 236 225 / 6%);
-  background-image: var(--paper-grain);
-  background-size: 160px 160px;
-  background-blend-mode: soft-light;
-  border-color: rgb(246 236 225 / 17%);
-  box-shadow: none;
-}
-.chat-column-villager .chat-composer:focus-within {
-  border-color: color-mix(in srgb, var(--garden-cyan) 68%, transparent);
-  box-shadow: 0 0 0 2px rgb(163 221 208 / 12%);
-}
-.chat-column-villager .chat-composer textarea { padding: 6px 8px 8px; }
-.chat-column-villager .bubble-system { border-radius: 16px; }
-/* A popover needs an opaque fill. `--card-solid` is re-pointed to a 7% wash on
-   the lantern (right for the composer field it came from, wrong for a panel
-   that drops over the conversation and would read straight through). */
-.chat-column-villager .body-pill-panel { background: var(--lantern-paper-lit); }
+/* Task 260 (Slice 5) moved the composer, the refusal note and the
+   provider-and-model panel to `surfaces.css`, where they are drawn from the
+   constitution's semantics instead of from the lantern's cream alphas and the
+   pond's cyan. The generic pill skin below is deliberately NOT moved: the
+   decision surfaces (Slice 6) and the result surfaces (Slice 7) still consume
+   it through this same class. */
 
 /* Task 186 flattens controls only inside the lantern. The rest of the app keeps
    its established tactile pills; here, one thin edge and a one-pixel lift read
@@ -1261,13 +1243,6 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-column-villager .pill-quiet[aria-disabled="true"]:hover,
 .chat-column-villager .pill-quiet[aria-disabled="true"]:active {
   background: transparent; color: var(--lantern-soft);
-}
-.chat-column-villager .chat-composer-actions .pill {
-  padding: 6px 11px; border-radius: 9px 11px 8px 10px; box-shadow: none;
-}
-.chat-column-villager .chat-composer-actions .pill:hover:not(:disabled) { transform: translateY(-1px); }
-.chat-column-villager .chat-composer-actions .pill:active:not(:disabled) {
-  transform: translateY(0) scale(.98); box-shadow: none;
 }
 .chat-column-villager .chat-tuck { color: var(--lantern-soft); }
 .chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
@@ -2297,78 +2272,19 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 /* Task 194: Cairn's optional next steps are marginal notes beneath its settled
    result comment, not a new row of dashed pills. The private control that
-   creates them is filtered in main; this block gives only the validated native
-   buttons a quiet cyan-ruled paper presence. */
-.chat-column-villager .bubble-commentary { opacity: .92; }
-.chat-column-villager .commentary-stream-note {
-  min-width: 0; margin: 9px 0 0; padding: 7px 0 0;
-  border-top: 1px solid rgb(246 236 225 / 9%);
-  color: var(--lantern-soft); line-height: 1.45; overflow-wrap: anywhere;
-}
-.chat-column-villager .followups {
-  position: relative; align-self: stretch; min-width: 0; overflow: visible;
-  margin: 1px 3px 5px; padding: 11px 4px 6px 17px;
-  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
-  border-bottom: 1px solid rgb(246 236 225 / 7%); border-radius: 0;
-  background: transparent; box-shadow: none;
-}
-.chat-column-villager .followups::before {
-  content: ""; position: absolute; left: 2px; top: 12px;
-  width: 2px; height: 25px; border-radius: 0 2px 2px 0;
-  background: var(--garden-cyan); opacity: .52;
-}
-.chat-column-villager .followups-heading { min-width: 0; padding: 0 3px; }
-.chat-column-villager .followups-label {
-  margin: 0; color: var(--garden-cyan); font-size: .74rem;
-  font-weight: 700; letter-spacing: .055em; line-height: 1.35;
-  text-transform: uppercase; overflow-wrap: anywhere;
-}
-.chat-column-villager .followups-hint {
-  margin: 3px 0 0; color: var(--lantern-soft); line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.chat-column-villager .followups-list {
-  display: flex; flex-direction: column; gap: 0; min-width: 0;
-  margin-top: 8px; border-top: 1px solid rgb(246 236 225 / 8%);
-}
-.chat-column-villager .followup-note {
-  position: relative; display: block; width: 100%; min-width: 0; min-height: 44px;
-  max-width: 100%; padding: 10px 4px 10px 22px;
-  border: 0; border-bottom: 1px solid rgb(246 236 225 / 9%);
-  border-radius: 1px; background: transparent; color: var(--lantern-ink);
-  box-shadow: none; font: inherit; font-size: .88rem; font-weight: 600;
-  line-height: 1.45; cursor: pointer; text-align: left;
-  white-space: normal; overflow-wrap: anywhere;
-  animation: followup-note-arrive .38s var(--pop) backwards;
-  transition: transform .24s var(--pop), color .2s, border-color .2s, opacity .15s;
-}
-.chat-column-villager .followup-note::before {
-  content: ""; position: absolute; left: 3px; top: calc(10px + .62em);
-  width: 8px; height: 2px; border-radius: 2px;
-  background: var(--garden-cyan); opacity: .46;
-}
-.chat-column-villager .followup-note:nth-child(1) { animation-delay: .04s; }
-.chat-column-villager .followup-note:nth-child(2) { animation-delay: .09s; }
-.chat-column-villager .followup-note:nth-child(3) { animation-delay: .14s; }
-.chat-column-villager .followup-note:hover:not(:disabled) {
-  transform: translateX(2px); border-bottom-color: rgb(163 221 208 / 30%);
-  background: transparent; color: var(--garden-cyan); box-shadow: none;
-}
-.chat-column-villager .followup-note:active:not(:disabled) {
-  transform: translateX(2px); background: transparent; box-shadow: none;
-}
-.chat-column-villager .followup-note:focus-visible {
-  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
-}
-.chat-column-villager .followup-note:disabled { opacity: .5; cursor: default; }
-@media (max-width: 620px) {
-  .chat-column-villager .followups { margin-inline: 0; padding: 10px 1px 5px 14px; }
-  .chat-column-villager .followups::before { left: 0; }
-  .chat-column-villager .followup-note {
-    max-width: 100%; padding: 10px 2px 10px 20px; text-align: left;
-  }
-  .chat-column-villager .followup-note::before { left: 2px; }
-}
+   creates them is filtered in main; only the validated native buttons ever get
+   a paper presence.
+
+   Task 260 (Slice 5) moved that presence, the commentary note, and the
+   compact treatment to `surfaces.css`. The shape is Task 194's exactly — one
+   shallow ruled annotation, full-width flat notes, a registration tick, no
+   scaling response — re-drawn from the constitution's teal and hairline
+   instead of the pond's cyan and the lantern's cream alphas. The compact
+   treatment moved from 620 px to 820 px on the way: 620 sits below the
+   supported 760 px minimum, so it only ever reached the containment stress
+   view, and the three new sheets are held to the breakpoint set {820, 1260}.
+   The staggered arrival itself stays where it always was, on the unscoped
+   `.followup-note` near the top of this file. */
 
 /* Reduced motion, part two — placed LAST in the file, deliberately.
    A media query adds no specificity, so the block near the top loses to every
@@ -2386,20 +2302,20 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .pond-line, .pond-line-chevron, .pond-back { transition: none; }
   .pond-back:hover { transform: translateX(-50%); }
   /* Task 186's lantern controls are more specific than the global pill rules,
-     so their reduced-motion final state must be equally specific. */
-  .chat-column-villager .pill,
-  .chat-column-villager .chat-composer-actions .pill { transition: none; }
+     so their reduced-motion final state must be equally specific.
+     Task 260 (Slice 5) took the composer's actions and the next-step notes out
+     of this list. They are scoped to the conversation's own class now, which
+     this file may not name in a rule OR in a comment — the two cascades stay
+     separable so Slice 10 can delete one without reading the other — so their
+     kill lives at the end of `motion.css`, which is imported last and outranks
+     everything here. */
+  .chat-column-villager .pill { transition: none; }
   .chat-column-villager .dispatch-actions .pill { transition: none; }
   .chat-column-villager .question-card-actions .pill { transition: none; }
   .chat-column-villager .push-chip .pill,
   .chat-column-villager .push-confirm-actions .pill { transition: none; }
-  .chat-column-villager .followup-note { animation: none; transition: none; }
   .chat-column-villager .pill:hover:not(:disabled),
-  .chat-column-villager .pill:active:not(:disabled),
-  .chat-column-villager .chat-composer-actions .pill:hover:not(:disabled),
-  .chat-column-villager .chat-composer-actions .pill:active:not(:disabled),
-  .chat-column-villager .followup-note:hover:not(:disabled),
-  .chat-column-villager .followup-note:active:not(:disabled) { transform: none; }
+  .chat-column-villager .pill:active:not(:disabled) { transform: none; }
   /* Found while fixing the lantern's entrance: these pre-date this work and lose
      to the block at the top of the file the same way it did. Every one is a
      specificity loss, not a miss — the eye groups carry both `town-face-eye`

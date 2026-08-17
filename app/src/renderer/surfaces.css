@@ -196,3 +196,638 @@
   color: var(--rp-coral-ink);
   border-left: 3px solid var(--rp-coral-line);
 }
+
+/* =======================================================================
+   Task 260 (Slice 5) — THE CONVERSATION ITSELF.
+
+   Slices 3 and 4 built the materials above and put the conversation on the
+   desk; the INSIDE of it stayed the retired lantern's, re-toned through about
+   thirty paired tokens re-pointed on the column. This is where the
+   conversation's own families stop borrowing that indirection and are drawn
+   from the constitution's semantics directly.
+
+   WHAT THIS SLICE OWNS, AND WHAT IT DELIBERATELY DOES NOT. Of the roughly 281
+   rules that hang off `chat-column-villager`, only the transcript, the two
+   voices, the queue, errors, commentary, follow-ups, the composer and the top
+   bar are moved here. The decision family — question card, task card, dispatch
+   panel, approvals — is Slice 6's, and the result family — receipts, run strip,
+   evidence, publication — is Slice 7's. Both still hang off that class, which
+   is why the class is still on the element and why the generic `.pill` skin in
+   `app.css` is left exactly where it is. Dropping the hook before those two
+   slices have moved is what reverted the dispatch panel to a pre-Task-186 card
+   language during Task 259.
+
+   EVERY SELECTOR STARTS AT `.rp-conversation`. Nothing here can reach TaskRun,
+   the Dashboard, an overlay or the standalone chat branch, all of which are
+   still the night garden's until their own slice.
+   ======================================================================= */
+
+/* ------------------------------------------------------- the top bar */
+
+/* Identity and the way back, on one quiet line under a seam. The retired rule
+   drew that seam in 9%-alpha cream, which was a pale line on dark paper and is
+   very nearly invisible on warm paper; `--rp-hairline` is the seam token and
+   carries the theme with it. */
+.rp-conversation .chat-topbar {
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rp-hairline);
+}
+
+/* The two top-bar controls reach the 44 x 44 floor. They are quiet — this row
+   is chrome, not a decision — so they carry no fill until the pointer is on
+   them, and the ring is the drawn one rather than the browser's. */
+.rp-conversation .chat-topbar .pill {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--rp-teal-ink);
+  font-weight: 600;
+  font-size: 14px;
+  transform: none;
+}
+
+.rp-conversation .chat-topbar .pill:hover:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, var(--rp-teal) 10%, transparent);
+  color: var(--rp-teal-ink);
+  box-shadow: none;
+}
+
+.rp-conversation .chat-topbar .pill:active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+}
+
+.rp-conversation .chat-topbar .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/* The provider-and-model panel. It is absolutely positioned, so it takes the
+   raised paper's colours by hand rather than the `.rp-paper-raised` class,
+   which would also give it `position: relative` and drop it back into the
+   flow. */
+.rp-conversation .body-pill-panel {
+  border: 1px solid var(--rp-hairline-strong);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper-raised);
+  box-shadow: var(--rp-shadow-lift);
+  color: var(--rp-ink);
+}
+
+.rp-conversation .body-pill-error { color: var(--rp-coral-ink); }
+
+/* --------------------------------------------------- the transcript */
+
+/*
+ * The one region that scrolls. Its own padding is small because the paper
+ * around it already has a margin; what it really owns is the rhythm between
+ * turns, which is what makes a conversation readable at a glance.
+ */
+.rp-conversation .rp-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 4px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rp-hairline-strong) transparent;
+}
+
+.rp-conversation .rp-transcript::-webkit-scrollbar { width: 8px; }
+.rp-conversation .rp-transcript::-webkit-scrollbar-track { background: transparent; }
+.rp-conversation .rp-transcript::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: var(--rp-hairline-strong);
+}
+
+/*
+ * CAIRN IS OPEN ON THE PAPER. No fill, no outline, no second avatar beside the
+ * words — production draws Cairn in exactly one component and a test enforces
+ * it. One short teal stroke in the margin keeps the speaker scannable. The
+ * stroke is drawn at full `--rp-teal-ink` rather than at the retired rule's
+ * 44% opacity: it means something, so WCAG 1.4.11 holds it to 3:1, and a
+ * faded mark on warm paper does not clear that.
+ *
+ * Type comes from `.rp-prose`, which the markup now carries.
+ */
+.rp-conversation .bubble-cairn {
+  position: relative;
+  align-self: flex-start;
+  min-width: 0;
+  padding: 2px 0 2px 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .bubble-cairn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: .82em;
+  width: 9px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--rp-teal-ink);
+}
+
+/*
+ * THE OWNER'S OWN VOICE, quieter. It keeps a fill so the two speakers stay
+ * scannable, and keeps the paper-cut corner that has said "this is a note, not
+ * a chat bubble" since Task 187 — but the fill is now the measured
+ * apricot pair from `.rp-note-owner` instead of a hard-coded peach gradient
+ * that had no dark-theme value at all and no ink guaranteed against it.
+ */
+.rp-conversation .bubble-owner {
+  align-self: flex-end;
+  min-width: 0;
+  max-width: 76%;
+  padding: 10px 16px 11px 14px;
+  border: 0;
+  border-radius: var(--rp-r-sm) 2px 3px var(--rp-r-sm);
+  box-shadow: none;
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+}
+
+/* A queued message is the owner's own words, not sent yet: the same note, held
+   back. Its explanation and its take-back take the note's OWN ink rather than
+   the muted ink, which is measured against paper and not against apricot. */
+.rp-conversation .bubble-pending { opacity: .78; }
+
+.rp-conversation .bubble-pending-controls {
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--rp-apricot-ink) 24%, transparent);
+}
+
+.rp-conversation .bubble-pending-controls .small { color: var(--rp-apricot-ink); }
+
+.rp-conversation .bubble-pending-controls .pill {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--rp-apricot-ink) 34%, transparent);
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--rp-apricot-ink);
+  font-weight: 600;
+  transform: none;
+}
+
+.rp-conversation .bubble-pending-controls .pill:hover:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, var(--rp-apricot-ink) 10%, transparent);
+  color: var(--rp-apricot-ink);
+}
+
+.rp-conversation .bubble-pending-controls .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * A refusal, and the way out of it. `.rp-note-stop` supplies the ground, the
+ * ink and the 3 px rule down its left edge, so the state is carried by shape
+ * and position as well as by colour — and the words in it say the rest.
+ * It is a full-width note rather than a centred one: a recovery the owner has
+ * to act on is not an aside.
+ */
+.rp-conversation .bubble-system {
+  align-self: stretch;
+  min-width: 0;
+  padding: 11px 14px 12px;
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  text-align: left;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .bubble-system p { margin: 0 0 9px; }
+.rp-conversation .bubble-system p:last-child { margin-bottom: 0; }
+
+.rp-conversation .bubble-system .pill {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--rp-coral-ink) 38%, transparent);
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  box-shadow: none;
+  color: var(--rp-coral-ink);
+  font-weight: 600;
+  transform: none;
+}
+
+.rp-conversation .bubble-system .pill:hover:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, var(--rp-coral-ink) 10%, transparent);
+  color: var(--rp-coral-ink);
+}
+
+.rp-conversation .bubble-system .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/* Plain `:focus`, not `:focus-visible`, and deliberately. Chat moves focus to
+   this note ITSELF when a send fails, so the owner lands on the explanation
+   rather than somewhere upstream of it — and that focus is programmatic, which
+   `:focus-visible` is not reliably granted. Without this the focus moved and
+   nothing on screen said so. */
+.rp-conversation .bubble-system:focus {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/* The controls under a stream Cairn is still writing. They sit clear of the
+   prose without the container itself moving. */
+.rp-conversation .bubble-stream-controls { margin-top: 10px; }
+
+/* The envelope's comment explains, in one restrained line, why a message sent
+   now waits. It is not a live region and never announces itself. */
+.rp-conversation .commentary-stream-note {
+  min-width: 0;
+  margin: 10px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--rp-hairline);
+  color: var(--rp-ink-muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------- Cairn's prose, in detail */
+
+.rp-conversation .md { min-width: 0; }
+.rp-conversation .md > :first-child { margin-top: 0; }
+.rp-conversation .md > :last-child { margin-bottom: 0; }
+.rp-conversation .md p { margin: 0 0 .7em; }
+
+.rp-conversation .md h1,
+.rp-conversation .md h2,
+.rp-conversation .md h3 {
+  margin: 1em 0 .35em;
+  color: var(--rp-ink-strong);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.rp-conversation .md h1 { font-size: 20px; }
+.rp-conversation .md h2 { font-size: 18px; }
+.rp-conversation .md h3 { font-size: 16px; }
+
+.rp-conversation .md ul,
+.rp-conversation .md ol { margin: 0 0 .7em; padding-left: 22px; }
+.rp-conversation .md li { margin: 4px 0; }
+.rp-conversation .md-rule { border: 0; border-top: 1px solid var(--rp-hairline); margin: 16px 0; }
+
+/*
+ * MACHINE EVIDENCE IS BOUNDED. Commands, paths, hashes and check ids sit in
+ * mono on raised paper inside a frame that scrolls on its own, so a 200-column
+ * command or an absolute Windows path can never widen the sheet or push the
+ * desk sideways. `.rp-scroll-x` on the element does the containing; this
+ * decides what the frame is made of.
+ */
+.rp-conversation .md-code {
+  margin: 0 0 .7em;
+  padding: 11px 13px;
+  border: 1px solid var(--rp-hairline-strong);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  color: var(--rp-ink);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+/* An inline machine word stays inside its sentence: a chip that tracks the
+   surrounding size, never a block that breaks the line. */
+.rp-conversation .md code.rp-machine,
+.rp-conversation .bubble code.rp-machine {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--rp-teal) 12%, transparent);
+  color: var(--rp-ink);
+  font-size: .92em;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .md-table-wrap { margin: 0 0 .7em; }
+
+.rp-conversation .md-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.rp-conversation .md-table th,
+.rp-conversation .md-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--rp-hairline-strong);
+  text-align: left;
+  vertical-align: top;
+}
+
+.rp-conversation .md-table th {
+  background: var(--rp-paper-raised);
+  color: var(--rp-ink-strong);
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------ next steps */
+
+/*
+ * Cairn's optional next steps are marginal notes beneath its settled comment,
+ * not a row of pills. Same shape as Task 194 gave them and the same native
+ * buttons; the cyan that ruled them was the retired pond's, and it is the
+ * constitution's teal now.
+ */
+.rp-conversation .followups {
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+  overflow: visible;
+  margin: 2px 0 4px;
+  padding: 12px 2px 6px 18px;
+  border: 0;
+  border-top: 1px solid var(--rp-hairline);
+  border-bottom: 1px solid var(--rp-hairline);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.rp-conversation .followups::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 13px;
+  width: 2px;
+  height: 26px;
+  border-radius: 0 2px 2px 0;
+  background: var(--rp-teal-ink);
+}
+
+.rp-conversation .followups-heading { min-width: 0; padding: 0 2px; }
+
+.rp-conversation .followups-label {
+  margin: 0;
+  color: var(--rp-teal-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  line-height: 1.35;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .followups-hint {
+  margin: 3px 0 0;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .followups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  margin-top: 9px;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .followup-note {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 11px 4px 11px 22px;
+  border: 0;
+  border-bottom: 1px solid var(--rp-hairline);
+  border-radius: 1px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--rp-ink);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  cursor: pointer;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .followup-note::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: calc(11px + .62em);
+  width: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--rp-teal-ink);
+}
+
+.rp-conversation .followup-note:hover:not(:disabled) {
+  transform: translateX(2px);
+  border-bottom-color: var(--rp-teal);
+  background: transparent;
+  box-shadow: none;
+  color: var(--rp-teal-ink);
+}
+
+.rp-conversation .followup-note:active:not(:disabled) {
+  transform: translateX(2px);
+  background: transparent;
+  box-shadow: none;
+}
+
+.rp-conversation .followup-note:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/* Same reasoning as the composer's controls below: a suggestion that cannot be
+   tapped while a task runs is still being READ, so it goes muted rather than
+   translucent. At .5 opacity its ink measured about 2.8:1 on the paper. */
+.rp-conversation .followup-note:disabled {
+  opacity: 1;
+  color: var(--rp-ink-muted);
+  cursor: default;
+}
+
+.rp-conversation .followup-note:disabled::before { background: var(--rp-ink-muted); }
+
+/* --------------------------------------------------- the composer */
+
+/* Why the composer stays open while a task runs is stated in words, in the
+   activity language the capsule above already uses. */
+.rp-conversation .composer-closed {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--rp-activity-ink);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-activity);
+  color: var(--rp-activity-ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/*
+ * ONE FIELD, not three controls in a row. The writing area and its two actions
+ * share a single boundary, and focus is drawn on that shared boundary — the
+ * arrangement `newhorizons.test.ts` has guarded since Task 126 and the one
+ * `motion.css` deliberately keeps its hands off.
+ *
+ * The tray is `--rp-paper-chrome`: still paper, a shade deeper than the sheet,
+ * so writing reads as a place on the desk rather than as another turn in the
+ * record.
+ */
+.rp-conversation .rp-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--rp-hairline-strong);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper-chrome);
+  box-shadow: var(--rp-shadow-low);
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.rp-conversation .rp-composer:focus-within {
+  border-color: var(--rp-teal);
+  box-shadow: 0 0 0 2px var(--rp-focus-halo);
+}
+
+.rp-conversation .rp-composer textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 56px;
+  max-height: 148px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  color: var(--rp-ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.rp-conversation .rp-composer textarea::placeholder { color: var(--rp-ink-muted); }
+.rp-conversation .rp-composer textarea:focus { border-color: transparent; outline: none; }
+.rp-conversation .rp-composer textarea:disabled { opacity: .6; }
+
+.rp-conversation .chat-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Both actions clear 44 x 44. New is quiet and Send is the one primary control
+   on this surface; the pair is the same two native buttons as before. */
+.rp-conversation .chat-composer-actions .pill {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  box-shadow: none;
+  color: var(--rp-ink);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.rp-conversation .chat-composer-actions .pill-primary {
+  border-color: var(--rp-teal);
+  background: var(--rp-teal);
+  color: var(--rp-on-teal);
+}
+
+.rp-conversation .chat-composer-actions .pill:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--rp-shadow-low);
+}
+
+.rp-conversation .chat-composer-actions .pill:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.rp-conversation .chat-composer-actions .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * A DISABLED CONTROL IS STILL READ. `opacity` fades the label and its ground
+ * together, and the connected-conversation contrast sweep caught what that
+ * costs the moment it was pointed at a real composer: Send sits disabled
+ * whenever the box is empty, which is most of the time, and white on a 55%
+ * teal measured 2.45:1 against a 4.5:1 floor.
+ *
+ * WCAG exempts an inactive component from the floor, so this could have been
+ * argued away. It is fixed instead, because the argument is about the standard
+ * and the owner's question is whether they can read the button. Inactive is
+ * carried by losing the teal fill and the strong edge — not by fading the
+ * words — and `--rp-ink-muted` on `--rp-paper-chrome` is one of the measured
+ * pairs. `opacity: 1` is explicit: the unscoped `.pill:disabled` sets .5.
+ */
+.rp-conversation .chat-composer-actions .pill:disabled,
+.rp-conversation .bubble-pending-controls .pill:disabled,
+.rp-conversation .bubble-system .pill:disabled,
+.rp-conversation .chat-topbar .pill:disabled {
+  opacity: 1;
+  border-color: var(--rp-hairline-strong);
+  background: var(--rp-paper-chrome);
+  color: var(--rp-ink-muted);
+  cursor: default;
+}
+
+/* ------------------------------------------------------- compact */
+
+/*
+ * Compact is the same components with less room. NO BREAKPOINT IS ADDED: 820 px
+ * is Slice 3's, and the retired rules this replaces used 620 px, which is below
+ * the supported 760 px minimum and so only ever reached the containment stress
+ * view. `visualtokens.test.ts` asserts the whole set across these sheets is
+ * exactly {820, 1260}.
+ */
+@media (max-width: 820px) {
+  .rp-conversation .rp-transcript { padding: 14px 0 12px; gap: 15px; }
+  .rp-conversation .bubble-owner { max-width: 88%; }
+  .rp-conversation .followups { padding-left: 15px; }
+  .rp-conversation .followup-note { padding-left: 20px; }
+  .rp-conversation .rp-composer { padding: 9px 10px 10px; gap: 6px; }
+  /* At the supported minimum the whole desk is 620 px tall. The composer keeps
+     its natural size and never scrolls away, so its natural size is what has to
+     give: one comfortable row instead of two, which returns about 14 px to the
+     transcript without taking a control or a word off the screen. */
+  .rp-conversation .rp-composer textarea { min-height: 44px; }
+  .rp-conversation .chat-composer-actions .pill { padding: 10px 14px; }
+}

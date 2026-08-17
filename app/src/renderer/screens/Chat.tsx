@@ -2157,7 +2157,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
         ) : null}
         {status && !status.connected ? <ConnectCard status={status} onConnected={() => void refreshStatus()} /> : null}
         {status && !status.connected && turns.some((turn) => turn.role === "envelope" || turn.role === "builder-review") ? (
-          <div className="chat-messages chat-local-results" aria-label="Saved conversation evidence">
+          <div className="chat-messages rp-transcript chat-local-results" aria-label="Saved conversation evidence">
             {/* Main authenticates both local evidence roles before returning
               * them. Disconnected mode still excludes owner/Cairn prose,
               * actions, streams, push controls and composer authority. */}
@@ -2176,7 +2176,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
             <p className="sr-only action-settled-status" role="status" aria-live="polite" aria-atomic="true">
               {settledAnnouncement ? <span key={settledAnnouncement.sequence}>{settledAnnouncement.text}</span> : null}
             </p>
-            <div className="chat-messages">
+            <div className="chat-messages rp-transcript">
               {turns.map((turn, i) => (turn.role === "envelope" ? (
                 <Fragment key={i}>
                   {/* Fold away the past (Task 155): an older card is this
@@ -2214,7 +2214,14 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 <BuilderProposalReview key={turn.displayTurnId} review={turn.review} />
               ) : (
                 <Fragment key={i}>
-                  <div className={`bubble ${turn.role === "owner" ? "bubble-owner" : "bubble-cairn"}${
+                  {/* Task 260 (Slice 5): the two voices take the materials
+                    * `surfaces.css` already declares. Cairn is `rp-prose` —
+                    * open ink on the paper, no box — and the owner is
+                    * `rp-note-owner`, the measured apricot pair. Neither class
+                    * changes what a turn IS; the role classes below still carry
+                    * that, and every test and scenario that reads them is
+                    * untouched. */}
+                  <div className={`bubble ${turn.role === "owner" ? "bubble-owner rp-note-owner" : "bubble-cairn rp-prose"}${
                     turn.role === "cairn" && turn === lastReply && action?.kind === "question" && actionCurrent
                       && activeQuestionLead(turn.text, action.question) === "" ? " bubble-active-question-only" : ""
                   }`}>
@@ -2405,9 +2412,9 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 </section>
               ) : null}
               {streaming ? (
-                <div className="bubble bubble-cairn">
+                <div className="bubble bubble-cairn rp-prose">
                   <Md text={streamingText || "…"} />
-                  <div className="row" style={{ marginTop: 8 }}>
+                  <div className="row bubble-stream-controls">
                     <Pill kind="quiet" onClick={() => void cairn.conductorStop(dir)}>Stop</Pill>
                   </div>
                 </div>
@@ -2418,7 +2425,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 * composer stays enabled by design (Task 070) — since Task 155
                 * a send made now simply queues below instead of bouncing. */}
               {commentary ? (
-                <div className="bubble bubble-cairn bubble-commentary">
+                <div className="bubble bubble-cairn rp-prose bubble-commentary">
                   <Md text={streamingText || "…"} />
                   <p className="small muted commentary-stream-note">Commenting on the result above. Messages sent now wait below.</p>
                 </div>
@@ -2428,7 +2435,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 * it has not gone yet — with a take-back that returns its
                 * exact words to the composer. */}
               {pending.map((message, i) => (
-                <div key={i} className="bubble bubble-owner bubble-pending">
+                <div key={i} className="bubble bubble-owner rp-note-owner bubble-pending">
                   {message.text}
                   <div className="row bubble-pending-controls">
                     <span className="small muted">{actionCurrent
@@ -2444,7 +2451,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 </div>
               ))}
               {error ? (
-                <div className="bubble bubble-system" ref={errorRecoveryRef} tabIndex={-1}>
+                <div className="bubble bubble-system rp-note-stop" ref={errorRecoveryRef} tabIndex={-1}>
                   <p>{error}</p>
                   {retryRequest ? (
                     <Pill kind="quiet" onClick={retryLastSend}
@@ -2461,7 +2468,7 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
                 ? "Cairn is finishing this result. You can type again when it is ready."
                 : "A task is running. You can type again when it finishes."}</p>
             ) : null}
-            <div className="chat-composer">
+            <div className="chat-composer rp-composer">
               {/* Closed only while a task runs (its note above says why).
                 * While Cairn answers or comments, a send queues instead of
                 * bouncing (Task 155), so the composer stays open. */}

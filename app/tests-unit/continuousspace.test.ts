@@ -150,12 +150,18 @@ test("without backdrop-filter the surface fails closed to legible", () => {
 test("Task 197 changes the space, not the approved paper surfaces", () => {
   // Tasks 186-194's checkpoints, receipts, questions, publication controls
   // and follow-up notes are approved and are not redesigned here.
-  for (const selector of [
-    ".chat-column-villager .result-card",
-    ".chat-column-villager .chat-composer",
-  ]) {
+  //
+  // REPOINTED by Task 260 (Slice 5). The composer used to be the second name on
+  // this list. It is still an approved paper surface and Task 197 still does not
+  // redesign it — but it is no longer drawn from the retired lantern's cream
+  // alphas, so it is no longer in this file. Naming its new home keeps the
+  // guard's meaning: the surface exists and was not deleted along the way.
+  for (const selector of [".chat-column-villager .result-card"]) {
     assert.ok(css.includes(selector), `${selector} was removed by Task 197`);
   }
+  const surfaces = readFileSync(join(renderer, "surfaces.css"), "utf8");
+  assert.ok(surfaces.includes(".rp-conversation .rp-composer {"),
+    "the composer surface was lost rather than moved");
 });
 
 test("Task 197 adds no motion", () => {

@@ -44,7 +44,15 @@ test("suggestion notes settle in gently and respond without scaling", () => {
       `suggestion ${nth} does not take its own turn`,
     );
   }
-  const hover = rule(".chat-column-villager .followup-note:hover:not(:disabled)");
+  // REPOINTED by Task 260 (Slice 5). Decision 9's rule is unchanged and is
+  // still what is asserted — a suggestion slides a little and never scales like
+  // a chunky pill. The rule that draws it moved to the conversation's own
+  // sheet; the stagger and the arrival it responds to are still the unscoped
+  // ones checked above, in `app.css`.
+  const surfaces = renderer("surfaces.css");
+  const at = surfaces.indexOf("\n.rp-conversation .followup-note:hover:not(:disabled) {");
+  assert.notEqual(at, -1, "the suggestion note has no hover response at all");
+  const hover = surfaces.slice(at, surfaces.indexOf("}", at));
   assert.ok(hover.includes("translateX(2px)") && !hover.includes("scale("),
     "a suggestion does not make its restrained paper response");
   // `both` would leave the final keyframe's `transform: none` pinned over the
@@ -108,22 +116,42 @@ test("the lantern's buttons keep their mint and ghost identities without chunky 
 });
 
 test("New and Send live inside one compact composer surface", () => {
-  assert.match(chat, /<div className="chat-composer">[\s\S]*?<textarea[\s\S]*?<div className="chat-composer-actions">[\s\S]*?aria-label="New conversation"[\s\S]*?>New<\/button>[\s\S]*?>Send<\/Pill>[\s\S]*?<\/div>[\s\S]*?<\/div>/,
+  // The class list is matched by PREFIX. Task 260 (Slice 5) added a second class
+  // to this element, and an exact-attribute match would simply have stopped
+  // finding the composer — which is a test going quiet, not a test passing.
+  assert.match(chat, /<div className="chat-composer[^"]*">[\s\S]*?<textarea[\s\S]*?<div className="chat-composer-actions">[\s\S]*?aria-label="New conversation"[\s\S]*?>New<\/button>[\s\S]*?>Send<\/Pill>[\s\S]*?<\/div>[\s\S]*?<\/div>/,
     "the writing field, New, and Send are not one composer control");
-  assert.ok(rule(".chat-composer").includes("flex-direction: column"),
+
+  // Decision 9's arrangement, asserted on the sheet that actually draws the
+  // shipped composer. Task 260 moved it; it did not change what it must be.
+  const surfaces = renderer("surfaces.css");
+  const surfaceRule = (selector: string): string => {
+    const start = surfaces.indexOf(`\n${selector} {`);
+    assert.notEqual(start, -1, `${selector} has no rule`);
+    return surfaces.slice(start, surfaces.indexOf("}", start));
+  };
+  const composer = surfaceRule(".rp-conversation .rp-composer");
+  assert.ok(composer.includes("flex-direction: column"),
     "the composer does not stack its writing area above its actions");
-  assert.ok(rule(".chat-composer").includes("border:"),
+  assert.ok(composer.includes("border: 1px solid"),
     "the composer has no single enclosing boundary");
-  assert.ok(rule(".chat-composer:focus-within").includes("border-color:")
-    && rule(".chat-composer:focus-within").includes("box-shadow:"),
+  const focus = surfaceRule(".rp-conversation .rp-composer:focus-within");
+  assert.ok(focus.includes("border-color:") && focus.includes("box-shadow:"),
     "keyboard focus does not mark the shared composer surface");
-  assert.ok(rule(".chat-composer textarea").includes("border: 0")
-    && rule(".chat-composer textarea").includes("background: transparent"),
+  const textarea = surfaceRule(".rp-conversation .rp-composer textarea");
+  assert.ok(textarea.includes("border: 0") && textarea.includes("background: transparent"),
     "the textarea still draws a competing field inside the shared composer");
-  assert.ok(rule(".chat-composer-actions").includes("justify-content: space-between"),
+  assert.ok(surfaceRule(".rp-conversation .chat-composer-actions").includes("justify-content: space-between"),
     "New and Send do not anchor opposite ends of the shared control");
-  assert.ok(rule(".chat-composer-actions .pill").includes("padding:"),
+  assert.ok(surfaceRule(".rp-conversation .chat-composer-actions .pill").includes("padding:"),
     "the full-size pills were not compacted to fit inside the composer");
+
+  // The unscoped rules stay in `app.css` for the standalone chat branch, which
+  // Slice 8 owns. They are not what ships on the desk, and this test no longer
+  // pretends they are — but a regression that emptied them would leave that
+  // branch unstyled, so their shape is still checked.
+  assert.ok(rule(".chat-composer").includes("flex-direction: column"));
+  assert.ok(rule(".chat-composer-actions").includes("justify-content: space-between"));
 });
 
 test("nothing outranks the pill's own press", () => {

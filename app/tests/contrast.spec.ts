@@ -1,10 +1,11 @@
-import { _electron as electron, expect } from "@playwright/test";
+import { _electron as electron, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { test } from "./fixtures/isolated-profile";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { clearStoredConnectionFiles } from "./fixtures/conductor-connection";
 
 /**
  * Task 197's contrast floor, MEASURED.
@@ -124,6 +125,99 @@ function scaffold(project: string): void {
   ]);
 }
 
+/**
+ * The sweep itself, EXTRACTED by Task 260 (Slice 5) so a second scenario can
+ * run the identical measurement over a different state of the same desk. Not a
+ * line of the arithmetic changed; only its two callers are new.
+ */
+const DESK_TEXT = "p, h1, h2, h3, h4, span, strong, button, summary, label";
+/** The conversation adds machine evidence, which is the point of measuring it:
+ *  mono on its own raised surface is a different pairing from prose on paper.
+ *  The disconnected sweep deliberately keeps the ORIGINAL element list, so this
+ *  slice cannot turn an unmigrated surface red by widening what it looks at. */
+const CONVERSATION_TEXT = `${DESK_TEXT}, code, td, th, li`;
+
+async function sweep(
+  app: ElectronApplication, win: Page, rootSelector: string, label: string,
+  elements: string = DESK_TEXT,
+): Promise<void> {
+  const root = win.locator(rootSelector);
+  const samples = await root.locator(elements).filter({ hasText: /\S/ }).all();
+  expect(samples.length, "no desk text was found to measure").toBeGreaterThan(3);
+
+  const failures: string[] = [];
+  let measured = 0;
+  let worst = { ratio: Infinity, text: "", floor: BODY_FLOOR };
+
+  for (const sample of samples) {
+    if (!(await sample.isVisible())) continue;
+    const box = await sample.boundingBox();
+    if (!box || box.width < 8 || box.height < 8) continue;
+
+    const style = await sample.evaluate((el) => {
+      const s = getComputedStyle(el);
+      // A container whose box is largely covered by a child that paints its
+      // OWN background is not measurable this way: the modal colour would be
+      // that child's fill while the colour read here is the parent's ink, and
+      // the two never actually meet on screen. (This produced a spurious
+      // 1.01:1 on the "Kimi K3 / Recommended" row, whose tag is a light pill
+      // carrying its own dark ink.) Such elements are skipped; their children
+      // are separately present in the sample set and get measured properly.
+      const covered = Array.from(el.querySelectorAll("*")).some((child) => {
+        const c = getComputedStyle(child as Element).backgroundColor;
+        return c !== "rgba(0, 0, 0, 0)" && c !== "transparent";
+      });
+      return { color: s.color, size: parseFloat(s.fontSize), weight: Number(s.fontWeight) || 400, covered };
+    });
+    if (style.covered) continue;
+    // A fully transparent colour is a decorative or spacing element.
+    if (/rgba?\([^)]*,\s*0\s*\)/.test(style.color)) continue;
+
+    const rect = {
+      x: Math.round(box.x), y: Math.round(box.y),
+      width: Math.round(box.width), height: Math.round(box.height),
+    };
+    const shot = await app.evaluate(async ({ BrowserWindow }, r) => {
+      const target = BrowserWindow.getAllWindows()[0];
+      const image = await target.webContents.capturePage(r);
+      return image.getBitmap().toString("base64");
+    }, rect);
+    const bgra = Buffer.from(shot, "base64");
+    if (bgra.length < 16) continue;
+
+    const [br, bg, bb] = modalColour(bgra);
+    const [tr, tg, tb] = parseRgb(style.color);
+    const ratio = contrast(luminance(tr, tg, tb), luminance(br, bg, bb));
+    const floor = isLarge(style.size, style.weight) ? LARGE_FLOOR : BODY_FLOOR;
+    measured += 1;
+
+    const text = ((await sample.textContent()) ?? "").trim().slice(0, 42);
+    if (ratio < worst.ratio) worst = { ratio, text, floor };
+    if (ratio >= floor) continue;
+
+    const where =
+      `${ratio.toFixed(2)}:1 (needs ${floor}:1) — ${style.size.toFixed(1)}px/${style.weight} ` +
+      `"${text}" ink ${style.color} on measured rgb(${br.toFixed(0)} ${bg.toFixed(0)} ${bb.toFixed(0)})`;
+    const known = PRE_EXISTING.get(key(text));
+    if (known === undefined) {
+      failures.push(`NEW: ${where}`);
+    } else if (ratio < known - SLIP) {
+      failures.push(`WORSE than its ${known.toFixed(2)}:1 baseline by ${(known - ratio).toFixed(2)} — ${where}`);
+    }
+  }
+
+  expect(measured, "nothing was actually measured, so this check proved nothing").toBeGreaterThan(3);
+  // eslint-disable-next-line no-console -- the report cites these numbers
+  console.log(`contrast (${label}): ${measured} elements measured, worst ${worst.ratio.toFixed(2)}:1 ` +
+    `(floor ${worst.floor}) on "${worst.text}"`);
+  expect(
+    failures,
+    `the contrast ratchet moved the wrong way in "${label}" — either an element that ` +
+    "used to clear the floor now does not, or one already below it collapsed " +
+    `further:\n  ${failures.join("\n  ")}`,
+  ).toEqual([]);
+}
+
 /*
  * REPOINTED by Task 259 (Slice 4). This swept `.chat-column-villager`, the
  * conversation panel floating over the pond. That panel is retired: the
@@ -153,97 +247,170 @@ test("the desk's text clears the contrast floor against the field it sits on", a
     const desk = win.locator(".workspace-stage");
     await expect(desk).toBeVisible({ timeout: 20_000 });
     await expect(win.locator(".rp-conversation")).toBeVisible({ timeout: 20_000 });
-    /* WHAT THIS SWEEP DOES NOT REACH. This lane runs with `CAIRN_MOCK` and no
-       conductor connection, so the conversation shows its connect card rather
-       than a composer, and no task card, risk chip, dispatch panel or result
-       card is on the paper to measure. That was true before Task 259 as well —
-       the sweep has always run in this state — and widening its root to the
-       whole stage added the header and the capsule to what it covers.
-       An attempt to drive a real proposal into it as part of Slice 4 failed
-       here: reaching one needs a connected conductor fixture, which is
-       conductor.spec's machinery and not this file's. The decision surfaces
-       are Slice 6's, and Slice 6 should bring them under this measurement. */
+    /* WHAT THIS SCENARIO DOES NOT REACH — and what the one below now does.
+       This lane runs with `CAIRN_MOCK` and no conductor connection, so the
+       conversation shows its connect card rather than a composer. Task 259
+       recorded that as a gap: the sweep had never measured a Cairn turn, an
+       owner note or a composer, because reaching one needs a connected
+       conductor fixture. Task 260 (Slice 5) adds exactly that below, against
+       the same local fake `conductor.spec.ts` uses — no provider, no
+       credential, no network beyond loopback. The DECISION surfaces (task card,
+       dispatch panel, question card) are still unmeasured and are Slice 6's. */
 
     // Let any entrance settle, or the capture catches a surface that is still
     // moving and still part-transparent.
     await win.waitForTimeout(1200);
-
-    const samples = await desk.locator("p, h1, h2, h3, h4, span, strong, button, summary, label")
-      .filter({ hasText: /\S/ }).all();
-    expect(samples.length, "no desk text was found to measure").toBeGreaterThan(3);
-
-    const failures: string[] = [];
-    let measured = 0;
-    let worst = { ratio: Infinity, text: "", floor: BODY_FLOOR };
-
-    for (const sample of samples) {
-      if (!(await sample.isVisible())) continue;
-      const box = await sample.boundingBox();
-      if (!box || box.width < 8 || box.height < 8) continue;
-
-      const style = await sample.evaluate((el) => {
-        const s = getComputedStyle(el);
-        // A container whose box is largely covered by a child that paints its
-        // OWN background is not measurable this way: the modal colour would be
-        // that child's fill while the colour read here is the parent's ink, and
-        // the two never actually meet on screen. (This produced a spurious
-        // 1.01:1 on the "Kimi K3 / Recommended" row, whose tag is a light pill
-        // carrying its own dark ink.) Such elements are skipped; their children
-        // are separately present in the sample set and get measured properly.
-        const covered = Array.from(el.querySelectorAll("*")).some((child) => {
-          const c = getComputedStyle(child as Element).backgroundColor;
-          return c !== "rgba(0, 0, 0, 0)" && c !== "transparent";
-        });
-        return { color: s.color, size: parseFloat(s.fontSize), weight: Number(s.fontWeight) || 400, covered };
-      });
-      if (style.covered) continue;
-      // A fully transparent colour is a decorative or spacing element.
-      if (/rgba?\([^)]*,\s*0\s*\)/.test(style.color)) continue;
-
-      const rect = {
-        x: Math.round(box.x), y: Math.round(box.y),
-        width: Math.round(box.width), height: Math.round(box.height),
-      };
-      const shot = await app.evaluate(async ({ BrowserWindow }, r) => {
-        const target = BrowserWindow.getAllWindows()[0];
-        const image = await target.webContents.capturePage(r);
-        return image.getBitmap().toString("base64");
-      }, rect);
-      const bgra = Buffer.from(shot, "base64");
-      if (bgra.length < 16) continue;
-
-      const [br, bg, bb] = modalColour(bgra);
-      const [tr, tg, tb] = parseRgb(style.color);
-      const ratio = contrast(luminance(tr, tg, tb), luminance(br, bg, bb));
-      const floor = isLarge(style.size, style.weight) ? LARGE_FLOOR : BODY_FLOOR;
-      measured += 1;
-
-      const text = ((await sample.textContent()) ?? "").trim().slice(0, 42);
-      if (ratio < worst.ratio) worst = { ratio, text, floor };
-      if (ratio >= floor) continue;
-
-      const where =
-        `${ratio.toFixed(2)}:1 (needs ${floor}:1) — ${style.size.toFixed(1)}px/${style.weight} ` +
-        `"${text}" ink ${style.color} on measured rgb(${br.toFixed(0)} ${bg.toFixed(0)} ${bb.toFixed(0)})`;
-      const known = PRE_EXISTING.get(key(text));
-      if (known === undefined) {
-        failures.push(`NEW: ${where}`);
-      } else if (ratio < known - SLIP) {
-        failures.push(`WORSE than its ${known.toFixed(2)}:1 baseline by ${(known - ratio).toFixed(2)} — ${where}`);
-      }
-    }
-
-    expect(measured, "nothing was actually measured, so this check proved nothing").toBeGreaterThan(3);
-    // eslint-disable-next-line no-console -- the report cites this number
-    console.log(`contrast: ${measured} elements measured, worst ${worst.ratio.toFixed(2)}:1 ` +
-      `(floor ${worst.floor}) on "${worst.text}"`);
-    expect(
-      failures,
-      "the contrast ratchet moved the wrong way — either a lantern element that " +
-      "used to clear the floor now does not, or one already below it collapsed " +
-      `further:\n  ${failures.join("\n  ")}`,
-    ).toEqual([]);
+    await sweep(app, win, ".workspace-stage", "disconnected desk");
   } finally {
     await app.close();
+  }
+});
+
+/*
+ * Task 260 (Slice 5) — THE CONNECTED CONVERSATION, MEASURED.
+ *
+ * The gap Task 259 wrote down and could not close. Everything this slice
+ * redrew — Cairn's open prose, the owner's apricot note, the machine-evidence
+ * surfaces inside that prose, the composer and its two actions, the top bar —
+ * exists only once a conductor is connected, so none of it had ever been on
+ * screen while this file was measuring.
+ *
+ * The connection is the local fixture body, reached the same visible way an
+ * owner reaches a custom provider: no real provider, no credential of the
+ * owner's, no paid call, and nothing leaving the machine. The stored
+ * connection lands in the throwaway profile `isolated-profile.ts` installs —
+ * `conductor-connection.ts` refuses to resolve a path at all outside it — so
+ * the owner's own saved connection is unreachable from here.
+ */
+test("the connected conversation's own text clears the contrast floor", async () => {
+  const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
+  const fixture = (await import(fixturePath)) as {
+    start: () => Promise<{ url: string; close: () => Promise<void> }>;
+  };
+  const server = await fixture.start();
+
+  const project = mkdtempSync(join(tmpdir(), "cairn-contrast-connected-"));
+  scaffold(project);
+  const env: { [key: string]: string } = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
+  env.CAIRN_MOCK = "1";
+  env.CAIRN_OPEN = project;
+
+  const app = await electron.launch({ args: ["."], env });
+  try {
+    const win = await app.firstWindow();
+    await win.setViewportSize({ width: 1320, height: 980 });
+    await expect(win.locator(".workspace-stage")).toBeVisible({ timeout: 20_000 });
+
+    // The same route an owner takes to a local provider: a different brain,
+    // Custom, the fixture's URL, and both standing-authorization choices made
+    // explicitly rather than inferred from filled fields.
+    const card = win.locator(".card", { hasText: "connect cairn's brain" });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await win.getByRole("button", { name: "Choose a different brain" }).click();
+    await win.getByRole("button", { name: "Custom…" }).click();
+    await card.locator('input[type="text"]').first().fill(server.url);
+    await win.getByPlaceholder("e.g. moonshotai/kimi-k3").fill("fixture-model");
+    await win.getByPlaceholder("Stored encrypted; shown never again").fill("sk-contrast-fixture");
+    const checkboxes = card.locator('input[type="checkbox"]');
+    await expect(checkboxes).toHaveCount(2);
+    await checkboxes.nth(0).check();
+    await checkboxes.nth(1).check();
+    await win.getByRole("button", { name: "Connect" }).click();
+    await expect(card).not.toBeVisible({ timeout: 20_000 });
+
+    // One exchange, so an owner note and a Cairn turn are both on the paper.
+    // The scripted reply carries an absolute Windows path in inline code, a
+    // fenced command far wider than the measure, a table and an unbroken
+    // token — the four things that overflow a conversation.
+    await win.getByPlaceholder("Talk with Cairn").fill("Show me the markdown-containment sample.");
+    await win.getByRole("button", { name: "Send", exact: true }).click({ noWaitAfter: true });
+    await expect(win.locator(".bubble-owner")).toBeVisible({ timeout: 20_000 });
+    await expect(win.locator(".bubble-cairn .md-code")).toBeVisible({ timeout: 30_000 });
+    await expect(win.locator(".chat-composer")).toBeVisible({ timeout: 20_000 });
+    await win.waitForTimeout(1200);
+
+    // CONTAINMENT, measured on the real composition rather than argued from the
+    // stylesheet: wide machine evidence scrolls inside its own frame, and the
+    // page itself never scrolls sideways.
+    const containment = await win.evaluate(() => {
+      const pre = document.querySelector<HTMLElement>(".rp-conversation .md-code");
+      const paper = document.querySelector<HTMLElement>(".rp-conversation");
+      const table = document.querySelector<HTMLElement>(".rp-conversation .md-table-wrap");
+      return {
+        pageOverflows: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        paperOverflows: paper ? paper.scrollWidth > paper.clientWidth : true,
+        preScrollsItself: pre ? pre.scrollWidth > pre.clientWidth : false,
+        preOverflowX: pre ? getComputedStyle(pre).overflowX : "missing",
+        tableOverflowX: table ? getComputedStyle(table).overflowX : "missing",
+      };
+    });
+    expect(containment.pageOverflows, "the page itself scrolls sideways").toBe(false);
+    expect(containment.paperOverflows, "wide machine evidence widened the paper").toBe(false);
+    expect(containment.preOverflowX, "a fenced command does not scroll inside its own frame").toBe("auto");
+    expect(containment.tableOverflowX, "a wide table does not scroll inside its own frame").toBe("auto");
+    expect(containment.preScrollsItself,
+      "the sample was not actually wider than the measure, so containment proved nothing").toBe(true);
+
+    /*
+     * KEYBOARD, measured by TABBING. A programmatic `.focus()` sets `:focus`
+     * but never `:focus-visible`, so testing that way measures a ring users
+     * never actually see. The constitution's ring is 3 px at a 2 px offset.
+     */
+    const composer = win.locator(".chat-composer");
+    // An unsent draft, so Send is enabled and therefore IN the tab order. A
+    // disabled control is skipped, which is correct behaviour and is why the
+    // first version of this walk could not reach it.
+    await win.getByPlaceholder("Talk with Cairn").fill("an unsent draft");
+    await win.getByPlaceholder("Talk with Cairn").focus();
+    const rings: { name: string; ring: { style: string; width: string; offset: string } }[] = [];
+    for (const name of ["New conversation", "Send"]) {
+      await win.keyboard.press("Tab");
+      const control = composer.getByRole("button", { name, exact: name === "Send" });
+      await expect(control).toBeFocused();
+      rings.push({
+        name,
+        ring: await control.evaluate((element) => {
+          const s = getComputedStyle(element);
+          return { style: s.outlineStyle, width: s.outlineWidth, offset: s.outlineOffset };
+        }),
+      });
+    }
+    for (const { name, ring } of rings) {
+      expect(ring, `${name} has no drawn focus ring`)
+        .toEqual({ style: "solid", width: "3px", offset: "2px" });
+    }
+    // Shift+Tab walks back to where it started, so nothing is a one-way trap.
+    await win.keyboard.press("Shift+Tab");
+    await win.keyboard.press("Shift+Tab");
+    await expect(win.getByPlaceholder("Talk with Cairn")).toBeFocused();
+    // Put the draft back and leave Send DISABLED for the sweep below. That is
+    // the state a composer is in most of the time, and measuring it is what
+    // caught a 2.45:1 label: `opacity` fades a control's words and its ground
+    // together, and an inactive control is still read.
+    await win.getByPlaceholder("Talk with Cairn").fill("");
+    await expect(composer.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
+
+    // Every interactive target the conversation itself owns clears 44 x 44,
+    // measured from real bounding boxes rather than from the stylesheet.
+    const small = await win.locator(".rp-conversation").evaluate((root) => {
+      const out: string[] = [];
+      for (const control of root.querySelectorAll<HTMLElement>("button, a[href], input, textarea, select")) {
+        const box = control.getBoundingClientRect();
+        if (box.width === 0 && box.height === 0) continue;
+        if (box.width < 44 || box.height < 44) {
+          out.push(`${(control.textContent ?? control.getAttribute("aria-label") ?? control.tagName).trim().slice(0, 30)}` +
+            ` ${box.width.toFixed(0)}x${box.height.toFixed(0)}`);
+        }
+      }
+      return out;
+    });
+    expect(small, "a conversation control is below the 44 x 44 target floor").toEqual([]);
+
+    await sweep(app, win, ".workspace-stage", "connected conversation", CONVERSATION_TEXT);
+  } finally {
+    await app.close();
+    clearStoredConnectionFiles();
+    await server.close();
   }
 });

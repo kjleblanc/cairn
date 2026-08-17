@@ -200,7 +200,38 @@ function answerGatePoint() {
   return new Promise((resolve) => { answerGate = resolve; });
 }
 
+/*
+ * Task 260 (Slice 5). One reply carrying every kind of thing that can overflow
+ * the conversation's measure at once: an absolute Windows path in inline code,
+ * a fenced command far wider than the paper, a table, and a single unbroken
+ * token with no space to wrap at. It exists so "long Markdown, paths and code
+ * contain themselves" and "machine evidence is legible on its own surface" can
+ * be MEASURED in the running app instead of argued from the stylesheet.
+ *
+ * Reachable only by that exact phrase, so no existing scenario changes.
+ */
+const MARKDOWN_CONTAINMENT_SCRIPT = [
+  "Here is what I checked, and the exact commands I ran.",
+  "",
+  "The record is at `C:\\Users\\owner\\Desktop\\WebApp Projects\\AI Coding Workflow Framework\\docs\\ai-work\\tasks\\260-report.md`.",
+  "",
+  "```",
+  "npm.cmd run test:unit -- --reporter=spec --concurrency=1 --test-name-pattern=\"the conversation contains its own machine evidence at every supported width\"",
+  "```",
+  "",
+  "| Check | What it proves | Result |",
+  "|---|---|---|",
+  "| c6 | a long command scrolls inside its own frame | pass |",
+  "| c7 | nothing moves that you did not cause | pass |",
+  "",
+  "And one unbroken token with nowhere to wrap:",
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+].join("\n");
+
 function scriptFor(content) {
+  if (content.includes("markdown-containment")) {
+    return { parts: [MARKDOWN_CONTAINMENT_SCRIPT], delayMs: DELAY_MS };
+  }
   if (content.includes("action-malformed")) {
     return { parts: ["I could not form this.\n\n```cairn-question\n{broken\n```"], delayMs: DELAY_MS };
   }

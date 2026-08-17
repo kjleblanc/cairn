@@ -154,7 +154,11 @@ test("verified facts and disclosures use ruled hierarchy with visible focus", ()
 
 test("the receipt adds no new decorative motion", () => {
   const start = css.indexOf("/* Task 188:");
-  const end = css.indexOf(".chat-column-villager .chat-composer {", start);
+  // The end marker was the scoped composer rule, which Task 260 (Slice 5) moved
+  // to `surfaces.css`. The receipt block is Slice 7's and has not moved; the
+  // next thing after it in this file is Task 186's control skin, so that is the
+  // boundary now.
+  const end = css.indexOf("/* Task 186 flattens", start);
   assert.ok(start !== -1 && end > start, "the Task 188 receipt style block cannot be audited as one slice");
   assert.doesNotMatch(css.slice(start, end), /\b(?:animation|transition)\s*:/,
     "the receipt style block introduces decorative motion");

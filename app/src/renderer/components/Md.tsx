@@ -28,7 +28,7 @@ function chunks(
 
 const plain = (t: string): ReactNode[] => (t ? [t] : []);
 const codeSpans = (t: string, pre: string): ReactNode[] =>
-  chunks(t, /`([^`]+)`/, (inner, key) => <code className="mono" key={key}>{inner}</code>, plain, pre);
+  chunks(t, /`([^`]+)`/, (inner, key) => <code className="mono rp-machine" key={key}>{inner}</code>, plain, pre);
 const italics = (t: string, pre: string): ReactNode[] =>
   chunks(t, /\*([^\s*][^*]*[^\s*]|[^\s*])\*/, (inner, key) => <em key={key}>{codeSpans(inner, key)}</em>, codeSpans, pre);
 const inline = (text: string): ReactNode[] =>
@@ -169,12 +169,15 @@ export function Md({ text }: { text: string }) {
           case "list":
             return renderList(b.list, `l${k}`);
           case "code":
-            return <pre className="md-code mono" key={k}><code>{b.text}</code></pre>;
+            // Machine evidence is bounded: `rp-machine` gives it the mono
+            // material, `rp-scroll-x` keeps a long command scrolling inside its
+            // own frame instead of widening the paper or the desk.
+            return <pre className="md-code mono rp-machine rp-scroll-x" key={k}><code>{b.text}</code></pre>;
           case "rule":
             return <hr className="md-rule" key={k} />;
           case "table":
             return (
-              <div className="md-table-wrap" key={k}>
+              <div className="md-table-wrap rp-scroll-x" key={k}>
                 <table className="md-table">
                   <thead>
                     <tr>{b.table.header.map((c, i) => <th key={i}>{inline(c)}</th>)}</tr>

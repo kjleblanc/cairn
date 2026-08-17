@@ -40,7 +40,12 @@ test("disconnected restart exposes only authenticated local results and run reat
   const disconnectedResults = chat.indexOf('aria-label="Saved conversation evidence"');
   const connectedGate = chat.indexOf("{status?.connected ? (", disconnectedResults);
   const ordinaryTurn = chat.indexOf('className={`bubble ${turn.role === "owner"');
-  const composer = chat.indexOf('<div className="chat-composer">');
+  // Matched on the PREFIX of the class list, not on the whole attribute. Task
+  // 260 appended a second class here, and an exact-attribute marker silently
+  // becomes -1 — which compares as "before the gate" and would have passed this
+  // assertion while proving nothing about where the composer actually sits.
+  const composer = chat.indexOf('<div className="chat-composer');
+  assert.notEqual(composer, -1, "the composer element cannot be found at all");
   assert.ok(disconnectedResults !== -1 && disconnectedResults < connectedGate,
     "local result receipts remain inside the connection gate");
   assert.ok(ordinaryTurn > connectedGate && composer > connectedGate,

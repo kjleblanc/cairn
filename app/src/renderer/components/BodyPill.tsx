@@ -57,16 +57,22 @@ export function BodyPill({ status, lastReply, onModelSaved, onDisconnected }: {
       <button type="button" className="pill pill-quiet" onClick={() => setOpen((o) => !o)}>
         {status.provider} · {status.model}
       </button>
+      {/* Task 260 (Slice 5): the panel's spacing and its refusal colour were
+        * four inline styles, which is presentation policy living in TypeScript
+        * where no stylesheet test can see it — and `var(--stop)` in particular
+        * is one of the paired tokens the conversation re-points, so it was
+        * quietly deciding a semantic colour from here. They are classes now.
+        * Nothing about what this panel does has changed. */}
       {open ? (
         <div className="body-pill-panel">
-          {error ? <p className="small" style={{ color: "var(--stop)" }}>{error}</p> : null}
-          <label className="small muted" style={{ display: "block", marginBottom: 4 }}>Model</label>
+          {error ? <p className="small body-pill-error">{error}</p> : null}
+          <label className="small muted body-pill-field-label">Model</label>
           <input type="text" value={model} onChange={(e) => setModel(e.target.value)} />
-          <div className="row" style={{ marginTop: 10 }}>
+          <div className="row body-pill-actions">
             <Pill onClick={() => void save()} disabled={saving || !model.trim()}>{saving ? "Saving…" : "Save"}</Pill>
             <Pill kind="danger" onClick={() => void disconnect()} disabled={disconnecting}>Disconnect</Pill>
           </div>
-          {line ? <p className="small muted" style={{ marginTop: 10 }}>Last reply: {line}</p> : null}
+          {line ? <p className="small muted body-pill-usage">Last reply: {line}</p> : null}
         </div>
       ) : null}
     </span>
