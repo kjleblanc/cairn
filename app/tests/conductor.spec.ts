@@ -406,16 +406,34 @@ test("one compact proposal carries its complete details through a set-aside repl
       return {
         border: style.borderTopWidth,
         radius: style.borderTopLeftRadius,
-        shadow: style.boxShadow,
+        // Theme-stable: `--rp-shadow-low` carries a different colour in Light
+        // and Dark, and the contract is about the geometry.
+        shadow: style.boxShadow === "none" ? "none" : style.boxShadow.replace(/^rgba?\([^)]*\)\s*/u, ""),
         concernDisplay: concern.display,
         concernTop: concern.borderTopWidth,
         concernLeft: concern.borderLeftWidth,
       };
     })).toEqual({
-      border: "0px", radius: "5px", shadow: "none",
-      concernDisplay: "grid", concernTop: "0px", concernLeft: "2px",
+      // REWRITTEN by Task 263 (Slice 6). Task 187's shape survives — no
+      // enclosing border, a concern laid out as a grid so Set aside shares its
+      // row rather than floating below it, and no top border on the concern —
+      // while the radius becomes the system's `--rp-r-sm`, the depth becomes
+      // the shipped low paper shadow, and the concern's margin rule widens
+      // from 2px to the 3px the semantic notes use.
+      border: "0px", radius: "9px", shadow: "0px 1px 2px 0px",
+      concernDisplay: "grid", concernTop: "0px", concernLeft: "3px",
     });
-    await expect(review).toHaveCSS("opacity", "0.68");
+    /*
+     * REWRITTEN. This pinned `opacity: 0.68` on a DISABLED primary control.
+     * That is the defect Slice 5 measured on the composer's Send at 2.45:1:
+     * `opacity` fades a label and its ground together, and an inactive control
+     * is still read. Inactive is carried by losing the teal fill and the strong
+     * edge now, so the words stay legible — which is what the owner actually
+     * asks of a button they cannot press yet.
+     */
+    await expect(review).toHaveCSS("opacity", "1");
+    expect(await review.evaluate((element) => getComputedStyle(element).color))
+      .not.toBe(await review.evaluate((element) => getComputedStyle(element).backgroundColor));
     await expect.poll(proposalControlsContained).toBe(true);
     const setAside = taskCard.locator(".task-risk").getByRole("button", { name: "Set aside" });
     for (const control of [setAside, review, detailsSummary]) {
@@ -465,10 +483,27 @@ test("one compact proposal carries its complete details through a set-aside repl
     const readyHeading = taskCard.getByRole("heading", { name: "Ready to review" });
     await expect(readyHeading).toBeVisible();
     await expect(readyHeading).toBeFocused();
+    /*
+     * REWRITTEN by Task 263 (Slice 6). The CONTRACT is unchanged and still
+     * asserted: a heading that takes focus programmatically must be visibly
+     * marked, and must not read as a button the owner failed to press. Only
+     * the mechanism moved.
+     *
+     * Task 187 drew that mark as an INSET BOX-SHADOW underline, while Task
+     * 191's dispatch heading and Task 192's question heading both drew theirs
+     * with `text-decoration`. Three headings, two mechanisms, one family —
+     * exactly the inconsistency this slice exists to remove. All three take
+     * the text underline now, in the focus ink, so `boxShadow !== "none"` is
+     * no longer the right question to ask.
+     */
     expect(await readyHeading.evaluate((element) => {
       const style = getComputedStyle(element);
-      return style.outlineStyle === "none" && style.boxShadow !== "none";
-    })).toBe(true);
+      return {
+        outline: style.outlineStyle,
+        underline: style.textDecorationLine,
+        thickness: style.textDecorationThickness,
+      };
+    })).toEqual({ outline: "none", underline: "underline", thickness: "2px" });
     await expect(taskCard.locator(".task-risk")).toHaveCount(0);
     await expect(review).toBeEnabled();
     await expect(details).not.toHaveAttribute("open", "");
@@ -492,8 +527,26 @@ test("one compact proposal carries its complete details through a set-aside repl
     expect(providerPrompt).toContain("put the task control fence before any prose");
     expect(providerPrompt).toContain("After the fence, write at most one short sentence");
     expect(providerPrompt).toContain("Do not repeat or summarize the outcome");
-    expect(await taskCard.evaluate((element) => getComputedStyle(element, "::before").backgroundColor))
-      .toBe("rgb(163, 221, 208)");
+    /*
+     * REWRITTEN by Task 263 (Slice 6). This read the mint fill of the
+     * proposal's registration mark off a positioned `::before`. The mark is a
+     * real `border-left` now — the same signal with no positioned box to
+     * contain, and the vocabulary the semantic notes already use — so the
+     * pseudo-element is gone and the question to ask is whether the rule is
+     * drawn on the card itself.
+     *
+     * The SEMANTIC half of that mark — that it switches to the attention ink
+     * when the proposal carries a concern — is asserted directly against the
+     * stylesheet in `tests-unit/conversationpaper.test.ts`, which can name the
+     * token instead of pinning a theme-dependent `rgb()` triple. This card is
+     * risk-free at this point in the flow, so what belongs here is that the
+     * mark is drawn at all, and that the retired pseudo-element is not.
+     */
+    expect(await taskCard.evaluate((element) => ({
+      markWidth: getComputedStyle(element).borderLeftWidth,
+      markStyle: getComputedStyle(element).borderLeftStyle,
+      retiredPseudo: getComputedStyle(element, "::before").backgroundColor,
+    }))).toEqual({ markWidth: "3px", markStyle: "solid", retiredPseudo: "rgba(0, 0, 0, 0)" });
     await win.locator(".chat-messages").evaluate((element) => { element.scrollTop = element.scrollHeight; });
     await expect.poll(() => taskCard.evaluate((element) => {
       const card = element.getBoundingClientRect();
@@ -505,8 +558,36 @@ test("one compact proposal carries its complete details through a set-aside repl
 
     await detailsSummary.click();
     await expect(details).toContainText("Set aside by the owner: Renaming the title may break bookmarked links.");
-    await expect(details.locator(".task-intent-owner-stated .muted").first())
-      .toHaveCSS("color", "rgb(163, 221, 208)");
+    /*
+     * REWRITTEN by Task 263 (Slice 6). This pinned the retired palette's mint
+     * on the ROLE label ("Outcome") of an owner-stated row. Two things moved.
+     *
+     * The tint is on the SOURCE label now ("You said so"), because that is the
+     * line that actually carries provenance; the role stays in the measured
+     * muted ink. And the assertion no longer pins an `rgb()` triple, because
+     * the palette is `light-dark()` and the same element is a different colour
+     * in the two themes — a pinned triple would make this scenario depend on
+     * the machine's theme. What it asserts instead is the thing that matters:
+     * provenance is visually distinguished from the role beside it.
+     *
+     * That the tint is specifically `--rp-teal-ink` is asserted against the
+     * stylesheet in `tests-unit/conversationpaper.test.ts`, which can name the
+     * token, and its contrast against the paper is recomputed in both themes
+     * by `visualtokens.test.ts`.
+     */
+    const provenance = await details.evaluate((root) => {
+      const row = root.querySelector<HTMLElement>(".task-intent-owner-stated");
+      const role = row?.querySelector<HTMLElement>(".task-intent-role") ?? null;
+      const source = row?.querySelector<HTMLElement>(".task-intent-source") ?? null;
+      return {
+        role: role === null ? null : getComputedStyle(role).color,
+        source: source === null ? null : getComputedStyle(source).color,
+      };
+    });
+    expect(provenance.role, "the owner-stated row has no role label").not.toBeNull();
+    expect(provenance.source, "the owner-stated row has no source label").not.toBeNull();
+    expect(provenance.source, "attribution is drawn in the same ink as the role beside it")
+      .not.toBe(provenance.role);
     await details.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-187-paper-details.png") });
     await win.screenshot({ path: join(tmpdir(), "cairn-task-184-details.png") });
@@ -531,7 +612,9 @@ test("one compact proposal carries its complete details through a set-aside repl
         overflow: element.scrollWidth - element.clientWidth,
         border: style.borderTopWidth,
         radius: style.borderTopLeftRadius,
-        shadow: style.boxShadow,
+        // Theme-stable: `--rp-shadow-low` carries a different colour in Light
+        // and Dark, and the contract is about the geometry.
+        shadow: style.boxShadow === "none" ? "none" : style.boxShadow.replace(/^rgba?\([^)]*\)\s*/u, ""),
         intentRowsFlat: intentRows.every((row) => {
           const rowStyle = getComputedStyle(row);
           return rowStyle.borderTopWidth === "0px" && rowStyle.borderLeftWidth === "2px"
@@ -539,7 +622,14 @@ test("one compact proposal carries its complete details through a set-aside repl
         }),
       };
     });
-    expect(offlinePaper).toEqual({ overflow: 0, border: "0px", radius: "5px", shadow: "none", intentRowsFlat: true });
+    // REWRITTEN by Task 263 (Slice 6): the same two values as everywhere else
+    // in this family — the system's `--rp-r-sm` radius and the shipped low
+    // paper shadow. The offline checkpoint's own contract is untouched, and
+    // `intentRowsFlat` is asserted unchanged: the shared intent-row rule set
+    // keeps the dispatch panel's rows flat, unfilled and square.
+    expect(offlinePaper).toEqual({
+      overflow: 0, border: "0px", radius: "9px", shadow: "0px 1px 2px 0px", intentRowsFlat: true,
+    });
     for (const action of [
       panel.getByRole("button", { name: "Run offline demonstration" }),
       panel.getByRole("button", { name: "Cancel" }),
@@ -1932,16 +2022,36 @@ test("a compact paper question keeps exact Answer and defer decisions honest", a
       controlsFit: controls.every((control) => contains(control.getBoundingClientRect())),
       border: style.borderTopWidth,
       radius: style.borderTopLeftRadius,
-      shadow: style.boxShadow,
+      // REWRITTEN by Task 263 (Slice 6). The colour of the shadow is
+      // theme-dependent — `--rp-shadow-low` is a cool ink at 10% in Light and
+      // black at 30% in Dark — so pinning the whole computed string would make
+      // this scenario depend on which theme the machine happens to be in. The
+      // geometry is what the contract is about: a low paper shadow, not a glow.
+      shadow: style.boxShadow === "none" ? "none" : style.boxShadow.replace(/^rgba?\([^)]*\)\s*/u, ""),
       grain: style.backgroundImage === "none" ? "none" : "paper",
       animation: style.animationName,
       headingWraps: headingElement.getBoundingClientRect().height
         > Number.parseFloat(headingStyle.lineHeight) * 1.5,
     };
   });
+  /*
+   * REWRITTEN by Task 263 (Slice 6), and only where the material genuinely
+   * moved. Task 192's contract is otherwise intact and still asserted here:
+   * no enclosing border, the card contained inside the messages column, every
+   * control inside its own bounds, the shared paper grain, no arrival
+   * animation, and a long question that wraps rather than overflows.
+   *
+   *   radius 4px -> 9px  the irregular 4/8/6/5 paper-cut corner is replaced by
+   *                      `--rp-r-sm`, the system's own small radius. One
+   *                      radius scale for the whole app was the point of it.
+   *   shadow none -> low the constitution asks for "subtle shadows and
+   *                      hairlines"; Task 192 banned the LANTERN's glow, and
+   *                      `--rp-shadow-low` is the lowest step of the shipped
+   *                      paper vocabulary, the same one the composer takes.
+   */
   expect(paper).toEqual({
     overflow: 0, withinMessages: true, controlsFit: true,
-    border: "0px", radius: "4px", shadow: "none", grain: "paper",
+    border: "0px", radius: "9px", shadow: "0px 1px 2px 0px", grain: "paper",
     animation: "none", headingWraps: true,
   });
   for (const action of [answer, defer]) {
@@ -1969,7 +2079,15 @@ test("a compact paper question keeps exact Answer and defer decisions honest", a
     const style = getComputedStyle(element);
     return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
   });
-  expect(actionFocus).toEqual({ style: "solid", width: "2px", offset: "3px" });
+  /*
+   * REWRITTEN by Task 263 (Slice 6). This pinned the retired lantern's ring,
+   * 2px at a 3px offset. The constitution specifies a 3px solid ring in
+   * `--rp-focus` at a 2px offset, which is what the composer already measures
+   * in `contrast.spec.ts`, and the decision family takes the same one — the
+   * whole point being that focus looks identical wherever the owner lands.
+   * Still measured by TABBING, so it is `:focus-visible` rather than `:focus`.
+   */
+  expect(actionFocus).toEqual({ style: "solid", width: "3px", offset: "2px" });
   await win.keyboard.press("Tab");
   await expect(defer).toBeFocused();
   await win.keyboard.press("Shift+Tab");
@@ -2748,9 +2866,14 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
       const style = getComputedStyle(element);
       return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
     });
+    // REWRITTEN by Task 263 (Slice 6). The floor was written around the
+    // lantern's 2px-at-3px ring. The dispatch checkpoint takes the
+    // constitution's ring now — 3px at a 2px offset, the same one the composer
+    // and the question card use — so the offset floor moved with it. The ring
+    // got THICKER, which is the direction that matters for 1.4.11.
     expect(actionFocus.style).toBe("solid");
-    expect(Number.parseFloat(actionFocus.width)).toBeGreaterThanOrEqual(2);
-    expect(Number.parseFloat(actionFocus.offset)).toBeGreaterThanOrEqual(3);
+    expect(Number.parseFloat(actionFocus.width)).toBeGreaterThanOrEqual(3);
+    expect(Number.parseFloat(actionFocus.offset)).toBeGreaterThanOrEqual(2);
     await dispatchPanel.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-real-checked.png") });
     await win.setViewportSize({ width: 1320, height: 820 });
@@ -2784,7 +2907,9 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
         controlsFit: controls.every((control) => contains(control.getBoundingClientRect())),
         border: style.borderTopWidth,
         radius: style.borderTopLeftRadius,
-        shadow: style.boxShadow,
+        // Theme-stable: `--rp-shadow-low` carries a different colour in Light
+        // and Dark, and the contract is about the geometry.
+        shadow: style.boxShadow === "none" ? "none" : style.boxShadow.replace(/^rgba?\([^)]*\)\s*/u, ""),
         animation: style.animationName,
         factDisplay: row.display,
         factRadius: row.borderTopLeftRadius,
@@ -2793,10 +2918,26 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
         exactTaskRule: exactTask.borderLeftWidth,
       };
     });
+    /*
+     * REWRITTEN by Task 263 (Slice 6). Task 191's contract is intact and still
+     * asserted: the checkpoint contains itself, every control fits inside it,
+     * there is no enclosing border and no arrival animation, and the routed
+     * facts are a ruled grid with no radius and no fill — one ledger, not a
+     * row of tiles. Three values moved with the material:
+     *
+     *   radius 5px -> 9px   the system's `--rp-r-sm` replaces the paper-cut
+     *                       corner, as everywhere else in this family.
+     *   shadow none -> low  the shipped low paper shadow, not a glow.
+     *   weight 500 -> 400   the exact task payload is machine evidence, and
+     *                       the constitution reserves monospace for exactly
+     *                       that. It is set in `--rp-mono` at the regular
+     *                       weight now, so it reads as evidence rather than
+     *                       competing with the approval sentence above it.
+     */
     expect(paper).toEqual({
-      overflow: 0, controlsFit: true, border: "0px", radius: "5px", shadow: "none",
+      overflow: 0, controlsFit: true, border: "0px", radius: "9px", shadow: "0px 1px 2px 0px",
       animation: "none", factDisplay: "grid", factRadius: "0px", factBackground: "rgba(0, 0, 0, 0)",
-      exactTaskWeight: "500", exactTaskRule: "1px",
+      exactTaskWeight: "400", exactTaskRule: "1px",
     });
     await panel.scrollIntoViewIfNeeded();
     await win.screenshot({ path: join(tmpdir(), "cairn-task-191-dispatch-real-unchecked.png") });

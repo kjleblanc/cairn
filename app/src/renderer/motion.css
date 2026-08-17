@@ -150,10 +150,18 @@
    So inside the conversation a turn simply appears. That is not less honest
    motion, it is the absence of motion nobody asked for: the arrival the owner
    caused is the words themselves. Everywhere the conversation is not — the
-   result card, the task card, the run strip, the push chip — keeps Task 126's
-   entrance until its own slice.
+   result card, the run strip, the push chip — keeps Task 126's entrance until
+   its own slice.
+
+   Task 263 (Slice 6) adds `.task-card` for the same reason, one slice later.
+   The proposal holds Review and a Set aside on every concern row, so it is
+   exactly the container the constitution forbids transforming — and the scale
+   blurred the outcome sentence, which is the one line the owner has to read
+   before deciding. Outside the conversation the proposal keeps its entrance;
+   the manual task screen is Slice 7's.
    ======================================================================= */
-.rp-conversation .bubble { animation: none; }
+.rp-conversation .bubble,
+.rp-conversation .task-card { animation: none; }
 
 @media (prefers-reduced-motion: reduce) {
   /* The end state is identical; only the travel is removed. Nothing is left
@@ -206,4 +214,38 @@
   .rp-conversation .chat-topbar .pill:hover:not(:disabled),
   .rp-conversation .bubble-pending-controls .pill:hover:not(:disabled),
   .rp-conversation .bubble-system .pill:hover:not(:disabled) { transform: none; }
+
+  /*
+   * Task 263 (Slice 6). The decision family's controls, for the same reason
+   * and by the same route. `app.css`'s last block used to carry two of these —
+   * `.dispatch-actions .pill` and `.question-card-actions .pill` — and they
+   * worked there only because they sat AFTER the generic
+   * `.chat-column-villager .pill` kill in source order. Their scoped
+   * replacements are (0,3,0) and would outrank that generic rule anyway, but
+   * they belong here regardless: `app.css` may not name this class at all.
+   */
+  .rp-conversation .task-card,
+  .rp-conversation .task-card-actions .pill,
+  .rp-conversation .task-risk .pill,
+  .rp-conversation .dispatch-actions .pill,
+  .rp-conversation .question-card-actions .pill,
+  .rp-conversation .question-card-controls input,
+  .rp-conversation .critic-call-actions .pill,
+  .rp-conversation .unsealed-candidate-actions .pill,
+  .rp-conversation .candidate-critique-actions .pill,
+  .rp-conversation .task-promise-card-row-choices .pill,
+  .rp-conversation .task-review-owner-check .pill { animation: none; transition: none; }
+
+  .rp-conversation .task-card-actions .pill:hover:not(:disabled),
+  .rp-conversation .task-card-actions .pill:active:not(:disabled),
+  .rp-conversation .task-risk .pill:hover:not(:disabled),
+  .rp-conversation .dispatch-actions .pill:hover:not(:disabled),
+  .rp-conversation .dispatch-actions .pill:active:not(:disabled),
+  .rp-conversation .question-card-actions .pill:hover:not(:disabled),
+  .rp-conversation .question-card-actions .pill:active:not(:disabled),
+  .rp-conversation .critic-call-actions .pill:hover:not(:disabled),
+  .rp-conversation .unsealed-candidate-actions .pill:hover:not(:disabled),
+  .rp-conversation .candidate-critique-actions .pill:hover:not(:disabled),
+  .rp-conversation .task-promise-card-row-choices .pill:hover:not(:disabled),
+  .rp-conversation .task-review-owner-check .pill:hover:not(:disabled) { transform: none; }
 }

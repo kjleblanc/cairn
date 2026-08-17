@@ -118,8 +118,13 @@ test("Stop and Open run are quiet text actions with unmistakable focus", () => {
 
 test("the paper thread keeps compact actions and adds no decorative travel", () => {
   const start = css.indexOf("/* Task 189:");
-  const end = css.indexOf("/* Task 191:", start);
-  assert.ok(start !== -1 && end > start, "the Task 189 presentation slice is not bounded for review");
+  // Task 263 (Slice 6) moved the dispatch checkpoint out of `app.css`, and its
+  // opening comment was this slice's end marker. The note left in its place is
+  // the boundary now. Nothing this test asserts changed.
+  const end = css.indexOf("/* Task 263 (Slice 6) took the dispatch checkpoint", start);
+  assert.notEqual(start, -1, "the Task 189 presentation slice has no start marker");
+  assert.notEqual(end, -1, "the Task 189 presentation slice has no end marker");
+  assert.ok(end > start, "the Task 189 presentation slice is not bounded for review");
   const slice = css.slice(start, end);
   assert.match(slice, /@media \(max-width: 620px\) \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) auto[\s\S]*?\.chat-column-villager \.run-strip-controls \{[\s\S]*?grid-column: 1 \/ -1[\s\S]*?grid-row: 3[\s\S]*?width: 100%[\s\S]*?\}/,
     "the narrow paper thread does not give its actions a contained row");

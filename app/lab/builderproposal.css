@@ -1,51 +1,78 @@
+/*
+ * Task 229's standalone visual lab, RESTYLED by Task 263 (Slice 6).
+ *
+ * This page is the positive control for the Builder proposal review: it is the
+ * only place that component renders, because it has no production consumer and
+ * Slice 6 adds none. What changed here is material only — the retired night
+ * garden became the constitution's warm desk, using the `--rp-*` tokens that
+ * `builderproposal.tsx` already imports from `src/renderer/tokens.css`.
+ *
+ * TASK 229'S CONTRACT IS STRUCTURAL AND IT IS UNTOUCHED. Nothing below adds a
+ * control, a link, a `role`, an SVG mark, a `<details>` fold or anything else
+ * focusable, because the browser qualification asserts that the card contains
+ * ZERO elements matching a long interactive selector list and that nothing
+ * inside it can hold focus. The 5px left border is likewise pinned by that
+ * qualification as an exact computed `borderLeftWidth`, so it stays 5px — only
+ * its colour moves, from the garden's amber to the measured `--rp-amber-ink`.
+ */
+
 body {
   min-height: 100%;
   overflow-y: auto;
-  background-color: var(--garden-deep);
-  background-image: var(--field-key), var(--field-counter), var(--field-haze), var(--field-vignette), var(--paper-grain);
-  background-blend-mode: screen, screen, screen, normal, overlay;
-  color: var(--lantern-ink);
+  background-color: var(--rp-field);
+  background-image: var(--rp-grain);
+  background-size: 160px 160px;
+  background-blend-mode: var(--rp-grain-blend);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
 }
 
-/* Task 229's standalone lab retains its wider visual treatment. Task 231 adds
- * separate production Chat rules without importing this lab stylesheet. */
+/* The card itself. One raised sheet with the attention rule down its edge:
+   this is a proposal that was NOT applied, and the surface should read as
+   something still waiting rather than something settled. */
 .builder-proposal-review {
   display: grid;
   gap: 14px;
   padding: 20px;
-  border: 1px solid color-mix(in srgb, var(--amber, #ffc979) 58%, transparent);
-  border-left: 5px solid var(--amber, #ffc979);
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--paper, #171d35) 94%, var(--amber, #ffc979) 6%);
-  box-shadow: var(--shadow-soft, 0 12px 32px rgba(0, 0, 0, .18));
+  border: 1px solid var(--rp-hairline-strong);
+  border-left: 5px solid var(--rp-amber-ink);
+  border-radius: var(--rp-r-md);
+  background: var(--rp-paper-raised);
+  color: var(--rp-ink);
+  box-shadow: var(--rp-shadow-low);
 }
 
 .builder-proposal-header { display: grid; gap: 4px; }
 .builder-proposal-header h2,
 .builder-proposal-capability h3,
-.builder-proposal-file h3 { margin: 0; }
+.builder-proposal-file h3 { margin: 0; color: var(--rp-ink-strong); }
 
 .builder-proposal-eyebrow,
 .builder-proposal-label {
   margin: 0;
-  color: var(--amber, #ffc979);
+  color: var(--rp-amber-ink);
   font-size: .72rem;
   font-weight: 700;
   letter-spacing: .12em;
   text-transform: uppercase;
 }
 
+/* The boundary sentence — "Nothing changed. No command ran." — is the single
+   most important line on the card, so it takes the measured attention pairing
+   rather than a translucent wash whose ink was never checked against it. */
 .builder-proposal-boundary {
   margin: 0;
   padding: 11px 13px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--amber, #ffc979) 14%, transparent);
+  border-left: 3px solid var(--rp-amber-ink);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-paper);
+  color: var(--rp-amber-ink);
   font-weight: 700;
 }
 
 .builder-proposal-caveat,
 .builder-proposal-summary p:last-child { margin: 0; }
-.builder-proposal-caveat { color: var(--muted, #aeb7cf); }
+.builder-proposal-caveat { color: var(--rp-ink-muted); }
 .builder-proposal-summary { display: grid; gap: 5px; }
 .builder-proposal-files { display: grid; gap: 14px; }
 
@@ -54,9 +81,9 @@ body {
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--paper, #171d35) 88%, transparent);
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper);
 }
 
 .builder-proposal-comparison {
@@ -70,10 +97,13 @@ body {
   display: block;
   margin-top: 5px;
   overflow-wrap: anywhere;
-  color: var(--muted, #aeb7cf);
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
   font-size: .72rem;
 }
 
+/* Proposed file text is machine evidence: mono, bounded, and scrolling inside
+   its own frame so a long line never widens the page. */
 .builder-proposal-file pre {
   min-height: 88px;
   margin: 9px 0 0;
@@ -81,9 +111,10 @@ body {
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  border-radius: 10px;
-  background: color-mix(in srgb, #090d19 78%, transparent);
-  font: 600 .78rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-chrome);
+  color: var(--rp-ink);
+  font: 400 13px/1.55 var(--rp-mono);
 }
 
 .builder-proposal-capability dl,
@@ -95,12 +126,12 @@ body {
   gap: 12px;
 }
 .builder-proposal-capability dt,
-.builder-proposal-identity dt { color: var(--muted, #aeb7cf); font-weight: 700; }
+.builder-proposal-identity dt { color: var(--rp-ink-muted); font-weight: 700; }
 .builder-proposal-capability dd,
-.builder-proposal-identity dd { margin: 0; overflow-wrap: anywhere; }
+.builder-proposal-identity dd { margin: 0; color: var(--rp-ink); overflow-wrap: anywhere; }
 .builder-proposal-identity {
   padding-top: 12px;
-  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-top: 1px solid var(--rp-hairline);
   font-size: .75rem;
 }
 
@@ -110,11 +141,11 @@ body {
   right: 12px;
   z-index: 20;
   padding: 5px 11px;
-  border: 1px dashed color-mix(in srgb, var(--garden-amber) 68%, transparent);
+  border: 1px dashed var(--rp-amber-ink);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--lantern-deep) 88%, transparent);
-  color: var(--garden-amber);
-  font: 700 .7rem/1.2 "Quicksand", ui-rounded, system-ui, sans-serif;
+  background: var(--rp-paper-raised);
+  color: var(--rp-amber-ink);
+  font: 700 .7rem/1.2 var(--rp-sans);
   letter-spacing: .08em;
   text-transform: uppercase;
   pointer-events: none;
@@ -134,20 +165,20 @@ body {
 .builder-proposal-lab-intro h1 {
   max-width: 700px;
   margin-bottom: 12px;
-  color: var(--lantern-ink);
+  color: var(--rp-ink-strong);
   font-size: clamp(2rem, 4vw, 3.25rem);
   letter-spacing: -.035em;
 }
 
 .builder-proposal-lab-intro > p:last-child,
 .builder-proposal-scenario > header > p:last-child {
-  color: var(--lantern-soft);
+  color: var(--rp-ink-muted);
 }
 
 .builder-proposal-lab-kicker,
 .builder-proposal-scenario-number {
   margin: 0 0 8px;
-  color: var(--garden-amber);
+  color: var(--rp-amber-ink);
   font-size: .74rem;
   font-weight: 700;
   letter-spacing: .12em;
@@ -173,7 +204,7 @@ body {
 }
 
 .builder-proposal-scenario > header h2 {
-  color: var(--lantern-ink);
+  color: var(--rp-ink-strong);
   font-size: 1.35rem;
 }
 
@@ -182,6 +213,9 @@ body {
   .builder-proposal-scenario > header { min-height: 0; }
 }
 
+/* The qualification drives this page at 1280 and 600 and requires a single
+   column with no horizontal overflow at 600. This lab is not one of the three
+   sheets whose breakpoint census is pinned to {820, 1260}. */
 @media (max-width: 620px) {
   #builder-proposal-badge { position: absolute; }
   .builder-proposal-lab {
