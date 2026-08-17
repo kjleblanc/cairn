@@ -1,0 +1,118 @@
+/*
+ * Task 258 (Slice 3) — the desk the conversation sits on.
+ *
+ * The outer composition: a dusty blue-gray field, a slim rail, a quiet header,
+ * and the warm paper that holds the exchange. Nothing in the running app
+ * consumes these yet — Slice 4 swaps `Workspace` onto them, and Slice 4 is
+ * where Owner gate 2 falls. Every selector is `.rp-`-prefixed and parsed by
+ * `tests-unit/visualtokens.test.ts`, so this file cannot recolour the Town,
+ * the pond or any other surface that has not migrated.
+ *
+ * The composition rules encoded here come from the constitution's section 7:
+ * the transcript scrolls and nothing else does; a long project name shortens
+ * but the connection state never does; compact is the same components with
+ * less room, not a second design.
+ */
+
+.rp-desk {
+  min-height: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  background: var(--rp-field);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+}
+
+.rp-desk-rail {
+  background: var(--rp-rail);
+  border-right: 1px solid var(--rp-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 8px;
+}
+
+.rp-desk-stage {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  /* The stage itself never scrolls sideways. Wide content scrolls inside its
+     own frame; see .rp-scroll-x. */
+  overflow: hidden;
+}
+
+/*
+ * The header holds identity and connection state. A long project name
+ * shortens; WHETHER YOU ARE CONNECTED never does, so the name gets the
+ * flexible track and the state keeps its natural size.
+ */
+.rp-desk-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--rp-chrome);
+  border-bottom: 1px solid var(--rp-hairline);
+}
+
+.rp-desk-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-desk-connection {
+  flex: none;
+  margin-left: auto;
+}
+
+/*
+ * The transcript scrolls; nothing else does. What Cairn is doing right now
+ * must never be something the owner has to hunt for, so the activity capsule
+ * and the composer keep their natural size and stay on screen.
+ */
+.rp-transcript {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px;
+}
+
+.rp-activity {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--rp-paper-chrome);
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-composer {
+  flex: none;
+  padding: 12px 16px;
+  background: var(--rp-chrome);
+  border-top: 1px solid var(--rp-hairline);
+}
+
+/* Wide content — tables, evidence, long machine output — scrolls inside its
+   own frame so the page itself never scrolls sideways. Below the supported
+   760 px minimum this is what keeps a deliberately wide composition contained
+   rather than pushing the whole desk off the edge. */
+.rp-scroll-x {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/*
+ * Compact is the same components with less room, not a second design: the rail
+ * narrows and the project name and the activity DETAIL drop. The activity
+ * state itself never drops.
+ */
+@media (max-width: 820px) {
+  .rp-desk-title { display: none; }
+  .rp-desk-rail { padding: 10px 6px; }
+  .rp-activity-detail { display: none; }
+  .rp-transcript { padding: 16px 14px; }
+}

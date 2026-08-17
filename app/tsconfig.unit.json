@@ -68,6 +68,7 @@
     "src/renderer/bodies.ts",
     "src/renderer/components/BuilderProposalReview.tsx",
     "lab/builderproposal-fixtures.ts",
+    "src/renderer/components/CairnProgram.tsx",
     "src/renderer/components/PondLine.tsx",
     "src/renderer/components/TownSquare.tsx",
     "src/renderer/components/TownDetail.tsx",

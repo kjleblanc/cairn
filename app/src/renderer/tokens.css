@@ -200,3 +200,141 @@
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
+
+/* =======================================================================
+   Task 258 (Slice 3) — the resident-program semantic layer.
+
+   Everything above this line is the night garden and stays exactly as it is:
+   the Town, the pond, the rail, the lantern panels and the conversation
+   surface all still read those tokens, and Slice 4 is what moves them.
+   `tests-unit/visualtokens.test.ts` compares every one of them against a
+   baseline taken before this task and fails if a single value moved.
+
+   The values below are the constitution's, recorded in
+   docs/superpowers/specs/2026-08-13-cairn-resident-program-visual-design.md
+   section 5 and drawn on the owner-approved Slice 1 board. "Measured" was
+   sampled from the approved mockup; "derived" exists because the measured or
+   seeded colour did not clear the WCAG floor for the job it actually does.
+
+   ONE DECLARATION PER TOKEN. The lab keeps the same palette in three blocks
+   because its side-by-side islands need them, and the spec records what that
+   cost: `--rp-on-teal` was added to explicit dark and forgotten in the System
+   block, which would have shipped a 2.28:1 button label to every
+   System-on-a-dark-OS user. Here `light-dark()` resolves from the
+   `color-scheme` the three lines above already set, so System, Light and Dark
+   all follow from a single value and the trap cannot be built.
+
+   The residue is at the bottom: shadows, an opacity and a blend mode are not
+   colours, and CSS `light-dark()` takes colours. Those five carry theme blocks,
+   and a test compares the explicit-dark and System blocks token for token.
+   ======================================================================= */
+
+:root {
+  /* Structure. The mockup's shell measures #C1C8CD; the owner asked for
+     "slightly darker", which the plan defines as exactly one step. */
+  --rp-field: light-dark(#b4c1c7, #1e2427);
+  --rp-field-edge: light-dark(#a3b2ba, #161b1e);
+  --rp-chrome: light-dark(#dbdcdd, #2b3236);        /* measured */
+  --rp-rail: light-dark(#c6cccf, #232a2d);
+
+  /* Paper. Dark is the same warm desk after dusk — the paper is still the
+     lightest, warmest thing in the frame, lit by a lamp rather than switched
+     off — not the retired night garden and not an inverted daylight theme. */
+  --rp-paper: light-dark(#f6ecdc, #37332c);         /* measured */
+  --rp-paper-raised: light-dark(#fbf4e7, #423d34);  /* measured */
+  --rp-paper-chrome: light-dark(#f0e8dc, #2f2c26);  /* measured */
+
+  /* Ink. */
+  --rp-ink: light-dark(#15384b, #f2e8d7);           /* approved seed */
+  --rp-ink-strong: light-dark(#0d2634, #fdf6e9);    /* derived: decisive headings */
+  --rp-ink-muted: light-dark(#47606d, #bdb2a0);     /* derived: #5c7480 measured 4.21:1 */
+
+  /* Cairn and action. */
+  --rp-teal: light-dark(#177f8c, #63b9bd);          /* approved seed — surfaces and fills */
+  --rp-teal-ink: light-dark(#0f5f6b, #86d0d2);      /* derived: teal TEXT needs 4.5:1 */
+  --rp-teal-press: light-dark(#10606b, #4da3a8);
+  /* Dark inverts which side of the teal the label sits on: white on the
+     lighter dark-theme teal measures 2.28:1, so the label goes dark. */
+  --rp-on-teal: light-dark(#ffffff, #10262a);
+  --rp-on-amber: light-dark(#3d2c05, #3d2c05);
+  --rp-amber: light-dark(#f0c65a, #e9bb58);         /* approved seed — Cairn's front pane */
+  --rp-amber-low: light-dark(#e7bb52, #dcaf4c);     /* the pane's lower edge, one soft step */
+  --rp-amber-edge: light-dark(#c99b33, #a37f2c);
+  --rp-amber-ink: light-dark(#7d5a12, #eec97a);     /* derived: attention TEXT */
+  --rp-seam: light-dark(#5fd8dc, #6fdadd);          /* the cyan seam pane */
+  --rp-rear: light-dark(#7fb0a8, #6fa19a);          /* translucent teal rear panes */
+  --rp-mark-sage: light-dark(#97a97c, #93a67a);     /* measured — upper data square */
+  --rp-mark-amber: light-dark(#d6b472, #cfae6e);    /* measured — lower data square */
+  /* The ink drawn ON Cairn's amber pane. One value, not a light-dark() pair:
+     the pane is warm amber in BOTH themes, so the face never changes side.
+     Task 255 carried this as a bare #12303f inside the drawing; naming it
+     changes no pixel and stops the one magic literal in the art. */
+  --rp-face-ink: #12303f;
+
+  /* Semantic surfaces. Each pairs a quiet ground with an ink that clears
+     4.5:1 on it, because state is always written and never coloured alone. */
+  --rp-apricot: light-dark(#f7dbb9, #4c3f2d);       /* measured — owner notes */
+  --rp-apricot-ink: light-dark(#4a3212, #f6ddb9);
+  --rp-activity: light-dark(#d2e2e9, #2c3c44);      /* approved seed — live work */
+  --rp-activity-ink: light-dark(#12505e, #a9cfdb);
+  --rp-sage: light-dark(#d9e4c9, #33422e);          /* approved seed — connected / verified */
+  --rp-sage-ink: light-dark(#33562f, #bcd4a5);
+  --rp-coral: light-dark(#f2ddd9, #452e2a);         /* restrained: coral is the ink, not a flood */
+  --rp-coral-line: light-dark(#bf5f56, #d98077);    /* derived: the seed #C86F67 measured 3.03:1 */
+  --rp-coral-ink: light-dark(#9a453e, #f2ab9f);     /* derived: STOPPED and ERROR TEXT */
+
+  /* Depth. Hairlines and shadows, never glass.
+     Two different jobs, and conflating them was a real accessibility bug in
+     Slice 1: hairlines are DECORATION — seams between paper surfaces — and
+     WCAG asks nothing of them, while `--rp-control-edge` is the visible
+     boundary OF a control, which 1.4.11 holds to 3:1. */
+  --rp-hairline: light-dark(rgb(21 56 75 / 16%), rgb(242 232 215 / 16%));
+  --rp-hairline-strong: light-dark(rgb(21 56 75 / 28%), rgb(242 232 215 / 28%));
+  --rp-control-edge: light-dark(#61757f, #968d7e);
+  --rp-focus: light-dark(#0f5f6b, #86d0d2);
+  --rp-focus-halo: light-dark(rgb(15 95 107 / 22%), rgb(134 208 210 / 24%));
+
+  /* Geometry and type. No theme has an opinion about these. */
+  --rp-r-lg: 20px;
+  --rp-r-md: 14px;
+  --rp-r-sm: 9px;
+  --rp-sans: Quicksand, "Segoe UI", system-ui, sans-serif;
+  --rp-mono: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
+
+  /* Motion curves. One finite arrival and one finite settle; see motion.css. */
+  --rp-settle: cubic-bezier(.22, .9, .3, 1);
+  --rp-arrive: cubic-bezier(.34, 1.4, .64, 1);
+
+  /* One restrained, static paper texture, shared by every paper surface and
+     never animated. Five bespoke noises would read as five textures. */
+  --rp-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.62' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+
+  /* The non-colour residue, at its daylight value. `light-dark()` takes
+     colours, and these are two shadows, an opacity and a blend mode. */
+  --rp-shadow-low: 0 1px 2px rgb(18 44 58 / 10%);
+  --rp-shadow-paper: 0 10px 26px rgb(18 44 58 / 12%), 0 2px 5px rgb(18 44 58 / 8%);
+  --rp-shadow-lift: 0 4px 12px rgb(18 44 58 / 14%);
+  --rp-grain-opacity: .34;
+  --rp-grain-blend: multiply;
+}
+
+/* The five non-colour tokens, after dusk. These two blocks must stay
+   token-for-token identical; `visualtokens.test.ts` compares them, which is
+   exactly the guard the design spec asks for. */
+:root[data-theme="dark"] {
+  --rp-shadow-low: 0 1px 2px rgb(0 0 0 / 30%);
+  --rp-shadow-paper: 0 12px 30px rgb(0 0 0 / 40%), 0 2px 6px rgb(0 0 0 / 26%);
+  --rp-shadow-lift: 0 4px 14px rgb(0 0 0 / 36%);
+  --rp-grain-opacity: .20;
+  --rp-grain-blend: overlay;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --rp-shadow-low: 0 1px 2px rgb(0 0 0 / 30%);
+    --rp-shadow-paper: 0 12px 30px rgb(0 0 0 / 40%), 0 2px 6px rgb(0 0 0 / 26%);
+    --rp-shadow-lift: 0 4px 14px rgb(0 0 0 / 36%);
+    --rp-grain-opacity: .20;
+    --rp-grain-blend: overlay;
+  }
+}

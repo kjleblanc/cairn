@@ -1,0 +1,34 @@
+/*
+ * Task 258 (Slice 3) — Cairn's own drawn presence.
+ *
+ * The component is `components/CairnProgram.tsx`; this file is the little that
+ * is not geometry. Every selector is `.rp-`-prefixed, which is what makes a
+ * foundation slice safe: no rule here can match a surface Slice 4 has not
+ * migrated yet, and `tests-unit/visualtokens.test.ts` parses this file to prove
+ * that rather than trusting it.
+ *
+ * The arrival and settle animations live in `motion.css`, with the rest of the
+ * app's motion and beside their reduced-motion kills, so the two can be read —
+ * and kept in sync — in one place.
+ */
+
+.rp-program {
+  display: block;
+  /* The rear fan and the data marks sit outside the front pane's box. */
+  overflow: visible;
+}
+
+/* Cairn appears in the surface that currently matters, at his own size. These
+   two are the sizes the constitution names: a brand mark in chrome, and one
+   conversational presence. `size` is a prop, not a class — the component
+   computes width and height from the amber pane's height — so these only carry
+   the layout around him. */
+.rp-program-mark {
+  flex: none;
+  align-self: center;
+}
+
+.rp-program-presence {
+  flex: none;
+  align-self: flex-start;
+}

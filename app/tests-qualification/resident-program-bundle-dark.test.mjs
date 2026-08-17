@@ -18,7 +18,28 @@ import { fileURLToPath } from "node:url";
  */
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BOARD_MARKER = /cairn-resident-program-board|resident-program|CairnProgram|rp-program|data-rp-state/iu;
+
+/*
+ * Markers that belong to the BOARD and to nothing else.
+ *
+ * REWRITTEN by Task 258 (Slice 3), because the original set stopped
+ * discriminating. It matched `CairnProgram`, `rp-program` and the bare phrase
+ * `resident-program`, all three of which now legitimately live in production:
+ * Slice 3's whole job was to promote that primitive out of the lab, and its
+ * class and component name went with it.
+ *
+ * Two things this discovered, both disclosed in Task 258's report:
+ *  - the loose phrase had ALREADY turned this test red on `main`. Task 257's
+ *    `renderer/activity/presentation.ts` names "the resident-program visual
+ *    overhaul" in its header comment, and Task 257 never ran this file.
+ *  - a marker that matches a word in a COMMENT was never testing imports.
+ *
+ * What remains is board-only: its declared marker, a path reference to its
+ * source, and three classes that exist nowhere but the board. The contract is
+ * unchanged — "product-dark" still means absent from production imports,
+ * routes and emitted bundles, and it does NOT mean dark-coloured.
+ */
+const BOARD_MARKER = /cairn-resident-program-board|lab\/resident-program|rp-state-consequence|rp-btn-inert|rp-swatch/iu;
 
 function files(root, extensions = /\.(?:js|css|html)$/u) {
   const output = [];
@@ -114,10 +135,28 @@ test("c7 · the board reaches nothing that could act", () => {
     "node:fs", "node:child_process", "electron", "ipcRenderer", "contextBridge",
     "window.cairn", "fetch(", "XMLHttpRequest", "WebSocket", "EventSource",
     "localStorage", "sessionStorage", "indexedDB", "navigator.clipboard",
-    "process.env", "eval(", "dangerouslySetInnerHTML", "@cairn/core", "../src/",
+    "process.env", "eval(", "dangerouslySetInnerHTML", "@cairn/core",
   ]) {
     assert.ok(!board.includes(seam), `the board must not reach ${seam}`);
   }
+
+  /*
+   * `../src/` used to be on that list. Task 258 (Slice 3) deliberately gave the
+   * board exactly two production imports, so that it demonstrates the CairnProgram
+   * the app actually ships instead of a private copy of the same geometry.
+   *
+   * A blanket ban would now be false, so the reach is enumerated instead: these
+   * two and nothing else. `app.css`, the token file, the stores and every
+   * behaviour-bearing screen stay out — importing the retired night-garden
+   * cascade would mean judging the new system through the old one, and
+   * importing anything that acts would give a lab board authority.
+   */
+  const reach = [...board.matchAll(/from "(\.\.\/src\/[^"]+)"|import "(\.\.\/src\/[^"]+)"/gu)]
+    .map((match) => match[1] ?? match[2]).sort();
+  assert.deepEqual(reach, [
+    "../src/renderer/cairn-program.css",
+    "../src/renderer/components/CairnProgram",
+  ], "the board may take only the shipped primitive from production");
 
   // No remote anything, in any of the three files. The allowed exceptions are
   // the SVG namespace URI, which is an identifier and not a fetch, and the

@@ -12,9 +12,9 @@ This file is orientation plus a copy-ready start prompt; the plan decides.
 | Slice | State | Evidence |
 |---|---|---|
 | 1 — Visual constitution and owner-approved system board | **DONE** | Task 255, commit `d9df42d`. Owner gate 1 approved 2026-08-16: *"Looks amazing. Passes all questions."* |
-| 2 — Extract neutral activity truth with no visible change | **DONE** | Task 257. No owner gate. E2E partial — see below |
-| 3 — Semantic foundations and CairnProgram primitive | **NEXT** | prompt below |
-| 4 — Chat-first workspace and Town/Pond retirement | not started | **Owner gate 2** falls at its end |
+| 2 — Extract neutral activity truth with no visible change | **DONE** | Task 257, commit `91b087e`. E2E partial, shortfall proved pre-existing |
+| 3 — Semantic foundations and CairnProgram primitive | **DONE** | Task 258 |
+| 4 — Chat-first workspace and Town/Pond retirement | **NEXT** | **Owner gate 2 falls at its end** — the first owner judgment since Slice 1 |
 | 5 — Core conversation surface | not started | |
 | 6 — Questions, proposals, approvals, operational papers | not started | |
 | 7 — Running, results, evidence, history, publication | not started | **Owner gate 3** at its end |
@@ -23,186 +23,176 @@ This file is orientation plus a copy-ready start prompt; the plan decides.
 | 10 — Retire obsolete Town/Pond implementation | not started | |
 | 11 — Whole-app qualification and final verdict | not started | **Owner gate 4** at its end |
 
-Slice 1 produced the written visual constitution at
-`docs/superpowers/specs/2026-08-13-cairn-resident-program-visual-design.md`, the
-lab board at `app/lab/resident-program.{html,tsx,css}`, and the two hash-checked
-approved references under `docs/visual-reference/`. Its `--rp-*` tokens are a
-**proposal** and are still not in `src/renderer/tokens.css` — promoting them is
-Slice 3's job.
+## What Slice 4 inherits
 
-Slice 2 replaced `app/src/renderer/town/presentation.ts` with
-`app/src/renderer/activity/presentation.ts`. Both it and
-`app/tests-unit/townpresentation.test.ts` are deleted. The projection is
-reached through `hydrateActivityPresentation`, `observeActivityPresentation`,
-`advanceActivityCue`, `settleActivityPresentation`, `activityStatus` and
-`activityRunKey`, over `ActivityPresentation` / `ActivityCue` / `ActivityEvent`.
-Two committed goldens guard it: a step-by-step reducer transcript
-(`app/tests-unit/activity-transcript.golden.txt`) and per-section render hashes
-(`app/tests-unit/activity-render.golden.txt`), both generated from the OLD
-module before it was deleted.
+**The foundation exists and nothing consumes it.** Slice 3 added, in production:
 
-## Inherited hazards — read before starting Slice 3
+- `src/renderer/tokens.css` — 61 `--rp-*` semantic tokens, appended. Theme
+  variation rides in `light-dark()`, so each colour is declared **once**; only
+  five non-colour tokens (two shadows, an opacity, a blend mode) carry explicit
+  dark and System blocks, and a test compares those two token for token.
+- `src/renderer/surfaces.css` — paper, ink, type, `.rp-control`, focus,
+  semantic grounds.
+- `src/renderer/workspace.css` — `.rp-desk`, rail, header, `.rp-transcript`,
+  `.rp-activity`, `.rp-composer`, `.rp-scroll-x`, and the compact rules at the
+  existing 820 px breakpoint.
+- `src/renderer/components/CairnProgram.tsx` — the shipped Cairn, nine states,
+  `size` = the amber pane's height, `variant="mark"` for chrome.
+- `motion.css` — `rp-arrive` and `rp-settle`, both ending at `transform: none`,
+  both re-killed under `prefers-reduced-motion`.
+
+**Every new selector is `.rp-`-prefixed and a test enforces it.** That is what
+made Slice 3 safe to land alone. Slice 4 is where that stops being true, because
+it puts `rp-` classes onto real markup — so from Slice 4 on, "nothing visible
+changed" is no longer the deliverable and those guards change meaning.
+
+**The old aliases are all still there and still consumed.** `tokens-baseline.golden.txt`
+pins all 110 pre-Slice-3 tokens byte-exact. Slice 4 migrates surfaces onto the
+new system; do not delete a garden/lantern/town token until nothing reads it.
+
+**The lab board draws the shipped component.** `lab/resident-program.tsx` imports
+`CairnProgram` and `cairn-program.css` from `src/` and nothing else. The
+direction is one-way and enforced: production must never import from `lab/`.
+
+## Inherited hazards — read before starting Slice 4
 
 1. **Three known-red E2E scenarios on `main`, none caused by the overhaul.**
-   `conductor.spec.ts:3314` (carried in briefs 243–252), plus two Task 257
-   recorded by rebuilding the renderer at `HEAD` and watching them fail
-   identically: `a fresh confirmed dispatch reaches the same stable Town with
-   reduced motion and no transient packet` (3204) and `a reload mid-run
-   reattaches the conversation's strip and shows the finished state there`
-   (3466). Pattern: scenarios that stop a run early pass; scenarios needing a
-   run to reach verified DONE fail, with `.run-strip` stuck in `Check`.
-2. **Nine known-red app unit tests**, all in `builderlivetransport.test.js` and
+   `conductor.spec.ts:3314` (carried since brief 243), plus `:3204` (reduced
+   motion) and `:3466` (reattachment), which Task 257 proved pre-existing by
+   rebuilding the renderer at `HEAD`. Pattern: scenarios that stop a run early
+   pass; scenarios needing a run to reach verified DONE fail with `.run-strip`
+   stuck in `Check`. **Slice 4 edits `conductor.spec.ts`, so expect to work
+   around these rather than fix them.**
+2. **Nine known-red app unit tests** in `builderlivetransport.test.js` and
    `buildertrackedtext.test.js`. Baseline to diff against is now
-   **970 / 959 / 9 / 2**. Diff the failure SET, never the count.
-3. **The root `playwright.config.ts` declares no `outputDir`**, so it defaults
-   to `test-results` and Playwright clears that directory at the start of every
-   run. Pass `--output=test-results/taskNNN-runner` on every invocation, or
-   declare `outputDir` in any new config. Task 255 destroyed Task 229's cited
-   screenshot this way and it was gitignored and unrecoverable.
-4. **`app/test-results/` holds untracked, gitignored evidence** —
-   `task229-builder-proposal-review.png`, `task255-board/` (19 screenshots).
-   Git cannot restore it. Back it up before running Playwright.
-5. **Never round-trip a source file through PowerShell `Get-Content`/
-   `Set-Content`.** It double-encodes non-ASCII and can empty the file. Also
-   note that the editing tools and the shell both silently convert a `\u`
-   escape in a string literal into the raw control byte — Task 257 hit this on
-   the run-key separator and replaced it with `String.fromCharCode(31)`.
-6. **Re-run a test after you edit it.** Task 255 shipped an edited assertion
-   that had never been run.
-7. **`playwright.cmd` fails from Git Bash** because the repository path contains
-   a space. Use `node ./node_modules/@playwright/test/cli.js test …`, or run it
-   from PowerShell.
-8. **The Windows worker-teardown `EPERM`** on profile cleanup aborts batched
-   Playwright runs (~190 stale `cairn-e2e-profile-*` dirs in `%TEMP%` since
-   2026-07-30, not ours — leave them). Run one Playwright invocation per
-   scenario so a teardown cannot cascade.
+   **997 / 986 / 9 / 2**. Diff the failure SET, never the count.
+3. **A test whose marker matches a word in a comment is not testing imports.**
+   Task 257 turned `resident-program-bundle-dark.test.mjs` red just by naming
+   the overhaul in a header comment, and Slice 2's checks never ran that file.
+   Run every qualification your change could touch, not only the ones your plan
+   section lists.
+4. **The root `playwright.config.ts` declares no `outputDir`**, so it defaults to
+   `test-results` and Playwright clears that directory at the start of every
+   run. Pass `--output=test-results/taskNNN-runner` on every invocation.
+5. **`app/test-results/` holds untracked, gitignored evidence** —
+   `task229-builder-proposal-review.png`, `task255-board/`. Back it up before
+   running Playwright. **The board's screenshots are NOT byte-reproducible:**
+   two consecutive runs of identical code differ in 15 of 19, so never treat a
+   screenshot hash as a no-change baseline. Measure instead.
+6. **`playwright.cmd` fails from Git Bash** because the repository path contains
+   a space. Use `node ./node_modules/@playwright/test/cli.js test …`.
+7. **The Windows worker-teardown `EPERM`** aborts batched Playwright runs. Run
+   one invocation per scenario so a teardown cannot cascade.
+8. **Never spell a control character as a `\u` escape in source** — the editing
+   tools and the shell both turn it into the raw invisible byte. Build it from
+   its code point.
+9. Task 255's board config takes **no app token** (no `globalSetup`, never
+   launches Electron). Slice 4's Electron E2E **does** need both token
+   locations.
 
-## Start prompt for Slice 3
+## Start prompt for Slice 4
 
 Copy everything inside the fence into a fresh Cairn/Codex conversation.
 
 ```text
-Work on: Slice 3 of Cairn's resident-program visual overhaul — semantic
-foundations and the CairnProgram primitive.
+Work on: Slice 4 of Cairn's resident-program visual overhaul — the chat-first
+workspace, and retiring the Town and Pond from the visible app.
 
 Authority: docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md
-Read its Slice 3 section, section 2 (the approved visual constitution, which is
-what you are implementing), section 3 (product truth that must survive),
-section 4 (migration seams) and section 6 (global execution rules) completely.
+Read its Slice 4 section, section 2 (the approved visual constitution), section
+3 (product truth that must survive — all fifteen items), section 4 (migration
+seams) and section 6 (global execution rules) completely. Then read
+docs/superpowers/specs/2026-08-13-cairn-resident-program-visual-design.md
+section 7, which is the composition this slice implements.
 
-Slice 2 closed DONE at Task 257. Read docs/ai-work/tasks/257-report.md before
-starting — its "Limitations" and its `c8` shortfall are your inherited hazards,
-and docs/ai-work/HANDOFF-resident-program-visual-overhaul.md lists eight more.
+Slices 1-3 are DONE. Read docs/ai-work/tasks/258-report.md and the "What Slice 4
+inherits" and "Inherited hazards" sections of
+docs/ai-work/HANDOFF-resident-program-visual-overhaul.md before starting.
 
 Start conditions — verify each, do not assume:
 
 1. Project root: C:\Users\KenJL\Desktop\WebApp Projects\AI Coding Workflow Framework
 2. main is clean and between tasks.
-3. Task 257's report says Disposition: DONE.
+3. Task 258's report says Disposition: DONE.
 4. Claim the LOWEST genuinely free task number. List docs/ai-work/tasks/ across
    the main checkout, EVERY registered worktree, and EVERY local branch. Any
    filename beginning with a number takes it, including a report with no brief.
    Do not trust a number quoted in any document, including this one. Commit the
    brief ALONE to claim your number.
-5. Ask the owner to confirm Lane A is free. Git cannot prove human lane
-   availability, and a registered worktree's existence proves nothing.
+5. Ask the owner to confirm Lane A is free.
 6. Know what else is queued. At the time of writing, lane/h holds Task 254 as
-   DONE and UNLANDED — two commits ahead of main and six behind, waiting for
-   main to be between tasks. Landing is serial and first-ready first-landed, so
-   if lane/h lands while you are mid-task, re-sync main into your work only
-   BETWEEN tasks, never mid-task. Re-derive with
-   `git rev-list --count main..lane/h`; it will be stale.
+   DONE and UNLANDED — two commits ahead of main and eight behind. Re-derive
+   with `git rev-list --count main..lane/h`; it will be stale.
 
 Do not create, delete, reuse, reset or move any registered worktree.
 
-What changes in posture from Slice 2:
+THIS SLICE CHANGES WHAT THE OWNER SEES. That inverts Slices 2 and 3, whose
+deliverable was that nothing moved:
 
-- Slice 2's deliverable was that NOTHING visible changed. This slice adds real
-  production tokens, CSS and a component — but the production workspace
-  composition is NOT yet swapped, so the app should still look essentially as
-  it does. Swapping composition is Slice 4.
-- You must PRESERVE the old token aliases and their existing computed values
-  while unmigrated surfaces still consume them. A foundation task must not
-  silently recolor the rest of the app before its surface slice.
-- There is still NO owner gate. Owner gate 2 falls at the end of Slice 4. Bring
-  the owner a rendered surface only at a real risk boundary.
-
-Visible finish line: approved tokens, type, focus, controls, paper materials,
-motion primitives and CairnProgram exist as reusable production components and
-stay demonstrated in the lab, with the production composition untouched.
+- Slice 3's guard that every `.rp-` selector reaches nothing is about to stop
+  being true on purpose. Update it to mean what you now intend, and say so.
+- "No visible change" is no longer the finish line. The finish line is the
+  approved composition: slim rail, quiet header, centered conversation paper,
+  ONE small Cairn presence, and a non-interactive written activity capsule.
+- OWNER GATE 2 FALLS AT THE END OF THIS SLICE. It is the first owner judgment
+  since Slice 1, and taste-dependent DONE requires it. Present real production
+  screenshots or the running app in empty, responding, needs-owner, working,
+  DONE and STOPPED states at wide, at the supported minimum 760x620, and at the
+  test-only 540x900 containment stress. Ask about scale, calmness, hierarchy,
+  and whether Cairn feels present but small. DO NOT PROCEED ON ASSUMED APPROVAL,
+  and do not lower the 760 px minimum window width.
 
 Work, in the plan's order:
 
-1. Add semantic roles — desk field/chrome, paper/raised paper, ink/muted,
-   hairline/focus, Cairn amber/teal/seam, info/attention/success/stop, depth.
-2. Preserve every old alias and its current computed value.
-3. Remove the forced-night assumption from new components; do NOT delete old
-   garden tokens.
-4. Implement the approved state geometry as ONE decorative SVG with
-   aria-hidden="true" and focusable="false". It has no announced name or state;
-   textual labels remain the sole announced truth.
-5. Consolidate reduced-motion behaviour for new components and remove motion
-   specificity traps.
+1. Preserve Workspace's active project, polling, capture identity attributes,
+   the project-generation guard, view routing and the Chat focus signal. These
+   are behaviour, not scenery, and Slice 2's tests exist to catch you.
+2. Add ONE pure CairnPresenceState combiner resolving the neutral runtime truth
+   from activity/presentation.ts together with Chat's needs-owner seam. Written
+   status and expression must derive from the SAME resolved value — two
+   independent answers to "is something waiting?" would eventually disagree, and
+   the line would be the one that lied. Cover overlapping streaming, needs-owner,
+   terminal, stale-project and disconnected inputs, plus project switch.
+3. Make Chat a main region/section rather than a permanently mounted dialog.
+4. Replace the 1260 px pond-open state with deliberate chat-first responsive
+   composition. Do not introduce another breakpoint cliff.
+5. Leave the Town files and the persistence code present but unused. Slice 10
+   deletes them. Never delete or transform an owner's .cairn/town-square.json.
 
-Exact paths, from the plan: modify app/src/renderer/tokens.css,
-app/src/renderer/main.tsx, app/src/renderer/motion.css,
-app/src/renderer/components/Ui.tsx, the Slice 1 lab files, and
-app/tsconfig.unit.json. Create app/src/renderer/workspace.css,
-app/src/renderer/surfaces.css, app/src/renderer/cairn-program.css,
-app/src/renderer/components/CairnProgram.tsx,
-app/tests-unit/cairnprogram.test.ts and app/tests-unit/visualtokens.test.ts.
-If you find a consumer the list does not name — Slice 2 found
-app/lab/chatmock-view.tsx that way — handle it and disclose it rather than
-trusting the list.
+Delete PondLine.tsx and pondline.test.ts only AFTER their truth, live-region and
+focus coverage has moved. Stop mounting TownSquare; do not delete it.
 
-Preserve: theme persistence, existing surfaces, safe Markdown, control
-callbacks, no new dependency, and no runtime import from @cairn/core into the
-renderer.
+Checks: no mounted Town/Pond/tucked DOM; written idle/ready plus working,
+checking, needs-owner, DONE, STOPPED and error; a project-switch stale-event
+test; a capture-bound identity test; keyboard focus; overflow at every desktop
+size in the plan's matrix; reduced motion; contrast; and targeted E2E under the
+mutex. Run from app/: npm.cmd run typecheck, npm.cmd run test:unit,
+npm.cmd run build:vite, npm.cmd run build:lab, plus the board suites — Slice 3
+proved a qualification can go red from a comment, so run the ones your change
+could touch even if the plan does not list them.
 
-Checks. Run from app/:
-  npm.cmd run typecheck
-  npm.cmd run test:unit
-  npm.cmd run build:lab
-  npm.cmd run build:vite
-plus the Slice 1 browser board config updated to import the production
-primitive WITHOUT making the page reachable from production. Cover token
-completeness, explicit theme renders, measured contrast recomputed from the
-stylesheet's own values (Slice 1 proved pinned numbers hide failures),
-focus and non-text contrast, the SVG's accessible treatment, a
-finite/no-infinite-motion source check, and reduced-motion final-state
-equality.
-
-Diff the unit failure SET against the baseline, never the count. The baseline
-is 970 tests / 959 pass / 9 fail / 2 skipped, and all nine failures sit in
-builderlivetransport.test.js and buildertrackedtext.test.js.
-
-If you run Playwright: keep workers: 1, hold both token locations (the OS-temp
-cairn-app-token and repository-local app/.app-token), acquire atomically, track
-what YOU created and release only that in a finally, and wait rather than
-remove anyone else's. Pass --output=test-results/taskNNN-runner on EVERY
-invocation. Run one invocation per scenario. Back up app/test-results/ first.
+Diff the unit failure SET against 997 / 986 / 9 / 2, never the count.
 
 Boundaries. No dependency install, provider or model call, credential use, paid
-call, external service write, push, publication or deployment. Never delete or
-transform an owner's .cairn/town-square.json. Protect every tracked, staged,
-modified and untracked path, including untracked evidence under
+call, external service write, push, publication or deployment. Protect every
+tracked, staged, modified and untracked path, including untracked evidence under
 app/test-results/. Stage by exact name; never clean, stash, reset, broadly
 stage, or rewrite history. Subagents may perform read-only audits, but only one
 task and one writer may change this repository at a time.
 
-STOP if the new foundation cannot be added without recoloring an unmigrated
-surface, or if theme persistence or an existing surface would change.
+STOP if runtime behaviour cannot be preserved through the composition change, if
+a stale project or run can paint the current project, or if the owner's gate-2
+verdict is anything other than approval.
 
 Close with a truthful report naming every file touched and every check's real
 result, one LOG row, and one exact-path completion commit as DONE or STOPPED
-under AGENTS.md. Then refresh this handoff for Slice 4 — and note that Slice 4
-ends at Owner gate 2, the first owner judgment since Slice 1. Do not begin
-Slice 4 in that conversation.
+under AGENTS.md. Record the owner's gate-2 words verbatim. Then refresh this
+handoff for Slice 5. Do not begin Slice 5 in that conversation.
 ```
 
 ## Required reading for any slice
 
 - `AGENTS.md` and `docs/ai-work/PROJECT.md`
-- the saved plan, and the preceding slice's report
+- the saved plan, the design spec, and the preceding slice's report
 - the complete Git status, and the current files themselves rather than
   historical line numbers

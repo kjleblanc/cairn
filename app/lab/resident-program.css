@@ -205,6 +205,11 @@
 /* ------------------------------------------------------- shared geometry */
 
 :root {
+  /* The ink drawn ON Cairn's amber pane. Theme-independent, because the pane
+     is warm amber in both themes, so it sits in this shared block rather than
+     in the three palettes. Task 258 gave it a name; Task 255 drew it as a bare
+     #12303f inside the art, and the shipped component now reads this token. */
+  --rp-face-ink: #12303f;
   --rp-r-lg: 20px;
   --rp-r-md: 14px;
   --rp-r-sm: 9px;
@@ -342,7 +347,9 @@ code, .rp-mono { font-family: var(--rp-mono); font-size: .92em; }
 
 /* ------------------------------------------------- the resident program */
 
-.rp-program { display: block; overflow: visible; }
+/* `.rp-program` now ships: it lives in src/renderer/cairn-program.css,
+   which this page imports, so the board styles the same component the app
+   does instead of keeping a second copy of its two lines. */
 
 /* Size row: every mark is drawn from ONE geometry at its true pixel size.
    Nothing here is magnified - what the owner sees is what ships. */

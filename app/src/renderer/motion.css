@@ -111,6 +111,39 @@
 }
 .overlay-scrim { animation: overlay-scrim-in .28s ease-out both; }
 
+/* =======================================================================
+   Task 258 (Slice 3) — the resident program's motion vocabulary.
+
+   "Nothing moves that you did not cause." There are exactly TWO animations:
+   one finite arrival and one finite settle. Both are event-driven, both are
+   transform/opacity only, and both END AT `transform: none` — which is
+   precisely why skipping them for reduced motion lands on the identical
+   rendered state instead of somewhere mid-flight.
+
+   No perpetual float, sheen, blink, packet, ripple, bounce or glitch loop, and
+   no delayed typewriter text. Both classes are plain (0,1,0) selectors, so the
+   kill below wins on source order alone — the compound-selector trap this
+   file's header warns about, and which Slice 1 hit when eight (0,2,0)
+   selectors outranked a bare element name, cannot arise here.
+   ======================================================================= */
+@keyframes rp-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rp-settle {
+  from { transform: scale(.94); }
+  to { transform: none; }
+}
+.rp-anim-arrive { animation: rp-arrive 340ms var(--rp-arrive) both; }
+.rp-anim-settle { animation: rp-settle 260ms var(--rp-settle) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The end state is identical; only the travel is removed. Nothing is left
+     mid-animation, hidden, or waiting for an event that will not arrive. */
+  .rp-anim-arrive,
+  .rp-anim-settle { animation: none; opacity: 1; transform: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bubble, .result-card, .task-card, .push-chip, .run-strip, .town-node,
   .town-face-svg, .town-skyglow, .town-face-holo,

@@ -21,6 +21,14 @@ const APP_ROOT = resolve(__dirname, "..", "..");
 const CSS = readFileSync(resolve(APP_ROOT, "lab/resident-program.css"), "utf8");
 const TSX = readFileSync(resolve(APP_ROOT, "lab/resident-program.tsx"), "utf8");
 const HTML = readFileSync(resolve(APP_ROOT, "lab/resident-program.html"), "utf8");
+/**
+ * Task 258 (Slice 3) promoted the drawn program out of the board and into
+ * production, so the assertions about GEOMETRY and EXPRESSION now read the
+ * shipped component while the assertions about the BOARD keep reading the lab.
+ * The contract each one enforces is unchanged — only the file that has to
+ * satisfy it moved, which is the point of promoting it.
+ */
+const PROGRAM = readFileSync(resolve(APP_ROOT, "src/renderer/components/CairnProgram.tsx"), "utf8");
 
 /* ------------------------------------------------------------------ colour */
 
@@ -281,7 +289,7 @@ test("c3 · all nine semantic states are on the board with their literal words",
       `${entry.state} does not carry its literal written truth "${entry.truth}"`,
     );
     assert.ok(
-      new RegExp(`case "${entry.state}":`, "u").test(TSX) || entry.state === "ready",
+      new RegExp(`case "${entry.state}":`, "u").test(PROGRAM) || entry.state === "ready",
       `${entry.state} has no drawn expression`,
     );
   }
@@ -297,21 +305,21 @@ test("c3 · no two states are drawn with the same face", () => {
   // approved resting face) undetectable. Every face is now compared, ready
   // included, by cutting each case at the next `case`/`default` OR at the end
   // of the switch.
-  const switchStart = TSX.indexOf("function Face(");
+  const switchStart = PROGRAM.indexOf("function Face(");
   assert.notEqual(switchStart, -1);
-  const switchEnd = TSX.indexOf("\n}\n", switchStart);
+  const switchEnd = PROGRAM.indexOf("\n}\n", switchStart);
   const bodies = new Map<string, string>();
   const marks = /<(?:OutlinedSquare|SolidSquare|CrescentUp|Bar|SteppedMouth)\b[^/]*\/>/gu;
 
   for (const entry of REQUIRED_STATES) {
     const label = entry.state === "ready" ? 'case "ready":\n    default:' : `case "${entry.state}":`;
-    const at = TSX.indexOf(label, switchStart);
+    const at = PROGRAM.indexOf(label, switchStart);
     assert.notEqual(at, -1, `no drawn expression for ${entry.state}`);
-    const nextCase = TSX.indexOf('case "', at + label.length);
+    const nextCase = PROGRAM.indexOf('case "', at + label.length);
     const end = nextCase === -1 || nextCase > switchEnd ? switchEnd : nextCase;
     // Compare the DRAWN MARKS, not the source text, so a comment or a
     // reformat cannot make two identical faces look different.
-    const drawn = (TSX.slice(at, end).match(marks) ?? [])
+    const drawn = (PROGRAM.slice(at, end).match(marks) ?? [])
       .map((m) => m.replace(/\s+/gu, " "))
       .join("|");
     assert.ok(drawn.length > 0, `${entry.state} draws no marks at all`);
@@ -329,10 +337,10 @@ test("c3 · a card never describes eyes the drawing does not draw", () => {
   // to know what to look for must not contradict the thing beside it.
   const face = (state: string) => {
     const label = state === "ready" ? 'case "ready":\n    default:' : `case "${state}":`;
-    const at = TSX.indexOf(label);
+    const at = PROGRAM.indexOf(label);
     assert.notEqual(at, -1, `no drawn expression for ${state}`);
-    const next = TSX.indexOf('case "', at + label.length);
-    return TSX.slice(at, next === -1 ? TSX.indexOf("\n}\n", at) : next);
+    const next = PROGRAM.indexOf('case "', at + label.length);
+    return PROGRAM.slice(at, next === -1 ? PROGRAM.indexOf("\n}\n", at) : next);
   };
   const card = (state: string) => {
     const at = TSX.indexOf(`state: "${state}",`);
@@ -373,7 +381,7 @@ test("c3 · STOPPED and ERROR carry their required written truth, not just a bad
 test("c3 · STOPPED and ERROR differ by shape, not only by colour", () => {
   assert.match(CSS, /\.rp-glyph-stop\s*\{[^}]*border-radius:\s*2px/u, "STOPPED needs a square mark");
   assert.match(CSS, /\.rp-glyph-error\s*\{[^}]*border-radius:\s*50%/u, "ERROR needs a round mark");
-  assert.match(TSX, /tone="down"/u, "ERROR needs its inverted stepped mouth");
+  assert.match(PROGRAM, /tone="down"/u, "ERROR needs its inverted stepped mouth");
 });
 
 /* ------------------------------------------------------------ art contract */
@@ -382,7 +390,7 @@ test("c2 · the program is code-native, decorative, and announces nothing", () =
   // The only url() on the page is the SVG clip-path reference; no raster,
   // remote image, or generated bitmap may appear anywhere.
   const strip = (text: string) => text.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/^\s*\/\/[^\n]*$/gmu, "");
-  const code = strip(TSX);
+  const code = strip(TSX) + strip(PROGRAM);
   // The CSS is the file that actually embeds an image, so scanning only the
   // TSX left the one real raster risk unexamined.
   const style = strip(CSS);
@@ -403,9 +411,9 @@ test("c2 · the program is code-native, decorative, and announces nothing", () =
   assert.ok(!/data:image\/(?!svg)/u.test(style), "no raster data URI may be embedded");
 
   // The art itself: hidden from the accessibility tree, unfocusable, unnamed.
-  const at = TSX.indexOf("function CairnProgram(");
+  const at = PROGRAM.indexOf("export function CairnProgram(");
   assert.notEqual(at, -1);
-  const program = TSX.slice(at, TSX.indexOf("\n}\n", TSX.indexOf("</svg>", at)));
+  const program = PROGRAM.slice(at, PROGRAM.indexOf("\n}\n", PROGRAM.indexOf("</svg>", at)));
   assert.match(program, /aria-hidden="true"/u);
   assert.match(program, /focusable="false"/u);
   assert.ok(!/role="img"/u.test(program), "the art must not become an announced image");
@@ -414,15 +422,15 @@ test("c2 · the program is code-native, decorative, and announces nothing", () =
 });
 
 test("c2 · one geometry serves every size", () => {
-  assert.match(TSX, /const PANE_W = 76;/u);
-  assert.match(TSX, /const PANE_H = 63\.5;/u);
+  assert.match(PROGRAM, /const PANE_W = 76;/u);
+  assert.match(PROGRAM, /const PANE_H = 63\.5;/u);
   // 12.8, measured: the reference's cut is 41 px across a 240 px pane. An
   // eyeballed 9.5 shipped a corner 26% too shallow.
-  assert.match(TSX, /const CHAMFER = 12\.8;/u);
-  assert.match(TSX, /const scale = size \/ PANE_H;/u,
+  assert.match(PROGRAM, /const CHAMFER = 12\.8;/u);
+  assert.match(PROGRAM, /const scale = size \/ PANE_H;/u,
     "size must mean the front pane's height, so 88 px matches the approved mockup");
   // The clipped top-right corner is the approved silhouette, not a rounded box.
-  assert.match(TSX, /L \$\{PANE_X \+ PANE_W\} \$\{PANE_Y \+ CHAMFER\}/u);
+  assert.match(PROGRAM, /L \$\{PANE_X \+ PANE_W\} \$\{PANE_Y \+ CHAMFER\}/u);
 });
 
 /* ---------------------------------------------------------------- motion */
@@ -496,7 +504,7 @@ test("c6 · no transform is applied to a container holding a control", () => {
     .flatMap((rule) => rule.selector.split(",").map((s) => s.trim()))
     .sort();
   assert.deepEqual([...new Set(animated)], [".rp-anim-arrive", ".rp-anim-settle"]);
-  assert.match(TSX, /className=\{\["rp-program"/u, "the arrival class belongs to the art alone");
+  assert.match(PROGRAM, /className=\{\["rp-program"/u, "the arrival class belongs to the art alone");
 });
 
 /* -------------------------------------------------------------- typography */
@@ -526,16 +534,37 @@ test("c4 · type sizes, measure and targets stay inside the constitution", () =>
 
 /* ---------------------------------------------------------- lab isolation */
 
-test("c7 · the board imports nothing from production and offers no action", () => {
+test("c7 · the board takes only the shipped primitive from production, and offers no action", () => {
   const imports = [...TSX.matchAll(/^import\s+(?:[^"']*from\s+)?["']([^"']+)["'];/gmu)].map((m) => m[1]);
+  /*
+   * REWRITTEN by Task 258 (Slice 3), and the reason matters.
+   *
+   * Task 255 asserted the board imported NOTHING from production, because
+   * Slice 1 was forbidden to touch `app/src/**` and had to be provably
+   * self-contained. Slice 3 deliberately inverts one half of that: the board's
+   * job is to let the owner judge the thing that SHIPS, so it now draws the
+   * production `CairnProgram` instead of a private copy of the same geometry.
+   *
+   * The half that must never invert is the DIRECTION. Production still imports
+   * nothing from `lab/`, and "product-dark" still means the board is absent
+   * from every emitted production bundle — which `resident-program-bundle-dark.test.mjs`
+   * proves against a fresh build, not against this list. A board reaching into
+   * production cannot put the board into production.
+   *
+   * So the allowlist gains exactly two entries and stays exact: anything else
+   * from `src/`, and in particular `app.css` or the shipped token file, would
+   * mean judging the new system through the retired night-garden cascade.
+   */
   assert.deepEqual(imports.sort(), [
     "./resident-program.css",
+    "../src/renderer/cairn-program.css",
+    "../src/renderer/components/CairnProgram",
     "@fontsource/quicksand/400.css",
     "@fontsource/quicksand/600.css",
     "@fontsource/quicksand/700.css",
     "react",
     "react-dom/client",
-  ].sort(), "the board must not reach into src/, core/, or any new dependency");
+  ].sort(), "the board may take only the shipped primitive from src/, and nothing else");
   for (const forbidden of ["window.cairn", "ipcRenderer", "fetch(", "XMLHttpRequest", "dangerouslySetInnerHTML", "localStorage"]) {
     assert.ok(!TSX.includes(forbidden), `the board must not use ${forbidden}`);
   }
