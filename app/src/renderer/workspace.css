@@ -236,16 +236,29 @@
  * The conversation is the object. Warm paper, centered, running the full
  * height of the view so the transcript has every pixel the desk can give it.
  *
- * THE THREE-CLASS SELECTOR IS DELIBERATE. The element still carries
- * `chat-column-villager`, because that class is the hook for the roughly two
- * hundred rules in `app.css` that give the cards and decision panels INSIDE
- * the conversation their paper — surfaces Slice 5 and Slice 6 own, not this
- * one. Dropping it reverted the dispatch panel to a pre-Task-186 card
- * language, which `conductor.spec.ts` caught. So this rule has to beat
- * `.chat-column.chat-column-villager` (0,2,0) on SPECIFICITY rather than on
- * source order, which a CSS minifier is allowed to reorder.
+ * THE THIRD CLASS IS GONE, AND THAT IS TASK 267'S DOING. This selector used
+ * to carry `chat-column-villager` as well, purely to out-specify the retired
+ * `.chat-column.chat-column-villager` (0,2,0) rule in `app.css` on
+ * SPECIFICITY rather than on source order, which a CSS minifier is allowed to
+ * reorder. Slice 7 deleted that rule and every other one hanging off the hook,
+ * so there is nothing left to beat and the selector states what it means.
+ *
+ * IT HAD TO CHANGE IN THE SAME COMMIT. This rule is where the paired tokens
+ * below are re-pointed, so it is what puts every surface inside the
+ * conversation on warm paper. Removing the class from `Chat.tsx` without
+ * shortening this selector would have stopped it matching — taking the
+ * geometry, the material and all thirty-six token re-points with it — and the
+ * damage would have looked like a hundred unrelated colour regressions rather
+ * than one selector that no longer matched.
+ *
+ * One consequence is deliberate and worth naming: at (0,2,0) this rule no
+ * longer outranks the 820px compact block at the end of this file, which is
+ * also (0,2,0) and comes later. That block's conversation padding was dead
+ * for as long as the third class was here; below 820px it now applies, which
+ * is what "compact is the same components with less room" was always meant to
+ * do.
  */
-.rp-conversation.chat-column.chat-column-villager {
+.rp-conversation.chat-column {
   position: relative;
   inset: auto;
   z-index: 1;
@@ -317,7 +330,7 @@
    backdrop blur and a four-edge feather mask. Every one of those properties is
    turned off by name: leaving one unset would let it show through the paper
    this rule replaces. */
-.rp-conversation.chat-column.chat-column-villager::after {
+.rp-conversation.chat-column::after {
   content: "";
   position: absolute;
   z-index: -1;

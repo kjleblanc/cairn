@@ -430,6 +430,95 @@ test("the connected conversation's own text clears the contrast floor", async ()
     expect(["none", "matrix(1, 0, 0, 1, 0, 0)"], "the proposal is drawn under a transform")
       .toContain(proposalMotion.transform);
 
+    /*
+     * Task 267 (Slice 7) — THE RESULT FAMILY, ON SCREEN AND MEASURED.
+     *
+     * Task 260 said Slice 6 should widen this scenario rather than write a
+     * third; Slice 6 said the same to Slice 7. This is that. Setting the
+     * concern aside enables Review, and the offline demonstration lands a
+     * settled run strip and a DONE receipt on the same paper — so the sweep
+     * below measures the receipt's provenance line, its disposition word, its
+     * checked facts, its two disclosure summaries and the run strip's own
+     * controls, none of which any earlier sweep could reach.
+     */
+    await win.locator(".task-risk").getByRole("button", { name: "Set aside" }).click({ noWaitAfter: true });
+    await expect(win.locator(".task-card-actions .pill-primary")).toBeEnabled({ timeout: 20_000 });
+    await win.locator(".task-card").getByRole("button", { name: "Review" }).click({ noWaitAfter: true });
+    await expect(win.locator(".dispatch-panel")).toBeVisible({ timeout: 20_000 });
+    await win.locator(".dispatch-panel").getByRole("button", { name: "Run offline demonstration" }).click();
+
+    const receipt = win.locator(".result-card");
+    await expect(receipt).toBeVisible({ timeout: 40_000 });
+    await expect(receipt.locator(".result-card-disposition")).toHaveText("DONE");
+    const strip = win.locator(".run-strip");
+    await expect(strip).toHaveAttribute("data-run-state", "done", { timeout: 20_000 });
+
+    // Open both provenance disclosures, so the sweep measures the summary
+    // labels AND the unverified material behind them rather than skipping past
+    // a closed fold.
+    for (const label of ["Run details", "Builder's account"]) {
+      const summary = receipt.locator("summary", { hasText: label }).first();
+      if (await summary.count()) await summary.click();
+    }
+    await win.waitForTimeout(600);
+
+    /*
+     * c7 — NOTHING LOST ITS SKIN WHEN THE HOOK CAME OFF.
+     *
+     * This is the check the whole slice turns on, and it can only be made
+     * here: removing `chat-column-villager` deletes the one rule that dressed
+     * every control the per-surface rules do not name. If its replacement had
+     * been missed, those controls would silently fall back to the app's
+     * tactile base — a 999px capsule with a hard 4px bottom edge, a focus ring
+     * in the retired garden cyan, and `opacity: .5` when disabled, which is
+     * the exact accessibility defect Slice 6 removed.
+     *
+     * None of that is visible in a stylesheet diff, and no selector grep finds
+     * it. It is only visible in computed styles in the running app, with a
+     * receipt, a run strip and a composer all on the paper at once.
+     */
+    const skin = await win.locator(".rp-conversation").evaluate((root) => {
+      const capsules: string[] = [];
+      const lifted: string[] = [];
+      const faded: string[] = [];
+      const controls = [...root.querySelectorAll<HTMLElement>("button, summary")];
+      for (const control of controls) {
+        const box = control.getBoundingClientRect();
+        if (box.width === 0 && box.height === 0) continue;
+        const style = getComputedStyle(control);
+        const name = (control.textContent ?? control.tagName).trim().slice(0, 34);
+        // The retired capsule. Every migrated control uses the small radius
+        // token instead, so a 999px (or half-height) radius means fallback.
+        const radius = Number.parseFloat(style.borderTopLeftRadius);
+        if (Number.isFinite(radius) && radius >= 100) capsules.push(`${name} r=${style.borderTopLeftRadius}`);
+        // The tactile base's signature is a solid offset edge drawn as a
+        // box-shadow. Every migrated control declares `box-shadow: none`.
+        if (style.boxShadow !== "none") lifted.push(`${name} shadow=${style.boxShadow}`);
+        // The defect Slice 6 removed: a disabled control read through a fade.
+        const disabled = (control as HTMLButtonElement).disabled
+          || control.getAttribute("aria-disabled") === "true";
+        if (disabled && Number.parseFloat(style.opacity) < 1) faded.push(`${name} opacity=${style.opacity}`);
+      }
+      return { capsules, lifted, faded, counted: controls.length };
+    });
+    expect(skin.counted, "no controls were found, so this check proved nothing")
+      .toBeGreaterThan(6);
+    expect(skin.capsules, "a control fell back to the retired capsule pill").toEqual([]);
+    expect(skin.lifted, "a control fell back to the retired tactile edge").toEqual([]);
+    expect(skin.faded, "a disabled control is being read through a fade again").toEqual([]);
+
+    // The receipt and the strip do not travel: both hold interactive controls,
+    // and `chat-arrive` used to slide AND scale them.
+    for (const [selector, what] of [[".result-card", "receipt"], [".run-strip", "run strip"]] as const) {
+      const motion = await win.locator(selector).first().evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { animation: style.animationName, transform: style.transform };
+      });
+      expect(motion.animation, `the ${what} still animates on arrival`).toBe("none");
+      expect(["none", "matrix(1, 0, 0, 1, 0, 0)"], `the ${what} is drawn under a transform`)
+        .toContain(motion.transform);
+    }
+
     // Put the draft back and leave Send DISABLED for the sweep below. That is
     // the state a composer is in most of the time, and measuring it is what
     // caught a 2.45:1 label: `opacity` fades a control's words and its ground

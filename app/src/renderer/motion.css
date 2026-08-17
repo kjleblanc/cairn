@@ -159,9 +159,26 @@
    blurred the outcome sentence, which is the one line the owner has to read
    before deciding. Outside the conversation the proposal keeps its entrance;
    the manual task screen is Slice 7's.
+
+   Task 267 (Slice 7) finishes the list this comment has been keeping. The
+   three names left in `chat-arrive` were `.result-card`, `.run-strip` and
+   `.push-chip`, held back each time as "its own slice" — and this is it.
+   Every one of them is the container the constitution forbids transforming:
+   the receipt holds its footer actions, three disclosure summaries and the
+   control that opens the local album; the run strip holds Stop this task; and
+   the push chip IS a button. The scale is worse here than anywhere else it was
+   removed, because what it blurs on the way in is the disposition word and the
+   outcome sentence — the two lines that say what actually happened, on a
+   surface whose entire job is to be read rather than admired.
+
+   `chat-arrive` itself stays declared: it is not this slice's to delete while
+   the retired screens still consume it. Only the conversation opts out.
    ======================================================================= */
 .rp-conversation .bubble,
-.rp-conversation .task-card { animation: none; }
+.rp-conversation .task-card,
+.rp-conversation .result-card,
+.rp-conversation .run-strip,
+.rp-conversation .push-chip { animation: none; }
 
 @media (prefers-reduced-motion: reduce) {
   /* The end state is identical; only the travel is removed. Nothing is left
@@ -219,10 +236,10 @@
    * Task 263 (Slice 6). The decision family's controls, for the same reason
    * and by the same route. `app.css`'s last block used to carry two of these —
    * `.dispatch-actions .pill` and `.question-card-actions .pill` — and they
-   * worked there only because they sat AFTER the generic
-   * `.chat-column-villager .pill` kill in source order. Their scoped
-   * replacements are (0,3,0) and would outrank that generic rule anyway, but
-   * they belong here regardless: `app.css` may not name this class at all.
+   * worked there only because they sat AFTER a generic scoped kill in source
+   * order. Their replacements are (0,3,0) and would outrank that generic rule
+   * anyway, but they belong here regardless: `app.css` may not name this class
+   * at all, and as of Slice 7 the scope they used to sit under is gone.
    */
   .rp-conversation .task-card,
   .rp-conversation .task-card-actions .pill,
@@ -248,4 +265,27 @@
   .rp-conversation .candidate-critique-actions .pill:hover:not(:disabled),
   .rp-conversation .task-promise-card-row-choices .pill:hover:not(:disabled),
   .rp-conversation .task-review-owner-check .pill:hover:not(:disabled) { transform: none; }
+
+  /*
+   * Task 267 (Slice 7). The result family declares exactly one piece of
+   * motion: the shared control skin's colour transition. Every other rule the
+   * slice wrote is static — the receipt, the run strip, the publication
+   * checkpoint and the inline evidence declare no `animation`, no
+   * `transition`, no `transform` and no `@keyframes` at all, which is what
+   * lets `evidencepresentation.test.ts` assert an absence over those regions
+   * and mean something by it.
+   *
+   * One kill is enough, and it is deliberately the GENERIC one rather than a
+   * list of the surfaces underneath it: the run strip's controls, the push
+   * chip and the receipt's actions inherit their transition from that one rule
+   * and declare none of their own, so naming them individually would only be a
+   * list to forget to extend.
+   *
+   * IT LIVES INSIDE THIS BLOCK, NOT IN A SECOND ONE. Adding a second
+   * `prefers-reduced-motion` block after this one moves every `lastIndexOf`
+   * marker in the suite onto the new block — four tests in three files pin
+   * their contract that way, and all four went red on exactly that mistake
+   * before this comment existed. There is one final block, and this is it.
+   */
+  .rp-conversation .pill { transition: none; }
 }

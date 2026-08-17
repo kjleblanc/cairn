@@ -3198,9 +3198,17 @@ test("a dispatched run lives in the conversation: the strip names its stage, the
     const style = getComputedStyle(element);
     return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
   });
+  /* REWRITTEN by Task 267 (Slice 7), for the same reason and in the same
+     direction Slice 6 recorded on the dispatch checkpoint at line 2869. This
+     floor was written around the retired 2px-at-3px ring. The run strip's
+     controls take the constitution's ring now — 3px at a 2px offset, the same
+     one the composer, the question card and the checkpoint use — so the offset
+     floor moves with it. THE RING GOT THICKER, which is the direction that
+     matters for 1.4.11; only the offset shrank, and one ring everywhere is the
+     whole point of drawing it. */
   expect(stopFocus.style).toBe("solid");
-  expect(Number.parseFloat(stopFocus.width)).toBeGreaterThanOrEqual(2);
-  expect(Number.parseFloat(stopFocus.offset)).toBeGreaterThanOrEqual(3);
+  expect(Number.parseFloat(stopFocus.width)).toBeGreaterThanOrEqual(3);
+  expect(Number.parseFloat(stopFocus.offset)).toBeGreaterThanOrEqual(2);
 
   // The composer says what is true instead of accepting a send the serial
   // gate would refuse.
@@ -3399,9 +3407,17 @@ test("a worker's claims render only inside the card's claims block, never as a v
     const style = getComputedStyle(element);
     return { style: style.outlineStyle, width: style.outlineWidth, offset: style.outlineOffset };
   });
+  /* REWRITTEN by Task 267 (Slice 7), for the same reason and in the same
+     direction Slice 6 recorded on the dispatch checkpoint at line 2869. This
+     floor was written around the retired 2px-at-3px ring. The run strip's
+     controls take the constitution's ring now — 3px at a 2px offset, the same
+     one the composer, the question card and the checkpoint use — so the offset
+     floor moves with it. THE RING GOT THICKER, which is the direction that
+     matters for 1.4.11; only the offset shrank, and one ring everywhere is the
+     whole point of drawing it. */
   expect(runFocusRing.style).toBe("solid");
-  expect(Number.parseFloat(runFocusRing.width)).toBeGreaterThanOrEqual(2);
-  expect(Number.parseFloat(runFocusRing.offset)).toBeGreaterThanOrEqual(3);
+  expect(Number.parseFloat(runFocusRing.width)).toBeGreaterThanOrEqual(3);
+  expect(Number.parseFloat(runFocusRing.offset)).toBeGreaterThanOrEqual(2);
   writeFileSync(fakeCodex.release, "finish\n");
 
   /* This scenario was already red on `main`, and not for a visual reason: the
@@ -4181,20 +4197,33 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   const chipButton = chip.getByRole("button", { name: "This project is 1 commit ahead of origin. Push?", exact: true });
   await expect(chipButton).toBeVisible();
   await expect(chip).not.toContainText("1 commits");
+  /* REWRITTEN by Task 267 (Slice 7). Task 193's contract is intact — the nudge
+     is quiet, unfilled, unlifted, still, and big enough to hit — and every one
+     of those is still asserted below. Two values moved with the material:
+
+       - the radius is the constitution's small-radius token rather than the
+         retired 1px underline, because the chip is a bordered flat control now
+         and not an underlined word;
+       - the practical target floor is the constitution's 44px rather than 40.
+         It was 4px short, and pressing this control opens a risk pause.
+
+     The transition is deliberately NOT pinned to zero any more: the shared
+     control skin gives every control on this paper one colour transition, and
+     `motion.css` stills it for a reader who asked for less motion. What still
+     must never happen is TRAVEL, which is why `transform` stays pinned. */
   expect(await chipButton.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
-      radius: style.borderRadius,
       background: style.backgroundColor,
       shadow: style.boxShadow,
       transform: style.transform,
-      practicalTarget: element.getBoundingClientRect().height >= 40,
-      underline: style.borderBottomWidth,
-      motion: style.transitionDuration.split(",").every((duration) => Number.parseFloat(duration) === 0),
+      practicalTarget: element.getBoundingClientRect().height >= 44,
+      radiusIsSmall: Number.parseFloat(style.borderRadius) > 0
+        && Number.parseFloat(style.borderRadius) < 100,
     };
   })).toEqual({
-    radius: "1px", background: "rgba(0, 0, 0, 0)", shadow: "none", transform: "none",
-    practicalTarget: true, underline: "1px", motion: true,
+    background: "rgba(0, 0, 0, 0)", shadow: "none", transform: "none",
+    practicalTarget: true, radiusIsSmall: true,
   });
   await chip.scrollIntoViewIfNeeded();
   await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-chip.png") });
@@ -4228,15 +4257,37 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await expect(pause).toContainText("this push publishes 1 commit");
   await expect(pause).toContainText("Pushing publishes these saved snapshots. If your project is public, anyone can see them.");
   await expect(pause).toContainText("You can undo a pushed snapshot with a new one, but the publishing itself can't be taken back.");
+  /* REWRITTEN by Task 267 (Slice 7). Task 193's checkpoint is still borderless
+     grain paper with a restrained corner, and all three of those are still
+     asserted. Two values moved with the material, both the same changes Slice 6
+     recorded for the decision family:
+
+       - the radius is the constitution's small-radius token rather than the
+         retired paper-cut corner;
+       - the shadow is `--rp-shadow-low` rather than `none`, matching every
+         other raised sheet on this paper.
+
+     The shadow is asserted WITHOUT its colour. `--rp-shadow-low` is a cool ink
+     at 10% in Light and black at 30% in Dark, so pinning the whole computed
+     string would make this scenario depend on the machine's theme — the trap
+     Slice 6 recorded after hitting it. */
   expect(await pause.evaluate((element) => {
     const style = getComputedStyle(element);
     return {
       border: style.borderTopWidth,
-      radius: style.borderTopLeftRadius,
-      shadow: style.boxShadow,
+      radiusIsSmall: Number.parseFloat(style.borderTopLeftRadius) > 0
+        && Number.parseFloat(style.borderTopLeftRadius) < 100,
+      shadow: style.boxShadow === "none"
+        ? "none"
+        : style.boxShadow.replace(/^rgba?\([^)]*\)\s*/u, "").trim(),
       grain: style.backgroundImage === "none" ? "none" : "paper",
+      // The registration mark is a real border-left now, not a positioned
+      // ::before, and it is what carries the risk semantic.
+      mark: style.borderLeftWidth,
     };
-  })).toEqual({ border: "0px", radius: "5px", shadow: "none", grain: "paper" });
+  })).toEqual({
+    border: "0px", radiusIsSmall: true, shadow: "0px 1px 2px 0px", grain: "paper", mark: "3px",
+  });
   await pause.locator(".push-confirm-title").scrollIntoViewIfNeeded();
   await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-confirm-wide.png") });
   const pushButton = pause.getByRole("button", { name: "Push", exact: true });
@@ -4245,10 +4296,15 @@ test("a DONE card offers the push chip, and the chip's press opens the contract'
   await expect(pushButton).toBeFocused();
   await win.keyboard.press("Tab");
   await expect(notNowButton).toBeFocused();
+  /* REWRITTEN by Task 267 (Slice 7), the same move Slice 6 made on the
+     checkpoint's actions: the retired 2px-at-3px ring becomes the
+     constitution's 3px at a 2px offset. THE RING GOT THICKER, which is the
+     direction that matters for 1.4.11, and Push and Not now now draw the same
+     ring as every other control on this paper. */
   expect(await notNowButton.evaluate((element) => {
     const style = getComputedStyle(element);
     return { width: style.outlineWidth, style: style.outlineStyle, offset: style.outlineOffset };
-  })).toEqual({ width: "2px", style: "solid", offset: "3px" });
+  })).toEqual({ width: "3px", style: "solid", offset: "2px" });
   await win.screenshot({ path: join(tmpdir(), "cairn-task-193-push-confirm-wide-focus.png") });
 
   await win.setViewportSize({ width: 540, height: 900 });

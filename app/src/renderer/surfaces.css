@@ -207,15 +207,18 @@
    from the constitution's semantics directly.
 
    WHAT THIS SLICE OWNS, AND WHAT IT DELIBERATELY DOES NOT. Of the roughly 281
-   rules that hang off `chat-column-villager`, only the transcript, the two
-   voices, the queue, errors, commentary, follow-ups, the composer and the top
-   bar are moved here. The decision family — question card, task card, dispatch
-   panel, approvals — is Slice 6's, and the result family — receipts, run strip,
-   evidence, publication — is Slice 7's. Both still hang off that class, which
-   is why the class is still on the element and why the generic `.pill` skin in
-   `app.css` is left exactly where it is. Dropping the hook before those two
-   slices have moved is what reverted the dispatch panel to a pre-Task-186 card
-   language during Task 259.
+   rules that hung off the retired scope, only the transcript, the two voices,
+   the queue, errors, commentary, follow-ups, the composer and the top bar were
+   moved by THIS slice. The decision family — question card, task card,
+   dispatch panel, approvals — was Slice 6's, and the result family — receipts,
+   run strip, evidence, publication — was Slice 7's, which also removed the
+   scope itself. (Read historically: when this was written both families still
+   hung off that class, which is why it was still on the element and why the
+   generic `.pill` skin was left in `app.css` exactly where it was. Dropping
+   the hook before those two slices had moved is what reverted the dispatch
+   panel to a pre-Task-186 card language during Task 259. Slice 7 restated that
+   generic skin here before removing the class, which is what finally made the
+   removal safe.)
 
    EVERY SELECTOR STARTS AT `.rp-conversation`. Nothing here can reach TaskRun,
    the Dashboard, an overlay or the standalone chat branch, all of which are
@@ -1060,10 +1063,13 @@
 /*
  * ONE intent-row rule set, used flat by the dispatch checkpoint and by every
  * operational paper, with the proposal's filled variation as an override
- * below. The result receipt's near-identical copy in `app.css` is Slice 7's
- * and is deliberately NOT touched here: its rules sit at (0,3,0) and outrank
- * this (0,2,0) one, so the receipt keeps exactly the appearance it has today.
- * Slice 7 should DELETE its copy in favour of this one rather than porting it.
+ * below.
+ *
+ * Task 267 (Slice 7) DELETED the result receipt's near-identical copy rather
+ * than porting it, which is what this comment asked for. That copy sat at
+ * (0,3,0) and outranked this (0,2,0) one, so it — not this — was what the
+ * receipt's request rows actually wore; with it gone they wear this, and the
+ * receipt and the checkpoint finally state the same provenance the same way.
  */
 .rp-conversation .task-intent { margin-top: 10px; min-width: 0; }
 
@@ -1843,4 +1849,1358 @@
   .rp-conversation .critic-call-actions .pill,
   .rp-conversation .unsealed-candidate-actions .pill,
   .rp-conversation .candidate-critique-actions .pill { padding: 10px 14px; text-align: left; }
+}
+
+/* =======================================================================
+   Task 267 (Slice 7) — THE RESULT FAMILY.
+
+   Live work, terminal receipts, evidence, publication and the follow-up
+   notes. Slice 5 put the conversation on paper and Slice 6 put the
+   decisions on it; these are the surfaces that report what happened.
+
+   ONE HIERARCHY, EVERYWHERE:
+
+     1. the outcome               — disposition and headline, first
+     2. what Cairn checked        — open, never folded
+     3. what the builder claims   — folded, and labelled as unchecked
+     4. the original request      — folded, labelled reference
+
+   TRUTH IS EASIER TO SCAN THAN DECORATION. A receipt is a record, not a
+   dashboard: the disposition is a word with a geometric mark beside it, the
+   checked facts are a ruled list, and the two disclosures that carry
+   UNVERIFIED material say so in their own summary line rather than in a
+   colour. Nothing here fills a surface with a success ground — a receipt
+   that looks triumphant is a receipt that has stopped being evidence.
+
+   Everything here is anchored on `.rp-conversation`, so a rule can only
+   reach a surface that has opted in. Unlike Slice 6, this slice leaves no
+   duplication behind: `result-card*`, `run-strip*`, `push-*`, `followup*`
+   and the evidence classes are rendered by `Chat.tsx` alone (`ResultEvidence`
+   is mounted only there, and `TaskRun` renders none of them), so their
+   unscoped halves move here whole rather than staying in `app.css` for a
+   second screen.
+   ======================================================================= */
+
+/* ------------------------------------------- the shared control skin */
+
+/*
+ * THIS RULE IS WHY THE HOOK COULD COME OFF.
+ *
+ * The retired language flattened every control inside the conversation with
+ * one generic scoped rule. Slice 6's action skin replaced only part of it:
+ * that skin is an ENUMERATED list of eight action containers, so a control
+ * outside those containers — the top bar's project link, the provider and
+ * model pill, the receipt's own actions, the run strip's two controls, the
+ * push chip, the evidence album's pager — was still being skinned by the
+ * retired hook.
+ *
+ * Deleting the hook without this rule drops every one of them back to the
+ * unscoped `.pill` base, which is the app's tactile pill: a 999px capsule
+ * with a hard 4px bottom edge, a `translateY(-2px) scale(1.04)` hover, a
+ * focus ring in the retired garden cyan, and `opacity: .5` when disabled —
+ * the exact fade Slice 6 removed as an accessibility defect, because
+ * `opacity` fades a label and its ground together and neither had been
+ * measured. Four regressions from one deletion, and not one of them visible
+ * in a stylesheet diff.
+ *
+ * So the floor is stated here once, for every control on the paper. The
+ * action skin above is (0,3,0) and still overrides it where a decision
+ * surface wants something louder.
+ */
+.rp-conversation .pill {
+  min-height: 44px;
+  min-width: 44px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  box-shadow: none;
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 15px;
+  transition: background-color .18s, border-color .18s, color .18s;
+}
+
+.rp-conversation .pill-primary {
+  border-color: var(--rp-teal-ink);
+  background: var(--rp-teal);
+  color: var(--rp-on-teal);
+}
+
+.rp-conversation .pill-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--rp-ink-muted);
+}
+
+/* No travel. A transform on a control is the same objection the
+   constitution makes to a transform on a container that holds one: it moves
+   a target the owner is trying to hit. */
+.rp-conversation .pill:hover:not(:disabled) {
+  transform: none;
+  background: var(--rp-paper-chrome);
+  color: var(--rp-ink-strong);
+}
+
+.rp-conversation .pill-primary:hover:not(:disabled) {
+  background: var(--rp-teal-press);
+  color: var(--rp-on-teal);
+}
+
+.rp-conversation .pill:active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+}
+
+.rp-conversation .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * A DISABLED CONTROL IS STILL READ. `opacity: 1` is explicit because the
+ * unscoped `.pill:disabled` and `.pill[aria-disabled="true"]` in `app.css`
+ * both set `.5`, and both are (0,2,0) — these are (0,3,0) and win.
+ * Inactive is carried by losing the fill and the strong edge.
+ */
+.rp-conversation .pill:disabled,
+.rp-conversation .pill[aria-disabled="true"] {
+  opacity: 1;
+  border-color: var(--rp-hairline-strong);
+  background: var(--rp-paper);
+  color: var(--rp-ink-muted);
+  box-shadow: none;
+  cursor: default;
+  transform: none;
+}
+
+/* ----------------------------------------------------- the run strip */
+
+/*
+ * Task 189's idea, kept: a project-scoped run is a ruled THREAD in the
+ * conversation, not another rounded dashboard card between the receipt and
+ * the composer. It is the one surface here that is not a sheet, because it
+ * is not a record — it is the conversation still happening.
+ */
+.rp-conversation .run-strip {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 5px;
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 10px 8px 9px 16px;
+  border: 0;
+  border-top: 1px solid var(--rp-hairline);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+}
+
+.rp-conversation .run-strip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 11px;
+  width: 3px;
+  height: 20px;
+  border-radius: 0 2px 2px 0;
+  background: var(--rp-teal);
+}
+
+.rp-conversation .run-strip-state {
+  grid-column: 1;
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-shrink: 1;
+  color: var(--rp-teal-ink);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/*
+ * EVERY RUN STATE CARRIES A SHAPE AS WELL AS AN INK, and the shapes are the
+ * receipt's own vocabulary so one glance reads the same in both places: an
+ * open ring is working, a filled disc is done, a bar is stopped, a doubled
+ * outline is an error, a hollow square is closed. Read in monochrome the
+ * five are still five.
+ */
+.rp-conversation .run-strip-state::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 2px;
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+}
+
+.rp-conversation .run-strip[data-run-state="running"] .run-strip-state::before {
+  width: 8px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.rp-conversation .run-strip[data-run-state="done"] .run-strip-state {
+  color: var(--rp-sage-ink);
+}
+
+.rp-conversation .run-strip[data-run-state="done"] .run-strip-state::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.rp-conversation .run-strip[data-run-state="stopped"] .run-strip-state,
+.rp-conversation .run-strip[data-run-state="closed"] .run-strip-state {
+  color: var(--rp-amber-ink);
+}
+
+.rp-conversation .run-strip[data-run-state="stopped"] .run-strip-state::before {
+  width: 10px;
+  height: 2px;
+  border-radius: 0;
+  background: currentColor;
+}
+
+.rp-conversation .run-strip[data-run-state="error"] .run-strip-state {
+  color: var(--rp-coral-ink);
+}
+
+.rp-conversation .run-strip[data-run-state="error"] .run-strip-state::before {
+  width: 8px;
+  height: 8px;
+  border: 2px double currentColor;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rp-conversation .run-strip[data-run-state="closed"] .run-strip-state::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rp-conversation .run-strip-stage {
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+
+.rp-conversation .run-strip-terminal {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .run-strip-elapsed {
+  grid-column: 2;
+  grid-row: 1;
+  flex-shrink: 0;
+  padding-left: 10px;
+  border-left: 1px solid var(--rp-hairline);
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+/* The outcome sentence takes its own row and WRAPS. The retired rule
+   ellipsized it onto one line, which hid the end of the one sentence that
+   says what actually happened. */
+.rp-conversation .run-strip-outcome {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  margin: 1px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--rp-hairline);
+  color: var(--rp-ink-muted);
+  font-size: 15px;
+  line-height: 1.45;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .run-strip-controls {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  margin-left: 0;
+  justify-self: end;
+}
+
+/*
+ * The retired rules made these two controls 2px-padded text links — roughly
+ * 20px tall against the constitution's 44 x 44 floor, and one of them is
+ * "Stop this task". They stay quiet, but they are the real size now. This is
+ * a Rewritten disposition with its reason stated, exactly as Slice 6 did for
+ * the question card's 40px actions.
+ */
+.rp-conversation .run-strip-controls .pill {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  color: var(--rp-ink-muted);
+  box-shadow: none;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.rp-conversation .run-strip-controls .pill:hover:not(:disabled) {
+  transform: none;
+  border-color: var(--rp-control-edge);
+  background: var(--rp-paper-raised);
+  color: var(--rp-ink-strong);
+}
+
+.rp-conversation .run-strip-controls .pill:active:not(:disabled) {
+  transform: none;
+  background: var(--rp-paper-raised);
+  box-shadow: none;
+}
+
+.rp-conversation .run-strip-controls .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------ the result receipt */
+
+/*
+ * Task 188's idea, kept whole: the envelope closes a run with ONE PAPER
+ * RECEIPT, not a compact dashboard. It is the same raised sheet the decision
+ * family uses, with the same registration rule down its left edge, so a
+ * conversation reads as one correspondence rather than as two systems.
+ *
+ * The rule's colour is the run's disposition, and it is never the only
+ * carrier: the disposition is also a word, and beside that word is a
+ * geometric mark. Three signals, of which two survive monochrome.
+ */
+.rp-conversation .result-card {
+  position: relative;
+  align-self: stretch;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 16px 18px 14px;
+  border: 0;
+  border-left: 3px solid var(--rp-teal);
+  border-radius: var(--rp-r-sm);
+  box-shadow: var(--rp-shadow-low);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+
+  /* One restrained static texture, on the element's own background so it
+     rides UNDER the children — the same construction, and the same reason,
+     as the decision family's sheet. */
+  background-color: var(--rp-paper-raised);
+  background-image: var(--rp-grain);
+  background-size: 160px 160px;
+  background-blend-mode: soft-light;
+}
+
+.rp-conversation .result-card:has(.result-card-stopped) {
+  border-left-color: var(--rp-amber-ink);
+}
+
+.rp-conversation .result-card:has(.result-card-error) {
+  border-left-color: var(--rp-coral-ink);
+}
+
+.rp-conversation .result-card > .card-title {
+  margin: 0;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+/* WHO REPORTED THIS. Attribution is a line of its own, above the outcome,
+   because a receipt whose source is ambiguous is not evidence. */
+.rp-conversation .result-card-provenance {
+  margin: 3px 0 10px;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------- 1. the outcome, first */
+
+.rp-conversation .result-card-headline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  margin: 0 0 12px;
+  color: var(--rp-ink-strong);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.rp-conversation .result-card-headline,
+.rp-conversation .result-card-headline > *,
+.rp-conversation .result-card-code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .result-card-disposition {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+/*
+ * THE DISPOSITION IS DISTINGUISHED WITHOUT COLOUR. A filled disc is DONE, a
+ * bar is STOPPED, a doubled outline is an ERROR. The marks are Task 188's
+ * and they are deliberately the run strip's marks too, so the live state and
+ * the settled receipt speak one vocabulary. Turn the screen greyscale and
+ * the three are still three.
+ */
+.rp-conversation .result-card-disposition::before {
+  content: "";
+  width: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.rp-conversation .result-card-done {
+  background: transparent;
+  color: var(--rp-sage-ink);
+}
+
+.rp-conversation .result-card-done::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.rp-conversation .result-card-stopped {
+  background: transparent;
+  color: var(--rp-amber-ink);
+}
+
+.rp-conversation .result-card-stopped::before {
+  width: 10px;
+  height: 2px;
+  border-radius: 0;
+  background: currentColor;
+}
+
+.rp-conversation .result-card-error {
+  background: transparent;
+  color: var(--rp-coral-ink);
+}
+
+.rp-conversation .result-card-error::before {
+  width: 8px;
+  height: 8px;
+  border: 2px double currentColor;
+  border-radius: 0;
+  background: transparent;
+}
+
+.rp-conversation .result-card-said,
+.rp-conversation .result-card-task {
+  color: var(--rp-ink);
+  font-weight: 600;
+}
+
+/* A machine code is machine evidence: bounded, monospaced, quiet. */
+.rp-conversation .result-card-code {
+  margin: -6px 0 10px;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  opacity: 1;
+}
+
+.rp-conversation .result-card-sentence {
+  margin: 0 0 8px;
+  color: var(--rp-ink);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------- 2. what Cairn checked, never folded */
+
+.rp-conversation .result-card-facts-title {
+  margin: 0 0 5px;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.rp-conversation .result-card-verification {
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.rp-conversation .result-card-facts {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.rp-conversation .result-card-facts > li {
+  min-width: 0;
+  padding: 7px 2px;
+  border-top: 1px solid var(--rp-hairline);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .result-card-files {
+  margin-top: 4px;
+  padding-left: 16px;
+}
+
+.rp-conversation .result-card-files .mono {
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* A failed verification keeps its own way back, in the stop ink and behind
+   its own rule — the vocabulary `.rp-note-stop` already uses. */
+.rp-conversation .result-card-recovery {
+  padding-left: 10px;
+  border-left: 2px solid var(--rp-coral-ink);
+  background: transparent;
+  color: var(--rp-ink);
+}
+
+/* ------------------- the promised rows: checked, owner-seen, reported */
+
+/*
+ * These rows are the sharpest place in the product where CHECKED and
+ * REPORTED sit side by side, so the distinction is structural: each row
+ * carries Cairn's own status, then the owner's, then the worker's — and the
+ * worker's is the only one that says "(reported, not checked)".
+ */
+.rp-conversation .result-card-promises {
+  min-width: 0;
+  margin-top: 11px;
+}
+
+.rp-conversation .result-card-promise-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.rp-conversation .result-card-promise {
+  min-width: 0;
+  padding: 9px 2px 9px 12px;
+  border-top: 1px solid var(--rp-hairline);
+  border-left: 2px solid var(--rp-hairline-strong);
+  overflow-wrap: anywhere;
+}
+
+/* The first row sits directly under its own heading, so it needs no rule
+   above it — the retired block had this and dropping it would have drawn a
+   second line under the heading. */
+.rp-conversation .result-card-promise:first-child {
+  border-top: none;
+}
+
+.rp-conversation .result-card-promise-text {
+  margin: 0 0 3px;
+  color: var(--rp-ink);
+  line-height: 1.5;
+}
+
+.rp-conversation .result-card-promise-cairn,
+.rp-conversation .result-card-promise-owner,
+.rp-conversation .result-card-promise-worker {
+  margin: 2px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.rp-conversation .result-card-promise-cairn {
+  color: var(--rp-ink);
+  font-weight: 600;
+}
+
+.rp-conversation .result-card-promise-cairn[data-status="passed"] {
+  color: var(--rp-sage-ink);
+}
+
+.rp-conversation .result-card-promise-cairn[data-status="failed"] {
+  color: var(--rp-coral-ink);
+}
+
+.rp-conversation .result-card-promise-cairn[data-status="unfinished"],
+.rp-conversation .result-card-promise-cairn[data-status="none"] {
+  color: var(--rp-ink-muted);
+}
+
+.rp-conversation .result-card-promise-owner {
+  color: var(--rp-ink-muted);
+}
+
+.rp-conversation .result-card-promise-worker {
+  color: var(--rp-ink-muted);
+}
+
+/* The word that does the work. It is not a colour and not an icon. */
+.rp-conversation .result-card-promise-provenance {
+  color: var(--rp-amber-ink);
+  font-weight: 600;
+}
+
+/* --------------------------- 3. complete details, behind native folds */
+
+.rp-conversation .result-card-claims,
+.rp-conversation .result-card-run-details,
+.rp-conversation .result-card-request-context {
+  min-width: 0;
+  margin: 11px 0 0;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--rp-hairline);
+  border-radius: 0;
+  background: transparent;
+  color: var(--rp-ink);
+}
+
+.rp-conversation .result-card details > summary {
+  min-width: 0;
+  padding: 11px 2px 10px;
+  color: var(--rp-ink-muted);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .result-card details > summary:hover,
+.rp-conversation .result-card details[open] > summary {
+  color: var(--rp-ink-strong);
+}
+
+.rp-conversation .result-card details > summary:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+.rp-conversation .result-card-disclosure-heading {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.rp-conversation .result-card-disclosure-title {
+  color: inherit;
+  font-weight: 700;
+}
+
+/*
+ * THE SUMMARY LINE CARRIES THE PROVENANCE, so the owner knows whether what
+ * is behind a fold was checked BEFORE opening it. "checked by Cairn" and
+ * "reported, not checked" are the component's own words; this rule only
+ * makes sure they are read as a label rather than as more prose.
+ */
+.rp-conversation .result-card-disclosure-provenance {
+  color: var(--rp-ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.rp-conversation .result-card-claims-preview {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--rp-ink);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rp-conversation .result-card details[open] > summary .result-card-claims-preview {
+  display: none;
+}
+
+/* Unverified material sits behind its own rule for as long as it is on
+   screen, so an opened fold still reads as a quotation rather than as
+   Cairn's own finding. */
+.rp-conversation .result-card-claims-body,
+.rp-conversation .result-card-request-body,
+.rp-conversation .result-card-run-facts {
+  min-width: 0;
+  margin: 0 0 8px 3px;
+  padding: 2px 4px 6px 13px;
+  border-left: 2px solid var(--rp-hairline-strong);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .result-card-run-facts {
+  list-style: none;
+}
+
+.rp-conversation .result-card-run-facts > li {
+  padding: 6px 0;
+}
+
+.rp-conversation .result-card-run-facts > li + li {
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .result-card-claims-label {
+  color: var(--rp-amber-ink);
+  font-weight: 600;
+}
+
+.rp-conversation .result-card-claims-text {
+  margin: 0 0 4px;
+  color: var(--rp-ink);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.rp-conversation .result-card-section-title {
+  margin: 12px 0 4px;
+  color: var(--rp-ink-strong);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.rp-conversation .result-card-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--rp-ink);
+}
+
+.rp-conversation .result-card-milestone {
+  margin: 12px 0 0;
+  color: var(--rp-ink-muted);
+}
+
+.rp-conversation .result-card-request-context > h2 {
+  font-size: 16px;
+}
+
+/*
+ * ONE intent-row rule set serves the dispatch checkpoint, the operational
+ * papers and this receipt. Slice 6 wrote it once above and left the
+ * receipt's near-identical copy in `app.css` alive only because that copy
+ * sat at (0,3,0) and outranked it; Slice 7 deletes the copy rather than
+ * porting it, exactly as `surfaces.css` line 1066 asked. Nothing is needed
+ * here — the shared rules now simply reach.
+ */
+
+/* ------------------------------------------------------ 4. the actions */
+
+.rp-conversation .result-card-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .result-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+.rp-conversation .result-card-path {
+  flex: 1 1 190px;
+  min-width: 0;
+  margin: 0;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------- the folded historical receipt */
+
+/*
+ * An older run folds down to one line. It is a control, so it takes the
+ * control floor; it is history, so it takes no fill.
+ */
+.rp-conversation .result-card-folded {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-left: 3px solid var(--rp-hairline-strong);
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-sans);
+  font-size: 14px;
+  text-align: left;
+}
+
+.rp-conversation .result-card-folded:hover {
+  border-color: var(--rp-control-edge);
+  border-left-color: var(--rp-hairline-strong);
+  background: var(--rp-paper-raised);
+  color: var(--rp-ink-strong);
+}
+
+.rp-conversation .result-card-folded:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+.rp-conversation .result-card-folded-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-conversation .result-card-folded-hint {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------- evidence */
+
+/*
+ * Task 173's contract, kept: a checked result leads with pictures when — and
+ * only when — the main process vouched for them. Nothing here adds travel;
+ * `evidencepresentation.test.ts` asserts that this whole region declares no
+ * animation and no transition, and that assertion is now anchored on markers
+ * that must be found.
+ */
+.rp-conversation .result-evidence {
+  min-width: 0;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .result-evidence-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.rp-conversation .result-evidence-heading > * {
+  min-width: 0;
+}
+
+.rp-conversation .result-evidence-heading h2 {
+  margin: 2px 0 0;
+  color: var(--rp-ink-strong);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* WHERE THE PICTURE CAME FROM. A local file is labelled as one, behind its
+   own rule, because a screenshot must never be mistaken for a check. */
+.rp-conversation .result-evidence-local {
+  padding: 2px 0 2px 8px;
+  border-left: 1px solid var(--rp-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+}
+
+/*
+ * ONLY THE INLINE HALF IS HERE. `EvidenceAlbum.tsx` renders two things: the
+ * `result-evidence*` section inside the receipt, and the local album, which
+ * goes through `createPortal(..., document.body)` at line 247. The album is
+ * therefore NOT inside `.rp-conversation` and no rule anchored here can ever
+ * reach it — its `evidence-album*` rules stay unscoped in `app.css`, where
+ * they still work, and it belongs to the support surfaces of a later slice.
+ * Scoping them here would have written six rules that silently never match.
+ */
+.rp-conversation .result-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.rp-conversation .result-evidence-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rp-conversation .result-evidence-figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.rp-conversation .result-evidence-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper);
+}
+
+.rp-conversation .result-evidence-figure figcaption {
+  padding: 6px 2px 0;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .result-evidence-open {
+  margin-top: 10px;
+}
+
+/* ------------------------------------------------------- publication */
+
+/*
+ * Task 193's idea, kept: publication is ONE PAPER CHECKPOINT beneath the
+ * checked receipt, and it is a separate risk approval. The target, the
+ * effect, the exposure and the recovery stay fully open — never folded,
+ * never summarised — because this is the last surface before something
+ * leaves the machine.
+ *
+ * It carries the attention rule, not the teal one, and it never takes a
+ * success ground: a checkpoint that looks settled is a checkpoint that has
+ * already misled someone.
+ */
+.rp-conversation .push-flow {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rp-conversation .push-flow > * + * {
+  margin-top: 10px;
+}
+
+/*
+ * The live region is mounted from the start and empty until the flow has an
+ * outcome. Spacing is by sibling margin rather than flex `gap` for exactly
+ * that reason: `gap` would reserve a row for a node with nothing in it, so
+ * an empty announcement would leave dead space under the chip.
+ */
+.rp-conversation .push-outcome {
+  margin: 0;
+}
+
+.rp-conversation .push-flow > .push-outcome:empty {
+  margin-top: 0;
+}
+
+.rp-conversation .push-chip {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* The chip is a nudge and looks like one — quiet, in the attention ink,
+   and at the full control floor because pressing it opens a risk pause. */
+.rp-conversation .push-chip .pill {
+  min-width: 0;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--rp-amber-edge);
+  border-radius: var(--rp-r-sm);
+  background: transparent;
+  color: var(--rp-amber-ink);
+  box-shadow: none;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.rp-conversation .push-chip .pill:hover:not(:disabled) {
+  transform: none;
+  border-color: var(--rp-amber-ink);
+  background: var(--rp-amber-low);
+  color: var(--rp-ink-strong);
+}
+
+.rp-conversation .push-chip .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+.rp-conversation .push-confirm {
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 16px 18px 14px;
+  border: 0;
+  border-left: 3px solid var(--rp-amber-ink);
+  border-radius: var(--rp-r-sm);
+  box-shadow: var(--rp-shadow-low);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  background-color: var(--rp-paper-raised);
+  background-image: var(--rp-grain);
+  background-size: 160px 160px;
+  background-blend-mode: soft-light;
+}
+
+/*
+ * The panel takes focus programmatically when it opens, so the owner lands
+ * on the risk rather than hunting for it. A focused panel must not read as
+ * a button: its title is underlined in the focus ink, the same mechanism the
+ * decision family's headings use.
+ */
+.rp-conversation .push-confirm:focus {
+  border: 0;
+  border-left: 3px solid var(--rp-amber-ink);
+  outline: none;
+}
+
+.rp-conversation .push-confirm-title {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 9px;
+  color: var(--rp-amber-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.rp-conversation .push-confirm:focus .push-confirm-title {
+  text-decoration-line: underline;
+  text-decoration-color: var(--rp-focus);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.rp-conversation .push-confirm-facts {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  margin: 0 0 10px;
+  padding: 0;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .push-confirm-fact {
+  min-width: 0;
+  margin: 0;
+  padding: 9px 2px 9px 11px;
+  border-bottom: 1px solid var(--rp-hairline);
+  border-left: 2px solid var(--rp-hairline-strong);
+  color: var(--rp-ink);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* What this push actually DOES is the row that gets the attention rule. */
+.rp-conversation .push-confirm-effect {
+  border-left-color: var(--rp-amber-ink);
+}
+
+.rp-conversation .push-confirm .mono {
+  min-width: 0;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.rp-conversation .push-confirm-subjects {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.rp-conversation .push-confirm-subjects > li {
+  position: relative;
+  padding: 3px 0 3px 14px;
+  color: var(--rp-ink);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .push-confirm-subjects > li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 12px;
+  width: 5px;
+  height: 1px;
+  background: var(--rp-ink-muted);
+}
+
+.rp-conversation .push-confirm-sentence {
+  margin: 8px 0 0;
+  padding-left: 11px;
+  color: var(--rp-ink);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* The exposure sentence and the way back are two separate paragraphs and
+   stay that way: merging them would let a reader stop after the first. */
+.rp-conversation .push-confirm-publication {
+  border-left: 2px solid var(--rp-amber-ink);
+}
+
+.rp-conversation .push-confirm-recovery {
+  border-left: 2px solid var(--rp-hairline-strong);
+  color: var(--rp-ink-muted);
+}
+
+.rp-conversation .push-confirm-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+/*
+ * The push outcome is `.push-outcome.card` — the COMPOUND is the mechanism.
+ * `Chat.tsx` adds `card` only when there is something true to say, so the
+ * empty state is a zero-height node that keeps its live region alive without
+ * drawing an empty box. Flattening this to `.push-outcome` would paint that
+ * empty node.
+ */
+/*
+ * The outcome SETTLES AS A RECEIPT LINE, not as another card. Task 193 chose
+ * that deliberately: what already happened should not compete with the
+ * checkpoint above it, which is the surface still asking for something. So it
+ * takes no fill and no radius — a ruled edge and a registration mark, like the
+ * facts it reports on.
+ */
+.rp-conversation .push-outcome.card {
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 2px 9px 12px;
+  border: 0;
+  border-top: 1px solid var(--rp-hairline);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--rp-ink);
+}
+
+/* The state mark is its own geometry beside the words, not a fill behind
+   them: a ruled bar whose length and ink both carry the state, while the
+   title beside it says the same thing in words. */
+.rp-conversation .push-outcome.card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  width: 3px;
+  height: 14px;
+  border-radius: 0 2px 2px 0;
+  background: var(--rp-hairline-strong);
+}
+
+.rp-conversation .push-outcome[data-push-state="running"].card::before {
+  height: 14px;
+  background: var(--rp-teal);
+}
+
+.rp-conversation .push-outcome[data-push-state="success"].card::before {
+  height: 20px;
+  background: var(--rp-sage-ink);
+}
+
+.rp-conversation .push-outcome[data-push-state="refusal"].card::before {
+  height: 20px;
+  border-radius: 0;
+  background: var(--rp-coral-ink);
+}
+
+.rp-conversation .push-outcome-title {
+  margin: 0;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.rp-conversation .push-outcome[data-push-state="success"] .push-outcome-title {
+  color: var(--rp-sage-ink);
+}
+
+.rp-conversation .push-outcome[data-push-state="refusal"] .push-outcome-title {
+  color: var(--rp-coral-ink);
+}
+
+.rp-conversation .push-outcome-text {
+  min-width: 0;
+  margin: 4px 0 0;
+  color: var(--rp-ink);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------- the follow-ups */
+
+/*
+ * NOTHING HERE, DELIBERATELY. The plan lists follow-ups among Slice 7's
+ * surfaces, but Slice 5 already moved the whole family — `.rp-conversation
+ * .followups`, its heading, label, hint, list and the note itself with its
+ * own rule, hover, active, focus and disabled states, plus its compact
+ * block. Re-declaring them here would have been strictly harmful: these
+ * rules would sit LATER in the same file and quietly override Slice 5's with
+ * a weaker copy.
+ *
+ * What is left of the retired language is the unscoped base in `app.css`,
+ * which still carries the note's finite arrival. That is Slice 5's motion
+ * decision, not this slice's, and it stays.
+ */
+
+/* ------------------------------------------------------------ narrow */
+
+/*
+ * Decision 9 settled this before evidence existed: at the narrow boundary a
+ * before/after pair becomes two full-width pictures rather than two
+ * thumbnails. `evidence.spec.ts` measures the column count at 1304px and
+ * again at 760px, so this rule is load-bearing and not decoration.
+ *
+ * 1260px is the breakpoint Slice 3 already owns; no new one is introduced.
+ */
+@media (max-width: 1260px) {
+  .rp-conversation .result-evidence-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ----------------------------------------------------------- compact */
+
+/*
+ * Compact is the same components with less room, not a second design.
+ *
+ * The retired rules these replace sat behind `max-width: 620px` — below the
+ * supported 760px minimum, so they only ever reached the test-only 540px
+ * containment stress view and never a size anyone is meant to use. They are
+ * at 820px now, with the rest of the system, which is the breakpoint Slice 3
+ * already owns. Nothing is dropped here; things are only given less room.
+ */
+@media (max-width: 820px) {
+  .rp-conversation .result-card,
+  .rp-conversation .push-confirm {
+    padding: 14px 14px 12px;
+  }
+
+  .rp-conversation .result-card-footer {
+    align-items: flex-start;
+  }
+
+  .rp-conversation .result-card-path {
+    flex-basis: 100%;
+    text-align: left;
+  }
+
+  .rp-conversation .result-card-actions {
+    width: 100%;
+  }
+
+  /*
+   * The run strip TIGHTENS HERE; it does not restack.
+   *
+   * The retired rules gave the controls their own full-width row at 620px.
+   * Moving that to 820px looked like a straight port and was not: 820px is
+   * ABOVE the supported 760px minimum, so a reflow that used to reach only the
+   * unsupported stress view started firing at a size people actually use — and
+   * `conductor.spec.ts` caught it, because "the current safe actions share the
+   * status line" is a contract it measures at exactly 760 x 620.
+   *
+   * So the controls keep their place and their column, and are allowed to wrap
+   * inside it instead. Below the supported minimum they wrap rather than
+   * restack, which still contains them.
+   */
+  .rp-conversation .run-strip {
+    padding: 9px 4px 8px 14px;
+    column-gap: 8px;
+  }
+
+  .rp-conversation .run-strip-controls {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .rp-conversation .push-confirm-fact {
+    padding: 8px 0 8px 8px;
+  }
+
+  .rp-conversation .push-confirm-sentence {
+    padding-left: 8px;
+  }
+
+  .rp-conversation .push-confirm-actions {
+    align-items: flex-start;
+  }
+
+  .rp-conversation .push-confirm-actions .pill,
+  .rp-conversation .result-card-actions .pill {
+    text-align: left;
+  }
 }

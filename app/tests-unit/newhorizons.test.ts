@@ -14,6 +14,16 @@ function rule(selector: string): string {
   return css.slice(start, css.indexOf("}", start));
 }
 
+/* HOISTED by Task 267 (Slice 7). This helper was declared inside one test; the
+   control skin it now has to reach moved out of `app.css`, so a second test
+   needs it too. Same body, module scope. */
+const surfaces = renderer("surfaces.css");
+function surfaceRule(selector: string): string {
+  const start = surfaces.indexOf(`\n${selector} {`);
+  assert.notEqual(start, -1, `${selector} has no rule in surfaces.css`);
+  return surfaces.slice(start, surfaces.indexOf("}", start));
+}
+
 /**
  * Decision 9, rule 5. Buttons are chunky pills with a solid lower edge that
  * compresses on press; motion overshoots rather than easing out; menu items
@@ -106,13 +116,27 @@ test("every added motion stops for reduced motion", () => {
 });
 
 test("the lantern's buttons keep their mint and ghost identities without chunky edges", () => {
-  const primary = rule(".chat-column-villager .pill-primary");
-  assert.ok(primary.includes("var(--garden-cyan)"),
-    "Send has lost its muted mint identity");
-  assert.ok(primary.includes("border: 1px solid") && !primary.includes("0 5px 0"),
-    "Send still carries the old thick lower edge");
-  assert.ok(rule(".chat-column-villager .pill-quiet").includes("background: transparent"),
-    "quiet lantern actions no longer disappear into the paper");
+  // REWRITTEN by Task 267 (Slice 7). Decision 9's contract is intact — ONE
+  // primary action with a muted identity rather than a chunky three-dimensional
+  // pill, and quiet actions that disappear into the paper — but two things
+  // moved and are named here so they are not mistaken for drift:
+  //
+  //   - the skin is stated once now, in the conversation's own sheet, for every
+  //     control on the paper rather than per surface. That single rule is what
+  //     made retiring the old scope safe;
+  //   - the primary's identity is the constitution's teal pair rather than the
+  //     retired pond's cyan. Same role, same restraint, measured token layer.
+  //     The cyan was a legacy alias that only resolved correctly while the
+  //     retired panel existed to re-point it.
+  const primary = surfaceRule(".rp-conversation .pill-primary");
+  assert.ok(primary.includes("var(--rp-teal)") && primary.includes("var(--rp-on-teal)"),
+    "Send has lost its muted identity, or its label is no longer the ink measured against it");
+  const base = surfaceRule(".rp-conversation .pill");
+  assert.ok(base.includes("border: 1px solid") && !base.includes("0 5px 0"),
+    "the shared control skin still carries the old thick lower edge");
+  assert.ok(base.includes("box-shadow: none"), "a control kept the tactile offset edge");
+  assert.ok(surfaceRule(".rp-conversation .pill-quiet").includes("background: transparent"),
+    "quiet actions no longer disappear into the paper");
 });
 
 test("New and Send live inside one compact composer surface", () => {
@@ -124,12 +148,6 @@ test("New and Send live inside one compact composer surface", () => {
 
   // Decision 9's arrangement, asserted on the sheet that actually draws the
   // shipped composer. Task 260 moved it; it did not change what it must be.
-  const surfaces = renderer("surfaces.css");
-  const surfaceRule = (selector: string): string => {
-    const start = surfaces.indexOf(`\n${selector} {`);
-    assert.notEqual(start, -1, `${selector} has no rule`);
-    return surfaces.slice(start, surfaces.indexOf("}", start));
-  };
   const composer = surfaceRule(".rp-conversation .rp-composer");
   assert.ok(composer.includes("flex-direction: column"),
     "the composer does not stack its writing area above its actions");

@@ -181,18 +181,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
  * looks like what it is — the owner's own words, not sent yet. */
 .bubble-pending { opacity: .64; }
 .bubble-pending-controls { margin-top: 6px; align-items: center; gap: 10px; }
-/* Task 155 (fold away the past): a settled older result card collapses to
- * this one-line chip; only the current moment keeps the full card. */
-.result-card-folded {
-  align-self: stretch; display: flex; align-items: center; gap: 10px;
-  padding: 6px 12px; border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: transparent; color: var(--card-muted); font: inherit; font-size: .82rem;
-  cursor: pointer; text-align: left;
-}
-.result-card-folded:hover { background: var(--card); color: var(--card-ink); }
-.result-card-folded:focus-visible { outline: 2px solid var(--garden-cyan); outline-offset: 2px; }
-.result-card-folded-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.result-card-folded-hint { flex-shrink: 0; font-size: .74rem; }
+/* Task 267 (Slice 7) took the folded historical receipt to the conversation's
+   own sheet. Task 155's idea survives whole there — a settled older result
+   collapses to one line and only the current moment keeps the full card — but
+   it is written against measured token pairs and at the control floor, since
+   it is a button. The class that scopes it may not be named in this file, in
+   a rule OR in a comment. */
 /* Task 157's safe tap-to-send behavior remains; Task 194 replaces its old
  * dashed chip material with flat notes. The late lantern block below supplies
  * the scene-specific paper treatment. */
@@ -219,16 +213,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   to { opacity: 1; transform: none; }
 }
 .bubble-system { align-self: center; background: var(--stop-soft); color: var(--stop); text-align: center; }
-/* The run, living in the conversation: one compact line above the composer. */
-.run-strip { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--card); }
-/* One element, two looks: the live region persists across the state change
- * (see Chat.tsx), so only the modifier class swaps under it. */
-.run-strip-state { flex-shrink: 0; }
-.run-strip-stage { font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--card-muted); }
-.run-strip-elapsed { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--card-muted); }
-.run-strip-terminal { font-weight: 600; }
-.run-strip-outcome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--card-muted); }
-.run-strip-controls { display: flex; flex-shrink: 0; gap: 8px; }
+/* Task 267 (Slice 7) took the run strip to the conversation's own sheet, base
+   and all. It has no second consumer: `TaskRun` renders none of these classes,
+   so unlike the decision family's surfaces this one left nothing behind. The
+   live region still persists across the state change — that is Chat.tsx's
+   doing, and this slice did not touch it. The class that scopes it may not be
+   named in this file, in a rule OR in a comment. */
 .composer-closed { margin: 8px 0 0; }
 .chat-composer {
   display: flex; flex-direction: column; gap: 2px; min-width: 0; margin-top: 10px;
@@ -248,31 +238,17 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .chat-composer textarea:disabled { opacity: .6; }
 .chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .chat-composer-actions .pill { padding: 7px 13px; font-size: .87rem; }
-/* The envelope's own turn: a card, not a bubble, because nothing in it was
- * said by anyone — it is Cairn's runtime reporting what it verified. */
-.result-card { align-self: stretch; margin: 0; border: 1px solid var(--line); }
-.result-card-headline { margin: 0 0 8px; font-weight: 600; }
-/* Task 169: the plain clause leads, the fixed code follows quietly. Before
-   this, the headline read "STOPPED — CANCELLED_BY_OWNER". */
-.result-card-said { font-weight: 600; }
-.result-card-code { margin: -4px 0 8px; font-size: 11px; opacity: 0.62; }
-.result-card-disposition { font-size: .74rem; font-weight: 700; letter-spacing: .06em; padding: 3px 8px; border-radius: 999px; }
-.result-card-done { background: var(--green-soft); color: var(--green-deep); }
-.result-card-stopped { background: var(--amber-soft); color: var(--amber-deep); }
-.result-card-error { background: var(--stop-soft); color: var(--stop); }
-.result-card-sentence { margin: 0 0 8px; }
-.result-card-facts { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
-.result-card-files { margin: 4px 0 0; padding-left: 16px; }
-.result-card-recovery { color: var(--stop); }
-.result-card-claims { margin-top: 10px; padding: 8px 12px; background: var(--card-solid); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--card-ink); }
-.result-card-claims-label { margin: 0 0 2px; }
-.result-card-claims-text { margin: 0 0 4px; white-space: pre-wrap; }
-.result-card-section-title { margin: 12px 0 4px; font-size: .9rem; }
-.result-card-detail-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
-.result-card-milestone { margin: 12px 0 0; }
-.result-card-request-context { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
-.result-card-request-context > h2 { font-size: 1rem; }
-.result-card-path { margin: 8px 0 0; color: var(--card-muted); overflow-wrap: anywhere; }
+/* Task 267 (Slice 7) took the result receipt to the conversation's own sheet,
+   base and all. Task 188's idea survives whole there — one paper receipt
+   rather than a compact dashboard, with the pictures and the Cairn-checked
+   facts open and the builder's account and the original request complete
+   behind their own native disclosures — but written against measured token
+   pairs instead of the pond's semantic pills, and with the disposition
+   carrying a geometric mark so it is not colour alone.
+
+   `Chat.tsx` is the only renderer of these classes, so nothing was left
+   behind for a second screen. The class that scopes them may not be named in
+   this file, in a rule OR in a comment. */
 
 /* Task 231: authenticated Builder output is a nonterminal review surface,
  * neither a chat bubble nor an envelope result. These rules style only the
@@ -346,32 +322,25 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
  * can still read at least one image from the card's exact trusted run. The
  * renderer receives opaque IDs, never paths. One surviving still owns the
  * whole width; the approved pair shares it. */
-.result-evidence {
-  margin: 0 0 16px; padding: 0 0 16px; border-bottom: 1px solid var(--line);
-}
-.result-evidence-heading {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px;
-}
-.result-evidence-heading h2 { margin: 2px 0 0; font-size: 1.08rem; }
-.result-evidence-local {
-  flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; background: var(--card);
-  color: var(--card-muted); font-size: .72rem; font-weight: 650;
-}
-.result-evidence-grid {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
-}
-.result-evidence-grid-single { grid-template-columns: minmax(0, 1fr); }
-.result-evidence-figure,
+/* Task 267 (Slice 7) took the INLINE half of this — the `result-evidence`
+   section that leads a checked receipt — to the conversation's own sheet.
+   Task 173's contract is unchanged: the renderer still receives opaque IDs
+   and never paths, one surviving still owns the whole width, and the approved
+   pair shares it.
+
+   The LOCAL ALBUM stays here, and that is not an oversight. It goes through
+   `createPortal(..., document.body)`, so it is not inside the conversation at
+   all and no rule anchored on the conversation could reach it. It belongs to
+   the support surfaces of a later slice. The three rules below therefore keep
+   only their album halves; their receipt halves moved. The class that scopes
+   the moved half may not be named in this file, in a rule OR in a comment. */
 .evidence-album-figure { margin: 0; min-width: 0; }
-.result-evidence-figure img,
 .evidence-album-figure img {
   display: block; width: 100%; height: auto; border-radius: 14px; background: var(--lantern-deep);
 }
-.result-evidence-figure figcaption,
 .evidence-album-figure figcaption {
   padding: 7px 3px 0; color: var(--card-muted); font-size: .78rem; line-height: 1.35;
 }
-.result-evidence-open { margin-top: 10px; }
 
 /* The album reuses the app's established accessible Overlay: Escape, the
  * scrim, and the close control all return to the same living conversation.
@@ -408,29 +377,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .evidence-album-image-slot .evidence-album-figure { background: var(--card-solid); }
 .evidence-album-image-slot .evidence-album-figure figcaption { padding: 7px 8px 8px; }
 .evidence-album-older { margin-top: 16px; }
-/* The push flow. The chip is a nudge and looks like one; the confirmation is
- * the contract's pause and looks like the other cards that ask for a decision
- * before something leaves this machine. */
-/* Spacing by sibling margin rather than flex `gap`, so the live region — which
- * is mounted from the start and empty until it has something to say — leaves
- * no dead space under the chip while it is still silent. */
-.push-flow { align-self: stretch; display: flex; flex-direction: column; }
-.push-flow > * + * { margin-top: 10px; }
-.push-flow > .push-outcome:empty { margin-top: 0; }
-.push-chip { display: flex; }
-.push-confirm { margin: 0; border: 1px solid var(--line); }
-/* The panel is focused when it opens, so it needs a focus ring of its own —
- * :focus-visible would suppress it for a programmatic focus, which is the only
- * way this element is ever focused. */
-.push-confirm:focus { border-color: var(--green); outline: 2px solid var(--green); outline-offset: 2px; }
-.push-confirm-facts { margin: 0 0 8px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
-.push-confirm-subjects { margin: 4px 0 0; padding-left: 16px; }
-.push-confirm-sentence { margin: 0 0 6px; }
-/* Empty and zero-height until the flow has an outcome, so the live region can
- * be mounted from the start and still show nothing (see Chat.tsx). */
-.push-outcome { margin: 0; }
-.push-outcome.card { border: 1px solid var(--line); }
-.push-outcome-text { margin: 0; overflow-wrap: anywhere; }
+/* Task 267 (Slice 7) took the publication flow to the conversation's own
+   sheet, base and all. Task 193's idea survives whole there: publication is
+   one paper checkpoint beneath the checked receipt, its target, effect,
+   exposure and recovery stay fully open, and it remains a separate risk
+   approval that looks like one. Two constructions moved with it deliberately
+   — spacing by sibling margin rather than flex `gap`, and the compound
+   `.push-outcome.card`, both so the live region can be mounted from the start
+   and still occupy nothing while it has nothing true to say. The class that
+   scopes them may not be named in this file, in a rule OR in a comment. */
 /* Task 179: attributed questions and requests share one calm, source-visible
  * review language. The words name every source; color only reinforces it. */
 .question-card, .task-card { align-self: stretch; margin: 0; min-width: 0; }
@@ -745,185 +700,45 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .pond-back:focus-visible { outline: 3px solid var(--garden-cyan); outline-offset: 3px; }
 .chat-villager-root { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
 .chat-villager-root > * { pointer-events: auto; }
-.chat-column.chat-column-villager {
-  position: absolute; top: 12%;
-  /* Wide enough for the conversation's contents (the run strip's two
-   * controls, the top bar's three items); the 400px of Task 146 squeezed
-   * them into wraps and clips. The width never pushes the left edge back
-   * over Cairn's node while there is room to avoid it: calc(50% - 128px)
-   * keeps the 96px anchor clearance plus the 32px pane margin, with a 400px
-   * floor — below the floor (very narrow panes) the dialog slides left over
-   * the node, the same overlay tradeoff the ≤620px centered mode already
-   * makes, and tucking reveals him again. */
-  left: max(16px, min(calc(50% + 96px), calc(100% - 32px - var(--town-chat-width))));
-  width: var(--town-chat-width);
-  height: auto; max-height: 76%; margin: 0;
-  /* Task 186 kept the lantern's warmth but retired its glass-card silhouette:
-     one controlled edge, a slightly uneven paper cut, faint fibre, and a soft
-     pool of light instead of a stacked halo.
+/* Task 267 (Slice 7) retired the conversation panel that used to live here:
+   its geometry, its translucent lantern surface, the four-edge feather mask
+   it painted on a pseudo-element, the backdrop-blur fallback behind it, and
+   the paired-token re-pointing that re-toned every card inside it.
 
-     Task 197 finishes that: the outline and the drop shadow are gone. A drop
-     shadow is the single strongest signal that a surface floats ABOVE what is
-     behind it, and it was the last thing making this read as a slab on the
-     pond. The warm spill stays and widens — light spilling ONTO the water is
-     what puts the surface in the pond rather than over it. This deliberately
-     retires the "one spill and one quiet drop" contract; see the Task 197
-     report.
+   NONE OF IT WAS STILL PAINTING. Task 259 (Slice 4) made the conversation a
+   region inside the desk rather than a dialog floating over a world, and
+   wrote its replacement in `workspace.css` on a deliberately longer selector
+   so it would win on SPECIFICITY rather than on source order, which a CSS
+   minifier is allowed to reorder. Every property declared here was overridden
+   there — including `position` and `inset`, which is why the absolute
+   placement above never took effect, and the entrance, which is turned off by
+   name. What is deleted is therefore a cascade that had already lost.
 
-     The paper is still the lantern's own, declared here from the lantern's own
-     palette. Only the painting moves, to ::after, so the feather mask can
-     never touch text. ::before is not available: that selector is the retired
-     villager tail and lantern.test.ts guards its absence. */
-  padding: 21px;
-  border: 0;
-  border-radius: 28px 31px 29px 26px;
-  --surface-lit: color-mix(in srgb, var(--lantern-paper-lit) var(--surface-alpha-lit), transparent);
-  --surface-body: color-mix(in srgb, var(--lantern-paper) var(--surface-alpha-body), transparent);
-  --surface-foot: color-mix(in srgb, var(--lantern-plum) var(--surface-alpha-foot), transparent);
-  background: none;
-  box-shadow: 0 0 96px rgb(247 211 168 / 6%);
-  /* The paired tokens are re-pointed once, here. Every card, rule, and muted
-     line inside the lantern is already written against them, so they re-tone
-     through the cascade rather than being rewritten rule by rule. Only what
-     carries its own colour in the approved mockup is named below.
-     Each alpha is the mockup's own value for the surface that token serves:
-     5% is `.l3-card` / `.l3-menu`, the card fill (lantern-v3.html:99,110);
-     7% is `.l3-input`, the composer field (lantern-v3.html:130); 13% is the
-     hairline rule (narrow-v2.html:66,69). */
-  --card: rgb(246 236 225 / 5%);
-  --card-solid: rgb(246 236 225 / 7%);
-  /* Task 197 (widened scope, owner-approved after seeing the first render).
-     Tasks 188/191 gave the receipt and the checkpoint a 3% cream wash. That
-     was invisible against the old ~90% opaque paper, but the surface is now
-     translucent over dark water — so the SAME wash suddenly reads as a lighter
-     block with a hard fill boundary, and the inner cards became the slab the
-     outer surface had just stopped being.
+   The one thing that was NOT merely redundant is the token re-pointing, and
+   it did not live only here: `workspace.css` re-points the same paired tokens
+   on its own rule, which is what keeps every unmigrated surface on warm paper
+   now that this block is gone. That rule had to lose one class from its
+   selector in the same change, or it would have stopped matching too.
 
-     The wash is not what identifies these cards: the 2px rule down their left
-     edge and their spacing are, which is what "flat ruled paper" already
-     meant. So the fill goes and the tint drops. The @supports fallback below
-     restores both, because with an opaque surface the original values are
-     right again — this is a relationship between the two, not a new opinion
-     about the cards. */
-  --inner-card-fill: transparent;
-  --inner-card-tint: rgb(163 221 208 / 5%);
-  --card-ink: var(--lantern-ink);
-  --card-muted: var(--lantern-soft);
-  --line: rgb(246 236 225 / 13%);
-  /* The panel is dark paper in BOTH themes now, so the theme-paired warning
-     tokens have to come with it — in light theme --stop-soft is a bright pale
-     block on dark paper, and --stop text measures ~3:1 against the card. */
-  --stop: var(--pond-stop);
-  /* Task 197, same reason as --stop directly above, found by the new measured
-     contrast check rather than by eye. --green-deep is a light-dark() pair, so
-     on this permanently dark paper it resolves to the LIGHT theme's #3f5c31 —
-     dark green on dark paper, measured at 1.14:1 against a 4.5 floor. That is
-     the identical class of bug Task 171's whole-branch review found once
-     before, which is why the check now exists. The dark-side green comes with
-     the paper, exactly as the coral did. */
-  --green-deep: var(--pond-done);
-  /* 5%, not 12%: this wash sits UNDER --green-deep ink, so a lighter wash
-     costs contrast. Measured on the Recommended tag — 12% gives 4.05:1,
-     under the floor for its 11.8px bold; 5% clears it. Same trade the
-     --stop-soft comment above records, found the same way. */
-  --green-soft: color-mix(in srgb, var(--pond-done) 5%, transparent);
-  --green: var(--pond-done);
-  /* The muted ink measured 4.21-4.48:1 for body text on this paper — under the
-     floor even before Task 197, and Task 197's translucency costs it a further
-     ~0.2. Lifted here, inside the lantern, rather than in the global token: the
-     shelf and town square use --lantern-soft over different, darker material
-     and are not this task's to re-tone. */
-  --lantern-soft: #d8cabd;
-  /* 12%, not 18%: the coral text sits ON this wash, so a lighter wash costs
-     contrast. Measured against the card's own 5% wash over the paper —
-     18% gives 4.27:1 (under the 4.5 floor for this 14.7px bold), 15% is 4.54
-     with no headroom, 12% is 4.83. The blend ratio is the free parameter here;
-     the approved coral itself does not move. */
-  --stop-soft: color-mix(in srgb, var(--pond-stop) 12%, transparent);
-  color: var(--card-ink);
-  /* The rise lands the panel, and then it STAYS landed.
-     The approved lantern-v3 mockup swayed the whole lantern on an 8s loop, and
-     that is deliberately not shipped: the mockup swayed a picture, while this
-     panel holds the composer, the run controls, and every card. An infinite
-     transform on the container means every control inside it is permanently
-     moving. That is not only a testing problem — it is harder to hit for
-     anyone, and materially so with a motor impairment — but the test evidence
-     is unusually clean: with the sway, Playwright reported "element is not
-     stable" 60 times over 30 seconds on the first click of nearly every spec
-     (19 failed / 4 passed against a 3-failure baseline); with it removed and
-     nothing else changed, the same specs passed in 4.5 seconds.
-     Everything else about the lantern is the mockup: warm paper, the light
-     spilling onto the water, the rounding.
-     Killing what remains needs the reduced-motion block at the END of this
-     file, not the one above: a media query adds no specificity, so
-     `.chat-column-villager` up there is (0,1,0) and loses to this (0,2,0). */
-  animation: villager-rise .42s var(--spring) both;
-}
-/* Task 197: the surface itself, painted behind its own text.
+   The class that scoped all of this may not be named in this file, in a rule
+   OR in a comment, and after this slice it exists nowhere at all. */
+/* Task 267 (Slice 7) deleted the last five rules that hung off the retired
+ * scope here, each one proved redundant rather than assumed so:
  *
- * This exists as a separate layer for one reason: the feather is a mask, and a
- * mask applied to the column would fade the TEXT at the edges as well as the
- * paper. Painting the surface on ::after and holding it at z-index -1 inside
- * the column's own stacking context means the paper thins out while every
- * glyph stays at full strength.
+ *   - the two flex rules that made the message list the only child that gives
+ *     were duplicated verbatim into `workspace.css` by Task 259, scoped to the
+ *     conversation's own class, where they have outranked this copy ever
+ *     since;
+ *   - the fact grid's narrow column count is superseded by the rules Slice 6
+ *     wrote for the dispatch checkpoint, which is the only surface inside the
+ *     conversation that renders one. The unscoped base near the top of this
+ *     file still serves the run screen, and stays;
+ *   - the two long-path wrapping rules were likewise already duplicated into
+ *     `workspace.css` by Task 259.
  *
- * The two-axis mask, composited with `intersect`, thins all four edges over
- * --surface-feather. The surface therefore never stops anywhere: there is no
- * edge to find, which is what "part of the pond" rather than "on the pond"
- * actually means.
- *
- * backdrop-filter is what makes the fill readable at these alphas — it
- * diffuses the field behind the paper instead of letting detail read straight
- * through the words. The @supports block below is the fallback for machines
- * that cannot do it. */
-.chat-column.chat-column-villager::after {
-  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
-  border-radius: inherit;
-  background-image:
-    var(--paper-grain),
-    linear-gradient(170deg, var(--surface-lit), var(--surface-body) 62%, var(--surface-foot));
-  background-size: 160px 160px, auto;
-  background-blend-mode: overlay, normal;
-  backdrop-filter: blur(13px) saturate(112%);
-  mask-image:
-    linear-gradient(to bottom, transparent 0, #000 var(--surface-feather), #000 calc(100% - var(--surface-feather)), transparent 100%),
-    linear-gradient(to right, transparent 0, #000 var(--surface-feather), #000 calc(100% - var(--surface-feather)), transparent 100%);
-  mask-composite: intersect;
-}
-/* Fail CLOSED to legible. Without backdrop-filter the field reads straight
- * through the paper, and the feather thins the fill exactly where the key
- * light is brightest — the two failures compound. A machine that cannot blur
- * gets the opaque surface and its hairline back instead. */
-@supports not (backdrop-filter: blur(1px)) {
-  .chat-column.chat-column-villager {
-    --surface-alpha-lit: 92%;
-    --surface-alpha-body: 89%;
-    --surface-alpha-foot: 87%;
-    border: 1px solid rgb(246 236 225 / 9%);
-    /* Opaque paper again, so the original card wash is right again. */
-    --inner-card-fill: rgb(246 236 225 / 3%);
-    --inner-card-tint: rgb(163 221 208 / 7%);
-  }
-  .chat-column.chat-column-villager::after { mask-image: none; }
-}
-/* Inside the dialog, only the message list gives. Before this, every child
- * shrank proportionally once the column hit max-height, collapsing the list
- * to a one-line strip with an always-on OS scrollbar; now the list — the one
- * region that can scroll — absorbs the overflow and everything else (top bar,
- * run strip, composer) keeps its natural size. */
-.chat-column-villager > * { flex-shrink: 0; }
-.chat-column-villager > .chat-messages { flex-shrink: 1; min-height: 0; overflow-x: hidden; }
-/* The top bar's provider·model pill takes the leftover space and ellipsizes
- * instead of forcing a wrap. These three rules were duplicated verbatim into
- * `workspace.css` by Task 259, scoped to the conversation's own class, where
- * they outrank this copy on specificity; Task 260 removes the copy rather than
- * leaving two statements of the same rule to drift apart.
- * (This file may not NAME that class — `visualtokens.test.ts` regexes the whole
- * of app.css, comments included, so the two cascades stay separable.) */
-/* Cards' fact grids and long mono paths fit the narrower measure. */
-.chat-column-villager .route-facts { grid-template-columns: 1fr 1fr; }
-.chat-column-villager .route-facts strong,
-.chat-column-villager .result-card-files .mono { overflow-wrap: anywhere; }
+ * (This file may not NAME the conversation's own class — `visualtokens.test.ts`
+ * regexes the whole of app.css, comments included, so the two cascades stay
+ * separable and a later slice can delete one without reading the other.) */
 .chat-tuck {
   border: 0; background: transparent; color: var(--card-muted); font: inherit;
   font-size: .78rem; cursor: pointer; border-radius: 8px; padding: 3px 8px;
@@ -935,7 +750,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   left: max(16px, min(calc(50% + 84px), calc(100% - 266px)));
   display: flex; align-items: center; gap: 8px;
   /* The chip is the lantern's put-away form, but it sits OUTSIDE
-     `.chat-column-villager`, so it resolved the GLOBAL `--card-solid` /
+     the retired panel's own scope, so it resolved the GLOBAL `--card-solid` /
      `--card-ink` — the bright cream fill Decision 9 exists to remove, sitting
      on the dark pond. It carries the lantern's own paper and border instead. */
   padding: 9px 16px; border: 1px solid rgb(246 236 225 / 12%);
@@ -980,212 +795,33 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
    The `.task-chip` scoped radius that shared the first of those rules went
    with them. No component renders that class, so nothing on screen moved. */
-/* Result states keep the pond's approved semantic colours, but Task 188 uses
-   them as printed words and geometric marks rather than another row of pills. */
-.chat-column-villager .result-card-done { background: transparent; color: var(--pond-done); }
-.chat-column-villager .result-card-stopped { background: transparent; color: var(--pond-task); }
-.chat-column-villager .result-card-error { background: transparent; color: var(--pond-stop); }
-/* Task 188: the envelope closes a run with one paper receipt, not a compact
-   dashboard. Pictures and Cairn-checked facts stay open; the builder's account
-   and original request remain complete behind separate native disclosures. */
-.chat-column-villager .result-card {
-  position: relative; flex-shrink: 0; overflow: visible; min-width: 0;
-  padding: 18px 18px 15px 21px; border: 0; border-radius: 5px 9px 7px 4px;
-  box-shadow: none;
-  background-color: var(--inner-card-fill);
-  background-image:
-    var(--paper-grain),
-    linear-gradient(108deg, var(--inner-card-tint), transparent 58%);
-  background-size: 160px 160px, auto;
-  background-blend-mode: soft-light, normal;
-}
-.chat-column-villager .result-card::before {
-  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
-  width: 2px; border-radius: 0 2px 2px 0;
-  background: var(--garden-cyan); opacity: .76;
-}
-.chat-column-villager .result-card:has(.result-card-stopped)::before { background: var(--garden-amber); }
-.chat-column-villager .result-card:has(.result-card-error)::before { background: var(--pond-stop); }
-.chat-column-villager .result-card > .card-title {
-  margin: 0; color: var(--garden-cyan); font-size: .76rem; letter-spacing: .075em;
-  text-transform: uppercase;
-}
-.chat-column-villager .result-card-provenance {
-  margin: 3px 0 10px; color: var(--lantern-soft); font-size: .76rem; line-height: 1.35;
-}
-.chat-column-villager .result-card-headline {
-  display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 6px;
-  margin: 0 0 12px; color: var(--lantern-ink); font-size: 1rem;
-}
-.chat-column-villager .result-card-headline,
-.chat-column-villager .result-card-headline > *,
-.chat-column-villager .result-card-code { min-width: 0; overflow-wrap: anywhere; }
-.chat-column-villager .result-card-disposition {
-  display: inline-flex; align-items: center; gap: 6px; padding: 0;
-  border-radius: 0; background: transparent; font-size: .92rem; letter-spacing: .08em;
-}
-.chat-column-villager .result-card-disposition::before {
-  content: ""; width: 8px; height: 2px; border-radius: 2px; background: currentColor;
-}
-.chat-column-villager .result-card-done::before {
-  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
-}
-.chat-column-villager .result-card-stopped::before {
-  width: 9px; height: 2px; border-radius: 0; background: currentColor;
-}
-.chat-column-villager .result-card-error::before {
-  width: 7px; height: 7px; border: 2px double currentColor;
-  border-radius: 0; background: transparent;
-}
-.chat-column-villager .result-card-code { margin: -8px 0 10px; }
-.chat-column-villager .result-card-verification { min-width: 0; margin-top: 2px; }
-.chat-column-villager .result-card-facts-title {
-  margin: 0 0 5px; color: var(--lantern-soft); font-size: .78rem;
-  font-weight: 650; letter-spacing: .04em;
-}
-.chat-column-villager .result-card-facts {
-  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0;
-}
-.chat-column-villager .result-card-facts > li {
-  min-width: 0; padding: 7px 2px; border-top: 1px solid rgb(246 236 225 / 8%);
-  overflow-wrap: anywhere;
-}
-.chat-column-villager .result-card-files { margin-top: 4px; }
-.chat-column-villager .result-card-recovery {
-  padding-left: 10px; border-left: 2px solid var(--pond-stop);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--pond-stop) 9%, transparent), transparent 70%);
-}
-.chat-column-villager .result-card-claims {
-  min-width: 0; margin: 11px 0 0; padding: 0;
-  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
-  border-radius: 0; background: transparent; color: var(--lantern-ink);
-}
-.chat-column-villager .result-card-run-details {
-  min-width: 0; margin: 11px 0 0; padding: 0;
-  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
-  border-radius: 0; background: transparent; color: var(--lantern-ink);
-}
-.chat-column-villager .result-card-request-context {
-  min-width: 0; margin: 11px 0 0; padding: 0;
-  border: 0; border-top: 1px solid rgb(246 236 225 / 10%);
-  border-radius: 0; background: transparent; color: var(--lantern-ink);
-}
-.chat-column-villager .result-card details > summary {
-  min-width: 0; padding: 10px 2px 9px; color: var(--lantern-soft);
-  cursor: pointer; overflow-wrap: anywhere;
-}
-.chat-column-villager .result-card details > summary:hover { color: var(--lantern-ink); }
-.chat-column-villager .result-card details > summary:focus-visible {
-  outline: 2px solid var(--garden-cyan); outline-offset: 2px;
-}
-.chat-column-villager .result-card details[open] > summary { color: var(--lantern-ink); }
-.chat-column-villager .result-card-disclosure-heading {
-  display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px;
-}
-.chat-column-villager .result-card-disclosure-title { color: inherit; font-weight: 700; }
-.chat-column-villager .result-card-disclosure-provenance {
-  color: var(--garden-cyan); font-size: .72rem; font-weight: 650; letter-spacing: .025em;
-}
-.chat-column-villager .result-card-claims-preview {
-  display: -webkit-box; margin: 4px 0 0; overflow: hidden;
-  color: var(--lantern-ink); font-size: .9rem; line-height: 1.42;
-  -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-}
-.chat-column-villager .result-card details[open] > summary .result-card-claims-preview { display: none; }
-.chat-column-villager .result-card-claims-body,
-.chat-column-villager .result-card-request-body {
-  min-width: 0; margin: 0 0 8px 3px; padding: 2px 4px 6px 13px;
-  border-left: 2px solid rgb(246 236 225 / 11%); overflow-wrap: anywhere;
-}
-.chat-column-villager .result-card-run-facts {
-  list-style: none; min-width: 0; margin: 0 0 8px 3px; padding: 2px 4px 6px 13px;
-  border-left: 2px solid rgb(246 236 225 / 11%); overflow-wrap: anywhere;
-}
-.chat-column-villager .result-card-run-facts > li { padding: 6px 0; }
-.chat-column-villager .result-card-run-facts > li + li {
-  border-top: 1px solid rgb(246 236 225 / 8%);
-}
-.chat-column-villager .result-card-claims-label { color: var(--garden-cyan); }
-.chat-column-villager .result-card-request-body .task-intent { margin-top: 2px; }
-.chat-column-villager .result-card-request-body .task-intent-row {
-  padding: 8px 0 8px 12px; border: 0; border-left: 2px solid rgb(246 236 225 / 16%);
-  border-radius: 0; background: transparent;
-  color: var(--lantern-ink);
-}
-.chat-column-villager .result-card-request-body .task-intent-owner-stated {
-  border-left-color: var(--garden-cyan); background: transparent;
-}
-.chat-column-villager .result-card-request-body .task-intent-owner-stated .muted {
-  color: var(--garden-cyan);
-}
-.chat-column-villager .result-card-request-body .task-intent-owner-unsure {
-  border-left-color: var(--garden-amber); background: transparent;
-}
-.chat-column-villager .result-card-request-body .task-intent-cairn-chosen {
-  border-left-color: rgb(246 236 225 / 16%); background: transparent;
-}
-.chat-column-villager .result-card-footer {
-  display: flex; align-items: flex-end; justify-content: space-between;
-  flex-wrap: wrap; gap: 8px 12px; margin-top: 11px; padding-top: 10px;
-  border-top: 1px solid rgb(246 236 225 / 10%);
-}
-.chat-column-villager .result-card-actions { margin: 0; }
-.chat-column-villager .result-card-path {
-  flex: 1 1 190px; min-width: 0; margin: 0; text-align: right;
-}
-.chat-column-villager .result-card .result-evidence-figure img { border-radius: 5px 8px 6px 4px; }
-.chat-column-villager .result-card .result-evidence { margin-bottom: 12px; padding-bottom: 12px; }
-.chat-column-villager .result-card .result-evidence-heading { flex-wrap: wrap; }
-.chat-column-villager .result-card .result-evidence-heading > * { min-width: 0; }
-.chat-column-villager .result-card .result-evidence-local {
-  padding: 2px 0 2px 8px; border-left: 1px solid var(--line);
-  border-radius: 0; background: transparent;
-}
-@media (max-width: 620px) {
-  .chat-column-villager .result-card { padding: 14px 12px 12px 16px; }
-  .chat-column-villager .result-card-footer { align-items: flex-start; }
-  .chat-column-villager .result-card-path { flex-basis: 100%; text-align: left; }
-}
-/* Task 260 (Slice 5) moved the composer, the refusal note and the
-   provider-and-model panel to `surfaces.css`, where they are drawn from the
-   constitution's semantics instead of from the lantern's cream alphas and the
-   pond's cyan. The generic pill skin below is deliberately NOT moved: the
-   decision surfaces (Slice 6) and the result surfaces (Slice 7) still consume
-   it through this same class. */
+/* Task 267 (Slice 7) took the result receipt out of here, the way Slice 6
+   took the proposal. Task 188's idea survives whole in the new system's
+   own sheet — one paper receipt with the outcome first, the Cairn-checked
+   facts open, and the builder's account and the original request complete
+   behind their own native disclosures — written there against measured
+   token pairs instead of eleven hard-coded cream alphas, and with each
+   disposition still carrying its own geometric mark so the three stay
+   distinguishable without colour.
 
-/* Task 186 flattens controls only inside the lantern. The rest of the app keeps
-   its established tactile pills; here, one thin edge and a one-pixel lift read
-   as part of the paper field instead of separate glossy buttons. The scoped
-   hover/press rules below deliberately outrank the global pill geometry. */
-.chat-column-villager .pill {
-  border: 1px solid rgb(246 236 225 / 12%);
-  border-radius: 11px 13px 10px 12px;
-  --pill-edge: transparent;
-  box-shadow: none;
-  transition: transform .22s var(--ease), background-color .2s, border-color .2s, opacity .15s;
-}
-.chat-column-villager .pill:hover:not(:disabled) { transform: translateY(-1px); }
-.chat-column-villager .pill:active:not(:disabled) {
-  transform: translateY(0) scale(.98); box-shadow: none; transition-duration: .08s;
-}
-.chat-column-villager .pill-primary {
-  border: 1px solid color-mix(in srgb, var(--garden-cyan) 64%, transparent);
-  background: color-mix(in srgb, var(--garden-cyan) 72%, transparent); color: #17302b;
-  --pill-edge: transparent;
-  box-shadow: 0 4px 14px rgb(163 221 208 / 12%);
-}
-.chat-column-villager .pill-quiet {
-  border-color: transparent; background: transparent; color: var(--lantern-soft); --pill-edge: transparent;
-}
-.chat-column-villager .pill-quiet:hover:not(:disabled) {
-  background: rgb(246 236 225 / 14%); color: var(--lantern-ink);
-}
-.chat-column-villager .pill-quiet[aria-disabled="true"]:hover,
-.chat-column-villager .pill-quiet[aria-disabled="true"]:active {
-  background: transparent; color: var(--lantern-soft);
-}
-.chat-column-villager .chat-tuck { color: var(--lantern-soft); }
-.chat-column-villager .chat-tuck:hover { background: rgb(246 236 225 / 14%); color: var(--lantern-ink); }
+   The receipt's near-identical copy of the intent rows was DELETED in
+   favour of the one shared rule set rather than ported, exactly as Slice 6
+   asked. It had outranked the shared rules only by specificity.
+
+   The class that scoped them may not be named in this file, in a rule OR
+   in a comment. */
+/* Task 267 (Slice 7) took the generic control skin out of here, and with
+   it the last reason this scope existed at all. Task 186's idea survives
+   whole in the new system's own sheet — controls inside the conversation
+   are flat paper rather than the tactile pills the rest of the app keeps —
+   but it is stated there once for EVERY control on that paper rather than
+   for the eight action containers Slice 6 enumerated, which is precisely
+   what made retiring the scope safe. Without that one rule, every control
+   the enumeration missed would have fallen back to the tactile base below,
+   recovering its hover scale and its faded disabled state in silence.
+   The retired tuck control went with it: nothing has rendered that class
+   since Slice 4. The class that scoped them may not be named in this file,
+   in a rule OR in a comment. */
 
 .town-square {
   position: relative; height: 100%; min-height: 360px; overflow: hidden;
@@ -1523,7 +1159,7 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .followup-note, .town-pond-layer { transition: none; }
   .town-face-holo, .town-face-eye, .town-face-thought circle, .town-face-mark path,
   .town-worker-pad span, .town-node-working .town-node-status i,
-  .chat-column-villager, .chat-villager-chip, .followup-note { animation: none; }
+  .chat-villager-chip, .followup-note { animation: none; }
   /* Reduced motion reaches the same final state, so a pill still sits on its
      edge and a suggestion is still fully arrived — they simply get there
      without travelling. */
@@ -1588,16 +1224,12 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
   .workspace-town-pane {
     --town-chat-width: min(520px, max(280px, calc(50% - 128px)), calc(100% - 32px));
   }
-  .chat-column.chat-column-villager {
-    left: max(16px, min(calc(50% + 96px), calc(100% - 32px - var(--town-chat-width))));
-    width: var(--town-chat-width);
-  }
-  .chat-column-villager .chat-topbar {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
-  }
-  .chat-column-villager .chat-topbar > .pill:first-child { grid-column: 1; grid-row: 1; justify-self: start; padding-inline: 4px; }
-  .chat-column-villager .chat-topbar > .body-pill-wrap { grid-column: 1 / -1; grid-row: 2; width: 100%; }
-  .chat-column-villager .chat-topbar > .chat-tuck { grid-column: 2; grid-row: 1; }
+  /* Task 267 (Slice 7): the five rules that cramped the retired dialog's top
+     bar into two grid rows at this width are gone. They were already dead —
+     `workspace.css` states the same three properties on a three-class selector
+     that outranks them, because at these widths the conversation is 760px of
+     paper rather than a narrow panel beside a pond. The fifth positioned the
+     retired tuck control, which nothing has rendered since Slice 4. */
   /* Reserve the conversation's right shore all the way through the compact
      rail regime. Saved workers are presentation-clamped to this shore in the
      Town component while their stored coordinates remain unchanged. */
@@ -1653,32 +1285,21 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      these two are the arms of one ternary and only the other was moved. */
   .workspace-town-pane .town-empty-note { inset: auto 18px 68px; }
 
-  /* The conversation takes the window. */
-  .chat-column.chat-column-villager {
-    left: 11px; right: 11px; top: 65px; bottom: 11px;
-    width: auto; height: auto; max-height: none; transform: none;
-    border-radius: 26px; padding: 15px;
-    animation: villager-rise .42s var(--spring) both;
-    /* The put-away transition belongs on the BASE rule, as narrow-v2.html:52
-       has it, so it is symmetric: declared only on the open-state rule, the
-       slide plays on the way out and the panel SNAPS back, because removing
-       the class leaves the after-change style with no transition to run. */
-    transition: transform .48s var(--pop), opacity .3s var(--ease), visibility .48s;
-  }
-  /* With the full width back, the top bar and run controls need none of the
-     621–1260 block's cramping. */
-  .chat-column-villager .chat-topbar { display: flex; }
-  .chat-column-villager .route-facts { grid-template-columns: repeat(3, 1fr); }
+  /* Task 267 (Slice 7): the conversation no longer takes the window here,
+     because it is no longer a panel that could fail to. `workspace.css` gives
+     it its geometry, its material and its stillness on a three-class selector
+     that outranked every property this rule set, so deleting it moves
+     nothing. */
+  /* Task 267 (Slice 7): the two rules that undid the 621–1260 block's cramping
+     are gone with the cramping itself. Both were already outranked — the top
+     bar by `workspace.css`, the fact grid by the rules Slice 6 wrote for the
+     one surface inside the conversation that renders one. */
 
-  /* Opening the pond puts the conversation away rather than shrinking it. */
-  /* Hidden from the keyboard too, not just the mouse: `pointer-events: none`
-     leaves the composer and every control tabbable off-screen, and focusing a
-     child translated 102% down can scroll this `overflow: hidden` pane and
-     shift the pond that is supposed to be whole. `visibility` is in the
-     transition list so the slide still plays before it goes. */
-  .workspace-town-pane-pond-open .chat-column.chat-column-villager {
-    transform: translateY(102%); opacity: .35; visibility: hidden; pointer-events: none;
-  }
+  /* Task 267 (Slice 7): the rule that put the conversation away when the pond
+     opened is gone. It was unreachable, and checkably so — nothing in the
+     renderer has rendered `workspace-town-pane-pond-open` since Slice 4
+     retired the world it belonged to. Its sibling below is left alone: it
+     names only retired classes and belongs to the slice that removes them. */
   .workspace-town-pane-pond-open .chat-villager-chip { display: none; }
 }
 
@@ -1705,106 +1326,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .checkup-finding .pill { margin-top: 6px; }
 .checkup-basis { margin-top: 14px; }
 
-/* Task 189: the project-scoped run is a ruled thread in the conversation,
-   not another rounded dashboard card between the receipt and composer. Its
-   status node, actions, outcome, and ownership are unchanged in Chat.tsx;
-   this slice is presentation only. */
-.chat-column-villager .run-strip {
-  position: relative; display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto; align-items: center;
-  column-gap: 10px; row-gap: 5px; min-width: 0; margin: 2px 3px 0;
-  padding: 10px 7px 9px 17px; border: 0;
-  border-top: 1px solid rgb(246 236 225 / 10%); border-radius: 0;
-  background: transparent; box-shadow: none;
-}
-.chat-column-villager .run-strip::before {
-  content: ""; position: absolute; left: 1px; top: 11px;
-  width: 2px; height: 20px; border-radius: 0 2px 2px 0;
-  background: var(--garden-cyan); opacity: .52;
-}
-.chat-column-villager .run-strip-state {
-  grid-column: 1; grid-row: 1;
-  display: inline-flex; align-items: center; gap: 7px; min-width: 0;
-  flex-shrink: 1; color: var(--garden-cyan); line-height: 1.35;
-}
-.chat-column-villager .run-strip-state::before {
-  content: ""; flex: 0 0 auto; width: 8px; height: 2px;
-  border: 0; border-radius: 0; background: currentColor;
-}
-.chat-column-villager .run-strip[data-run-state="running"] .run-strip-state::before {
-  width: 7px; height: 7px; border: 1.5px solid currentColor;
-  border-radius: 50%; background: transparent;
-}
-.chat-column-villager .run-strip[data-run-state="done"] .run-strip-state {
-  color: var(--pond-done);
-}
-.chat-column-villager .run-strip[data-run-state="done"] .run-strip-state::before {
-  width: 8px; height: 8px; border-radius: 50%; background: currentColor;
-}
-.chat-column-villager .run-strip[data-run-state="stopped"] .run-strip-state,
-.chat-column-villager .run-strip[data-run-state="closed"] .run-strip-state {
-  color: var(--pond-task);
-}
-.chat-column-villager .run-strip[data-run-state="stopped"] .run-strip-state::before {
-  width: 9px; height: 2px; border-radius: 0; background: currentColor;
-}
-.chat-column-villager .run-strip[data-run-state="error"] .run-strip-state {
-  color: var(--pond-stop);
-}
-.chat-column-villager .run-strip[data-run-state="error"] .run-strip-state::before {
-  width: 7px; height: 7px; border: 2px double currentColor;
-  border-radius: 0; background: transparent;
-}
-.chat-column-villager .run-strip[data-run-state="closed"] .run-strip-state::before {
-  width: 7px; height: 7px; border: 1px solid currentColor;
-  border-radius: 0; background: transparent;
-}
-.chat-column-villager .run-strip-stage {
-  color: var(--garden-cyan); font-size: .76rem; letter-spacing: .055em;
-}
-.chat-column-villager .run-strip-terminal { overflow-wrap: anywhere; }
-.chat-column-villager .run-strip-elapsed {
-  grid-column: 2; grid-row: 1; flex-shrink: 0; padding-left: 9px;
-  border-left: 1px solid rgb(246 236 225 / 12%);
-  color: var(--lantern-soft); font-size: .78rem; line-height: 1.35;
-}
-.chat-column-villager .run-strip-outcome {
-  grid-column: 1 / -1; grid-row: 2; order: initial; min-width: 0;
-  margin: 1px 0 0; padding: 6px 0 0;
-  border-top: 1px solid rgb(246 236 225 / 8%);
-  color: var(--lantern-soft); font-size: .88rem; line-height: 1.45;
-  overflow: visible; text-overflow: clip; white-space: normal;
-  overflow-wrap: anywhere;
-}
-.chat-column-villager .run-strip-controls {
-  grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 10px;
-  width: auto; margin-left: 0; justify-self: end;
-}
-.chat-column-villager .run-strip-controls .pill {
-  flex: none; min-width: 0; padding: 2px 4px;
-  border: 0; border-bottom: 1px solid transparent; border-radius: 1px;
-  background: transparent; color: var(--lantern-soft); box-shadow: none;
-  font-size: .82rem; line-height: 1.35;
-}
-.chat-column-villager .run-strip-controls .pill:hover:not(:disabled) {
-  transform: none; border-bottom-color: rgb(246 236 225 / 32%);
-  background: transparent; color: var(--lantern-ink);
-}
-.chat-column-villager .run-strip-controls .pill:active:not(:disabled) {
-  transform: none; background: transparent; box-shadow: none;
-}
-.chat-column-villager .run-strip-controls .pill:focus-visible {
-  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
-}
-@media (max-width: 620px) {
-  .chat-column-villager .run-strip {
-    grid-template-columns: minmax(0, 1fr) auto; padding: 9px 4px 8px 14px;
-  }
-  .chat-column-villager .run-strip-controls {
-    grid-column: 1 / -1; grid-row: 3; width: 100%; margin-left: 0;
-    justify-self: start; justify-content: flex-start; flex-wrap: wrap;
-  }
-}
+/* Task 267 (Slice 7) took the run strip out of here. Task 189's idea
+   survives whole in the new system's own sheet — a ruled thread in the
+   conversation rather than another rounded dashboard card — and every one
+   of its five states still carries a distinct geometric mark as well as an
+   ink, so a live run reads the same in monochrome as a settled receipt.
+   Its two controls gained the 44px floor they were roughly 20px short of,
+   and its outcome sentence now wraps instead of being ellipsized onto one
+   line. The class that scoped them may not be named in this file, in a
+   rule OR in a comment. */
 
 /* Task 263 (Slice 6) took the dispatch checkpoint out of here. Task 191's
    hierarchy survives whole in the new system's own sheet: the accepted
@@ -1821,156 +1351,15 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
    gained the 44px target floor they were 4px short of. Its compact rules moved
    from 620px to 820px with everything else. The class that scopes them may not
    be named in this file, in a rule OR in a comment. */
-/* Task 193: publication is one paper checkpoint beneath the checked receipt.
-   The target, effect, exposure, and recovery remain fully open; only the
-   inherited rounded-card/pill material and the focus continuity change. */
-.chat-column-villager .push-flow { min-width: 0; }
-.chat-column-villager .push-chip { align-items: flex-start; min-width: 0; padding-left: 16px; }
-.chat-column-villager .push-chip .pill {
-  min-width: 0; min-height: 40px; max-width: 100%; padding: 5px 3px;
-  border: 0; border-bottom: 1px solid color-mix(in srgb, var(--garden-amber) 58%, transparent);
-  border-radius: 1px; background: transparent; color: var(--garden-amber);
-  box-shadow: none; transform: none; text-align: left; white-space: normal;
-  overflow-wrap: anywhere; line-height: 1.4;
-  transition: border-color .2s, color .2s, opacity .15s;
-}
-.chat-column-villager .push-chip .pill:hover:not(:disabled) {
-  transform: none; border-bottom-color: rgb(246 236 225 / 42%);
-  background: transparent; color: var(--lantern-ink); box-shadow: none;
-}
-.chat-column-villager .push-chip .pill:active:not(:disabled) {
-  transform: none; background: transparent; box-shadow: none;
-}
-.chat-column-villager .push-chip .pill:focus-visible {
-  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
-}
-.chat-column-villager .push-confirm {
-  position: relative; align-self: stretch; min-width: 0; overflow: visible;
-  margin: 0; padding: 17px 18px 15px 21px; border: 0;
-  border-radius: 5px 8px 6px 4px; box-shadow: none;
-  background-color: rgb(246 236 225 / 3%);
-  background-image: var(--paper-grain); background-size: 160px 160px;
-  background-blend-mode: soft-light; color: var(--lantern-ink);
-}
-.chat-column-villager .push-confirm::before {
-  content: ""; position: absolute; left: 1px; top: 17px;
-  width: 2px; height: 28px; border-radius: 0 2px 2px 0;
-  background: var(--garden-amber); opacity: .58;
-}
-.chat-column-villager .push-confirm:focus { border: 0; outline: none; }
-.chat-column-villager .push-confirm:focus::before { height: 34px; opacity: .86; }
-.chat-column-villager .push-confirm-title {
-  width: fit-content; max-width: 100%; margin: 0 0 9px;
-  color: var(--garden-amber); font-size: .76rem; line-height: 1.35;
-  letter-spacing: .065em; text-transform: uppercase;
-}
-.chat-column-villager .push-confirm:focus .push-confirm-title {
-  text-decoration-line: underline; text-decoration-color: var(--garden-amber);
-  text-decoration-thickness: 2px; text-underline-offset: 4px;
-}
-.chat-column-villager .push-confirm-facts {
-  display: flex; flex-direction: column; gap: 0; min-width: 0;
-  margin: 0 0 10px; padding: 0; border-top: 1px solid rgb(246 236 225 / 12%);
-  list-style: none;
-}
-.chat-column-villager .push-confirm-fact {
-  min-width: 0; margin: 0; padding: 8px 1px 8px 11px;
-  border-bottom: 1px solid rgb(246 236 225 / 9%);
-  border-left: 2px solid rgb(246 236 225 / 14%);
-  color: var(--lantern-ink); overflow-wrap: anywhere;
-}
-.chat-column-villager .push-confirm-effect { border-left-color: var(--garden-amber); }
-.chat-column-villager .push-confirm .mono {
-  min-width: 0; color: var(--lantern-soft); overflow-wrap: anywhere; word-break: break-word;
-}
-.chat-column-villager .push-confirm-subjects {
-  display: flex; flex-direction: column; gap: 3px; min-width: 0;
-  margin: 6px 0 0; padding: 0 0 0 12px; list-style: none;
-}
-.chat-column-villager .push-confirm-subjects > li {
-  position: relative; min-width: 0; padding-left: 12px; overflow-wrap: anywhere;
-}
-.chat-column-villager .push-confirm-subjects > li::before {
-  content: "—"; position: absolute; left: 0; color: var(--lantern-soft);
-}
-.chat-column-villager .push-confirm-sentence {
-  min-width: 0; margin: 0; padding: 8px 2px 8px 11px;
-  border-bottom: 1px solid rgb(246 236 225 / 9%);
-  line-height: 1.45; overflow-wrap: anywhere;
-}
-.chat-column-villager .push-confirm-publication {
-  border-left: 2px solid var(--garden-amber); color: var(--lantern-ink);
-}
-.chat-column-villager .push-confirm-recovery {
-  border-left: 2px solid rgb(246 236 225 / 14%); color: var(--lantern-soft);
-}
-.chat-column-villager .push-confirm-actions {
-  align-items: center; justify-content: flex-start; flex-wrap: wrap;
-  gap: 8px 12px; margin-top: 10px; padding-top: 8px;
-}
-.chat-column-villager .push-confirm-actions .pill {
-  flex: none; min-width: 0; min-height: 40px; max-width: 100%; padding: 4px 4px;
-  border: 0; border-bottom: 1px solid transparent; border-radius: 1px;
-  background: transparent; color: var(--lantern-soft); box-shadow: none;
-  line-height: 1.35; white-space: normal; overflow-wrap: anywhere;
-  transition: border-color .2s, color .2s, opacity .15s;
-}
-.chat-column-villager .push-confirm-actions .pill-primary {
-  border-bottom-color: color-mix(in srgb, var(--garden-amber) 68%, transparent);
-  background: transparent; color: var(--garden-amber); box-shadow: none;
-}
-.chat-column-villager .push-confirm-actions .pill:hover:not(:disabled) {
-  transform: none; border-bottom-color: rgb(246 236 225 / 42%);
-  background: transparent; color: var(--lantern-ink); box-shadow: none;
-}
-.chat-column-villager .push-confirm-actions .pill:active:not(:disabled) {
-  transform: none; background: transparent; box-shadow: none;
-}
-.chat-column-villager .push-confirm-actions .pill:focus-visible {
-  outline: 2px solid var(--garden-cyan); outline-offset: 3px;
-}
-.chat-column-villager .push-confirm-actions .pill:disabled {
-  border-bottom-color: rgb(246 236 225 / 10%); background: transparent;
-}
-.chat-column-villager .push-outcome.card {
-  position: relative; min-width: 0; margin: 0 3px; padding: 9px 5px 9px 17px;
-  border: 0; border-top: 1px solid rgb(246 236 225 / 12%);
-  border-radius: 0; background: transparent; color: var(--lantern-ink); box-shadow: none;
-}
-.chat-column-villager .push-outcome.card::before {
-  content: ""; position: absolute; left: 2px; top: 16px;
-  width: 7px; height: 7px; box-sizing: border-box;
-}
-.chat-column-villager .push-outcome[data-push-state="running"]::before {
-  border: 1px dashed var(--garden-cyan); border-radius: 50%; background: transparent;
-}
-.chat-column-villager .push-outcome[data-push-state="success"]::before {
-  border: 1px solid var(--garden-cyan); border-radius: 1px;
-  background: color-mix(in srgb, var(--garden-cyan) 28%, transparent); transform: rotate(45deg);
-}
-.chat-column-villager .push-outcome[data-push-state="refusal"]::before {
-  width: 2px; height: 13px; top: 13px; border: 0;
-  border-left: 2px double var(--garden-amber); background: transparent;
-}
-.chat-column-villager .push-outcome-title {
-  margin: 0 0 2px; color: var(--lantern-soft); font-size: .72rem;
-  letter-spacing: .06em; text-transform: uppercase;
-}
-.chat-column-villager .push-outcome[data-push-state="success"] .push-outcome-title {
-  color: var(--garden-cyan);
-}
-.chat-column-villager .push-outcome[data-push-state="refusal"] .push-outcome-title {
-  color: var(--garden-amber);
-}
-.chat-column-villager .push-outcome-text { min-width: 0; overflow-wrap: anywhere; }
-@media (max-width: 620px) {
-  .chat-column-villager .push-chip { padding-left: 10px; }
-  .chat-column-villager .push-confirm { padding: 14px 12px 12px 16px; }
-  .chat-column-villager .push-confirm-fact { padding: 8px 0 8px 8px; }
-  .chat-column-villager .push-confirm-sentence { padding-left: 8px; }
-  .chat-column-villager .push-confirm-actions { align-items: flex-start; }
-  .chat-column-villager .push-confirm-actions .pill { text-align: left; }
-}
+/* Task 267 (Slice 7) took the publication checkpoint out of here with the
+   rest of its family. Task 193's hierarchy survives whole in the new
+   system's own sheet — the target, the effect, the exposure and the way
+   back all stay open beneath one attention rule — written there against
+   measured token pairs rather than against hard-coded cream alphas, and
+   with the chip and the actions raised to the 44px target floor they were
+   short of. Its compact rules moved from 620px to 820px with everything
+   else. The class that scoped them may not be named in this file, in a
+   rule OR in a comment. */
 
 /* Task 194: Cairn's optional next steps are marginal notes beneath its settled
    result comment, not a new row of dashed pills. The private control that
@@ -1990,17 +1379,20 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 
 /* Reduced motion, part two — placed LAST in the file, deliberately.
    A media query adds no specificity, so the block near the top loses to every
-   `.chat-column.chat-column-villager` rule below it, including the one that
-   declares the lantern's finite entrance. Naming the element up there was never
-   enough; only source order settles a tie. Everything here reaches the SAME
-   final state as the motion it replaces — the chevron still points the other
-   way when the pond is open, the conversation is still put away, the lantern
-   still sits where it landed. Nothing travels to get there.
+   later rule that names the same element with one more class. That is the trap
+   this block exists to beat, and it cost a real defect once: the retired
+   conversation panel's entrance ran for a reduced-motion reader while the test
+   above it passed, because naming an element is not the same as outranking it.
+   Only source order settles a tie. Everything here reaches the SAME final
+   state as the motion it replaces — the chevron still points the other way
+   when the pond is open. Nothing travels to get there.
    `.pond-back` keeps `translateX(-50%)` rather than taking `transform: none`,
    because that transform is its centring, not its animation. */
 @media (prefers-reduced-motion: reduce) {
-  .chat-column.chat-column-villager,
-  .workspace-town-pane-pond-open .chat-column.chat-column-villager { animation: none; transition: none; }
+  /* Task 267 (Slice 7): the entrance these two killed no longer exists. The
+     conversation does not arrive — it is simply where the desk is — and
+     `workspace.css` turns its animation, transform and transition off by name
+     for every reader, not only for a reader who asked for less motion. */
   .pond-line, .pond-line-chevron, .pond-back { transition: none; }
   .pond-back:hover { transform: translateX(-50%); }
   /* Task 186's lantern controls are more specific than the global pill rules,
@@ -2012,11 +1404,10 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
      separable so Slice 10 can delete one without reading the other — so their
      kill lives at the end of `motion.css`, which is imported last and outranks
      everything here. */
-  .chat-column-villager .pill { transition: none; }
-  .chat-column-villager .push-chip .pill,
-  .chat-column-villager .push-confirm-actions .pill { transition: none; }
-  .chat-column-villager .pill:hover:not(:disabled),
-  .chat-column-villager .pill:active:not(:disabled) { transform: none; }
+  /* Task 267 (Slice 7) took the last four of these with the control skin they
+     belonged to. Their kill lives at the end of `motion.css` now, with the
+     rest of the conversation's — imported last, so it outranks everything
+     here without needing to name a class this file may not name. */
   /* Found while fixing the lantern's entrance: these pre-date this work and lose
      to the block at the top of the file the same way it did. Every one is a
      specificity loss, not a miss — the eye groups carry both `town-face-eye`
@@ -2211,20 +1602,13 @@ textarea:focus, input[type="text"]:focus, input[type="password"]:focus { border-
 .unsealed-candidate-promise-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .unsealed-candidate-owed { margin: 6px 0 0; font-size: .8rem; color: var(--lantern-warn, #d8a657); }
 
-.result-card-promises { margin-top: 10px; }
-.result-card-promise-list { margin: 0; padding: 0; list-style: none; }
-.result-card-promise { padding: 6px 0; border-top: 1px solid var(--lantern-line); }
-.result-card-promise:first-child { border-top: none; }
-.result-card-promise-text { margin: 0 0 3px; line-height: 1.45; }
-.result-card-promise-cairn,
-.result-card-promise-owner,
-.result-card-promise-worker { margin: 2px 0; font-size: .8rem; line-height: 1.45; }
-.result-card-promise-cairn[data-status="passed"] { color: var(--lantern-ok, #7fbf8f); }
-.result-card-promise-cairn[data-status="failed"],
-.result-card-promise-cairn[data-status="unfinished"],
-.result-card-promise-cairn[data-status="none"] { color: var(--lantern-warn, #d8a657); }
-.result-card-promise-worker { color: var(--lantern-soft); }
-.result-card-promise-provenance { font-size: .7rem; }
+/* Task 267 (Slice 7) took the receipt's promised rows with the rest of the
+   receipt. They are the sharpest place in the product where a CHECKED fact
+   and a REPORTED claim sit on the same row, so they moved with their
+   distinction intact and the three statuses now separate `failed` from
+   `unfinished` and `none` rather than washing all three into one warning
+   ink. The class that scopes them may not be named in this file, in a rule
+   OR in a comment. */
 
 /* Task 240: the second opinion beside the unsealed candidate.
    Deliberately quieter than the candidate card - a dimmer left rule, no amber

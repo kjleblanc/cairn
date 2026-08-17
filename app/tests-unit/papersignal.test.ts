@@ -51,7 +51,12 @@ test("one static paper grain belongs to the field, shelf, lantern, and composer"
   for (const selector of [
     ".workspace-shell",
     ".project-rail",
-    ".chat-column.chat-column-villager",
+    // RE-POINTED by Task 267 (Slice 7). The conversation surface was the third
+    // name here. It still shares the one texture and still paints it on its own
+    // skin layer so no mask can touch text — but it is the desk's paper now, in
+    // `workspace.css`, drawn from the constitution's `--rp-grain`, and the
+    // retired panel that used to carry it is deleted. It is checked below
+    // against its own system's one-texture rule, exactly as the composer was.
     ".town-square",
   ]) {
     // A surface may paint the shared texture on its own skin layer rather than
@@ -128,26 +133,37 @@ test("workspace buttons are flatter while the composer remains one field", () =>
   assert.ok(primary.includes("var(--rp-teal)") && primary.includes("var(--rp-on-teal)"),
     "Send is not the one primary action drawn in the approved teal pair");
 
-  // The decision and result surfaces still consume Task 186's own skin, and
-  // this slice deliberately left it alone.
-  const lanternPrimary = rule(".chat-column-villager .pill-primary");
-  assert.ok(lanternPrimary.includes("border: 1px solid") && !lanternPrimary.includes("0 5px 0"),
-    "the unmigrated surfaces' primary control regained a thick three-dimensional edge");
+  // RE-POINTED by Task 267 (Slice 7). Task 186's skin was the LAST thing left
+  // on the retired scope, and it is the rule that made retiring that scope
+  // safe: it dressed every control the per-surface rules do not name. It is
+  // stated once now, for every control on the paper, in the conversation's own
+  // sheet. The contract is unchanged — one thin edge, no thick three-
+  // dimensional one — so only its address moved.
+  const sharedPrimary = surfaceRule(".rp-conversation .pill");
+  assert.ok(sharedPrimary.includes("border: 1px solid") && !sharedPrimary.includes("0 5px 0"),
+    "the shared control skin regained a thick three-dimensional edge");
+  assert.ok(surfaceRule(".rp-conversation .pill-primary").includes("var(--rp-teal)"),
+    "the shared primary action is no longer the approved teal");
 });
 
 test("the flatter lantern controls become completely still for reduced motion", () => {
-  const start = css.lastIndexOf("@media (prefers-reduced-motion: reduce)");
+  // RE-POINTED by Task 267 (Slice 7). These three kills went with the skin they
+  // cancelled. They live at the end of `motion.css` now — imported last, so a
+  // (0,2,0) kill still outranks the (0,2,0) declaration it cancels — and
+  // `app.css` may not name that class in a rule OR in a comment, which is what
+  // keeps the two cascades separable for Slice 10.
+  const motionCss = renderer("motion.css");
+  const start = motionCss.lastIndexOf("@media (prefers-reduced-motion: reduce)");
   assert.notEqual(start, -1, "the final reduced-motion repair block is gone");
-  const reduced = css.slice(start);
-  for (const selector of [
-    ".chat-column-villager .pill { transition: none; }",
-    ".chat-column-villager .pill:hover:not(:disabled),",
-    ".chat-column-villager .pill:active:not(:disabled) { transform: none; }",
-  ]) {
-    assert.ok(reduced.includes(selector), `${selector} is not covered at matching specificity`);
-  }
+  const reduced = motionCss.slice(start);
+  assert.ok(reduced.includes(".rp-conversation .pill { transition: none; }"),
+    "the shared control skin is not stilled at matching specificity");
   assert.ok(reduced.includes("{ transform: none; }"),
-    "the lantern's hover or press still travels under reduced motion");
+    "a control's hover or press still travels under reduced motion");
+  // There must be exactly ONE final block: a second one silently moves every
+  // `lastIndexOf` marker in this suite onto it.
+  assert.equal((motionCss.match(/@media \(prefers-reduced-motion: reduce\)/gu) ?? []).length, 2,
+    "motion.css no longer has exactly its two reduced-motion blocks");
 
   // REWRITTEN by Task 260 (Slice 5). The composer's actions left this block with
   // the composer itself. They cannot be named here — `app.css` declares no

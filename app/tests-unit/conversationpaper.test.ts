@@ -366,6 +366,16 @@ test("conversation paper adds no new moving decoration", () => {
   // exactly the container the constitution forbids transforming; a scaled
   // container also blurs its own text mid-flight.
   const motion = renderer("motion.css");
-  assert.match(motion, /\.rp-conversation \.bubble,\s*\n\.rp-conversation \.task-card \{ animation: none; \}/,
-    "the transcript's turns or the proposal still slide and scale on arrival");
+  // REWRITTEN by Task 267 (Slice 7). The list grew rather than changed: the
+  // receipt, the run strip and the push chip were the three names `chat-arrive`
+  // still slid and scaled, each held back as "its own slice" until this one.
+  // Every one of them holds an interactive control — the receipt's actions and
+  // disclosures, Stop this task, and the chip itself, which IS a button — so
+  // each is exactly the container the constitution forbids transforming.
+  for (const surface of ["bubble", "task-card", "result-card", "run-strip", "push-chip"]) {
+    assert.match(motion, new RegExp(`\\.rp-conversation \\.${surface}[,\\s]`, "u"),
+      `the conversation's ${surface} still slides and scales on arrival`);
+  }
+  assert.match(motion, /\.rp-conversation \.push-chip \{ animation: none; \}/u,
+    "the arrival opt-out list does not end in an animation kill");
 });

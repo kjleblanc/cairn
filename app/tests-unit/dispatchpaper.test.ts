@@ -192,8 +192,14 @@ test("approval and actions are quiet, distinct, keyboard-visible paper controls"
 test("the compact cascade wraps the ledger at a supported width without adding motion", () => {
   // REPAIRED: the old ordering marker pinned a whole one-line declaration and
   // would have gone silent the moment it was reformatted. Both ends assert.
-  const wideReset = css.lastIndexOf(".chat-column-villager .route-facts {");
-  assert.notEqual(wideReset, -1, "the older route-facts reset is gone; this ordering check is vacuous");
+  // RE-POINTED by Task 267 (Slice 7). The scoped reset this used as its
+  // ordering marker was deleted with the rest of the retired cascade — the only
+  // surface inside the conversation that renders a routed ledger is the
+  // dispatch checkpoint, and Slice 6 already gave it its own rules. The
+  // UNSCOPED base near the top of `app.css` still serves the run screen, so it
+  // is the marker now, and it still asserts it was found.
+  const wideReset = css.lastIndexOf(".route-facts {");
+  assert.notEqual(wideReset, -1, "the route-facts base is gone; this ordering check is vacuous");
   assert.ok(!/\.rp-/u.test(css), "the retired cascade and the new system interleaved");
 
   const sliceStart = surfaces.indexOf("Task 263 (Slice 6)");

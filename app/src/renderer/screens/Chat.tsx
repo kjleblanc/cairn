@@ -2120,17 +2120,20 @@ export function Chat({ dir, onBack, onOpenRun, embedded = false, focusSignal = 0
          something to dismiss and something behind it to return to; the
          conversation is the thing itself, so it is a named region and the
          desk's `<main>` holds it. */
-      /* `chat-column-villager` stays, and it is not an oversight. That class is
-         the hook for roughly two hundred rules that give the cards, panels and
-         decision surfaces INSIDE the conversation their paper — the dispatch
-         panel's flat rules, the result card's disposition marks, the question
-         card, the push confirmation. Those interiors are Slice 5's and Slice
-         6's work, not this slice's, and dropping the hook silently reverted
-         them to a pre-Task-186 card language nobody approved. The name is
-         inherited from a surface that is gone; `rp-conversation` re-points the
-         paired tokens those rules are written against, so they re-tone onto
-         warm paper instead of being rewritten two slices early. */
-      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " rp-conversation chat-column-villager" : ""}`}
+      /* Task 267 (Slice 7) removed `chat-column-villager`, the last inheritance
+         from the surface this conversation replaced. Slice 4 kept it on purpose
+         — it was the hook for roughly two hundred rules that gave the cards and
+         panels INSIDE the conversation their paper, and dropping it early
+         reverted the dispatch panel to a card language nobody approved. Slices
+         5, 6 and 7 moved all of them onto `rp-conversation`, so the name of a
+         retired thing is no longer load-bearing and the class is simply gone.
+
+         The one that could not be moved was the generic control skin: it was
+         the only rule dressing every control the per-surface rules did not
+         name, so it is restated once, on `rp-conversation`, in `surfaces.css`.
+         Without it these controls would silently recover the app's tactile
+         pill — its hover scale, and its faded disabled state. */
+      <div className={`chat-column${status?.connected ? "" : " chat-column-static"}${embedded ? " rp-conversation" : ""}`}
         role={embedded ? "region" : undefined} aria-label={embedded ? "Conversation with Cairn" : undefined}
         data-conversation-restore={restoringConversation ? "pending" : "settled"}>
         <div className="row spread chat-topbar">

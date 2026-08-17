@@ -6,6 +6,24 @@ import { join } from "node:path";
 const renderer = (file: string) =>
   readFileSync(join(__dirname, "..", "..", "src", "renderer", file), "utf8");
 const component = renderer(join("components", "EvidenceAlbum.tsx"));
+const surfaces = renderer("surfaces.css");
+
+/**
+ * A rule body from `surfaces.css`, found by a selector that may sit anywhere
+ * in a grouped selector list. The miss is an assertion, never a fallback.
+ */
+function surfaceRule(selector: string): string {
+  for (const suffix of [" {", ",\n"]) {
+    let at = surfaces.indexOf(selector + suffix);
+    while (at !== -1) {
+      const open = surfaces.indexOf("{", at);
+      const close = surfaces.indexOf("}", open);
+      if (open !== -1 && (close === -1 || open < close)) return surfaces.slice(at, close);
+      at = surfaces.indexOf(selector + suffix, at + 1);
+    }
+  }
+  return assert.fail(`surfaces.css has no rule carrying \`${selector}\``);
+}
 const questionCard = renderer(join("components", "QuestionCard.tsx"));
 const intentList = renderer(join("components", "TaskIntentList.tsx"));
 const taskCard = renderer(join("components", "TaskCard.tsx"));
@@ -74,10 +92,26 @@ test("all image bytes come through opaque evidenceImage IDs", () => {
 });
 
 test("the card pair shares wide space, one image fills it, and narrow stacks", () => {
-  assert.match(rule(".result-evidence-grid"), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
-  assert.match(rule(".result-evidence-grid-single"), /grid-template-columns:\s*minmax\(0, 1fr\)/);
-  assert.match(css, /@media \(max-width: 1260px\)[\s\S]*?\.result-evidence-grid,[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/,
+  // RE-POINTED by Task 267 (Slice 7). The INLINE evidence section moved to the
+  // conversation's own sheet with the receipt it leads. The local album did
+  // NOT: it goes through `createPortal(..., document.body)`, so it is not
+  // inside the conversation and no rule anchored there could reach it. Its
+  // rules stay unscoped in `app.css`, and that split is asserted below rather
+  // than assumed, because getting it backwards would write rules that silently
+  // never match.
+  assert.match(surfaceRule(".rp-conversation .result-evidence-grid"),
+    /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/u);
+  assert.match(surfaceRule(".rp-conversation .result-evidence-grid-single"),
+    /grid-template-columns:\s*minmax\(0, 1fr\)/u);
+  assert.match(surfaces, /@media \(max-width: 1260px\)[\s\S]*?\.rp-conversation \.result-evidence-grid[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/u,
     "the approved 1260px breakpoint does not stack the evidence pair");
+
+  // The portaled album keeps its own unscoped rules, at the same breakpoint.
+  assert.match(component, /createPortal\(/u, "the album no longer portals, so its rules may be scoped after all");
+  assert.match(css, /@media \(max-width: 1260px\)[\s\S]*?\.evidence-album-images[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/u,
+    "the portaled album lost the 1260px stack that no scoped rule can give it");
+  assert.doesNotMatch(surfaces, /\.rp-conversation \.evidence-album/u,
+    "an album rule was anchored on the conversation, where it can never match");
 });
 
 test("the local album distinguishes current, earlier checked, and legacy review pictures", () => {
@@ -106,8 +140,38 @@ test("the local album distinguishes current, earlier checked, and legacy review 
 });
 
 test("the evidence UI adds no travel and the reused overlay stops for reduced motion", () => {
-  const evidenceCss = css.slice(css.indexOf("/* Task 173:"), css.indexOf("/* The push flow."));
+  // REPAIRED by Task 267. This test used to take two BARE `indexOf` results
+  // and assert only a NEGATIVE over the slice between them. Either marker
+  // moving returned -1, `slice(-1, -1)` yields "", and an empty string
+  // satisfies "contains no animation" perfectly — so the guard would have gone
+  // on passing while reading nothing at all. Slice 7 moved one of those two
+  // markers, which is exactly the event it would have failed to notice.
+  //
+  // Both ends now assert they were found, the slice asserts it is a plausible
+  // size, and a POSITIVE control asserts the region really does carry the
+  // rules this test is about.
+  const start = css.indexOf("/* Task 267 (Slice 7) took the INLINE half");
+  const end = css.indexOf("/* Task 267 (Slice 7) took the publication flow", start);
+  assert.notEqual(start, -1, "the evidence region's start marker is gone");
+  assert.ok(end > start, "the evidence region has no end marker after it");
+  const evidenceCss = css.slice(start, end);
+  assert.ok(evidenceCss.length > 400, "the evidence region is implausibly short, so this proves nothing");
+  assert.match(evidenceCss, /\.evidence-album/u,
+    "the sliced region does not contain the album rules it is meant to audit");
   assert.ok(!/animation\s*:|transition\s*:/.test(evidenceCss));
+
+  // The inline half moved, so its own absence of travel is audited where it
+  // now lives — with both ends guarded there too.
+  const inlineStart = surfaces.indexOf("/* ---------------------------------------------------------- evidence */");
+  const inlineEnd = surfaces.indexOf("/* ------------------------------------------------------- publication */", inlineStart);
+  assert.notEqual(inlineStart, -1, "the inline evidence section cannot be found");
+  assert.ok(inlineEnd > inlineStart, "the inline evidence section has no end marker after it");
+  const inline = surfaces.slice(inlineStart, inlineEnd);
+  assert.ok(inline.length > 400, "the inline evidence section is implausibly short");
+  assert.match(inline, /\.rp-conversation \.result-evidence/u,
+    "the sliced section does not contain the inline evidence rules");
+  assert.ok(!/animation\s*:|transition\s*:/.test(inline),
+    "the inline evidence section introduces decorative motion");
   assert.match(motion, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.overlay-card, \.overlay-scrim[\s\S]*?animation: none/);
 });
 
