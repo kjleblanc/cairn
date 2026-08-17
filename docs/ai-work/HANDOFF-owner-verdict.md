@@ -1,7 +1,43 @@
 # Handoff — the owner-verdict work
 
-Written 2026-08-08 at the end of the session that produced it, so the state
-survives a fresh context.
+Written 2026-08-08; **state refreshed 2026-08-17 after checking the repository
+rather than trusting this note.**
+
+## Update, 2026-08-17 — read this before the rest
+
+Nine days and forty tasks have passed. Three things changed:
+
+- **Prerequisite Q is DONE.** Q1–Q10 landed as tasks 208–221 (Q8 split across
+  216–219). **Plan 2 is no longer blocked by anything.**
+- **Plan 2 was still not started, deliberately.** Task 222's brief names
+  "begin owner-verdict Plan 2" in its do-not list, and the project went
+  elsewhere: the Gauntlet around ordinary Chat (Task Card, critic offer,
+  candidate screen — tasks 222–254), then a four-slice resident-program visual
+  overhaul that retired the Town and Pond (tasks 255–259). Task 260 is in
+  flight as of this writing.
+- **The cli build is fixed.** Task 246 (`fdcf896`) updated
+  `cli/test/task.test.ts` for Task 211's overloads. The "known-red" section
+  below is history.
+
+**Plan 1 has proven itself in use, which was the open question.** Measured
+2026-08-17: briefs 240–260 carry between 6 and 16 `cN` check ids each, and
+reports answer by id — task 257's report makes 23 id references, 259's makes 20.
+The only briefs without ids are 248, 250 and 251, which are **envelope-dispatched
+worker runs whose briefs `briefText()` generates** — precisely the case the
+amendment scoped out on purpose. The format holds everywhere it was meant to.
+
+**Task 212's verdict guard is alive** and was strengthened: Task 215 refactored
+the literal path check into `serialCandidateReservedRecordClass` and applied it
+in two scan paths rather than one. Contract is still v0.8.0.
+
+**So the state is simple: the machinery Plan 1 shipped is load-bearing and
+working. The verdict itself — the owner's pass/revise/fail — still does not
+exist, and building it is an open decision, not a blocked one.**
+
+---
+
+*Everything below was written 2026-08-08 and is kept for its reasoning. Where
+it says Plan 2 is blocked, or the cli is red, see the update above.*
 
 **Spec:** `docs/superpowers/specs/2026-08-07-cairn-owner-verdict-design.md`
 (seven Decisions).
