@@ -114,18 +114,35 @@ reads many of them.
 
 ## Inherited hazards — read before starting Slice 6
 
-1. **TWO known-red E2E scenarios.** `conductor.spec.ts` ·
+1. **ONE known-red E2E scenario.** `conductor.spec.ts` ·
    *a reload mid-run reattaches the conversation's strip* still fails with
    `.run-strip` stuck in `Check`, which is the documented pre-existing symptom,
-   confirmed unchanged by Task 260. And `evidence.spec.ts` fails at its first
-   scenario inside its own `connectAndRestore` helper (`evidence.spec.ts:190`,
-   `expect(connected.ok)` receives `false` in ~900 ms). Task 259 recorded that
-   suite as never run to completion; Task 260 ran it and found this. **It is
-   older than the overhaul:** that spec was last touched at Task 189
-   (`9fe6703`, 2026-08-06) and the connect path has changed nine times since,
-   including Task 201 "store model connection authority" and Task 206 "add
-   headless catalog and sticky Auto", while its `fakeProvider` answers every
-   request with an SSE chat completion and serves no catalog endpoint.
+   confirmed unchanged by Task 260.
+
+   **`evidence.spec.ts` is FIXED.** Both scenarios pass, solo and in one
+   invocation (16.9 s, no `EPERM` cascade). It had **two** causes, both older
+   than the overhaul, and **neither was the `fakeProvider` catalog** this note
+   used to blame: `connect()` never contacts the provider at all, and
+   `conductorConsentCard` was returning a correct card with `ok: true`. The
+   refusal was `CONDUCTOR_PROJECT_REAUTHORIZATION_REQUIRED`
+   (`conductor/service.ts:494`).
+
+   - **Cause one, the connect race.** Task 201 scoped every stored connection to
+     the project main has been told the renderer opened, and main learns that
+     from the `project:open` IPC alone. `connectAndRestore` called connect
+     straight after `firstWindow()` and lost the race against the renderer's
+     boot. It now waits for `.workspace-stage[data-project-dir]`, which mounts
+     only from `enterWorkspace` after `projectOpen` resolves. **Do not key that
+     wait to a card.** The first version waited for "connect cairn's brain" and
+     passed solo, then failed batched: the second scenario inherits the first's
+     stored connection through the worker-scoped profile and opens on the
+     project-authorization card instead.
+   - **Cause two, the owner pause.** Tasks 243-245's unsealed-candidate gate
+     then held the receipt back — the symptom this note already warned about.
+     Both scenarios now press "Continue to Cairn's current checks", exactly as
+     `conductor.spec.ts:3277` does.
+
+   No `src/` change was needed for either; the whole repair is in the spec.
    **If a scenario needing verified DONE hangs at `Check`, look for an owner
    pause on screen before assuming the documented red.**
 2. **Nine known-red app unit tests** in `builderlivetransport.test.js` and

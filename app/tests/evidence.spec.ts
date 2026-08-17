@@ -176,7 +176,23 @@ async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
 }
 
+/** Task 201 scoped every stored connection to the project main has been told
+ * the renderer opened: `connect` refuses with
+ * CONDUCTOR_PROJECT_REAUTHORIZATION_REQUIRED until `project:open` has run, and
+ * main learns the project from that IPC alone. `firstWindow()` resolves long
+ * before the renderer's boot finishes opening CAIRN_OPEN, so this shortcut
+ * raced that call and lost.
+ *
+ * The wait is on the workspace stage rather than on any card, because the
+ * stage IS the precondition: `App.tsx` mounts it only from `enterWorkspace`,
+ * which runs after `projectOpen` resolves, and the `project:open` handler notes
+ * the project before it returns. Which card sits inside it depends on what the
+ * profile already holds — a second scenario in the same worker inherits the
+ * first one's stored connection and opens on the project-authorization card,
+ * not "connect cairn's brain" — so keying the wait to a card would make these
+ * scenarios pass alone and fail batched. */
 async function connectAndRestore(win: Page, baseUrl: string): Promise<void> {
+  await expect(win.locator(".workspace-stage[data-project-dir]")).toBeVisible({ timeout: 30_000 });
   const connected = await win.evaluate(async ({ baseUrl: url }) => {
     const card = await window.cairn.conductorConsentCard(url, "fixture-model");
     if (!card.ok) return card;
@@ -187,7 +203,9 @@ async function connectAndRestore(win: Page, baseUrl: string): Promise<void> {
       fileContentsConfirmed: true,
     });
   }, { baseUrl });
-  expect(connected.ok).toBe(true);
+  // `toMatchObject` over `toBe(true)`: a refusal prints its own fixed code, so
+  // the next reader of a red here starts from main's reason, not from `false`.
+  expect(connected).toMatchObject({ ok: true });
   await win.reload();
   await expect(win.getByText(OWNER_TURN, { exact: true })).toBeVisible({ timeout: 20_000 });
 }
@@ -203,6 +221,21 @@ async function beginRun(win: Page): Promise<void> {
   await panel.getByLabel("I approve this one real Codex Exec call.").check();
   await panel.getByRole("button", { name: "Start one real Codex Exec call" }).click({ noWaitAfter: true });
   await expect(panel).toContainText("Cairn is working on this");
+}
+
+/** Tasks 243-245 put an owner pause between the worker finishing and Cairn
+ * sealing anything: no report, no log row, no commit and no DONE exist until
+ * the owner presses Continue. This suite predates that gate (Task 189), so
+ * both scenarios used to wait out their whole timeout for a receipt the runtime
+ * was deliberately holding back. Answering the pause is what they always meant
+ * to do, and it changes no product behaviour — `conductor.spec.ts:3277` answers
+ * the same pause the same way, and the worker on both these lanes is the fake
+ * one. The fixture's intent carries no requirements and no owner-answered
+ * promise rows, so Continue is live as soon as the card is. */
+async function answerCandidateGate(win: Page): Promise<void> {
+  const gate = win.getByRole("button", { name: "Continue to Cairn's current checks" });
+  await expect(gate).toBeVisible({ timeout: 30_000 });
+  await gate.click();
 }
 
 async function setWindowSize(app: ElectronApplication, width: number, height: number): Promise<void> {
@@ -262,6 +295,7 @@ test("automatic pair leads its card, opens on this run, survives reload, and nev
     expect(currentRecord(project)?.value.completedAt).toBeNull();
 
     writeFileSync(fakeCodex.release, "finish\n");
+    await answerCandidateGate(win);
     const card = win.locator(".result-card");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAccessibleName("DONE result receipt for Task 001");
@@ -475,6 +509,7 @@ test("a failed terminal capture shows one honest before image and replacement re
       stage.setAttribute("data-project-dir", "C:\\not-the-selected-project");
     });
     writeFileSync(fakeCodex.release, "finish\n");
+    await answerCandidateGate(win);
 
     const evidence = win.locator(".result-card .result-evidence");
     await expect(evidence).toBeVisible({ timeout: 30_000 });
