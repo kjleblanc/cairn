@@ -1,218 +1,154 @@
-# Task 261 brief — questions, proposals, approvals and the operational papers
+# Task 261 brief — the owner-verdict documents become true, and the gate is retired
 
-**Lane:** A (the main checkout), owner-confirmed free. **Base commit:**
-`cf6033b`. **Slice:** 6 of 11 in
-`docs/superpowers/plans/2026-08-13-cairn-resident-program-visual-overhaul.md`.
+**Lane:** A (the main checkout). **Base commit:** `cf6033b`.
 
-**Number claimed by this commit.** Task files across the main checkout, all nine
-registered worktrees and all thirteen local branches form an unbroken run
-`001`–`260` with no gap, so `261` is the lowest genuinely free number. The
-evidence-spec repair that landed at `cf6033b` claimed no number.
+**261 is the lowest genuinely free number.** Every filename beginning with a
+number was listed across the main checkout, all five populated lane worktrees
+(`.lanes/b,c,d,e,h`) and all thirteen local branches: the highest taken number
+is 260 and nothing begins with 261. The number was not taken from a handoff.
 
-There is no owner gate at the end of this slice. The next owner judgment is
-gate 3, at the end of Slice 7.
+**A second session is active in this checkout.** HEAD moved twice while this
+task was being prepared (`e9f9fdd`, then `cf6033b`). This task touches only
+`docs/`, commits by exact path, and re-reads `git log` before committing.
+
+## Where this came from
+
+The owner asked for the state of the owner-verdict workstream and was told, by
+`docs/ai-work/HANDOFF-owner-verdict.md`, that Prerequisite Q was DONE and Plan 2
+was no longer blocked. **Both sentences are false.** Q10 is STOPPED as Task 221
+and was never re-attempted. Two verification passes then established that the
+spec this workstream runs on carries roughly a dozen statements that are false
+or point at code that has moved.
+
+The owner made two decisions on 2026-08-17, from stated options:
+
+- **Owner decision — delete the gate outright.** The four sentences forbidding
+  Plan 2 from being written are retired, with no replacement condition.
+- **Owner decision — repairs first, then Plan 2.** Correct the documents before
+  writing anything on top of them.
+
+**Cairn chose** to split that into three serial tasks rather than one: this
+documentation task, then the contract amendment (code and three hand-edited
+contract copies), then Plan 2. Each is independently reversible and
+independently rejectable, which is the same reason Plan 1 shipped alone.
 
 ## The requested visible outcome
 
-Questions, pushback, task proposals, quality review, dispatch disclosure,
-connection consent, the critic/repair/harness pauses and the lab-only Builder
-proposal review read as one decision family on the paper Slice 5 built. One
-hierarchy throughout: **decision first, effect and reason and recovery next,
-complete details on demand, actions last.** The next owner action and its
-consequences are visually obvious.
+Someone opening `docs/superpowers/specs/2026-08-07-cairn-owner-verdict-design.md`
+reads a document whose statements about the code are true, whose citations land
+on the thing they name, and which no longer forbids the next step. The six
+design questions that blocked Plan 2 are answered in it, each answer carrying
+how it was established — run, read, or neither — so a Plan 2 author can tell
+proof from assertion without repeating the investigation.
 
-## What the read-only audit settled before any file was opened
+`docs/ai-work/HANDOFF-owner-verdict.md` no longer tells its reader something
+that is not so.
 
-**This slice is two problems, not one.**
+## The one thing this task must not get wrong
 
-Only three surfaces are inside the `chat-column-villager` hook — the question
-card, the task card with its intent rows, and the dispatch panel. That is
-**88 rules and 95 selector-list entries**: 19 on the task card (app.css
-972–1042), 44 on the dispatch panel (1872–2027), 23 on the question card
-(2033–2119), one hiding the bubble-only duplicate of the active question, and
-two in the last reduced-motion block. Slice 5's recipe applies to them
-directly.
+**This document has twice shipped a fabricated safety property stated as
+verified code behaviour, and the second was introduced by the first round's
+fix.** Every sentence this task writes about what the code does carries an
+explicit marking: `(ran)` for executed against built code, `(read)` for resolved
+against the file at a named commit, `(UNVERIFIED)` for neither. A correction
+that swaps one unproven claim for another is worse than the defect, because it
+spends the reader's trust to do it.
 
-**Six of this slice's surfaces also render on TaskRun, which is Slice 7's
-screen.** `TaskReviewView`, `TaskSpecProposalPreviewView`, `CriticCallCard`,
-`RepairCallCard`, `HarnessRevisionCard` and `DisclosureConfirm` are mounted by
-both `Chat.tsx` and `TaskRun.tsx`, and their rules are **unscoped** — they only
-re-tone inside the conversation because the column re-points `--card`, `--line`,
-`--muted` and `--stop`. `visualtokens.test.ts` requires every selector in
-`surfaces.css` to be anchored on an `.rp-` class, so they cannot be moved there
-unscoped. **They get `.rp-conversation`-anchored rules and their unscoped
-originals stay for TaskRun until Slice 7 migrates it.** That is a deliberate,
-temporary duplication, forced by the guard rather than chosen, and it is
-recorded here so it is not rediscovered mid-slice.
+## The boundary of intent — what must not change
 
-**Three decision pauses post-date the plan's path list.** `TaskPromiseCard`,
-`UnsealedCandidateCard` and `CandidateCritiqueCard` arrived in Tasks 238–245.
-They are owner decisions, they render only inside the conversation, and leaving
-them in the retired language beside restyled siblings would read as broken.
-They are **in scope**, disclosed as an addition to the plan's list — the same
-way Slice 2 added `chatmock-view.tsx` by sweeping consumers rather than trusting
-the list.
-
-**The intent row exists three times and this slice owns two.** It is styled
-inside `.task-card` (with fills), inside `.dispatch-panel` (flat), and a third
-time inside `.result-card-request-body` — Slice 7's receipt, near-identical to
-the dispatch copy. This slice writes ONE shared rule set with the task-card
-variation as an override, leaves the receipt's copy alone, and the report and
-handoff tell Slice 7 to delete its copy in favour of the shared one rather than
-porting it. Reaching into the receipt's interior here is the mistake the Slice 5
-discipline exists to prevent.
-
-**`.card` is rendered by sixteen files**, every screen included, and
-`conductor.spec.ts` finds the connect card with `locator(".card", …)`. No global
-`.card` restyle. Every existing class name stays; `rp-` classes are added beside
-them, exactly as Slice 5 did.
-
-## The boundary of intent
-
-**Every approval boundary survives unchanged.** Unsent question drafts, defer
-and set-aside choices, busy state, callback identity, focus movement, and the
-exact provider/model/project/data/cost copy. **A prettier card must never look
-already approved, executed, applied, published, verified or terminal.**
-
-**Task 229's contract is absolute.** The Builder proposal review stays lab-only,
-literal-text, no-callback, no-control, no-route, nonterminal and authority-free.
-Its qualification pins hard facts: `borderLeftWidth` exactly `"5px"`, and
-**zero** elements inside the card matching `a, button, input, textarea, select,
-option, form, label, details, summary, iframe, object, embed, audio, video,
-canvas, img, svg, style, script, [href], [src], [for], [role], [tabindex],
-[contenteditable=true]`; nothing focusable; no navigation or network request on
-interaction; no horizontal overflow at 1280 or 600, single column at 600. **No
-`role=`, no SVG mark and no `<details>` fold may be added to that card**, and a
-changed border is a Rewritten disposition with a stated reason, never a quiet
-edit.
-
-The dormant Task-Spec candidate route and Builder proposal activation stay dark
-or output-only. Existing critic, repair and harness approval surfaces stay
-exactly as active and reachable as they are today.
-
-Nothing under `core/**`, `cli/**`, `src/main/**`, IPC, preload, stores, the phone
-page, package manifests or lockfiles. No `.cairn` data read, written or deleted.
-No dependency install, provider or model call, credential use, paid call,
-external-service write, push, publication or deployment. No registered worktree
-created, deleted, reused, reset or moved. Every tracked, staged, modified and
-untracked path is protected, including the untracked evidence under
-`app/test-results/` and `app/shots/`.
+- **No source changes.** No file under `core/src`, `app/src`, `cli/src`, or any
+  test directory is touched. The numberers, the guard, and the runtime are Task
+  262's business.
+- **No contract copies.** `CONTRACT-TEMPLATE.md`, `AGENTS.md` and `cairn.html`
+  are untouched here, and no version moves. Declaring
+  `docs/ai-work/verdicts/` reserved is Task 262.
+- **Plan 2 is not written here.** This task makes its source true; it does not
+  consume it.
+- **No sealed record is edited.** Existing task briefs, reports and LOG rows are
+  history. This task appends one LOG row and writes one report.
+- **The owner's decisions are not re-litigated.** The gate is deleted because
+  the owner said so on 2026-08-17; this task records that, and does not argue it
+  either way.
+- **Nothing leaves the machine.** No push, no paid call, no provider, no
+  credential, no dependency, no external write.
+- **The critic's capability is not retired with the gate.** The owner's sentence
+  wanted a critic and a critic ships. Only the sequencing half is retired.
 
 ## Checks
 
-Each check has a stable id. Commands are run from `app/` unless stated.
+Run from the repository root. Every check names a command whose output a later
+reader can reproduce.
 
-1. **`c1` — the decision family's own rules leave the hook.** The 88 hooked
-   rules are gone from `app.css` and exist in `surfaces.css` anchored on
-   `.rp-conversation`. The boundary guards pass unchanged: every new selector
-   anchored, `app.css` declaring no `.rp-` selector **in a rule or a comment**,
-   production markup carrying `rp-` classes, tokens declared only inside an
-   `.rp-` scope, and the breakpoint census across the three new sheets still
-   exactly `{820, 1260}`. The eight rules currently behind `max-width: 620px`
-   move to 820 px, because 620 sits below the supported 760 px minimum.
+1. **`c1` — no document forbids Plan 2 any more.**
+   `grep -rn "may not be written or started" docs/` returns nothing, and
+   `grep -rniE "before .*plan 2 (begins|starts)" docs/` returns only sentences
+   that describe the retired gate in the past tense. Each of the four gate sites
+   named in the report carries the owner's dated decision rather than a silent
+   deletion.
 
-2. **`c2` — every component's behaviour is unchanged, measured.** Before any
-   edit, strip the VALUE of every `className` out of each component this slice
-   touches and hash the rest; re-run afterwards and report the entire diff.
-   Callbacks, gates, refs, effects, busy flags and focus moves must not move.
+2. **`c2` — the retirement does not overstate what the owner retired.** The
+   quality-intent spec's status block still records the owner's full sentence
+   verbatim, still records that a critic was wanted, and states in its own words
+   that the calibration bar which was to stop the critic rejecting everything
+   for minor issues was never run. Proved by reading the block, not by grepping
+   for the word "critic".
 
-3. **`c3` — one hierarchy, and nothing reads as already acted on.** Decision,
-   then effect/reason/recovery, then details on demand, then actions. Asserted
-   per surface, and seen in the captures under `c9`.
+3. **`c3` — every citation this task touches resolves.** For each `file:NNN`
+   the task edits or adds in the spec, open the file at `cf6033b` and confirm
+   the named symbol or text is at that line. Zero mismatches. The report lists
+   every citation checked and its result, and separately lists any citation left
+   untouched so a reader knows the pass was partial.
 
-4. **`c4` — Task 229's contract holds.** The dedicated browser qualification
-   green, the literal-text and no-action-seam proofs green, and no production
-   consumer added.
+4. **`c4` — the false claims are corrected in place and marked as corrections.**
+   The spec's existing convention — "every correction is marked where it appears
+   rather than quietly rewritten" — is followed for each. A reader can see which
+   sentences were once wrong. Nothing is deleted to hide it.
 
-5. **`c5` — native controls, keyboard, and target size.** Native semantics and
-   accessible names unchanged; focus rings drawn and measured by **tabbing**
-   from real computed styles; every interactive target in the decision family at
-   44 × 44 from real bounding boxes. The question card's actions currently pin
-   `min-height: 40px`, which is below that floor: raising it is recorded as a
-   Rewritten disposition with its reason.
+5. **`c5` — no unproven claim is stated as verified.** Every statement the task
+   adds about code behaviour carries `(ran)`, `(read)`, or `(UNVERIFIED)`.
+   Proved by reading every added paragraph and counting: the report states the
+   count of each marking and names every `(UNVERIFIED)` item explicitly.
 
-6. **`c6` — long disclosure, long model, path and outcome text contain
-   themselves** at 1320×980, the supported minimum 760×620 and the test-only
-   540×900 stress. The page never scrolls sideways and the paper never widens.
+6. **`c6` — the six answers are recorded and are decision-complete.** Each of
+   the six questions carries one decision, its reason, its ground truth with
+   markings, and the test that would prove it. A reader can start Plan 2 without
+   re-deriving any of them. `grep -c` on the six decision headings returns six.
 
-7. **`c7` — nothing moves that the owner did not cause.** No perpetual motion;
-   reduced motion reaches the identical end state; and no transform on a
-   container holding interactive controls — `motion.css`'s `chat-arrive` still
-   slides and scales `.task-card`, which this slice owns.
+7. **`c7` — the handoff no longer states anything false.** Each claim in its
+   "Update, 2026-08-17" block is either true, corrected, or removed. Every count
+   it carries states the counting rule and the commit it was measured at, so it
+   can be re-run.
 
-8. **`c8` — measured contrast, with the decision surfaces brought under
-   `contrast.spec.ts`.** Slice 5 gave that file a connected conversation and the
-   fixture machinery to reach a proposal; this slice widens that scenario rather
-   than writing a third. Two disabled-opacity defects already in this family are
-   fixed and re-measured: `.task-card-actions .pill-primary:disabled`
-   (`opacity: .68`) and `.question-card-controls input:disabled` (`opacity: .5`),
-   plus the `transition: opacity` on the question card's actions.
+8. **`c8` — the two live defects are recorded, not fixed.**
+   `docs/ai-work/verdicts/` is fatal to any run that touches it while no
+   contract copy mentions it, and `pendingVerdictCopyRefusal` ignores its own
+   `_boundary` argument. Both are written down as Task 262's inbox with their
+   file and line, and neither is touched here.
 
-9. **`c9` — every semantic state, seen.** Captures of the real built app for
-   question, pushback, proposal with and without a concern, quality review,
-   dispatch disclosure, connection consent, a critic pause and the Builder
-   proposal review, at wide / minimum / stress in both themes, into
-   `app/shots/task261/` — never `test-results/`.
+9. **`c9` — nothing outside `docs/` changed.** `git status --short` before the
+   commit lists only paths under `docs/`, and `git show --stat` on the commit
+   confirms it. No lockfile, no version, no source.
 
-10. **`c10` — a disposition for every old visual test that moved**, Preserved,
-    Rewritten or Replaced, each with its reason. The blast radius is wider than
-    the plan's list: `conversationpaper.test.ts` (thirteen task-card selectors
-    Slice 5 deliberately left behind), `resultreceipt.test.ts` (one intent row),
-    and **`evidencepresentation.test.ts`, which carries eight assertions on the
-    same class families UNSCOPED** and which a scoped grep misses.
+10. **`c10` — the other session's work is intact.** `git log --oneline` is
+    re-read immediately before committing; if HEAD moved, the diff is
+    re-inspected. The commit stages by exact path, never `git add -A`.
 
-    Three guards that go quiet rather than red are repaired while their files
-    are open, each with a positive `-1` assertion: `questionpaper.test.ts:112`
-    (**already dead on `main`** — its marker
-    `".chat-column-villager .question-card,"` has zero occurrences in `app.css`,
-    so its ordering assertion has been vacuously true), `dispatchpaper.test.ts:116`
-    (live today, silent the moment its one-line marker is reformatted or moved),
-    and `repaircallpaper.test.ts:32` (an empty slice satisfies every
-    `doesNotMatch` on it).
-
-11. **`c11` — the app compiles, builds and tests as it did.**
-
-    ```powershell
-    npm.cmd run typecheck
-    npm.cmd run test:unit
-    npm.cmd run build:vite
-    npm.cmd run build:lab
-    node --test dist-unit/tests-unit/residentprogramboard.test.js
-    node --test tests-qualification/resident-program-bundle-dark.test.mjs
-    node --test tests-qualification/builder-proposal-bundle-dark.test.mjs
-    node ./node_modules/@playwright/test/cli.js test --config playwright.builderproposal.config.ts
-    ```
-
-    The unit failure SET is diffed by full test title against a baseline
-    **re-derived in this lane before the first edit**, not against the
-    1036 / 1025 / 9 / 2 in the handoff. `dist-unit/` is removed first if any
-    test source is deleted.
-
-12. **`c12` — targeted E2E under the exact mutex protocol.** Both token
-    locations acquired with `mkdir`, ownership recorded, released in a `finally`
-    that also covers the launch. One invocation per scenario, `workers: 1`,
-    `--output=test-results/task261-runner`, with `test-results/` backed up first
-    and its hashes verified after. The proposal, question, set-aside, dispatch,
-    critic and Builder-review scenarios in `conductor.spec.ts` and
-    `builder-proposal-conversation.spec.ts`, plus `contrast.spec.ts`.
-
-13. **`c13` — no dependency, no external action.** No install, provider or model
-    call, credential, paid call, network beyond loopback, external-service
-    write, push, publication or deployment.
-
-14. **`c14` — records and Git protection.** This brief committed alone; the
-    completion commit stages only this task's exact paths, by name. Nothing
-    cleaned, stashed, reset, broadly staged or rewritten.
+11. **`c11` — the owner can read it.** The owner opens the spec's new "The six
+    questions Plan 2 asked" section and the corrected handoff update, and says
+    whether they can tell what was wrong, what is now decided, and what is still
+    unproven. **This check is the owner's own eyes and cannot be closed by
+    Cairn.**
 
 ## DONE and STOPPED
 
-**DONE** means the decision family is drawn by the approved paper language, one
-hierarchy is visible across all of it, every approval boundary and Task 229's
-contract are intact, every check above has a real recorded result, the unit
-failure set is unchanged from the re-derived baseline, and no component's
-behaviour moved.
+**DONE** means `c1`–`c10` hold as written and the owner has answered `c11`. The
+spec is true and decision-complete for Plan 2, the handoff is honest, the gate
+is retired with the owner's decision recorded, and no source file moved.
 
-**STOPPED** means an approval boundary could not be preserved through the
-restyle, a restyled card could be mistaken for one already acted on, a contrast
-floor could not be met without changing an approved colour, or a concrete risk
-boundary was reached.
+**STOPPED** means any of these: a correction could not be verified and would
+have shipped as another assertion; the retirement would have to overstate what
+the owner decided; a source or contract change turned out to be unavoidable to
+make a document true; protected work from the other session changed
+unexpectedly; or the owner's `c11` answer says the result is not readable. A
+STOPPED here leaves every document exactly as it was found, because every change
+in this task is one commit of prose.
