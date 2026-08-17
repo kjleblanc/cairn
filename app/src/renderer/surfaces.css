@@ -831,3 +831,1016 @@
   .rp-conversation .rp-composer textarea { min-height: 44px; }
   .rp-conversation .chat-composer-actions .pill { padding: 10px 14px; }
 }
+
+/* =======================================================================
+   Task 263 (Slice 6) — THE DECISION FAMILY.
+
+   Questions, pushback, task proposals, quality review, dispatch disclosure,
+   the critic/repair/harness pauses and the three later Q9 pauses. Slice 5 put
+   the conversation on paper; these are the surfaces on that paper that ask the
+   owner for something.
+
+   ONE HIERARCHY, EVERYWHERE:
+
+     1. the decision              — what is being asked, as a heading
+     2. effect, reason, recovery  — what happens, why, and the way back
+     3. complete details on demand — a native fold, never a truncation
+     4. actions                   — last, on their own ruled row
+
+   Everything here is anchored on `.rp-conversation`, so a rule can only reach
+   a surface that has opted in. Six of these components also mount on TaskRun,
+   which is Slice 7's screen: their UNSCOPED rules stay in `app.css` until that
+   slice moves them. That duplication is forced by the anchor guard in
+   `visualtokens.test.ts`, not chosen.
+
+   A PRETTIER CARD MUST NEVER LOOK ALREADY ACTED ON. Nothing here fills a
+   surface with a success or terminal colour, and no disabled control is faded
+   into unreadability — see the disabled block near the end.
+   ======================================================================= */
+
+/* ------------------------------------------------- the shared sheet */
+
+/*
+ * Every decision surface is one raised sheet with a registration rule down its
+ * left edge. The retired language drew that mark as an absolutely-positioned
+ * 2px `::before`; a real `border-left` is the same signal with no positioned
+ * box to contain, and it is already the vocabulary `.rp-note-attention` and
+ * `.rp-note-stop` use.
+ *
+ * The rule's colour is the surface's semantic, and it is never the only
+ * carrier: every one of these cards states its condition in words in its own
+ * heading.
+ */
+.rp-conversation .task-card,
+.rp-conversation .question-card,
+.rp-conversation .dispatch-panel,
+.rp-conversation .critic-call,
+.rp-conversation .unsealed-candidate,
+.rp-conversation .candidate-critique,
+.rp-conversation .task-promise-card,
+.rp-conversation .task-review-state,
+.rp-conversation .task-spec-preview {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: visible;
+  margin: 0;
+  padding: 16px 18px 14px;
+  border: 0;
+  border-left: 3px solid var(--rp-teal);
+  border-radius: var(--rp-r-sm);
+  box-shadow: var(--rp-shadow-low);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+
+  /*
+   * ONE restrained static paper texture, shared by every paper surface — the
+   * constitution's words, and these are paper surfaces.
+   *
+   * It rides on the element's OWN background, under its children, rather than
+   * on the `::after` the `.rp-paper*` material classes use. That is deliberate
+   * and it is the construction the retired cards used: an absolutely
+   * positioned grain layer paints OVER a card's contents, and these cards hold
+   * interactive controls, so it would tint the teal fill of every primary
+   * action and change a contrast pairing that is measured elsewhere. Under the
+   * children it cannot.
+   *
+   * `soft-light` rather than `var(--rp-grain-blend)` for the same reason: that
+   * token is half of a pair, calibrated against `--rp-grain-opacity` on a
+   * pseudo-element, and an element background has no opacity of its own to
+   * pair with it. Only the outer sheet is grained; the surfaces nested inside
+   * it stay plain, because five grains would read as five textures.
+   */
+  background-color: var(--rp-paper-raised);
+  background-image: var(--rp-grain);
+  background-size: 160px 160px;
+  background-blend-mode: soft-light;
+}
+
+/* A proposal carrying an unresolved concern is drawn in the attention ink, and
+   says so in its own heading — "One thing needs your call". Colour reinforces
+   the words; it never replaces them. */
+.rp-conversation .task-card:has(.task-risk) {
+  border-left-color: var(--rp-amber-ink);
+}
+
+/* A run that is waiting is not a run that is finished. */
+.rp-conversation .unsealed-candidate,
+.rp-conversation .task-promise-card {
+  border-left-color: var(--rp-amber-ink);
+}
+
+/* --------------------------------------------------- 1. the decision */
+
+.rp-conversation .task-card-heading,
+.rp-conversation .question-card-heading,
+.rp-conversation .dispatch-heading,
+.rp-conversation .critic-call-title,
+.rp-conversation .unsealed-candidate-title,
+.rp-conversation .candidate-critique-title,
+.rp-conversation .task-promise-card-title,
+.rp-conversation .task-review-state .card-title,
+.rp-conversation .task-spec-preview-heading {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 6px;
+  color: var(--rp-ink-strong);
+  font-family: var(--rp-sans);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1.3;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * These headings take focus programmatically so a decision announces itself,
+ * and a focused heading must not read as a button the owner failed to press.
+ * It is underlined instead, in the focus ink.
+ */
+.rp-conversation .task-card-heading:focus,
+.rp-conversation .question-card-heading:focus,
+.rp-conversation .dispatch-heading:focus {
+  outline: none;
+  border-radius: 0;
+  box-shadow: none;
+  text-decoration-line: underline;
+  text-decoration-color: var(--rp-focus);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+/* ------------------------------- 2. effect, reason, and the way back */
+
+.rp-conversation .task-card-outcome {
+  margin: 0;
+  color: var(--rp-ink);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.55;
+  max-width: 62ch;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .dispatch-acceptance,
+.rp-conversation .dispatch-routing,
+.rp-conversation .dispatch-running,
+.rp-conversation .critic-call-purpose,
+.rp-conversation .candidate-critique-sentence {
+  margin: 10px 0 0;
+  padding: 0;
+  color: var(--rp-ink);
+  font-size: 16px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* The concern rows. Attention is the whole point of them, so they take the
+   measured attention pairing rather than a bespoke amber wash. */
+.rp-conversation .task-card-risks {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.rp-conversation .task-risk {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-left: 3px solid var(--rp-amber-ink);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-paper);
+  color: var(--rp-ink);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .task-risk p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+/* A routed or connection fact the owner may need in order to recover. */
+.rp-conversation .dispatch-connection {
+  margin-top: 10px;
+  padding: 9px 0 2px 12px;
+  border-left: 3px solid var(--rp-amber-ink);
+  min-width: 0;
+}
+
+.rp-conversation .dispatch-connection p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .dispatch-connection p + p { margin-top: 5px; }
+
+/* STOPPED and ERROR are written first and coloured second. */
+.rp-conversation .dispatch-error {
+  margin: 10px 0 0;
+  padding: 9px 12px;
+  border: 0;
+  border-left: 3px solid var(--rp-coral-line);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-coral);
+  color: var(--rp-coral-ink);
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------- the shared request provenance */
+
+/*
+ * ONE intent-row rule set, used flat by the dispatch checkpoint and by every
+ * operational paper, with the proposal's filled variation as an override
+ * below. The result receipt's near-identical copy in `app.css` is Slice 7's
+ * and is deliberately NOT touched here: its rules sit at (0,3,0) and outrank
+ * this (0,2,0) one, so the receipt keeps exactly the appearance it has today.
+ * Slice 7 should DELETE its copy in favour of this one rather than porting it.
+ */
+.rp-conversation .task-intent { margin-top: 10px; min-width: 0; }
+
+.rp-conversation .task-intent-heading {
+  margin: 0 0 6px;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.rp-conversation .task-intent-list,
+.rp-conversation .task-intent-context > ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+}
+
+.rp-conversation .task-intent-row {
+  min-width: 0;
+  padding: 8px 0 8px 12px;
+  border: 0;
+  border-left: 2px solid var(--rp-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--rp-ink);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .task-intent-owner-stated { border-left-color: var(--rp-teal); }
+.rp-conversation .task-intent-owner-unsure { border-left-color: var(--rp-amber-ink); }
+.rp-conversation .task-intent-cairn-chosen { border-left-color: var(--rp-hairline-strong); }
+
+/* Provenance is a word before it is a colour: TaskIntentList prints "You said
+   so", "You weren't sure" or "Cairn chose" on every row. */
+.rp-conversation .task-intent-role {
+  margin: 0 0 2px;
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+}
+
+.rp-conversation .task-intent-source {
+  margin: 0 0 4px;
+  color: var(--rp-ink-muted);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.rp-conversation .task-intent-owner-stated .task-intent-source { color: var(--rp-teal-ink); }
+
+.rp-conversation .task-intent-interpretation {
+  margin: 0;
+  color: var(--rp-ink);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .task-intent-owner-quote {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rp-hairline);
+  min-width: 0;
+}
+
+.rp-conversation .task-intent-owner-quote blockquote {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .task-intent-context {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .task-intent-context > h3 {
+  margin: 0 0 6px;
+  color: var(--rp-ink-muted);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.rp-conversation .task-intent-context li {
+  padding-left: 12px;
+  border-left: 2px solid var(--rp-hairline-strong);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The proposal's own variation: the same rows, given a quiet fill so the
+   folio's interior reads as one annotated object rather than a loose list. */
+.rp-conversation .task-card .task-intent-row {
+  padding: 9px 10px;
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-paper);
+}
+
+/* -------------------------------------------- 3. details on demand */
+
+.rp-conversation .task-card-details,
+.rp-conversation .unsealed-candidate-fold {
+  margin-top: 10px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--rp-ink);
+}
+
+.rp-conversation .task-card-details > summary,
+.rp-conversation .unsealed-candidate-fold > summary {
+  width: fit-content;
+  padding: 8px 2px;
+  border-radius: var(--rp-r-sm);
+  color: var(--rp-teal-ink);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.rp-conversation .task-card-details > summary:focus-visible,
+.rp-conversation .unsealed-candidate-fold > summary:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+.rp-conversation .task-card-details > .task-intent {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+/* --------------------------------------- the routed disclosure ledger */
+
+/*
+ * Provider, model, target project and the exact task, as one ruled ledger
+ * rather than a row of tiles. Every byte the owner confirms stays open.
+ */
+.rp-conversation .dispatch-disclosure-lead {
+  margin: 14px 0 5px;
+  color: var(--rp-ink-strong);
+  font-weight: 700;
+}
+
+.rp-conversation .dispatch-panel .route-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  min-width: 0;
+  margin: 5px 0 0;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .dispatch-panel .route-facts p {
+  display: grid;
+  grid-template-columns: minmax(96px, .28fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 0;
+  border: 0;
+  border-bottom: 1px solid var(--rp-hairline);
+  border-radius: 0;
+  background: transparent;
+  color: var(--rp-ink);
+}
+
+.rp-conversation .dispatch-panel .route-facts span,
+.rp-conversation .dispatch-panel .route-facts strong { min-width: 0; overflow-wrap: anywhere; }
+
+.rp-conversation .dispatch-panel .route-facts span {
+  color: var(--rp-ink-muted);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* The exact task payload is machine evidence: it keeps its line breaks and
+   stops shouting over the approval it belongs to. */
+.rp-conversation .dispatch-panel .disclosure-task {
+  display: block;
+  padding-left: 10px;
+  border-left: 1px solid var(--rp-hairline-strong);
+  color: var(--rp-ink);
+  font-family: var(--rp-mono);
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.rp-conversation .dispatch-disclosure-scope,
+.rp-conversation .dispatch-disclosure-quota {
+  margin: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rp-hairline);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .dispatch-disclosure-scope strong,
+.rp-conversation .dispatch-disclosure-quota strong { color: var(--rp-ink-strong); }
+
+/*
+ * The one-call gate. It is the last thing before a real paid call, so it is a
+ * distinct ruled checkpoint rather than another line of prose — and it is a
+ * native labelled checkbox, unchanged.
+ */
+.rp-conversation .dispatch-approval {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 12px 10px;
+  border: 0;
+  border-left: 3px solid var(--rp-amber-ink);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-paper);
+  color: var(--rp-ink);
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.rp-conversation .dispatch-approval input {
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  accent-color: var(--rp-teal);
+}
+
+.rp-conversation .dispatch-approval input:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+.rp-conversation .dispatch-approval span { min-width: 0; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------ the question's field */
+
+/*
+ * Main sends a question twice: once as Cairn's own turn and once as the live
+ * action. Chat projects the turn down to whatever it said BESIDES the prompt,
+ * and when that is nothing the turn would render as an empty prose row above
+ * the annotation. The stored turn is never rewritten — only this display copy
+ * is hidden.
+ */
+.rp-conversation .bubble-active-question-only { display: none; }
+
+.rp-conversation .question-card-answer {
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 11px 12px 12px;
+  border: 0;
+  border-radius: var(--rp-r-sm);
+  box-shadow: none;
+  background: var(--rp-paper);
+}
+
+.rp-conversation .question-card-answer > label {
+  display: block;
+  margin: 0 0 6px;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.rp-conversation .question-card-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.rp-conversation .question-card-controls input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  box-shadow: none;
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.rp-conversation .question-card-controls input:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+  border-color: var(--rp-teal);
+}
+
+/* ------------------------------------------ the operational ledgers */
+
+/*
+ * The critic, repair and harness pauses share one class family — RepairCall
+ * and HarnessRevision both render `critic-call` beside their own class — so
+ * one rule set draws all three.
+ */
+.rp-conversation .critic-call-route,
+.rp-conversation .candidate-critique-route-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  min-width: 0;
+  margin: 8px 0;
+  padding: 0;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .critic-call-route > div,
+.rp-conversation .candidate-critique-route-list div {
+  display: grid;
+  grid-template-columns: minmax(96px, .28fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rp-hairline);
+}
+
+.rp-conversation .critic-call-route dt,
+.rp-conversation .candidate-critique-route-list dt {
+  margin: 0;
+  color: var(--rp-ink-muted);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.rp-conversation .critic-call-route dd,
+.rp-conversation .candidate-critique-route-list dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--rp-ink);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .critic-call-sends,
+.rp-conversation .critic-call-notsent,
+.rp-conversation .critic-call-limit,
+.rp-conversation .critic-call-billing,
+.rp-conversation .critic-call-empty {
+  margin: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rp-hairline);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .critic-call-sends strong,
+.rp-conversation .critic-call-notsent strong,
+.rp-conversation .critic-call-limit strong,
+.rp-conversation .critic-call-billing strong { color: var(--rp-ink-strong); }
+
+.rp-conversation .critic-call-files { margin: 0; padding: 6px 0 8px; list-style: none; }
+
+.rp-conversation .critic-call-files li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.rp-conversation .critic-call-file {
+  min-width: 0;
+  color: var(--rp-ink);
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .critic-call-count,
+.rp-conversation .critic-call-hash,
+.rp-conversation .critic-call-fingerprint {
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Bounded machine output stays inside its own frame and never widens the
+   paper; the page itself must never scroll sideways. */
+.rp-conversation .critic-call pre,
+.rp-conversation .unsealed-candidate pre,
+.rp-conversation .candidate-critique pre {
+  max-width: 100%;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper);
+  color: var(--rp-ink);
+  font-family: var(--rp-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+.rp-conversation .unsealed-candidate-sentence {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper);
+  color: var(--rp-ink);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .unsealed-candidate-section-title,
+.rp-conversation .candidate-critique-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 10px 0 4px;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.rp-conversation .unsealed-candidate-provenance,
+.rp-conversation .candidate-critique-provenance {
+  color: var(--rp-ink-muted);
+  font-size: 13px;
+}
+
+/* ------------------------------------- the Builder proposal, not applied */
+
+/*
+ * Task 229's review surface, inside the conversation. Chat renders it on the
+ * authenticated Builder route, so it is part of this family whatever else it
+ * is — and the ONE thing it must never look like is a change that happened.
+ * It carries the attention rule rather than the teal one for that reason, and
+ * its boundary sentence ("Nothing changed. No command ran.") is the strongest
+ * ink on the card.
+ *
+ * TASK 229'S CONTRACT IS STRUCTURAL AND NOTHING HERE TOUCHES IT. These are
+ * presentation rules on existing class names: no control, no `role`, no SVG,
+ * no fold and nothing focusable is added, and the component takes no callback
+ * at all. Its dedicated browser qualification drives the LAB page, where the
+ * pinned 5px left border lives; this copy keeps 5px so the two say the same
+ * thing.
+ */
+.rp-conversation .builder-proposal-review {
+  align-self: stretch;
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--rp-hairline-strong);
+  border-left: 5px solid var(--rp-amber-ink);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  box-shadow: var(--rp-shadow-low);
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+}
+
+.rp-conversation .builder-proposal-header { display: grid; min-width: 0; gap: 4px; }
+
+.rp-conversation .builder-proposal-header h2,
+.rp-conversation .builder-proposal-capability h3,
+.rp-conversation .builder-proposal-file h3 {
+  min-width: 0;
+  margin: 0;
+  color: var(--rp-ink-strong);
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .builder-proposal-eyebrow,
+.rp-conversation .builder-proposal-label {
+  margin: 0;
+  color: var(--rp-amber-ink);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.rp-conversation .builder-proposal-boundary {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--rp-amber-ink);
+  border-radius: 0 var(--rp-r-sm) var(--rp-r-sm) 0;
+  background: var(--rp-paper);
+  color: var(--rp-amber-ink);
+  font-weight: 700;
+}
+
+.rp-conversation .builder-proposal-caveat { margin: 0; color: var(--rp-ink-muted); }
+.rp-conversation .builder-proposal-summary p:last-child { margin: 0; }
+.rp-conversation .builder-proposal-summary,
+.rp-conversation .builder-proposal-files { display: grid; min-width: 0; gap: 8px; }
+.rp-conversation .builder-proposal-files { gap: 12px; }
+
+.rp-conversation .builder-proposal-file,
+.rp-conversation .builder-proposal-capability {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--rp-hairline);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper);
+}
+
+.rp-conversation .builder-proposal-file pre {
+  max-width: 100%;
+  margin: 9px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-chrome);
+  color: var(--rp-ink);
+  font: 400 13px/1.55 var(--rp-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.rp-conversation .builder-proposal-hash {
+  display: block;
+  margin-top: 5px;
+  color: var(--rp-ink-muted);
+  font-family: var(--rp-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.rp-conversation .builder-proposal-capability dt,
+.rp-conversation .builder-proposal-identity dt { color: var(--rp-ink-muted); font-weight: 700; }
+.rp-conversation .builder-proposal-capability dd,
+.rp-conversation .builder-proposal-identity dd { margin: 0; overflow-wrap: anywhere; }
+
+.rp-conversation .builder-proposal-identity {
+  padding-top: 12px;
+  border-top: 1px solid var(--rp-hairline);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------ 4. the actions */
+
+/*
+ * Actions come last, on their own ruled row, and every one of them clears
+ * 44 x 44 from a real bounding box. The question card's actions previously
+ * pinned `min-height: 40px`, which is below the constitution's floor.
+ */
+.rp-conversation .task-card-actions,
+.rp-conversation .dispatch-actions,
+.rp-conversation .question-card-actions,
+.rp-conversation .critic-call-actions,
+.rp-conversation .unsealed-candidate-actions,
+.rp-conversation .candidate-critique-actions,
+.rp-conversation .task-promise-card-row-choices {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-width: 0;
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--rp-hairline);
+}
+
+/* The question's two paths sit inside the response field, so they take no
+   second rule above them. */
+.rp-conversation .question-card-actions {
+  margin: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.rp-conversation .task-card-actions .pill,
+.rp-conversation .dispatch-actions .pill,
+.rp-conversation .question-card-actions .pill,
+.rp-conversation .critic-call-actions .pill,
+.rp-conversation .unsealed-candidate-actions .pill,
+.rp-conversation .candidate-critique-actions .pill,
+.rp-conversation .task-promise-card-row-choices .pill,
+.rp-conversation .task-review-owner-check .pill {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  max-width: 100%;
+  padding: 10px 18px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper);
+  box-shadow: none;
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  transition: border-color .2s, background-color .2s, color .2s;
+}
+
+/* One primary control per decision. */
+.rp-conversation .task-card-actions .pill-primary,
+.rp-conversation .dispatch-actions .pill-primary,
+.rp-conversation .critic-call-actions .pill-primary,
+.rp-conversation .unsealed-candidate-actions .pill-primary,
+.rp-conversation .candidate-critique-actions .pill-primary,
+.rp-conversation .question-card-actions > .pill:first-child {
+  border-color: var(--rp-teal);
+  background: var(--rp-teal);
+  color: var(--rp-on-teal);
+}
+
+/* A stop is drawn in the restrained coral and always says "stop" in words. */
+.rp-conversation .critic-call-actions .pill-danger,
+.rp-conversation .unsealed-candidate-actions .pill-danger,
+.rp-conversation .candidate-critique-actions .pill-danger {
+  border-color: var(--rp-coral-line);
+  background: var(--rp-coral);
+  color: var(--rp-coral-ink);
+}
+
+.rp-conversation .task-card-actions .pill:hover:not(:disabled),
+.rp-conversation .dispatch-actions .pill:hover:not(:disabled),
+.rp-conversation .question-card-actions .pill:hover:not(:disabled),
+.rp-conversation .critic-call-actions .pill:hover:not(:disabled),
+.rp-conversation .unsealed-candidate-actions .pill:hover:not(:disabled),
+.rp-conversation .candidate-critique-actions .pill:hover:not(:disabled),
+.rp-conversation .task-promise-card-row-choices .pill:hover:not(:disabled),
+.rp-conversation .task-review-owner-check .pill:hover:not(:disabled) {
+  transform: none;
+  border-color: var(--rp-teal);
+  box-shadow: var(--rp-shadow-low);
+}
+
+.rp-conversation .task-card-actions .pill:active:not(:disabled),
+.rp-conversation .dispatch-actions .pill:active:not(:disabled),
+.rp-conversation .question-card-actions .pill:active:not(:disabled),
+.rp-conversation .critic-call-actions .pill:active:not(:disabled),
+.rp-conversation .unsealed-candidate-actions .pill:active:not(:disabled),
+.rp-conversation .candidate-critique-actions .pill:active:not(:disabled),
+.rp-conversation .task-promise-card-row-choices .pill:active:not(:disabled),
+.rp-conversation .task-review-owner-check .pill:active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+}
+
+.rp-conversation .task-card-actions .pill:focus-visible,
+.rp-conversation .dispatch-actions .pill:focus-visible,
+.rp-conversation .question-card-actions .pill:focus-visible,
+.rp-conversation .critic-call-actions .pill:focus-visible,
+.rp-conversation .unsealed-candidate-actions .pill:focus-visible,
+.rp-conversation .candidate-critique-actions .pill:focus-visible,
+.rp-conversation .task-promise-card-row-choices .pill:focus-visible,
+.rp-conversation .task-review-owner-check .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * A DISABLED CONTROL IS STILL READ — the same defect Slice 5 measured on the
+ * composer, and this family carried two more of it: the proposal's Review at
+ * `opacity: .68` and the question's answer input at `opacity: .5`, with the
+ * question's actions also TRANSITIONING opacity. `opacity` fades a label and
+ * its ground together, and neither had ever been measured.
+ *
+ * Inactive is carried by losing the teal fill and the strong edge, not by
+ * fading the words. `opacity: 1` is explicit here because the unscoped
+ * `.pill:disabled` in `app.css` sets .5.
+ */
+.rp-conversation .task-card-actions .pill:disabled,
+.rp-conversation .dispatch-actions .pill:disabled,
+.rp-conversation .question-card-actions .pill:disabled,
+.rp-conversation .critic-call-actions .pill:disabled,
+.rp-conversation .unsealed-candidate-actions .pill:disabled,
+.rp-conversation .candidate-critique-actions .pill:disabled,
+.rp-conversation .task-promise-card-row-choices .pill:disabled,
+.rp-conversation .task-review-owner-check .pill:disabled,
+.rp-conversation .task-card-actions .pill-primary:disabled,
+.rp-conversation .question-card-controls input:disabled {
+  opacity: 1;
+  border-color: var(--rp-hairline-strong);
+  background: var(--rp-paper);
+  color: var(--rp-ink-muted);
+  cursor: default;
+}
+
+/* The proposal's Set aside sits on its concern row, not on the action row, so
+   it keeps the quiet skin and the same 44 x 44 floor. */
+.rp-conversation .task-risk .pill {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--rp-control-edge);
+  border-radius: var(--rp-r-sm);
+  background: var(--rp-paper-raised);
+  box-shadow: none;
+  color: var(--rp-ink);
+  font-family: var(--rp-sans);
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.rp-conversation .task-risk .pill:focus-visible {
+  outline: 3px solid var(--rp-focus);
+  outline-offset: 2px;
+}
+
+.rp-conversation .task-risk .pill:disabled {
+  opacity: 1;
+  border-color: var(--rp-hairline-strong);
+  color: var(--rp-ink-muted);
+  cursor: default;
+}
+
+/* ------------------------------------------------------------ compact */
+
+/*
+ * The retired rules these replace sat behind `max-width: 620px`, which is
+ * below the supported 760 px minimum — so they only ever reached the
+ * test-only containment stress view and never a supported size. They are at
+ * 820 px now, the breakpoint Slice 3 already owns.
+ */
+@media (max-width: 820px) {
+  .rp-conversation .task-card,
+  .rp-conversation .question-card,
+  .rp-conversation .dispatch-panel,
+  .rp-conversation .critic-call,
+  .rp-conversation .unsealed-candidate,
+  .rp-conversation .candidate-critique,
+  .rp-conversation .task-promise-card,
+  .rp-conversation .task-review-state,
+  .rp-conversation .task-spec-preview { padding: 14px 13px 12px; }
+
+  /* The scoped sheet outranks `app.css`'s own compact rule for this card
+     (0,2,0 against 0,1,0), so the conversation's copy needs its own. */
+  .rp-conversation .builder-proposal-review { padding: 14px 13px; }
+
+  .rp-conversation .dispatch-panel .route-facts p,
+  .rp-conversation .critic-call-route > div,
+  .rp-conversation .candidate-critique-route-list div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .rp-conversation .question-card-answer { padding: 10px 10px 11px; }
+
+  .rp-conversation .question-card-controls {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .rp-conversation .task-risk { grid-template-columns: minmax(0, 1fr); }
+
+  .rp-conversation .task-card-actions,
+  .rp-conversation .dispatch-actions,
+  .rp-conversation .question-card-actions,
+  .rp-conversation .critic-call-actions,
+  .rp-conversation .unsealed-candidate-actions,
+  .rp-conversation .candidate-critique-actions { align-items: flex-start; }
+
+  .rp-conversation .task-card-actions .pill,
+  .rp-conversation .dispatch-actions .pill,
+  .rp-conversation .question-card-actions .pill,
+  .rp-conversation .critic-call-actions .pill,
+  .rp-conversation .unsealed-candidate-actions .pill,
+  .rp-conversation .candidate-critique-actions .pill { padding: 10px 14px; text-align: left; }
+}

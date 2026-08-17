@@ -282,6 +282,12 @@ test("the desk's text clears the contrast floor against the field it sits on", a
  * `conductor-connection.ts` refuses to resolve a path at all outside it — so
  * the owner's own saved connection is unreachable from here.
  */
+/*
+ * Task 263 (Slice 6) WIDENED this scenario rather than adding a third: the
+ * decision surfaces — the proposal, its concern, its attributed request rows
+ * and its gated primary control — are now driven onto the paper before the
+ * sweep runs, so they are measured with everything else.
+ */
 test("the connected conversation's own text clears the contrast floor", async () => {
   const fixturePath = pathToFileURL(join(__dirname, "fixtures", "fake-conductor.mjs")).href;
   const fixture = (await import(fixturePath)) as {
@@ -384,6 +390,46 @@ test("the connected conversation's own text clears the contrast floor", async ()
     await win.keyboard.press("Shift+Tab");
     await win.keyboard.press("Shift+Tab");
     await expect(win.getByPlaceholder("Talk with Cairn")).toBeFocused();
+
+    /*
+     * Task 263 (Slice 6) — THE DECISION SURFACES, ON SCREEN AND MEASURED.
+     *
+     * Tasks 259 and 260 both wrote down that the proposal's primary control
+     * "looks low-contrast and is unmeasured", and Task 260 said the right fix
+     * was to WIDEN this scenario rather than write a third. This is that.
+     *
+     * The fixture answers anything containing "title" with a proposal that
+     * carries a concern, which is the richest state in the family: the folio,
+     * the attention rule down its edge, a concern row with its own Set aside,
+     * the attributed request rows behind the native fold — and Review DISABLED,
+     * because an unresolved concern gates it. That last one is the state the
+     * retired rule faded to `opacity: .68`, on a teal fill, never measured.
+     */
+    await win.getByPlaceholder("Talk with Cairn").fill("Please change the page title for me.");
+    await win.getByRole("button", { name: "Send", exact: true }).click({ noWaitAfter: true });
+    await expect(win.locator(".task-card")).toBeVisible({ timeout: 30_000 });
+    await expect(win.locator(".task-risk")).toBeVisible({ timeout: 20_000 });
+
+    // Open the fold, so the attributed request rows are measured too rather
+    // than being hidden behind a summary the sweep would skip.
+    await win.locator(".task-card-details > summary").click();
+    await expect(win.locator(".task-intent-row").first()).toBeVisible({ timeout: 10_000 });
+    await win.waitForTimeout(600);
+
+    // The gated control really is disabled, so the sweep below measures the
+    // inactive state rather than proving nothing.
+    await expect(win.locator(".task-card-actions .pill-primary")).toBeDisabled();
+
+    // The proposal does not travel: it holds Review and a Set aside, which is
+    // exactly the container the constitution forbids transforming.
+    const proposalMotion = await win.locator(".task-card").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { animation: style.animationName, transform: style.transform };
+    });
+    expect(proposalMotion.animation, "the proposal still animates on arrival").toBe("none");
+    expect(["none", "matrix(1, 0, 0, 1, 0, 0)"], "the proposal is drawn under a transform")
+      .toContain(proposalMotion.transform);
+
     // Put the draft back and leave Send DISABLED for the sweep below. That is
     // the state a composer is in most of the time, and measuring it is what
     // caught a 2.45:1 label: `opacity` fades a control's words and its ground

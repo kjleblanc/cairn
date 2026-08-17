@@ -29,8 +29,26 @@ test("repair call paper: the renderer shows every required identity and returns 
 
 test("repair call paper: shared output has no project, instruction bytes, command, or authority field", () => {
   const shared = source("src", "shared", "repair-call.ts");
-  const disclosure = shared.slice(shared.indexOf("export type RepairCallDisclosureV1"), shared.indexOf("export type RepairCallDecisionRequest"));
-  const decision = shared.slice(shared.indexOf("export type RepairCallDecisionRequest"), shared.indexOf("export type RepairCallDecisionV1"));
+
+  // REPAIRED by Task 263 (Slice 6) while this file was open. Both slices were
+  // taken from bare `indexOf` results, and the `disclosure` half carries only
+  // `doesNotMatch` assertions — so a renamed or deleted marker yields an empty
+  // string that satisfies every one of them, and the custody guard that
+  // matters most here would pass while reading nothing at all.
+  const disclosureAt = shared.indexOf("export type RepairCallDisclosureV1");
+  const requestAt = shared.indexOf("export type RepairCallDecisionRequest");
+  const decisionAt = shared.indexOf("export type RepairCallDecisionV1");
+  assert.notEqual(disclosureAt, -1, "RepairCallDisclosureV1 is gone; the custody slice reads nothing");
+  assert.notEqual(requestAt, -1, "RepairCallDecisionRequest is gone; the custody slice reads nothing");
+  assert.notEqual(decisionAt, -1, "RepairCallDecisionV1 is gone; the custody slice reads nothing");
+  assert.ok(requestAt > disclosureAt && decisionAt > requestAt,
+    "the three shared types are no longer in the order these slices assume");
+
+  const disclosure = shared.slice(disclosureAt, requestAt);
+  const decision = shared.slice(requestAt, decisionAt);
+  // The positive control: the disclosure really does carry its own fields, so
+  // the absence checks below are absences in something rather than in nothing.
+  assert.match(disclosure, /^\s*approvalId:/mu, "the disclosure slice is empty or has no fields");
   assert.doesNotMatch(disclosure, /^\s*(?:dir|projectPath|instruction|command|authorization):/mu);
   assert.doesNotMatch(decision, /^\s*(?:projectPath|instruction|command|authorization):/mu);
   assert.match(decision, /^\s*dir:/mu);

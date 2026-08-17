@@ -45,6 +45,41 @@ function surfaceRule(selector: string): string {
   return surfaces.slice(start, surfaces.indexOf("}", start));
 }
 
+/**
+ * EVERYTHING `selector` declares in `surfaces.css`, brace-tracked, comments
+ * stripped first so a comma inside prose cannot split a selector list.
+ *
+ * Task 263's decision family is written as shared rule sets — one sheet, one
+ * heading, one action skin for nine surfaces — so most of its selectors sit in
+ * a comma-separated list and never appear as `\n<selector> {`. `surfaceRule`
+ * above would simply not find them, and a helper that cannot find its rule is
+ * a test that goes quiet rather than red; this one asserts it found something.
+ * Several selectors are also declared twice, once in a shared list and once in
+ * a small override, so the union is what the selector actually declares here.
+ */
+function surfaceRuleFor(selector: string): string {
+  const source = surfaces.replace(/\/\*[\s\S]*?\*\//gu, "");
+  let depth = 0;
+  let head = "";
+  const found: string[] = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (character === "{") {
+      depth += 1;
+      if (depth === 1
+        && head.split(",").map((part) => part.trim().replace(/\s+/gu, " ")).includes(selector)) {
+        found.push(source.slice(index + 1, source.indexOf("}", index)));
+      }
+      head = "";
+    } else if (character === "}") {
+      depth -= 1;
+      head = "";
+    } else if (depth === 0) head += character;
+  }
+  assert.notEqual(found.length, 0, `no rule in surfaces.css lists "${selector}"`);
+  return found.join("\n");
+}
+
 test("the owner speaks on one flat clipped memo, in the measured apricot pair", () => {
   const owner = surfaceRule(".rp-conversation .bubble-owner");
   assert.ok(owner.includes("box-shadow: none"), "the owner's note still glows like a bubble");
@@ -129,43 +164,98 @@ test("machine evidence in Cairn's prose is bounded and scrolls inside its own fr
     "machine evidence is not set on its own raised mono surface");
 });
 
-test("the proposal is one translucent folio instead of a rounded card", () => {
-  const proposal = rule(".chat-column-villager .task-card");
-  assert.ok(proposal.includes("border: 0") && proposal.includes("box-shadow: none"),
-    "the proposal still carries enclosing glass-card chrome");
+/* ------------------------------------------------------------------------ *
+ * The proposal, REWRITTEN by Task 263 (Slice 6).
+ *
+ * Slice 5 deliberately left these five tests pointing at `app.css`, because
+ * the task card was Slice 6's surface and moving its guard early would have
+ * guarded nothing. Slice 6 moved the rules, so the guard moves with them.
+ *
+ * Task 187's IDEAS are all still asserted: one folio rather than an enclosing
+ * glass card, a concern as a margin note rather than a second card, a label
+ * that does not compete with the outcome it introduces, details behind a
+ * native disclosure with visible focus, and no decorative travel on any of it.
+ * What changed is the material — measured token pairs instead of eleven
+ * hard-coded cream alphas — and three specific things that are named here so
+ * they are not mistaken for drift:
+ *
+ *   1. The registration mark is a real `border-left`, not an absolutely
+ *      positioned 2px `::before`. Same signal, no positioned box, and it is
+ *      the vocabulary `.rp-note-attention` and `.rp-note-stop` already use.
+ *   2. `box-shadow: none` became `var(--rp-shadow-low)`. Task 187 banned the
+ *      lantern's GLOW; the new constitution asks for "subtle shadows and
+ *      hairlines" and this is the lowest step of the shipped paper vocabulary,
+ *      the same one the composer takes.
+ *   3. Disabled Review no longer fades. `opacity: .68` on a teal fill was the
+ *      defect Slice 5 measured at 2.45:1 on the composer's Send, and this
+ *      family carried two more of it.
+ * ------------------------------------------------------------------------ */
+
+test("the proposal is one folio on measured paper, not a rounded card", () => {
+  const proposal = surfaceRuleFor(".rp-conversation .task-card");
   assert.ok(proposal.includes("flex-shrink: 0") && proposal.includes("overflow: visible"),
     "a long transcript can compress and clip the current proposal");
-  assert.ok(proposal.includes("var(--paper-grain)"), "the proposal does not share the paper field");
-  assert.ok(!proposal.includes("border-radius: 22px"), "the proposal still uses the oversized card radius");
+  assert.ok(proposal.includes("border: 0"), "the proposal regained a full enclosing outline");
+  assert.ok(!/border-radius: (?:16|22)px/u.test(proposal), "the proposal still uses an oversized card radius");
 
-  const registration = rule(".chat-column-villager .task-card::before");
-  assert.ok(registration.includes("var(--garden-cyan)"), "the risk-free proposal has no restrained registration rule");
-  assert.ok(registration.includes("width: 2px"), "the proposal registration rule became decorative");
-  assert.ok(rule(".chat-column-villager .task-card:has(.task-risk)::before").includes("var(--garden-amber)"),
-    "a proposal with a concern does not switch its margin cue to amber");
+  // The ground, the depth and the rule all come from the measured layer, so a
+  // later edit that drops one below its floor fails `visualtokens.test.ts`
+  // instead of shipping.
+  assert.ok(proposal.includes("background-color: var(--rp-paper-raised)"),
+    "the proposal does not sit on the measured raised paper");
+  assert.ok(proposal.includes("box-shadow: var(--rp-shadow-low)"),
+    "the proposal's depth is not the shipped paper vocabulary");
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b|rgb\(/u.test(proposal),
+    "the proposal decides a colour outside the measured token layer");
+
+  // The registration rule, and the amber switch that is the whole point of it.
+  assert.ok(proposal.includes("border-left: 3px solid var(--rp-teal)"),
+    "the risk-free proposal has no restrained registration rule");
+  assert.ok(surfaceRuleFor(".rp-conversation .task-card:has(.task-risk)")
+    .includes("border-left-color: var(--rp-amber-ink)"),
+  "a proposal with a concern does not switch its margin cue to the attention ink");
 });
 
 test("a concern is an amber margin note, not a second card", () => {
-  const concern = rule(".chat-column-villager .task-risk");
-  assert.ok(concern.includes("border: 0") && concern.includes("border-left: 2px solid"),
+  const concern = surfaceRuleFor(".rp-conversation .task-risk");
+  assert.ok(concern.includes("border: 0") && concern.includes("border-left: 3px solid"),
     "the concern still has a full enclosing outline");
-  assert.ok(concern.includes("var(--garden-amber)"), "the concern lost its amber decision cue");
+  assert.ok(concern.includes("var(--rp-amber-ink)"), "the concern lost its amber decision cue");
   assert.ok(concern.includes("grid-template-columns: minmax(0, 1fr) auto"),
     "Set aside still floats on a separate empty row below the concern");
   assert.ok(!concern.includes("border-radius: 16px"), "the concern still reads as a nested rounded card");
+
+  // Set aside is a real target, not a text link squeezed onto a note.
+  const setAside = surfaceRuleFor(".rp-conversation .task-risk .pill");
+  assert.ok(setAside.includes("min-height: 44px") && setAside.includes("min-width: 44px"),
+    "Set aside is below the 44 x 44 floor");
 });
 
 test("proposal hierarchy and controls remain visibly decisive", () => {
-  const heading = rule(".chat-column-villager .task-card-heading");
-  assert.ok(heading.includes("var(--lantern-soft)"), "the proposal label still competes with its outcome");
-  const focusedHeading = rule(".chat-column-villager .task-card-heading:focus");
-  assert.ok(focusedHeading.includes("outline: none") && focusedHeading.includes("var(--garden-cyan)"),
-    "replacement focus still boxes the label instead of marking the paper line");
-  const outcome = rule(".chat-column-villager .task-card-outcome");
-  assert.ok(outcome.includes("var(--lantern-ink)"), "the proposal outcome no longer leads the note");
+  // Decision first: the heading is the strongest ink on the card and the
+  // outcome is the prose beneath it, not the other way round.
+  const heading = surfaceRuleFor(".rp-conversation .task-card-heading");
+  assert.ok(heading.includes("color: var(--rp-ink-strong)") && heading.includes("font-weight: 700"),
+    "the proposal label still competes with its outcome instead of leading it");
+  const focusedHeading = surfaceRuleFor(".rp-conversation .task-card-heading:focus");
+  assert.ok(focusedHeading.includes("outline: none")
+    && focusedHeading.includes("text-decoration-line: underline")
+    && focusedHeading.includes("var(--rp-focus)"),
+  "replacement focus still boxes the label instead of marking the paper line");
+  const outcome = surfaceRuleFor(".rp-conversation .task-card-outcome");
+  assert.ok(outcome.includes("color: var(--rp-ink)"), "the proposal outcome no longer leads the note");
 
-  const disabled = rule(".chat-column-villager .task-card-actions .pill-primary:disabled");
-  assert.ok(disabled.includes("opacity: .68"), "disabled Review disappears into the paper");
+  // A DISABLED CONTROL IS STILL READ. The retired rule faded it to .68.
+  const disabled = surfaceRuleFor(".rp-conversation .task-card-actions .pill-primary:disabled");
+  assert.ok(disabled.includes("opacity: 1"), "disabled Review fades into the paper again");
+  assert.ok(disabled.includes("color: var(--rp-ink-muted)"),
+    "inactive Review is not carried by a measured ink");
+  assert.ok(!css.includes("opacity: .68"), "the retired disabled fade is still in the old cascade");
+
+  // Every action clears the floor, and the native gates are untouched.
+  const action = surfaceRuleFor(".rp-conversation .task-card-actions .pill");
+  assert.ok(action.includes("min-height: 44px") && action.includes("min-width: 44px"),
+    "the proposal's primary control is below the 44 x 44 floor");
   assert.match(taskCard, /className="task-card-risks" aria-label="Concerns to decide"/,
     "the visual pass removed the labeled concern list");
   assert.match(taskCard, /disabled=\{busy \|\| !current \|\| action\.risks\.length > 0\}/,
@@ -173,17 +263,81 @@ test("proposal hierarchy and controls remain visibly decisive", () => {
 });
 
 test("expanded proposal details use rules rather than nested tiles", () => {
-  const details = rule(".chat-column-villager .task-card-details");
+  const details = surfaceRuleFor(".rp-conversation .task-card-details");
   assert.ok(details.includes("border-radius: 0") && details.includes("background: transparent"),
     "Details still creates a rounded inner panel");
-  const intent = rule(".chat-column-villager .task-card .task-intent-row");
-  assert.ok(intent.includes("border: 0") && intent.includes("border-left: 2px solid"),
-    "attributed details still stack bordered tiles inside the proposal");
-  assert.ok(rule(".chat-column-villager .task-card .task-intent-owner-stated .muted")
-    .includes("var(--garden-cyan)"),
+
+  // ONE intent-row rule set, flat, with the proposal's fill as an override.
+  const shared = surfaceRuleFor(".rp-conversation .task-intent-row");
+  assert.ok(shared.includes("border: 0") && shared.includes("border-left: 2px solid"),
+    "attributed details still stack bordered tiles");
+  const inProposal = surfaceRuleFor(".rp-conversation .task-card .task-intent-row");
+  assert.ok(inProposal.includes("background: var(--rp-paper)"),
+    "the proposal's own intent rows lost the quiet fill that groups them");
+
+  // Provenance is a word before it is a colour — TaskIntentList prints "You
+  // said so" on the row — but the label still has to be readable.
+  assert.ok(surfaceRuleFor(".rp-conversation .task-intent-owner-stated .task-intent-source")
+    .includes("var(--rp-teal-ink)"),
   "owner-attribution labels inherit an unreadable legacy dark color");
-  assert.ok(rule(".task-card-details > summary:focus-visible").includes("var(--garden-cyan)"),
-    "the native Details disclosure lost its visible keyboard focus");
+  assert.ok(surfaceRuleFor(".rp-conversation .task-card-details > summary:focus-visible")
+    .includes("var(--rp-focus)"),
+  "the native Details disclosure lost its visible keyboard focus");
+});
+
+/*
+ * `c3` — ONE HIERARCHY, and nothing reads as already acted on.
+ *
+ * Decision first, then effect/reason/recovery, then details on demand, then
+ * actions. Asserted here on the two halves a stylesheet can actually be held
+ * to: the surfaces put their actions on their own ruled row at the end, and no
+ * decision surface is filled with a settled or terminal colour.
+ *
+ * ONE HONEST EXCEPTION, NOT PAPERED OVER. `TaskCard.tsx` renders its actions
+ * row BEFORE its `<details>` fold, so on that one surface "details on demand"
+ * sits after "actions" in the DOM. It was left that way deliberately: moving
+ * the fold above the actions changes the KEYBOARD ORDER of a live approval
+ * surface, and the boundary of intent for this slice keeps focus movement and
+ * native control semantics exactly as they are. Reordering it belongs to a
+ * task that can carry its own keyboard evidence, and the report says so.
+ */
+test("every decision surface ends in its actions, and none is filled like a settled one", () => {
+  // Actions sit on their own ruled row at the end of the always-visible
+  // content — a rule above them, nothing below them but a fold.
+  const actions = surfaceRuleFor(".rp-conversation .dispatch-actions");
+  assert.ok(actions.includes("border-top: 1px solid"), "the action row has no rule separating it");
+  assert.ok(actions.includes("margin: 12px 0 0"), "the action row is not the last thing on the card");
+
+  // Nothing in this family takes a success, verified or terminal ground. A
+  // prettier card must never look already approved, executed or done.
+  const settled = ["--rp-sage", "--rp-mark-sage"];
+  const slice = surfaces.slice(surfaces.indexOf("Task 263 (Slice 6)"));
+  for (const token of settled) {
+    assert.ok(!slice.includes(`background: var(${token})`),
+      `a decision surface is filled with ${token}, which reads as already done`);
+  }
+
+  // The decision itself is the strongest ink on every surface, and it is a
+  // heading rather than a label competing with the body.
+  for (const heading of [
+    ".rp-conversation .task-card-heading",
+    ".rp-conversation .question-card-heading",
+    ".rp-conversation .dispatch-heading",
+    ".rp-conversation .critic-call-title",
+    ".rp-conversation .unsealed-candidate-title",
+    ".rp-conversation .candidate-critique-title",
+    ".rp-conversation .task-promise-card-title",
+  ]) {
+    const rule = surfaceRuleFor(heading);
+    assert.ok(rule.includes("color: var(--rp-ink-strong)"), `${heading} is not the strongest ink`);
+    assert.ok(rule.includes("font-weight: 700"), `${heading} does not lead its surface`);
+  }
+
+  // The Builder proposal is the one surface that must never read as a change
+  // that happened, so it carries the attention rule rather than the teal one.
+  assert.ok(surfaceRuleFor(".rp-conversation .builder-proposal-review")
+    .includes("border-left: 5px solid var(--rp-amber-ink)"),
+  "the unapplied Builder proposal reads like a routine settled decision");
 });
 
 test("conversation paper adds no new moving decoration", () => {
@@ -198,19 +352,20 @@ test("conversation paper adds no new moving decoration", () => {
     assert.ok(!/\b(?:animation|transition):/.test(declaration), `${selector} introduces decorative motion`);
   }
   for (const selector of [
-    ".chat-column-villager .task-card",
-    ".chat-column-villager .task-card::before",
-    ".chat-column-villager .task-risk",
+    ".rp-conversation .task-card",
+    ".rp-conversation .task-risk",
+    ".rp-conversation .task-card-details",
   ]) {
-    const declaration = rule(selector);
+    const declaration = surfaceRuleFor(selector);
     assert.ok(!/\b(?:animation|transition):/.test(declaration), `${selector} introduces decorative motion`);
   }
 
-  // A turn does not travel. Three of the four bubble kinds hold a control —
-  // Stop, Take back, Try again — and the constitution forbids a transform on a
-  // container that holds one; a scaled container also blurs its own text
-  // mid-flight, on the one surface whose whole content is text.
+  // A turn does not travel, and neither does the proposal. Three of the four
+  // bubble kinds hold a control — Stop, Take back, Try again — and the
+  // proposal holds Review plus a Set aside on every concern row, which is
+  // exactly the container the constitution forbids transforming; a scaled
+  // container also blurs its own text mid-flight.
   const motion = renderer("motion.css");
-  assert.match(motion, /\.rp-conversation \.bubble \{ animation: none; \}/,
-    "the transcript's turns still slide and scale on arrival");
+  assert.match(motion, /\.rp-conversation \.bubble,\s*\n\.rp-conversation \.task-card \{ animation: none; \}/,
+    "the transcript's turns or the proposal still slide and scale on arrival");
 });
