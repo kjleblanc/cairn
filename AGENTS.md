@@ -13,7 +13,7 @@ STATUS: ACTIVE
 PROJECT NAME: Cairn
 WHAT WE ARE BUILDING: Cairn, an AI conductor with a desktop app, portable contract, and swappable worker adapters, so people with zero coding experience can build real software safely
 WHO WILL USE IT: complete beginners — and Cairn's own maintainers, starting now
-CURRENT MILESTONE: one conversation on Cairn itself runs request -> pushback -> dispatch -> verified DONE -> honest explanation, delivered as the envelope's result card with the conductor's commentary
+CURRENT MILESTONE: from the owner's paired phone on the home network, one conversation takes a task through dispatch approval, verified DONE, and the push decision, with every approval the desktop requires
 EVIDENCE LEVEL: Verified
 ```
 

@@ -16,11 +16,27 @@ completing an improvement to Cairn itself, end to end — was achieved twice on
 reading the real project records, turning a vague request into a well-scoped
 task that dispatches and completes DONE — was achieved on 2026-07-24 in the
 owner's Bookshelf evaluation project (its task 004, commit 5b65dab; recorded
-here as Task 055).
+here as Task 055). The conversation-loop milestone — one conversation on Cairn
+itself running request → pushback → dispatch → verified DONE → honest
+explanation, delivered as the envelope's result card with the conductor's
+commentary — was reached on 2026-08-17 by **Task 268, commit `daa1bdb`**, and
+the owner confirmed it. That run began with the owner's own words about the
+window's title bar, carried a concern the owner set aside, dispatched a real
+paid call to Codex Exec (OpenAI / gpt-5.6-sol), verified DONE against Git
+rather than against the worker's claims, retained only bounded numeric worker
+evidence, and made one exact-path commit — with each requirement labelled "You
+said so" or "Cairn chose", the latter stated plainly as not evidence of owner
+preference. Task 268's own LOG row says `Milestone moved? NO`, and that is
+correct and stays: that column carries the WORKER's answer, and the worker was
+asked to fix a title bar. Recorded as Task 269.
 
-First visible milestone (current): one conversation on Cairn itself runs
-request → pushback → dispatch → verified DONE → honest explanation, delivered
-as the envelope's result card with the conductor's commentary.
+First visible milestone (current): from the owner's paired phone on the home
+network, one conversation takes a task through dispatch approval, verified
+DONE, and the push decision, with every approval the desktop requires. This is
+the mobile-groundwork direction already accepted on 2026-07-31 and described
+below, promoted to the current milestone rather than newly chosen. The shipped
+companion is LAN-only and read-only after pairing today, so full approval
+parity is accepted and unbuilt.
 
 Route: the owner-approved phases live in
 `docs/superpowers/specs/2026-07-23-cairn-conductor-route-design.md`.
