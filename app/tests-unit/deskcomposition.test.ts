@@ -126,6 +126,26 @@ test("c2: the workspace resolves the presence once and hands it over", () => {
     "the workspace no longer receives Chat's needs-you signal");
 });
 
+test("the native title bar has a measured drag region with clickable children", () => {
+  const main = readFileSync(join(process.cwd(), "src", "main", "main.ts"), "utf8");
+  const rule = (selector: string): string => {
+    const at = WORKSPACE_CSS.indexOf(`${selector} {`);
+    assert.notEqual(at, -1, `workspace.css has no ${selector} rule`);
+    return WORKSPACE_CSS.slice(at, WORKSPACE_CSS.indexOf("}", at));
+  };
+  const header = rule(".rp-desk-header");
+  const children = rule(".rp-desk-header > *");
+
+  assert.match(main, /titleBarOverlay:\s*\{[\s\S]*?color:\s*"#dbdcdd"[\s\S]*?symbolColor:\s*"#0d2634"[\s\S]*?height:\s*41/u,
+    "the native window controls no longer have Cairn's measured header styling");
+  assert.match(header, /padding:\s*8px calc\(138px \+ 16px\) 8px 16px/u,
+    "the header no longer reserves the three-button native overlay width");
+  assert.match(header, /-webkit-app-region:\s*drag/u,
+    "the visible top bar is no longer a draggable window region");
+  assert.match(children, /-webkit-app-region:\s*no-drag/u,
+    "header controls can be swallowed by the drag region");
+});
+
 /* ------------------------------------------------ c5: capture identity ---- */
 
 test("c5: the capture selector and the stage's identity attributes are the same element", () => {

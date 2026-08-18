@@ -99,10 +99,20 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  min-height: 41px;
+  /* Electron's three native caption buttons occupy 138 px at the right. The
+     space is part of the header, so connection text can never sit underneath
+     minimize, maximize, or close. */
+  padding: 8px calc(138px + 16px) 8px 16px;
   background: var(--rp-chrome);
   border-bottom: 1px solid var(--rp-hairline);
+  -webkit-app-region: drag;
 }
+
+/* Explicitly keep anything placed in the draggable header interactive. Text
+   is harmless today; this guard also prevents a future button or input from
+   silently becoming part of the drag surface. */
+.rp-desk-header > * { -webkit-app-region: no-drag; }
 
 .rp-desk-title {
   min-width: 0;

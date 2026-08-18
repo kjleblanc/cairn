@@ -256,7 +256,14 @@ export function createWindow(): BrowserWindow {
     minWidth: 760,
     minHeight: 620,
     titleBarStyle: "hidden",
-    titleBarOverlay: true,
+    // Keep the operating-system window actions, but make them part of Cairn's
+    // quiet chrome instead of an unmeasured overlay. The renderer reserves the
+    // matching 138 px (three 46 px Windows caption buttons) at the right edge.
+    titleBarOverlay: {
+      color: "#dbdcdd",
+      symbolColor: "#0d2634",
+      height: 41,
+    },
     backgroundColor: "#fbf7ee",
     ...(e2e ? offScreenParking() : {}),
     webPreferences: {
